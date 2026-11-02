@@ -66,6 +66,11 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **`findByIds()`, `indexAdvisor()`.** `collection.findByIds(ids)` reads many records in one call of the
+  engine — a `Map` of the live ones of the collection. `indexAdvisor(db)` (`@alexify/syncom/inspect`)
+  watches every plan the cursors make and suggests the keys — the equalities, a range field, the sort —
+  that would serve the queries no index served or sorted (`suggest()` → `[{ entity, index, queries }]`);
+  `explain()` carries `uses`, what a query asks of its fields.
 - **Compound indexes, a planner, `explain()`.** An entity's `index` takes compound keys beside fields —
   `index: ['orgId', ['orgId', 'createdAt']]`, or a metaschema `indexes` entry kept whole — each a sorted
   key the catalog keeps (in memory, rebuilt from the rows at load) beside the equality postings. A cursor

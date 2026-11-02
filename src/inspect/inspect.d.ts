@@ -3,6 +3,22 @@
 
 import type { Storage, SyncOpType } from '../../index.js';
 
+/** An index a query asked for and no index served: the entity, the key (the equalities, a range field, the sort), how many queries. */
+export interface IndexSuggestion {
+  entity: string;
+  index: string[];
+  queries: number;
+}
+
+/** What `indexAdvisor()` hands back: the suggestions so far (most asked for first), and the stop. */
+export interface IndexAdvisor {
+  suggest(): IndexSuggestion[];
+  stop(): void;
+}
+
+/** Watches every plan the database's cursors make from here on and suggests the indexes that would serve the queries no index served, or sorted. */
+export function indexAdvisor(storage: Storage): IndexAdvisor;
+
 /** One field of a record as the metadata holds it: its kind, whether the composed reading shows it, and the kind's own counts and stamps. */
 export interface FieldInspection {
   field: string;

@@ -709,6 +709,7 @@ const runQueryTests = async (t, assert, createStorage) => {
         sortedByIndex: true,
         covered: false,
         residual: false,
+        uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] },
       });
       fsi.reset();
       const rows = await cursor.fetch();

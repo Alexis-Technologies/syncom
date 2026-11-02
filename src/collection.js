@@ -294,6 +294,23 @@ class Collection extends Emitter {
     return this.select(query).count();
   }
 
+  /**
+   * The records of `ids` that are live and of this collection, as a Map by
+   * id — one read of the engine for the ones not cached (`records.getMany`);
+   * an id absent, gone or of another collection is left out. To follow a
+   * set of ids, `select({ id: { $in: ids } }).watch(...)`.
+   */
+  async findByIds(ids) {
+    if (!Array.isArray(ids)) throw new TypeError('findByIds() takes an array of ids');
+    const found = await this.#storage[SOURCE].loadMany(ids);
+    const out = new Map();
+    for (const [id, data] of found) {
+      if (data === null || data.$type !== this.#name) continue;
+      out.set(id, JSON.parse(JSON.stringify(data)));
+    }
+    return out;
+  }
+
   /** The distinct values of `field` among the records matching `query` — the cursor's `distinct()`. */
   distinct(field, query) {
     return this.select(query).distinct(field);

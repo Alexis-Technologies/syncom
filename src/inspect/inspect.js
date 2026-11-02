@@ -188,4 +188,57 @@ const anonymize = (value, { salt, keys = true } = {}) => {
   return walk(value);
 };
 
-module.exports = { inspect, anonymize };
+// What a plan asks for and gets: the index a query would be served by —
+// its equalities first, then a range field, then the sort's fields — where
+// none was (`scan` other than `index`), or where the sort was not the
+// index's (`sortedByIndex` false). Null for a plan that is well served, or
+// asks for nothing an index could give.
+const wanted = (made) => {
+  if (made.scan === 'text') return null;
+  const { equalities, ranges, order } = made.uses;
+  if (made.scan === 'index' && made.sortedByIndex) return null;
+  const fields = [];
+  const seen = new Set();
+  const take = (field) => {
+    if (seen.has(field)) return;
+    seen.add(field);
+    fields.push(field);
+  };
+  for (let i = 0; i < equalities.length; i++) take(equalities[i]);
+  if (ranges.length > 0) take(ranges[0]);
+  for (let i = 0; i < order.length; i++) take(order[i]);
+  return fields.length === 0 ? null : fields;
+};
+
+/**
+ * Watches every plan the database's cursors make from here on and suggests
+ * the indexes that would serve the queries no index served (or sorted):
+ * `suggest()` → `[{ entity, index, queries }]`, the index a key of the
+ * equalities, a range field and the sort, most asked for first; `stop()`
+ * takes the watch off. A plan well served asks for nothing.
+ */
+const indexAdvisor = (storage) => {
+  if (!isStorage(storage)) throw new TypeError('indexAdvisor() takes a database');
+  const asked = new Map();
+  const stop = storage[SOURCE].advise((entity, made) => {
+    const fields = wanted(made);
+    if (fields === null) return;
+    const key = `${entity}\0${fields.join(',')}`;
+    const held = asked.get(key);
+    if (held === undefined) asked.set(key, { entity, index: fields, queries: 1 });
+    else held.queries++;
+  });
+  return {
+    suggest() {
+      const out = [];
+      for (const held of asked.values()) {
+        out.push({ entity: held.entity, index: held.index.slice(), queries: held.queries });
+      }
+      out.sort((a, b) => b.queries - a.queries || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0));
+      return out;
+    },
+    stop,
+  };
+};
+
+module.exports = { inspect, anonymize, indexAdvisor };

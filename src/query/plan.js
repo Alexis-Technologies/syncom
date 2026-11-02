@@ -125,12 +125,20 @@ const plan = ({ query, order, indexes, indexed, covered }) => {
     covered,
     residual: true,
   };
+  // What the query asks of its fields — an equality, a range, a sort — for an advisor to read.
+  const found = conjuncts(query, { fields: new Map(), other: 0 });
+  const uses = { equalities: [], ranges: [], order: [] };
+  for (const [field, test] of found.fields) {
+    if (test.eq !== undefined) uses.equalities.push(field);
+    if (test.lower !== null || test.upper !== null) uses.ranges.push(field);
+  }
+  for (let i = 0; i < order.length; i++) uses.order.push(order[i].field);
+  made.uses = uses;
   if (query.$text !== undefined) {
     made.scan = 'text';
     made.sortedByIndex = order.length === 0;
     return made;
   }
-  const found = conjuncts(query, { fields: new Map(), other: 0 });
   let best = null;
   for (let i = 0; i < indexes.length; i++) {
     const candidate = fit(indexes[i], found.fields, order);

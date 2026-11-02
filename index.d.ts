@@ -2728,6 +2728,8 @@ export interface QueryPlan {
   covered: boolean;
   /** Whether the predicate still runs over what the scan yields. */
   residual: boolean;
+  /** What the query asks of its fields: an equality, a range, a sort — what an index advisor reads. */
+  uses: { equalities: string[]; ranges: string[]; order: string[] };
 }
 
 /** Where a page ends: the last row's order keys and its id — what `after()` takes. Opaque; JSON. */
@@ -2963,6 +2965,8 @@ export interface SyncomCollection<R = RecordData, I = R> {
   /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
   select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
   count(query?: MangoQuery<R>): Promise<number>;
+  /** The live records of `ids` that are this collection's, as a Map by id — one read of the engine for the ones not cached; an id absent, gone or foreign is left out. */
+  findByIds(ids: readonly string[]): Promise<Map<string, R>>;
   /** The distinct values of `field` among the records matching `query`, in the sort order. */
   distinct(field: string, query?: MangoQuery<R>): Promise<unknown[]>;
   /** The distinct values of `field` with how many records hold each. */

@@ -581,6 +581,8 @@ class Cursor {
       // A filter reads the record and decides for itself: nothing the index decided is final.
       if (this.#filter !== null) made.residual = true;
       this.#planned = made;
+      // Told to whoever advises on indexes (@alexify/syncom/inspect indexAdvisor).
+      this.#source.planned?.(this.#entity, made);
     }
     return this.#planned;
   }

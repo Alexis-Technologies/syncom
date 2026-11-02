@@ -217,6 +217,8 @@ class Database extends Emitter {
   #entities = null;
   // The collections, by name, as one frozen object (`db.collections`); made again when one is added or removed.
   #collections = Object.freeze({});
+  // Who hears of every plan a cursor makes (`indexAdvisor` of @alexify/syncom/inspect).
+  #advisors = new Set();
   // The text index factory (`createDatabase({ search })`), kept for a collection defined after the open.
   #search = null;
   #version = null;
@@ -1228,6 +1230,14 @@ class Database extends Emitter {
       indexed: (entity) => catalog.indexed(entity),
       indexes: (entity) => catalog.indexes(entity),
       scan: (entity, plan) => catalog.scan(entity, plan),
+      // Every plan a cursor makes, told to the advisors; `advise(fn)` adds one and answers what takes it off.
+      planned: (entity, plan) => {
+        for (const fn of this.#advisors) fn(entity, plan);
+      },
+      advise: (fn) => {
+        this.#advisors.add(fn);
+        return () => this.#advisors.delete(fn);
+      },
       searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
       // What a query result is current as of: moves with every change of a record the catalog heard of.

@@ -209,8 +209,9 @@ takes; both from the entity's Standard Schema or the schema's `Shapes`,
 `update(id, delta, { actor }?)` (refuses a delta naming `$type`),
 `delete(id, { actor }?)`, `document(id)` — `update`, `delete` and `record`
 reject with `NOT_FOUND` for a record of another collection —
-`select(query?)` → a cursor, `count(query?)` (the `query` plugin's:
-`PLUGIN_MISSING` without it).
+`select(query?)` → a cursor, `count(query?)`, `distinct(field, query?)`, `countBy(field, query?)` (the `query` plugin's:
+`PLUGIN_MISSING` without it), `findByIds(ids)` (a `Map` of the live records of this collection among `ids`, one read of
+the engine for the ones not cached; to follow a set of ids, `select({ id: { $in: ids } }).watch()`).
 Writes through a collection with a `schema` are validated — see
 [Validation](../guide/database#validation); `unique` keys are refused with a
 `ValidationError` whose issue has `code: 'unique'` and `conflict`.
@@ -224,7 +225,7 @@ query searches the entity's `search` fields, best first unless ordered.
 | Member | Notes |
 | --- | --- |
 | `matches(doc)` | Whether a document (its data, with or without `id`) matches the cursor's query, the filter aside — `matches(query)` of `@alexify/syncom/query` is the same predicate without a cursor |
-| `explain()` | How the cursor is answered, as a copy: `{ scan, index, prefix, range, desc, sortedByIndex, covered, residual }` — the scan (`text`: the text index's ranking; `index`: a sorted key the catalog keeps, entered by `prefix` (the equality values of its first fields) and `range` (the bounds on the field after); `postings`: the posting lists of the equalities on indexed fields; `collection`: every record), whether the rows come sorted by the index (`sortedByIndex`: a window is then read as far as `offset + limit` and no further), whether only the catalog is read, whether the predicate still runs. See [The plan](../guide/query#the-plan) |
+| `explain()` | How the cursor is answered, as a copy (`uses` says what the query asks of its fields: the equalities, the ranges, the sort): `{ scan, index, prefix, range, desc, sortedByIndex, covered, residual }` — the scan (`text`: the text index's ranking; `index`: a sorted key the catalog keeps, entered by `prefix` (the equality values of its first fields) and `range` (the bounds on the field after); `postings`: the posting lists of the equalities on indexed fields; `collection`: every record), whether the rows come sorted by the index (`sortedByIndex`: a window is then read as far as `offset + limit` and no further), whether only the catalog is read, whether the predicate still runs. See [The plan](../guide/query#the-plan) |
 | `order(field)`, `desc(field)` | Sort keys, in order; nothing first, then booleans, numbers, strings; stable. Every builder hands back a NEW cursor and leaves the one it was called on as it was |
 | `limit(n)`, `offset(n)` | Applied after the sort |
 | `filter(fn)` | A predicate over the loaded row |
@@ -858,6 +859,7 @@ vocabulary, Myers and Emitter are the core's. `UndoManager` is the class
 | Member | Notes |
 | --- | --- |
 | `inspect(storage, id)` | `Promise<Inspection>` — `{ id, present, encrypted, alive, data, reading, base, deleted, purged, v, fields, log }`: the data in the op model's terms and the composed reading (lens and hooks aside), the reset stamps, every field with its `kind`, whether it is `reachable` in the reading and the kind's counts and stamps (a register's `stamp`, a counter's `sums`, a set's `elements`/`live`, a block's `runs`/`cuts`/`ext`/`pos`/`vals`/`marks` or `nodes`/`moves`), and the record's retained log entries (`seq`, `eventId`, `type`, `origin`, `stream`, `ts`, `scope`, `field`, `actor`, `message`, `signed`, `skipped`, `scrubbed`); nothing written; `INVALID_ID` for an id that is none |
+| `indexAdvisor(db)` | `{ suggest(), stop() }` — watches every plan the database's cursors make from here on; `suggest()` is `[{ entity, index, queries }]`, most asked for first: the key — the query's equalities, a range field, the sort's fields — that would serve the queries no index served (`scan` other than `index`) or sorted (`sortedByIndex` false), as a copy; a plan well served asks for nothing; `stop()` takes the watch off |
 | `anonymize(value, { salt, keys = true }?)` | A copy of any JSON value with every string — and every key unless `keys: false` — replaced by a stable hash of it under `salt` (`~` and sixteen hex digits, two xxHash32; the same string reads the same throughout; a fresh random salt when none is given); numbers, booleans and nulls as they are. Pseudonymous, not anonymous: the shape, lengths and numbers stay, and a guessable string is found again by whoever holds the salt. A value JSON cannot carry is a `TypeError` |
 
 ## Editor (subpath)

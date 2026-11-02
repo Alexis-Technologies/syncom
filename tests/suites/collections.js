@@ -640,6 +640,40 @@ const runCollectionTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test('findByIds() reads many records in one call: live ones of the collection, by id', async (t2) => {
+    const fsi = memory();
+    let reads = 0;
+    const counting = {
+      read: (dir, name) => {
+        if (dir.endsWith('/data')) reads++;
+        return fsi.read(dir, name);
+      },
+      write: (dir, name, content, options) => fsi.write(dir, name, content, options),
+      exists: (dir, name) => fsi.exists(dir, name),
+      remove: (dir, name) => fsi.remove(dir, name),
+      list: (dir) => fsi.list(dir),
+    };
+    const db = await createStorage(t2, 'A', {
+      fsi: counting,
+      schema: { entities: { Post: {}, Tag: {} } },
+      cache: { max: 2 },
+    });
+    const ids = [];
+    for (let i = 0; i < 6; i++) ids.push(await db.insert({ $type: 'Post', i }));
+    const tag = (await db.Tag.insert({})).id;
+    await db.Post.delete(ids[1]);
+    reads = 0;
+    const found = await db.Post.findByIds([ids[0], ids[1], 'nope', tag, ids[2], ids[0], ids[3]]);
+    assert.deepStrictEqual([...found.keys()], [ids[0], ids[2], ids[3]]);
+    assert.deepStrictEqual(found.get(ids[2]), { i: 2, $type: 'Post' });
+    assert.ok(reads <= 4, `one read of the engine for the ones not cached (${reads})`);
+    assert.deepStrictEqual(await db.Post.findByIds([]), new Map());
+    await assert.rejects(db.Post.findByIds('x'), TypeError);
+    // A copy: editing it changes nothing.
+    found.get(ids[0]).i = 99;
+    assert.deepStrictEqual(await db.Post.get(ids[0]), { i: 0, $type: 'Post' });
+  });
+
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
     const id = (await db.Post.insert({ n: 1 })).id;
