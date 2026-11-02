@@ -181,6 +181,7 @@ export {
   compareVectors,
   Database,
   createDatabase,
+  dropDatabase,
   Storage,
   open,
   SyncomError,

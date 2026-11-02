@@ -20,6 +20,7 @@ src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's ana
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
 src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
+src/layout.js             DIRS, tagDirs — every directory a database keeps under its path (the kv namespaces, the files engine's, a tag's two): what engine.remove sweeps, tests/package/layout.test.js holds every module to — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
@@ -60,8 +61,7 @@ src/identity.js           loadIdentity — which node a directory is (the signin
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
 src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
-src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on
-                          applyPatches); appliedHere lives in log.js
+src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on applyPatches); appliedHere lives in log.js
 src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),
                           the bounded cache, the catalog row each change leaves
 src/document.js           Reference, Document — what the application holds of one record; public API + the symbols only

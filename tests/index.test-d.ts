@@ -981,6 +981,11 @@ storage.record<Post>('id').then((record) => {
   db.Tag.once('remove', (event) => expectType<string>(event.id));
   expectError(db.Tag.on('nope', () => {}));
   expectType<Promise<{ id: string }>>(db.Tag.toPromise('insert'));
+  expectType<Promise<{ removed: number }>>(db.Tag.remove({ purge: true, actor: 'me' }));
+  expectType<Promise<void>>(db.drop());
+  expectType<Promise<void>>(syncom.dropDatabase('data'));
+  expectType<Promise<void>>(syncom.dropDatabase('data', { fsi: memory() }));
+  expectError(syncom.dropDatabase());
   expectError<syncom.EntityDefinition>({ refs: { tags: ['Tag', 'Other'] } });
   const doc = await db.Tag.document('t1');
   expectType<Promise<syncom.SyncomDocument<RecordData> | null | (syncom.SyncomDocument<RecordData> | null)[]>>(

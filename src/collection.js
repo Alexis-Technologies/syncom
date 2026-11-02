@@ -20,6 +20,9 @@ const list = (method, rows) => {
   return rows;
 };
 
+// How many records `remove()` takes in one transaction.
+const PAGE = 500;
+
 // A row's own verdict — on its data, its id, its collection — as against a failure of the batch
 // (the disk, the log, the database closed), which fails the whole write.
 const ROW_CODES = new Set([
@@ -238,6 +241,41 @@ class Collection extends Emitter {
       await tx.delete(id, options);
       return id;
     });
+  }
+
+  /**
+   * Deletes every record of the collection — tombstones that replicate, or
+   * with `purge: true` purges scrubbed from the log — in pages of 500, each
+   * page one turn of the queue (an encrypted record, which has no op, is
+   * removed on its own); resolves to how many. The definition stays: `removeCollection()` forgets it.
+   */
+  async remove({ purge = false, actor } = {}) {
+    const source = this.#storage[SOURCE];
+    let removed = 0;
+    for (;;) {
+      const live = source.ids(this.#name);
+      if (live.length === 0) break;
+      const ids = [];
+      const sealed = [];
+      for (let i = 0; i < live.length && ids.length < PAGE; i++) {
+        if (source.row(live[i])?.encrypted) sealed.push(live[i]);
+        else ids.push(live[i]);
+      }
+      for (let i = 0; i < sealed.length; i++) await this.#storage.delete(sealed[i], { actor });
+      if (ids.length > 0) {
+        if (purge) await source.purgeMany(ids, { actor });
+        else {
+          await this.#storage.transact(
+            async (tx) => {
+              for (let i = 0; i < ids.length; i++) await tx.delete(ids[i], { actor });
+            },
+            { actor },
+          );
+        }
+      }
+      removed += ids.length + sealed.length;
+    }
+    return { removed };
   }
 
   /** The record, or null when it is absent or belongs to another collection. */

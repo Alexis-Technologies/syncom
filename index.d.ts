@@ -2524,6 +2524,11 @@ export interface Database {
   /** Forgets a collection's definition; the records stay. An unknown name is a TypeError. */
   removeCollection(name: string): void;
   /**
+   * Drops the database: closed, then every store of it removed from the engine — the identity, the
+   * records, the log, the tags, the chain. A node opened at the path again is a new node.
+   */
+  drop(): Promise<void>;
+  /**
    * Runs `data` through an entity's validator the way a write would and
    * returns what it gives back (defaults filled, aliases resolved); rejects
    * with a ValidationError. Nothing is written.
@@ -2861,6 +2866,11 @@ export interface SyncomCollection<R = RecordData, I = R> {
   bulkRemove(ids: readonly string[], options?: TransactOptions): Promise<BulkResult<string>>;
   /** Changes the record by a function inside the queue — the database's `modify()`; `NOT_FOUND` for a record of another collection. */
   modify(id: string, fn: ModifyFn<R>, options?: TransactOptions): Promise<R | null>;
+  /**
+   * Deletes every record of the collection — tombstones that replicate, or with `purge` purges
+   * scrubbed from the log — in pages of 500, each one transaction; the definition stays.
+   */
+  remove(options?: WriteOptions & { purge?: boolean }): Promise<{ removed: number }>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
   /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
   select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
@@ -2947,6 +2957,12 @@ export type DatabaseOptions<S extends Schema = Schema> = StorageOptions<S>;
 export function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
 ): Promise<Database & Collections<S> & PluginMethods<P>>;
+/**
+ * Drops a closed database: every store of it removed from the engine — the one given, or the files
+ * engine over `fsi` (the platform's by default). Held while it is taken: another instance's open
+ * database is `LOCKED`, never emptied under it; a path that holds nothing is nothing to do.
+ */
+export function dropDatabase(path: string, options?: { engine?: Engine; fsi?: Fsi }): Promise<void>;
 /** @deprecated `createDatabase()` — the name before the rename; removed in 1.0. */
 export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },

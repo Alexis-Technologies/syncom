@@ -175,7 +175,8 @@ const ENTRIES = [
   // 67.0 with `delete(id, { data })` and a revival's resets; declared references, `populate()` (collections plan,
   // C1.7–C1.8). 67.5, raised by name.
   // 67.7 with an entity's methods and statics and the collection events (collections plan, C1.9–C1.10). 68, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 68 },
+  // 68.2 with `collection.remove()`, `drop()`/`dropDatabase()` and src/layout.js (collections plan, C1.11). 68.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 68.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

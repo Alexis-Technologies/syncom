@@ -1233,6 +1233,9 @@ class Database extends Emitter {
       // A transaction over this database's write API: what a cursor's write terminals run (a view at a
       // tag reads alone: its source has none).
       transact: (fn, options) => this.transact(fn, options),
+      // Several records purged as one turn of the queue — one append, one landing — then scrubbed
+      // from the log one by one: what a collection's `remove({ purge: true })` runs a page through.
+      purgeMany: (ids, options) => this.#purgeMany(ids, options),
       load: async (id) => {
         const entry = await this.#entries.load(id);
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;
@@ -2119,6 +2122,35 @@ class Database extends Emitter {
     this.#records.delete(id);
   }
 
+  // `purge()` over several ids: the ops as one transaction, the scrubs after.
+  async #purgeMany(ids, { actor } = {}) {
+    const run = () =>
+      transact(
+        this.#core,
+        async (tx) => {
+          for (let i = 0; i < ids.length; i++) await tx.commit('purge', ids[i], {}, { actor });
+        },
+        { actor },
+      );
+    const { done } = await this.#run(run);
+    if (done !== null) await done;
+    for (let i = 0; i < ids.length; i++) {
+      await this.#core.scrub(ids[i]);
+      this.#records.delete(ids[i]);
+    }
+  }
+
+  /**
+   * Drops the database: closed, then every store of it removed from the
+   * engine — the identity, the records, the log, the tags, the chain
+   * (`engine.remove(path)`). A node opened at the path again is a new node.
+   * `dropDatabase(path, { engine })` does the same for a closed one.
+   */
+  async drop() {
+    await this.close();
+    await this.#engine.remove(this.#path);
+  }
+
   /**
    * Forgets a record for good: a `purge` op (which no later write revives)
    * and a scrub of every entry of the id from this node's log — peers do
@@ -2679,4 +2711,34 @@ Database.Record = Document;
 const createDatabase = (options) => new Database(options);
 const open = createDatabase;
 
-module.exports = { Database, createDatabase, Storage: Database, open };
+/**
+ * Drops a closed database: every store of it removed from the engine — the
+ * one given, or the files engine over `fsi` (the platform's by default).
+ * Held while it is taken: another instance's open database is `LOCKED`,
+ * never emptied under it. A path that holds nothing is nothing to do.
+ */
+const dropDatabase = async (path, options = {}) => {
+  if (typeof path !== 'string' || path.length === 0) throw new TypeError('dropDatabase() takes a path');
+  if (options.engine !== undefined && options.fsi !== undefined) {
+    throw new TypeError('dropDatabase({ engine, fsi }): an engine or a backend, not both');
+  }
+  const engine =
+    options.engine !== undefined
+      ? checkEngine(options.engine, 'dropDatabase({ engine })')
+      : filesEngine(checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'dropDatabase({ fsi })'));
+  const db = checkEngineDb(await engine.open(path, {}), 'dropDatabase()');
+  let lock = null;
+  try {
+    const native = db.capabilities.lock === 'native' && typeof db.lock === 'function';
+    lock = native
+      ? await db.lock({ mode: 'fail', onLost: NOOP })
+      : await acquireLock({ store: kvNamespace(db.kv, ''), path, mode: 'fail' });
+    await engine.remove(path);
+  } finally {
+    // The lock went with the rest: its release finds nothing to let go of.
+    if (lock !== null) await lock.release().catch(NOOP);
+    await db.close();
+  }
+};
+
+module.exports = { Database, createDatabase, dropDatabase, Storage: Database, open };

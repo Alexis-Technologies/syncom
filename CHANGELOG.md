@@ -66,6 +66,14 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **`collection.remove({ purge })`, `db.drop()`, `dropDatabase(path, { engine, fsi })`.** A collection's
+  records deleted as ops that replicate — tombstones, or purges scrubbed from every log — in pages of
+  500, each page one transaction; the definition stays (`removeCollection()` forgets it). A database
+  dropped: closed, then every store of it removed from the engine (`engine.remove(path)`), so a node
+  opened at the path again is a new node; `dropDatabase()` does it for a closed one, held by the lock —
+  another instance's open database is `LOCKED`, never emptied under it. `src/layout.js` names every
+  directory a database keeps under its path, and `tests/package/layout.test.js` holds every module
+  that names a kv namespace to it.
 - **ORM: `methods` and `statics`.** An entity's `methods` go on every `Document` of the collection, bound
   to it and hidden from enumeration (a field is enumerable, a method is not); its `statics` on the
   collection. A name a Document or a Collection answers to already is a `TypeError` where the

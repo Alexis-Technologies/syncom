@@ -561,6 +561,85 @@ const runCollectionTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test('collection.remove() replicates as tombstones, or as purges scrubbed from every log', async (t2) => {
+    const schema = { entities: { Post: {}, Tag: {} } };
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
+      nodes: { A: { fsi: memory(), schema }, B: { fsi: memory(), schema } },
+    });
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const posts = [];
+    for (let i = 0; i < 1203; i++) posts.push((await a.Post.insert({ i })).id);
+    const sealed = await a.insert({ $type: 'Post', secret: true }, { encrypted: true });
+    const tags = [(await a.Tag.insert({})).id, (await a.Tag.insert({})).id];
+    await settle([a, b]);
+    assert.strictEqual(await b.Post.count(), 1203);
+    const turns = [];
+    a.on('transaction', (event) => turns.push(event.ops.length));
+    assert.deepStrictEqual(await a.Post.remove(), { removed: 1204 });
+    // Pages of 500, each one turn; the encrypted record on its own (it has no op).
+    assert.deepStrictEqual(turns, [500, 500, 203]);
+    assert.strictEqual(await a.Post.count(), 0);
+    assert.strictEqual(a.hasRecord(sealed), false);
+    assert.strictEqual(await a.Tag.count(), 2, 'the other collection stays');
+    assert.ok(a.Post, 'the definition stays');
+    await settle([a, b]);
+    assert.strictEqual(await b.Post.count(), 0);
+    assert.strictEqual(await b.get(posts[0]), null);
+    assert.ok(b.log.entriesOf(posts[0]).length > 0, 'tombstones, replicated');
+    // Purged: the ops scrubbed here and on the peer.
+    assert.deepStrictEqual(await a.Tag.remove({ purge: true }), { removed: 2 });
+    await settle([a, b]);
+    assert.strictEqual(await b.Tag.count(), 0);
+    for (const id of tags) {
+      assert.ok(
+        a.log.entriesOf(id).every((entry) => entry.scrubbed),
+        'scrubbed here',
+      );
+      assert.ok(
+        b.log.entriesOf(id).every((entry) => entry.scrubbed),
+        'scrubbed there',
+      );
+      assert.strictEqual(await b.get(id), null);
+    }
+    // A record written after the purge of its id stays purged everywhere.
+    await b.set(tags[0], { back: true, $type: 'Tag' });
+    await settle([a, b]);
+    assert.strictEqual(await a.get(tags[0]), null);
+    assert.deepStrictEqual(await a.Post.remove(), { removed: 0 });
+  });
+
+  await t.test(
+    'drop() and dropDatabase() take every store away; an open database is LOCKED, not emptied',
+    async (t2) => {
+      const fsi = memory();
+      const schema = { entities: { Post: {} } };
+      let db = await createStorage(t2, 'A', { fsi, schema });
+      const { path, nodeId } = db;
+      await db.Post.insert({ a: 1 });
+      if (db.plugins.includes('versions')) await db.tag('v1');
+      await db.Post.insert({ a: 2 });
+      const { dropDatabase } = db.plugins.includes('signing')
+        ? require('../../src/all/all.js')
+        : require('../../index.js');
+      await assert.rejects(dropDatabase(path, { fsi }), { code: 'LOCKED' });
+      assert.strictEqual(await db.Post.count(), 2, 'nothing emptied under the lock');
+      await db.drop();
+      assert.strictEqual(Object.keys(fsi.dump()).filter((key) => key.startsWith(`${path}/`)).length, 0, 'nothing left');
+      // A new node at the path: nothing of the old one, another identity.
+      db = await createStorage(t2, 'A', { fsi, schema });
+      assert.notStrictEqual(db.nodeId, nodeId);
+      assert.strictEqual(await db.Post.count(), 0);
+      await db.Post.insert({ b: 1 });
+      await db.close();
+      await dropDatabase(path, { fsi });
+      assert.strictEqual(Object.keys(fsi.dump()).filter((key) => key.startsWith(`${path}/`)).length, 0);
+      await dropDatabase(path, { fsi });
+      await assert.rejects(dropDatabase('', { fsi }), TypeError);
+      await assert.rejects(dropDatabase(path, { fsi, engine: db.engine }), TypeError);
+    },
+  );
+
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
     const id = (await db.Post.insert({ n: 1 })).id;
