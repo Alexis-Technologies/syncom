@@ -576,6 +576,14 @@ const ENTRIES = [
   // (collections plan, C4.3).
   // 6.5 measured; 7.
   { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
+  // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
+  {
+    label: 'pipeline — browser (@alexify/syncom/pipeline)',
+    entry: 'src/pipeline/pipeline.js',
+    platform: 'browser',
+    // 2.8 measured; 3.
+    budget: 3,
+  },
 ];
 
 // A browser entry has to be self-contained: no node builtins, and no packages

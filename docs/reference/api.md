@@ -324,7 +324,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`,
 | --- | --- | --- |
 | `CLOSED` | any write, `applyPatches()`, `tag()`/`untag()`, `repair()`, `applyRemote()`, `mergeSnapshot()` or `adoptVector()` after `close()`; a text handle's edit (`openText()`) once its `close()` was called | — |
 | `IN_HOOK` | a write issued from inside a write or apply hook (the `cause` of the `HookError` the operation rejects with) | — |
-| `IN_TRANSACTION` | a write issued through the database from inside `transact()`'s or `modify()`'s function, which holds the mutation queue the write would wait for — write through `tx`, or return the record | — |
+| `IN_TRANSACTION` | a write issued through the database from inside `transact()`'s or `modify()`'s function, which holds the mutation queue the write would wait for — write through `tx`, or return the record. Told by the function's async context (Node); in the browser such a write is not told from one made meanwhile and waits for the queue the function holds | — |
 | `EXISTS` | `insert()` (the database's, a collection's, `tx.insert()`) and `bulkInsert()` of a record whose data names the id of a live record — the entity's composite id, or the id field's value; decided inside the queue | `id` |
 | `NOT_FOUND` | a write under a list element or a tree node that is not there (`items/<name>/body` with no element `name`: `id`, `field` the list or tree, `elem` the name); `update()`, `swap()` on a record that is absent, deleted or purged; a collection's `update()`, `delete()`, `document()` on a record of another collection; `treeMove()` with an `after`/`before` sibling not under the parent; `joinBlock()`, `updateBlock()`, `setAt()` on a text at a slot that is no block marker and no embed | none from `update()`/`swap()`; `id`, `entity` (the collection's) from a collection; `id`, `field`, `node` (the sibling) for a tree; `id`, `field`, `index` for a text's slot |
 | `FIELD_KIND` | `openText()` on a field that is not a text, `update()`/`set()` on a counter, set, list, text or tree field, `inc()` on a register, set, list, text or tree field, `add()`/`remove()` on a register, counter, list, text or tree field, `splice()`/`push()`/`updateText()` on a register, counter, set or tree field (and a string on a list, an array on a text), `move()` on anything but a list, `setAt()` on anything but a list or a text, `mark()`/`unmark()`/`unmarkById()`/`insertEmbed()`/`splitBlock()`/`joinBlock()`/`updateBlock()` on anything but a text, `treeMove()`/`treeRemove()` on anything but a tree — the patches of `applyPatches()` alike; a list or text op past a bound of the field — pending work (`sync.pendingMax`, 4 096), a run (1 048 576 slots), the field as a whole (4 194 304 slots; see [Costs and limits](../guide/lists#costs-and-limits)) a splice whose cut names more than 65 536 ranges (one per run a deleted stretch crosses: delete in parts, or `compact()` first) or a `mark()` on a text that holds 65 536 marks already (a `move()` counts its position run against the field); a `treeMove()`/`treeRemove()` on a tree field that holds 65 536 moves already; an `inc()` that would take this node's sum of the counter past ±`Number.MAX_SAFE_INTEGER` | `field`, `kind` (`'register'`, `'counter'`, `'set'`, `'list'`, `'text'`, `'tree'` — or `'bound'`, with `detail` (`'pending'`, `'run'`, `'field'`, `'cuts'`, `'marks'`, `'moves'`, `'counter'` or `'paths'`), `count` and `max`); `prefix` when the field lies under a prefix a counter, a set, a list, a text or a tree holds |
@@ -691,6 +691,21 @@ engines.
 
 A backup is `JSON.stringify(await exportJSON(db))` to a file and `importJSON(db, JSON.parse(text))` back; a live backup
 follows the `transaction` event and exports the records it names.
+
+## Pipeline (subpath)
+
+`@alexify/syncom/pipeline` — `createPipeline(db, { name, source, handler, leader })`: a handler run over every
+change of the `source` collection, once, in order — a derived collection, a counter, an index kept elsewhere.
+
+| Member | Notes |
+| --- | --- |
+| `handler(batch, tx)` | Per turn of the database that changed a record of the source: `batch` is `{ ids, changes, replay, rebuilt, eventId }` — the records that changed (each once), their changes (null on a replay), the turn's log position — and `tx` the one transaction the handler writes through (the derived writes land whole, or not at all); a throw keeps the error (`errors`, the `error` event) and moves the checkpoint nothing past the turn |
+| `start()` | Reads the checkpoint from the `pipeline` kv namespace, replays the turns the log holds since it (their ids, `replay: true`), or — where the log cannot resume from it, or there is none — hands every record of the source over once (`rebuilt: true`), then follows the `transaction` events |
+| `stop()`, `idle()`, `awaitIdle()` | Stops following (what is queued waits for the next start); whether nothing is queued or running; a promise of that |
+| `checkpoint`, `rebuilt`, `errors`, `leader` | The log position handled last; whether the last start rebuilt; the handler's errors; kept for a shared database (the leader runs it) |
+
+The `transaction` event carries `eventId`, the log position of the turn's last op, which is what a pipeline keeps.
+A handler's write to the source is another turn, handed over again: derive into another collection.
 
 ## Telemetry (subpath)
 

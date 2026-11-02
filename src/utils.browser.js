@@ -8,4 +8,8 @@ const { createLogger } = require('./logger.js');
 
 const generateUUID = () => crypto.randomUUID();
 
-module.exports = { Emitter, createLogger, generateUUID };
+// No async context in the browser: a write from inside a transaction's function is not told apart
+// from one made meanwhile (it waits for the queue the function holds — the documented caveat).
+const taskScope = () => ({ run: (fn) => fn(), inside: () => false });
+
+module.exports = { Emitter, createLogger, generateUUID, taskScope };

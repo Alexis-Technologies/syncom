@@ -220,7 +220,16 @@ const mergeBatch = async (core, records, via, from) => {
   }
   if (core.listening('transaction')) {
     const ts = batch.ops[batch.ops.length - 1].ts;
-    const event = { local: true, via, source: null, message: null, ops: batch.ops, changes, ts };
+    const event = {
+      local: true,
+      via,
+      source: null,
+      message: null,
+      ops: batch.ops,
+      changes,
+      ts,
+      eventId: core.log.lastEventId,
+    };
     event[ENTRIES] = batch.touched;
     core.emit('transaction', event);
   }

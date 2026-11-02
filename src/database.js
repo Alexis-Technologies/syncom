@@ -9,7 +9,7 @@
 // beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
-const { Emitter, generateUUID, createLogger } = require('./utils.js');
+const { Emitter, generateUUID, createLogger, taskScope } = require('./utils.js');
 const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
@@ -287,9 +287,10 @@ class Database extends Emitter {
   #encrypted;
   #hooks;
   #inHook = 0;
-  // A transaction's or a `modify()`'s function running inside the queue: a write made through the
-  // database from inside it would wait for the queue it holds (IN_TRANSACTION).
-  #inTask = 0;
+  // The async context a transaction's (or a `modify()`'s) function runs in: a write made through the
+  // database from inside it would wait for the queue the function holds (IN_TRANSACTION); one made
+  // meanwhile by anyone else queues. Node's async context; the browser half tells neither apart.
+  #task = taskScope();
   #queued = 0;
   #queue = Promise.resolve();
   #closed = false;
@@ -1607,7 +1608,7 @@ class Database extends Emitter {
         ),
       );
     }
-    if (this.#inTask > 0) {
+    if (this.#task.inside()) {
       return Promise.reject(
         new SyncomError(
           'IN_TRANSACTION',
@@ -2486,14 +2487,7 @@ class Database extends Emitter {
     if (typeof fn !== 'function') throw new TypeError('transact() takes a function');
     // While `fn` runs the queue is this transaction's: a write made through the database meanwhile is
     // refused (IN_TRANSACTION) where it would otherwise wait for itself.
-    const guarded = async (tx) => {
-      this.#inTask++;
-      try {
-        return await fn(this.#transaction(tx));
-      } finally {
-        this.#inTask--;
-      }
-    };
+    const guarded = (tx) => this.#task.run(() => fn(this.#transaction(tx)));
     const run = () => transact(this.#core, guarded, options);
     const otel = this.#otel;
     const { result, done } = await this.#run(

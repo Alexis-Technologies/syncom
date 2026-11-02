@@ -66,6 +66,11 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
+  over every change of a collection, once, in order, inside one transaction per turn, and keeps the turn's
+  log position as its checkpoint after the transaction landed — a reopen resumes from it (the turns since
+  replayed from the log), or hands every record of the source over once where the log cannot resume. The
+  `transaction` event carries `eventId`, the log position of the turn's last op.
 - **Dumps: `@alexify/syncom/dump`.** `exportJSON(db)` is every record a snapshot would hand a peer — live
   ones and tombstones, each with its meta, under the node, the schema's version and hash, the kinds and
   the log position (`meta: false`: the live data alone); `exportPages` the same a page at a time.
@@ -164,7 +169,8 @@ and one `commit` event, not one per call.
   changed by the function is `FIELD_KIND`.
 - **`IN_TRANSACTION`.** A write made through the database from inside `transact()`'s or `modify()`'s
   function — which holds the mutation queue the write would wait for — is refused at once, where it used
-  to deadlock.
+  to deadlock (told by the function's async context in Node; the browser half has none and such a write
+  still waits there). A write made meanwhile by anyone else queues, as it always did.
 - **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
   its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
   `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),

@@ -27,6 +27,7 @@ same process may run with others.
 | `@alexify/syncom/local` | local documents: `db.local` and `collection.local`, JSON values beside the records that never become an op | `createDatabase({ plugins: [local] })` |
 | `@alexify/syncom/state` | persistent app state by name and path, over a record (replicated, a path a register) or a local document | `createState(db, name)` |
 | `@alexify/syncom/dump` | a database as JSON and back: `exportJSON`/`exportPages`, `importJSON` (merge or insert), `migrateStorage` between engines | functions over a database |
+| `@alexify/syncom/pipeline` | a handler over every change of a collection, once, in order, checkpointed — a derived collection | `createPipeline(db, { name, source, handler })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |

@@ -47,6 +47,7 @@ and the rows to this order, numbered within a prefix):
 | `LOCAL` | local documents: never an op |
 | `STATE` | app state by name and path |
 | `DUMP` | dumps: export and import, a move between engines |
+| `PIPE` | pipelines: a handler over a collection's turns, checkpointed |
 
 | id | guarantee | tests |
 | --- | --- | --- |
@@ -220,3 +221,4 @@ and the rows to this order, numbered within a prefix):
 | STATE-1 | A state over a record keeps every path as a register of its own: two nodes that write different paths of one state both keep theirs and read the same, a function set at a path runs over the value as it is inside a transaction, and a path observed is told after every change of it. | `two nodes that write different paths of one state converge; a function runs over the value as it is` |
 | DUMP-1 | A dump exported and imported as a merge on an empty node gives it what the source held — every record's data, every tombstone and purge — as a bootstrap would, converged; `insert` keeps the ids and makes new ops of the importing node (a tombstone deletes), and takes a dump with no meta the same way; a dump made under another schema hash is `SCHEMA_MISMATCH` unless forced. | `export then import (merge) on an empty node equals the source, record by record and tombstone by tombstone` |
 | DUMP-2 | `migrateStorage` by copy opens on the new engine as the same node — its id, its vector, every record — and writes on; by merge, a new node holds what the old one held. | `migrateStorage copies a database as the same node (its id and vector) or merges it into a new one` |
+| PIPE-1 | A pipeline hands every change of its source collection to its handler once, in order, inside one transaction per turn, and keeps the turn's log position as its checkpoint only after that transaction landed — so a reopen resumes from the checkpoint (the turns since it replayed from the log, their ids once each) and hands nothing over twice; where the log cannot resume from the checkpoint, every record of the source is handed over once (`rebuilt`); a handler that throws keeps the error and moves nothing past the turn. | `a pipeline resumes from its checkpoint after a reopen and handles every change once` |

@@ -517,10 +517,11 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
 // One turn's worth of ops announced as a whole — a local write, a
 // transaction, a peer's page, a joined snapshot — with every change tagged
 // by its record: what a view updates itself by, once.
-const transacted = (core, { local, via, source, message, ops, changes, entries }) => {
+// `eventId` is the log position of the turn's last op: where a reader that follows the turns resumes from.
+const transacted = (core, { local, via, source, message, ops, changes, entries, eventId }) => {
   if (ops.length === 0 || !core.listening('transaction')) return;
   const ts = ops[ops.length - 1].ts;
-  const event = { local, via, source, message, ops, changes, ts };
+  const event = { local, via, source, message, ops, changes, ts, eventId };
   // The records as the turn left them, for a handle's base (off the public surface: a symbol).
   event[ENTRIES] = entries;
   core.emit('transaction', event);
@@ -852,7 +853,17 @@ const landNow = (core, made, position) => {
     if (core.listening('transaction')) {
       const entries = new Map([[op.id, entry]]);
       const message = op.msg ?? null;
-      transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes), entries });
+      const eventId = core.log.formatId(position);
+      transacted(core, {
+        local: true,
+        via,
+        source,
+        message,
+        ops: [op],
+        changes: tagged(op, changes),
+        entries,
+        eventId,
+      });
     }
   }
 };
@@ -873,7 +884,17 @@ const commitLocal = async (core, type, id, payload, options) => {
       if (core.listening('transaction')) {
         const message = op.msg ?? null;
         const entries = new Map([[op.id, entry]]);
-        transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes), entries });
+        const eventId = core.log.formatId(seq);
+        transacted(core, {
+          local: true,
+          via,
+          source,
+          message,
+          ops: [op],
+          changes: tagged(op, changes),
+          entries,
+          eventId,
+        });
       }
     }
   });
@@ -1135,7 +1156,8 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       }
       if (listening) tagged(op, items[i].changes, changes);
     }
-    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes, entries: touched });
+    const eventId = core.log.formatId(to);
+    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes, entries: touched, eventId });
     if (failed !== null) throw failed;
   });
   return { result, done, ops: items.length };

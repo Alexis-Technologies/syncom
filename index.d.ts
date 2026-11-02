@@ -559,6 +559,8 @@ export interface TransactionEvent {
   ops: SyncOp[];
   changes: RecordChange[];
   ts: number;
+  /** The log position of the turn's last op: where a reader that follows the turns resumes from (`log.since`). */
+  eventId: string;
 }
 
 /** What a field is, once written: a register (last writer wins), a counter (`inc`), a set (`add`/`remove`), a list, a text or a tree. */

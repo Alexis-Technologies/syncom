@@ -17,6 +17,7 @@ src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back 
 src/local/local.js        @alexify/syncom/local — the local plugin: db.local over the `local` kv namespace, never an op (its own CLAUDE.md)
 src/state/state.js        @alexify/syncom/state — createState(db, name): app state by path over a record or a local document (its own CLAUDE.md)
 src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
+src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
@@ -38,8 +39,7 @@ src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser cryp
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — what `anonymize` hashes a string by (src/inspect/inspect.js); a checksum, never a signature — no requires
-src/crc32.js              CRC-32 of a string's UTF-8, 8 hex digits — the checksum every log file carries; zlib's in Node.js, the table of
-                          src/crc32.browser.js where it is absent and in the browser (package.json#browser)
+src/crc32.js              CRC-32 of a string's UTF-8, 8 hex digits — the checksum every log file carries; zlib's in Node.js, the table of src/crc32.browser.js where it is absent and in the browser (package.json#browser)
 src/header.js             what names an op, the core's: the header (v1, `prev` last), payloadOf, the salted digest every node mints
                           (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
                           ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream

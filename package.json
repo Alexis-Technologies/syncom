@@ -159,6 +159,10 @@
       "types": "./src/dump/dump.d.ts",
       "default": "./src/dump/dump.js"
     },
+    "./pipeline": {
+      "types": "./src/pipeline/pipeline.d.ts",
+      "default": "./src/pipeline/pipeline.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
