@@ -284,7 +284,7 @@ const runCollectionTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
-    "a cursor's update(), modify() and delete() are one transaction over the matches when it started",
+    "a cursor's update(), modify() and delete() are one transaction over the matches, each matched again inside the queue",
     async (t2) => {
       const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: { index: ['org'] } } } });
       const ids = [];
@@ -327,7 +327,17 @@ const runCollectionTests = async (t, assert, createStorage) => {
       });
       skipped = await cursor.update({ late: true });
       assert.deepStrictEqual(skipped, { matched: 4, written: 4 });
-      assert.deepStrictEqual(await db.Post.select({ org: 'a' }).delete(), { matched: 4, written: 4 });
+      // A record that stopped matching between the match and the write — a transaction ahead in the queue
+      // moved it — is skipped too: the predicate runs again inside the queue, over the record as it reads there.
+      const [second] = await db.Post.select({ org: 'a' }).order('n').limit(1).fetch();
+      const held = db.transact(async (tx) => {
+        await tx.update(second.id, { org: 'moved' });
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      });
+      const rechecked = await db.Post.select({ org: 'a' }).update({ late: 2 });
+      await held;
+      assert.deepStrictEqual(rechecked, { matched: 4, written: 3 }, 'the moved one left out');
+      assert.deepStrictEqual(await db.Post.select({ org: 'a' }).delete(), { matched: 3, written: 3 });
       assert.deepStrictEqual(await db.Post.select({ org: 'a' }).update({ x: 1 }), { matched: 0, written: 0 });
       await assert.rejects(db.Post.select().modify('nope'), TypeError);
       // A view at a tag reads alone (the versions plugin's; the lean suite runs without it).
@@ -335,6 +345,55 @@ const runCollectionTests = async (t, assert, createStorage) => {
         await db.tag('t');
         await assert.rejects(db.at('t').collection('Post').select().update({ a: 1 }), TypeError);
       }
+    },
+  );
+
+  await t.test(
+    'a data field named id never names another record: writes by query and ifMatch go by the record’s id',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+      const p1 = (await db.Post.insert({ t: 'one' })).id;
+      const p2 = (await db.Post.insert({ t: 'two' })).id;
+      // A data field named `id` — a peer could set one on any record.
+      await db.update(p1, { id: p2 });
+      assert.deepStrictEqual(await db.get(p1), { t: 'one', id: p2, $type: 'Post' });
+      // In a row the record's id wins; the data field is under it.
+      assert.deepStrictEqual(await db.Post.select({ t: 'one' }).fetch(), [{ t: 'one', id: p1, $type: 'Post' }]);
+      assert.deepStrictEqual(await db.Post.select({ id: p2 }).fetch(), [{ t: 'two', id: p2, $type: 'Post' }]);
+      // A write by query goes to the record matched, never to the one its data names.
+      assert.deepStrictEqual(await db.Post.select({ t: 'one' }).update({ seen: true }), { matched: 1, written: 1 });
+      assert.deepStrictEqual(await db.get(p2), { t: 'two', $type: 'Post' }, 'p2 untouched');
+      assert.strictEqual((await db.get(p1)).seen, true);
+      assert.deepStrictEqual(await db.Post.select({ t: 'one' }).delete(), { matched: 1, written: 1 });
+      assert.strictEqual(await db.get(p1), null);
+      assert.deepStrictEqual(await db.get(p2), { t: 'two', $type: 'Post' });
+      // `ifMatch` reads the record's id too.
+      await db.update(p2, { id: 'other' });
+      assert.strictEqual(await db.update(p2, { t: 'three' }, { ifMatch: { id: p2 } }), true);
+      assert.strictEqual(await db.update(p2, { t: 'four' }, { ifMatch: { id: 'other' } }), false);
+      assert.strictEqual((await db.get(p2)).t, 'three');
+    },
+  );
+
+  await t.test(
+    'a reference resolves within the declared collection alone, and a Document holds a copy of a reference field’s value',
+    async (t2) => {
+      const schema = { entities: { Author: {}, Tag: {}, Post: { refs: { author: 'Author', tags: ['Tag'] } } } };
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema });
+      const tag = await db.Tag.insert({ n: 't' });
+      // A Tag's id where an Author is declared: not an Author — null, from a Document and from a cursor.
+      const post = await db.Post.insert({ title: 'q', author: tag.id, tags: [tag.id] });
+      assert.strictEqual(await post.populate('author'), null);
+      assert.strictEqual(await post.author.document(), null);
+      assert.strictEqual((await post.populate('tags'))[0].n, 't');
+      const [row] = await db.Post.select({ title: 'q' }).populate(['author', 'tags']).fetch();
+      assert.strictEqual(row.author, null);
+      assert.deepStrictEqual(row.tags, [{ n: 't', $type: 'Tag', id: tag.id }]);
+      // A reference field holding an object (no id yet): the Document holds a copy, never the record's own.
+      const odd = await db.Post.insert({ title: 'r', author: { pending: true } });
+      odd.author.pending = false;
+      assert.deepStrictEqual((await db.get(odd.id)).author, { pending: true }, 'the record is as written');
+      assert.deepStrictEqual((await db.Post.select({ title: 'r' }).fetch())[0].author, { pending: true });
     },
   );
 

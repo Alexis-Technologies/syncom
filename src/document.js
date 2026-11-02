@@ -11,14 +11,15 @@ const { isPlainObject } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
 
 // A field of a declared reference, as a Document holds it: a string made a
-// Reference, an array of them where the reference is to many; anything else
-// as it is (a reference not yet set, a value of another shape).
-const referenced = (value, many, storage) => {
-  if (!many) return typeof value === 'string' ? new Reference(value, storage) : value;
+// Reference to the declared collection, an array of them where the reference
+// is to many; anything else as it is (a reference not yet set, a value of
+// another shape).
+const referenced = (value, many, storage, entity) => {
+  if (!many) return typeof value === 'string' ? new Reference(value, storage, entity) : value;
   if (!Array.isArray(value)) return value;
   const out = [];
   for (let i = 0; i < value.length; i++) {
-    out.push(typeof value[i] === 'string' ? new Reference(value[i], storage) : value[i]);
+    out.push(typeof value[i] === 'string' ? new Reference(value[i], storage, entity) : value[i]);
   }
   return out;
 };
@@ -26,10 +27,13 @@ const referenced = (value, many, storage) => {
 class Reference {
   #id;
   #storage = null;
+  // The collection the reference is declared to name; null where none was.
+  #entity;
 
-  constructor(id, storage) {
+  constructor(id, storage, entity = null) {
     this.#id = id;
     this.#storage = storage;
+    this.#entity = entity;
   }
 
   /** The id the reference names. */
@@ -37,9 +41,13 @@ class Reference {
     return this.#id;
   }
 
-  /** The live Document the reference names, or null when the record is not there (gone, or never was). */
+  /**
+   * The live Document the reference names, or null when the record is not there (gone, or never was) — or is
+   * not of the collection the reference is declared to name.
+   */
   async document() {
     if (!this.#storage.hasRecord(this.#id)) return null;
+    if (this.#entity !== null && this.#storage[SOURCE].row(this.#id)?.type !== this.#entity) return null;
     return await this.#storage.document(this.#id);
   }
 
@@ -101,13 +109,13 @@ class Document extends Emitter {
     return this.#storage[SOURCE].definition(type)?.refs ?? null;
   }
 
-  // A field's value as the Record holds it: a copy, a declared reference's
-  // id made a Reference.
+  // A field's value as the Record holds it: a copy — a declared reference's
+  // value too, whatever its shape — a declared reference's id made a Reference.
   #own(key, value) {
+    const copy = !value || typeof value !== 'object' ? value : JSON.parse(JSON.stringify(value));
     const refs = this.#refs();
-    if (refs !== null && Object.hasOwn(refs, key)) return referenced(value, refs[key].many, this.#storage);
-    if (!value || typeof value !== 'object') return value;
-    return JSON.parse(JSON.stringify(value));
+    const ref = refs !== null && Object.hasOwn(refs, key) ? refs[key] : null;
+    return ref === null ? copy : referenced(copy, ref.many, this.#storage, ref.entity);
   }
 
   /**
@@ -157,7 +165,7 @@ class Document extends Emitter {
     const refs = this.#refs();
     if (refs === null) return;
     for (const key of Object.keys(refs)) {
-      if (Object.hasOwn(data, key)) data[key] = referenced(data[key], refs[key].many, this.#storage);
+      if (Object.hasOwn(data, key)) data[key] = referenced(data[key], refs[key].many, this.#storage, refs[key].entity);
     }
   }
 

@@ -230,7 +230,7 @@ query searches the entity's `search` fields, best first unless ordered.
 | `limit(n)`, `offset(n)` | Applied after the sort |
 | `filter(fn)` | A predicate over the loaded row |
 | `projection(fields)` | The fields each row carries, plus `id` |
-| `populate(fields)` | The declared [references](../guide/database#references) of `fields` resolved on every row of the page: the record as `{ id, …data }` (`null` where it is not there), an array of them where the reference is to many — one read of the targets per field per page; a field that is no declared reference is a `TypeError` |
+| `populate(fields)` | The declared [references](../guide/database#references) of `fields` resolved on every row of the page: the record as `{ …data, id }` (`null` where it is not there, or not of the declared collection), an array of them where the reference is to many — one read of the targets per field per page; a field that is no declared reference is a `TypeError` |
 | `fetch()` | `Promise<QueryRow<R>[]>` — `{ id, ...data }` as the record reads |
 | `count()` | `Promise<number>` |
 | `one()` | `Promise<QueryRow<R> \| null>` |
@@ -241,7 +241,7 @@ query searches the entity's `search` fields, best first unless ordered.
 | `distinct(field)` | `Promise<unknown[]>` — the distinct values of `field` among the matches, in the sort order, each once (an array field by the whole array; a record without the field under `null`); from the catalog alone where the field is indexed and the query covered. A collection's `distinct(field, query?)` is the same |
 | `countBy(field)` | `Promise<[{ value, count }]>` — the distinct values with how many matches hold each, in the sort order. A collection's `countBy(field, query?)` is the same |
 | `nearest(field, vector, k, { distance }?)` | `Promise<[{ distance, row }]>` — the `k` matches nearest to `vector` by `field` (an array of numbers of the vector's length; a row without one is skipped), nearest first, by `'cosine'` (the default), `'euclidean'`, `'manhattan'`, `'dot'` (the negated product) or a function of two vectors — the distances of `@alexify/syncom/search`. A scan over the matches with the `k` best kept: no index |
-| `update(delta, { actor, message, source }?)` | Every match updated — fields, or the [operators](../guide/database#update-operators) — as ONE transaction over the matches when it started: `Promise<{ matched, written }>` (a record gone meanwhile is skipped). A cursor at a tag is read-only (a `TypeError`) |
+| `update(delta, { actor, message, source }?)` | Every match updated — fields, or the [operators](../guide/database#update-operators) — as ONE transaction over the matches when it started, each matched again inside the queue: `Promise<{ matched, written }>` (a record gone or no longer a match meanwhile is skipped). A cursor at a tag is read-only (a `TypeError`) |
 | `modify(fn, options?)` | Every match changed by `fn`, as `modify()` does, as ONE transaction: `{ matched, written }` |
 | `delete({ actor, data }?)` | Every match deleted as ONE transaction, `data` on each tombstone: `{ matched, written }` |
 | `stream({ batch }?)` | The rows `fetch()` would give — the window applied — read lazily, `batch` (100) at a time by keyset, so a result of any size is walked in bounded memory; `for await (const row of cursor)` is `stream()` |

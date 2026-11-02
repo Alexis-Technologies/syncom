@@ -581,7 +581,7 @@ hook in play, the change reaches it once the write is done, in order.
 An entity declares which of its fields name other records — `refs: { author: 'Author',
 tags: ['Tag'] }`, or a metaschema relation (`author: 'Author'`, `{ many: 'Tag' }`) — and a
 `Document` reads such a field as a `Reference` (an array of them for many): `id` is the string,
-`document()` resolves it to the target's `Document` (`null` where it is not there), `toJSON()`
+`document()` resolves it to the target's `Document` (`null` where it is not there, or not of the declared collection), `toJSON()`
 is the id again. A cursor's `populate(fields)` resolves them on every row instead.
 
 ```js

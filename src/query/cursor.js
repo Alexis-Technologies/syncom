@@ -20,10 +20,11 @@ const MAX_TEXT = 1000;
 const CONCURRENCY = 16;
 // On a row, the object it was built from — the record as it reads, or its catalog row's fields —
 // held until the record changes: what a live result tells a change of the row by. A symbol: a copy
-// of the row (JSON) leaves it behind.
+// of the row (JSON) leaves it behind. The row's `id` is the record's, laid LAST: a data field named
+// `id` never stands for another record in a query, a write by query or an `ifMatch`.
 const VIEW = Symbol('syncom.view');
 const rowOf = (id, view) => {
-  const row = { id, ...view };
+  const row = { ...view, id };
   row[VIEW] = view;
   return row;
 };
@@ -534,7 +535,7 @@ class Cursor {
     const refs = this.#source.definition(this.#entity).refs;
     for (let f = 0; f < this.#populate.length; f++) {
       const field = this.#populate[f];
-      const { many } = refs[field];
+      const { many, entity } = refs[field];
       const ids = [];
       const seen = new Set();
       const want = (value) => {
@@ -548,10 +549,11 @@ class Cursor {
         else want(value);
       }
       const found = await this.#source.loadMany(ids);
+      // The record the id names — of the declared collection; another collection's record is not it.
       const record = (value) => {
         if (typeof value !== 'string') return null;
         const data = found.get(value) ?? null;
-        return data === null ? null : { id: value, ...data };
+        return data === null || data.$type !== entity ? null : { ...data, id: value };
       };
       for (let i = 0; i < rows.length; i++) {
         const value = rows[i][field];
@@ -748,9 +750,10 @@ class Cursor {
   }
 
   // A write over every record the cursor matches, as ONE transaction: the
-  // matches are taken when it starts, each is written as `write(tx, id)`
-  // says inside the queue — a record gone meanwhile is skipped (`written`
-  // counts the rest). A view at a tag reads alone.
+  // matches are taken when it starts, and each is matched AGAIN inside the
+  // queue, over the record as it reads there, before it is written as
+  // `write(tx, id)` says — a record gone or no longer a match meanwhile is
+  // skipped (`written` counts the rest). A view at a tag reads alone.
   async #write(method, options, write) {
     const { transact } = this.#source;
     if (typeof transact !== 'function') throw new TypeError(`${method}(): a cursor at a tag is read-only`);
@@ -759,7 +762,10 @@ class Cursor {
     await transact(
       async (tx) => {
         for (let i = 0; i < ids.length; i++) {
-          if (!(await tx.has(ids[i]))) continue;
+          const view = await tx.get(ids[i]);
+          if (view === null) continue;
+          const candidate = rowOf(ids[i], view);
+          if (!this.#predicate(candidate) || (this.#filter !== null && !this.#filter(candidate))) continue;
           await write(tx, ids[i]);
           written++;
         }

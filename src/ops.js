@@ -1045,7 +1045,9 @@ const applyOp = (previous, op, limits = null) => {
       // write landed first): the reading shows the survivor and the fields that went — reported so
       // (`unset` each, from the delta), never as a record gone (EVT-5).
       if (isAlive(entry)) return outcome(true);
-      changes.push(isPlainObject(op.data) ? { action: 'delete', data: asJson(op.data) } : { action: 'delete' });
+      // What the tombstone carries: the fields the delete's data applied — never the payload as sent.
+      const carried = Object.keys(entry.data).length > 0 ? asJson(entry.data) : null;
+      changes.push(carried === null ? { action: 'delete' } : { action: 'delete', data: carried });
       return outcome(true, true);
     }
   } else if (op.type === 'merge') {

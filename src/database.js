@@ -2588,7 +2588,8 @@ class Database extends Emitter {
       const test = ifMatch === null ? null : this.#predicate(ifMatch);
       const view = await api.get(id);
       if (view === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
-      if (test !== null && !test({ id, ...view })) return false;
+      // The record's id laid last: a data field named `id` is not the record's.
+      if (test !== null && !test({ ...view, id })) return false;
       if (operators) await operate(api, tx, id, delta, options);
       else await tx.commit('set', id, { data: delta }, { actor: options.actor });
       return test === null ? undefined : true;

@@ -215,11 +215,17 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.strictEqual(pinned.i, 1);
     assert.strictEqual(await storage.get('nope'), null);
     assert.strictEqual(storage.getCachedData('nope'), null);
-    // A declared reference to an evicted record is still a reference, and reads it back in.
-    const referrer = await storage.insert({ $type: 'Link', to: ids[2] });
+    // A declared reference to an evicted record is still a reference, and reads it back in — a record of the
+    // declared collection; one of another collection, or of none, resolves to null.
+    const target = await storage.insert({ $type: 'Link', i: 2 });
+    for (let i = 12; i < 16; i++) ids.push(await storage.insert({ i }));
+    assert.strictEqual(storage.getCachedData(target), null, 'evicted');
+    const referrer = await storage.insert({ $type: 'Link', to: target });
     const record = await storage.document(referrer);
     assert.strictEqual(typeof record.to.record, 'function');
     assert.strictEqual((await record.to.document()).i, 2);
+    const loose = await storage.document(await storage.insert({ $type: 'Link', to: ids[2] }));
+    assert.strictEqual(await loose.to.document(), null, 'not a Link');
     await assert.rejects(() => createStorage(t2, 'B', { cache: { max: 0 } }), /cache.max must be a positive integer/);
     await assert.rejects(() => createStorage(t2, 'B', { catalog: { flushEvery: 'often' } }), /flushEvery must be/);
   });
