@@ -1226,6 +1226,8 @@ class Database extends Emitter {
       ids: (entity) => catalog.ids(entity),
       row: (id) => catalog.row(id),
       indexed: (entity) => catalog.indexed(entity),
+      indexes: (entity) => catalog.indexes(entity),
+      scan: (entity, plan) => catalog.scan(entity, plan),
       searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
       // What a query result is current as of: moves with every change of a record the catalog heard of.

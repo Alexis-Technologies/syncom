@@ -43,6 +43,48 @@ const valueOf = (data, path) => {
   return value;
 };
 
+// A total order for sorting: nothing, then booleans, numbers, strings, then
+// everything else (left where it was) — the order of `order()`, of a sorted
+// index, of `$gt` and the rest, which hold only between values of one of
+// the three ordered kinds.
+const rankOf = (value) => {
+  if (value === undefined || value === null) return 0;
+  const type = typeof value;
+  if (type === 'boolean') return 1;
+  if (type === 'number') return 2;
+  if (type === 'string') return 3;
+  return 4;
+};
+
+const compare = (a, b) => {
+  const rank = rankOf(a);
+  const other = rankOf(b);
+  if (rank !== other) return rank - other;
+  if (rank === 0 || rank === 4) return 0;
+  return a < b ? -1 : a > b ? 1 : 0;
+};
+
+// Two entries of a sorted index: by each key, then by id.
+const compareEntries = (a, b) => {
+  for (let i = 0; i < a.keys.length; i++) {
+    const order = compare(a.keys[i], b.keys[i]);
+    if (order !== 0) return order;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+};
+
+// The first position of `entries` at which `test` is no longer below: a binary search.
+const lowerBound = (entries, below) => {
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (below(entries[mid])) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+};
+
 // A value with its object keys sorted at every depth: `{ a, b }` and
 // `{ b, a }` are equal to the query's predicate, so they share a key. A
 // prototype-less copy, so a `__proto__` field stays a field.
@@ -143,7 +185,45 @@ const defOf = (def) => {
   const fields = new Set(def.index);
   for (const key of def.unique) for (const field of key) fields.add(field);
   const search = def.search ?? [];
-  return { index: def.index, unique: def.unique, search, fields: [...fields], indexed: fields };
+  // The sorted keys kept: the declared indexes (singles as one-field keys), each with its name.
+  let indexes = def.indexes ?? null;
+  if (indexes === null) {
+    indexes = [];
+    for (let i = 0; i < def.index.length; i++) indexes.push([def.index[i]]);
+  }
+  return { index: def.index, indexes, unique: def.unique, search, fields: [...fields], indexed: fields };
+};
+
+// What a sorted index holds of a row: its keys, one per field of the index
+// — and, where a field holds an array, one entry per element of it (as the
+// posting lists post an array, and as the predicate matches one: by any of
+// its elements), every combination of them; `multi` says an array was met.
+// Bounded: past 64 entries the array is keyed whole alone.
+const MAX_ENTRIES = 64;
+const keysOf = (fields, index) => {
+  let tuples = [[]];
+  let multi = false;
+  for (let i = 0; i < index.length; i++) {
+    const value = valueOf(fields, index[i]);
+    const elements =
+      Array.isArray(value) && value.length > 0 && tuples.length * value.length <= MAX_ENTRIES ? value : null;
+    const next = [];
+    for (let t = 0; t < tuples.length; t++) {
+      if (elements === null) next.push(tuples[t].concat([value]));
+      else {
+        multi = true;
+        for (let e = 0; e < elements.length; e++) next.push(tuples[t].concat([elements[e]]));
+      }
+    }
+    tuples = next;
+  }
+  return { tuples, multi };
+};
+
+// Whether two entries hold the same keys.
+const sameKeys = (a, b) => {
+  for (let i = 0; i < a.keys.length; i++) if (compare(a.keys[i], b.keys[i]) !== 0) return false;
+  return true;
 };
 
 // A row with nothing indexed: what a record of a collection keeps while
@@ -163,6 +243,9 @@ class Catalog {
   #byType = new Map();
   #eq = new Map();
   #unique = new Map();
+  // Per type, per declared index (by its name): the entries `{ keys, id }` in key order, then id — what
+  // a range, a prefix or a sort reads in order (`scan`).
+  #keyed = new Map();
   #watchers = new Map();
   #dirty = 0;
   // The rows put since the last save, by id (null: removed), and whether the
@@ -195,8 +278,95 @@ class Catalog {
   // collections, their indexes, unique keys and search fields.
   #rekey() {
     const shape = [];
-    for (const [name, def] of this.#defs) shape.push([name, def.index, def.unique, def.search]);
+    for (const [name, def] of this.#defs) shape.push([name, def.index, def.indexes, def.unique, def.search]);
     this.#indexKey = keyOf(shape);
+  }
+
+  /** The declared indexes of a collection — the keys as field lists, the sorted indexes kept. Shared: read it, do not edit it. */
+  indexes(type) {
+    return this.#defs.get(type)?.indexes ?? [];
+  }
+
+  /**
+   * The ids a plan (src/query/plan.js) reads from a sorted index, in its
+   * order — the rows whose first keys are `prefix`, within `range` on the
+   * key after it (`{ lower: { value, inclusive }, upper }`, either side
+   * open), forward or backward (`desc`). A scan is bounded: a binary search
+   * to each edge, the entries between.
+   */
+  scan(type, { index, prefix, range, desc }) {
+    const held = this.#keyed.get(type)?.get(index.join(','));
+    if (held === undefined) return { ids: [], sorted: true };
+    const { entries } = held;
+    const k = prefix.length;
+    // Below the prefix (and the lower edge) / within or below the upper edge.
+    const belowLower = (entry) => {
+      for (let i = 0; i < k; i++) {
+        const order = compare(entry.keys[i], prefix[i]);
+        if (order !== 0) return order < 0;
+      }
+      if (range === null || range.lower === null) return false;
+      const order = compare(entry.keys[k], range.lower.value);
+      return order < 0 || (order === 0 && !range.lower.inclusive);
+    };
+    const withinUpper = (entry) => {
+      for (let i = 0; i < k; i++) {
+        const order = compare(entry.keys[i], prefix[i]);
+        if (order !== 0) return order < 0;
+      }
+      if (range === null || range.upper === null) return true;
+      const order = compare(entry.keys[k], range.upper.value);
+      return order < 0 || (order === 0 && range.upper.inclusive);
+    };
+    const from = lowerBound(entries, belowLower);
+    const to = lowerBound(entries, withinUpper);
+    const ids = [];
+    // An array keyed per element lists a row once per element in range: each id once.
+    const seen = held.multi ? new Set() : null;
+    const push = (id) => {
+      if (seen !== null) {
+        if (seen.has(id)) return;
+        seen.add(id);
+      }
+      ids.push(id);
+    };
+    if (!desc) for (let i = from; i < to; i++) push(entries[i].id);
+    else {
+      // Backwards by key, forwards by id within equal keys: the result's one order.
+      let i = to - 1;
+      while (i >= from) {
+        let j = i;
+        while (j > from && sameKeys(entries[j - 1], entries[i])) j--;
+        for (let k = j; k <= i; k++) push(entries[k].id);
+        i = j - 1;
+      }
+    }
+    // Sorted by the index only where no key holds an array (an element's place is not the row's).
+    return { ids, sorted: !held.multi };
+  }
+
+  // A row's entries into the type's sorted indexes, or out of them.
+  #key(type, id, fields, def, into) {
+    let byIndex = this.#keyed.get(type);
+    if (byIndex === undefined) {
+      if (!into) return;
+      byIndex = new Map();
+      for (let i = 0; i < def.indexes.length; i++) {
+        byIndex.set(def.indexes[i].join(','), { fields: def.indexes[i], entries: [], multi: false });
+      }
+      this.#keyed.set(type, byIndex);
+    }
+    for (const held of byIndex.values()) {
+      const { tuples, multi } = keysOf(fields, held.fields);
+      if (multi && into) held.multi = true;
+      const { entries } = held;
+      for (let t = 0; t < tuples.length; t++) {
+        const entry = { keys: tuples[t], id };
+        const at = lowerBound(entries, (other) => compareEntries(other, entry) < 0);
+        if (into) entries.splice(at, 0, entry);
+        else if (at < entries.length && entries[at].id === id && sameKeys(entries[at], entry)) entries.splice(at, 1);
+      }
+    }
   }
 
   /**
@@ -220,6 +390,7 @@ class Catalog {
     else this.#defs.set(name, defOf(def));
     this.#eq.delete(name);
     this.#unique.delete(name);
+    this.#keyed.delete(name);
     if (index === null) this.#text.delete(name);
     else this.#text.set(name, index);
     for (const [id, pending] of this.#textPending) if (pending.type === name) this.#textPending.delete(id);
@@ -290,6 +461,7 @@ class Catalog {
       const value = this.#uniqueKey(row.fields, key);
       if (value !== null) drop(unique.get(key.join(',')), value, id);
     }
+    this.#key(row.type, id, row.fields, def, false);
   }
 
   /** What unique key `key` (a field list) reads as in `data` — null when a field is missing. */
@@ -338,6 +510,7 @@ class Catalog {
       const value = this.#uniqueKey(row.fields, key);
       if (value !== null) add(unique.get(key.join(',')), value, id);
     }
+    this.#key(row.type, id, row.fields, def, true);
   }
 
   /**
@@ -657,4 +830,4 @@ class Catalog {
   }
 }
 
-module.exports = { Catalog, valueOf, textOf, isTextIndex };
+module.exports = { Catalog, valueOf, textOf, isTextIndex, rankOf, compare };

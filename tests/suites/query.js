@@ -661,10 +661,10 @@ const runQueryTests = async (t, assert, createStorage) => {
       );
       assert.ok(nearest[0].distance <= nearest[1].distance && nearest[1].distance <= nearest[2].distance);
       assert.deepStrictEqual(
-        (await storage.Project.select({ kind: 'app' }).nearest('v', [6, 6], 2, { distance: 'euclidean' })).map(
+        (await storage.Project.select({ kind: 'app' }).nearest('v', [4.5, 7.5], 2, { distance: 'euclidean' })).map(
           ({ row }) => row.name,
         ),
-        ['n6', 'n4'],
+        ['n4', 'n6'],
       );
       const farthest = (a, b) => -Math.abs(a[0] - b[0]);
       assert.deepStrictEqual(
@@ -679,6 +679,95 @@ const runQueryTests = async (t, assert, createStorage) => {
       await assert.rejects(storage.Project.select().nearest('v', [1, 'x'], 1), TypeError);
       await assert.rejects(storage.Project.select().nearest('v', [1], 1, { distance: 'nope' }), TypeError);
       await assert.rejects(storage.Project.select().nearest('v', [1], -1), TypeError);
+    },
+  );
+
+  await t.test(
+    'an ordered, limited cursor over an index reads offset + limit records and no more; explain() names the index',
+    async (t2) => {
+      const fsi = counting(memory());
+      const compound = { entities: { Task: { index: ['boardId', ['boardId', 'rank'], ['boardId', 'done', 'rank']] } } };
+      const storage = await createStorage(t2, 'X', { fsi, schema: compound, cache: { max: 2 } });
+      const all = [];
+      for (let i = 0; i < 60; i++) {
+        const data = { boardId: `b${i % 3}`, rank: (i * 7) % 60, done: i % 4 === 0, title: `t${i}` };
+        const id = await storage.insert({ ...data, $type: 'Task' });
+        all.push({ id, ...data, $type: 'Task' });
+      }
+      const byRank = (a, b) => a.rank - b.rank || (a.id < b.id ? -1 : 1);
+      const reference = all.filter((row) => row.boardId === 'b1' && row.rank >= 10).sort(byRank);
+      const cursor = storage.Task.select({ boardId: 'b1', rank: { $gte: 10 } })
+        .order('rank')
+        .limit(4)
+        .offset(3);
+      assert.deepStrictEqual(cursor.explain(), {
+        scan: 'index',
+        index: ['boardId', 'rank'],
+        prefix: ['b1'],
+        range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
+        desc: false,
+        sortedByIndex: true,
+        covered: false,
+        residual: false,
+      });
+      fsi.reset();
+      const rows = await cursor.fetch();
+      assert.deepStrictEqual(rows, reference.slice(3, 7));
+      assert.strictEqual(fsi.dataReads(), 7, 'offset + limit records, not the board');
+      // Backwards, a bounded range, a three-field key.
+      const back = storage.Task.select({ boardId: 'b1', rank: { $gt: 10, $lte: 40 } })
+        .desc('rank')
+        .limit(2);
+      assert.strictEqual(back.explain().desc, true);
+      assert.deepStrictEqual(
+        await back.fetch(),
+        [...reference]
+          .filter((row) => row.rank > 10 && row.rank <= 40)
+          .sort(byRank)
+          .reverse()
+          .slice(0, 2),
+      );
+      const three = storage.Task.select({ boardId: 'b2', done: true }).order('rank');
+      assert.deepStrictEqual(three.explain().index, ['boardId', 'done', 'rank']);
+      assert.deepStrictEqual(
+        (await three.fetch()).map((row) => row.rank),
+        all
+          .filter((row) => row.boardId === 'b2' && row.done)
+          .sort(byRank)
+          .map((row) => row.rank),
+      );
+      // A sort the index cannot serve: read by the prefix, sorted after — the oracle's order still.
+      const resorted = storage.Task.select({ boardId: 'b0' }).order('title').limit(5);
+      const made = resorted.explain();
+      assert.strictEqual(made.scan, 'index');
+      assert.strictEqual(made.sortedByIndex, false);
+      assert.deepStrictEqual(
+        (await resorted.fetch()).map((row) => row.title),
+        all
+          .filter((row) => row.boardId === 'b0')
+          .map((row) => row.title)
+          .sort()
+          .slice(0, 5),
+      );
+      // A field with no index at all: the collection; an equality on an indexed one: the posting lists.
+      assert.strictEqual(storage.Task.select({ title: 't1' }).explain().scan, 'collection');
+      assert.strictEqual(
+        storage.Task.select({ boardId: 'b0', $or: [{ done: true }, { rank: 1 }] }).explain().scan,
+        'index',
+      );
+      assert.strictEqual(storage.Task.select({ boardId: { $in: ['b0', 'b1'] } }).explain().scan, 'postings');
+      // A live query over the index stays a fresh run.
+      const seen = [];
+      const stop = cursor.watch((page) => seen.push(page));
+      await tick();
+      await storage.Task.update(reference[4].id, { rank: 11 });
+      await tick();
+      assert.deepStrictEqual(seen.at(-1), await cursor.fetch());
+      stop();
+      // The plan is a copy.
+      const copy = cursor.explain();
+      copy.index.push('x');
+      assert.deepStrictEqual(cursor.explain().index, ['boardId', 'rank']);
     },
   );
 

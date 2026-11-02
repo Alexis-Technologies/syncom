@@ -7,9 +7,10 @@
 // browser.
 
 const { deepEqual } = require('../shape.js');
-const { valueOf } = require('../catalog.js');
+const { valueOf, rankOf, compare } = require('../catalog.js');
 const { Live } = require('./live.js');
 const { keyOf } = require('./cache.js');
+const { plan } = require('./plan.js');
 const { DISTANCES, isVector } = require('../search/distance.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -27,25 +28,8 @@ const rowOf = (id, view) => {
   return row;
 };
 
-// A total order for sorting: nothing, then booleans, numbers, strings, then
-// everything else (left where it was). Comparisons in a query are stricter —
-// they hold only between values of one of the three ordered kinds.
-const rankOf = (value) => {
-  if (value === undefined || value === null) return 0;
-  const type = typeof value;
-  if (type === 'boolean') return 1;
-  if (type === 'number') return 2;
-  if (type === 'string') return 3;
-  return 4;
-};
-
-const compare = (a, b) => {
-  const rank = rankOf(a);
-  const other = rankOf(b);
-  if (rank !== other) return rank - other;
-  if (rank === 0 || rank === 4) return 0;
-  return a < b ? -1 : a > b ? 1 : 0;
-};
+// The order of values — nothing, then booleans, numbers, strings, then the rest — is the catalog's
+// (`compare`, `rankOf`): the sorted indexes keep it, so a scan comes in the order a sort would give.
 
 // Equality as a query means it: the value itself, or — for an array field
 // and a scalar — any of its elements.
@@ -328,6 +312,8 @@ class Cursor {
   #populate = null;
   // Keyset paging: the row the page starts after — its order keys and its id — or null.
   #after = null;
+  // The plan (./plan.js), made once per cursor at its first run.
+  #planned = null;
   // The query cache (./cache.js) of the database, null at a tag's source.
   #cache;
 
@@ -581,6 +567,37 @@ class Cursor {
     return rows;
   }
 
+  // How the cursor is answered (./plan.js): over the collection's declared indexes, once.
+  #plan() {
+    if (this.#planned === null) {
+      const indexes = this.#source.indexes?.(this.#entity) ?? [];
+      const made = plan({
+        query: this.#query,
+        order: this.#order,
+        indexes,
+        indexed: this.#source.indexed(this.#entity),
+        covered: this.#covered(true),
+      });
+      // A filter reads the record and decides for itself: nothing the index decided is final.
+      if (this.#filter !== null) made.residual = true;
+      this.#planned = made;
+    }
+    return this.#planned;
+  }
+
+  /**
+   * How the cursor is answered: `{ scan, index, prefix, range, desc,
+   * sortedByIndex, covered, residual }` — the index chosen (its fields) and
+   * how it is entered (an equality prefix, a range on the field after),
+   * whether the rows come sorted by it (a window is then read as far as
+   * `offset + limit`), whether only the catalog is read, whether the
+   * predicate still runs. A copy: edit it as you like.
+   */
+  explain() {
+    const made = this.#plan();
+    return JSON.parse(JSON.stringify({ ...made, index: made.index === null ? null : made.index.slice() }));
+  }
+
   // The cache key of this cursor's result: what it reads and how; null with a filter (a function has
   // no name) or without a cache (a tag's source).
   #cacheKey() {
@@ -618,15 +635,21 @@ class Cursor {
   async #matching(needsRows, limit = this.#limit) {
     // A source that reads its catalog at first use (a tag's) hands `ready`.
     if (this.#source.ready !== undefined) await this.#source.ready();
-    const { candidates, ids, row, load } = this.#source;
-    let found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
+    const { candidates, ids, row, load, scan } = this.#source;
+    const made = this.#plan();
+    // By the plan: an index scanned in its order, the posting lists, or every record of the collection.
+    const scanned = made.scan === 'index' ? scan(this.#entity, made) : null;
+    let found = scanned !== null ? scanned.ids : (candidates(this.#entity, this.#query) ?? ids(this.#entity));
     const ordered = needsRows && this.#order.length > 0;
     const wanted = this.#offset + limit;
-    const enough = needsRows && !ordered ? wanted : Infinity;
+    // Sorted by the index already (a key that holds arrays is not): enough rows is the window, read as
+    // far as it and no further.
+    const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex;
+    const enough = needsRows && (!ordered || byIndex) ? wanted : Infinity;
     // An unordered cursor that stops at enough rows reads its candidates in id order — the result's
     // order without keys — so what it stops at is the window a run of every candidate would give.
-    if (enough !== Infinity && !this.#ranked() && !Array.isArray(found)) found = [...found].sort();
-    const sink = ordered && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
+    if (enough !== Infinity && !byIndex && !this.#ranked() && !Array.isArray(found)) found = [...found].sort();
+    const sink = ordered && !byIndex && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
     // From after the edge of the page before, where there is one.
     const edge = this.#after === null ? null : this.#edge();
     const byOrder = edge === null ? null : compareFully(this.#order);
@@ -642,7 +665,7 @@ class Cursor {
         if (indexed === null || indexed.encrypted) continue;
         take(rowOf(id, indexed.fields));
       }
-      return { rows: sink.rows, sorted: sink instanceof TopK };
+      return { rows: sink.rows, sorted: sink instanceof TopK || byIndex };
     }
     // A batch is as wide as what is still wanted, CONCURRENCY at most: a
     // `one()` reads one record at a time and stops at the first match, a
@@ -661,7 +684,7 @@ class Cursor {
       if (batch.length >= Math.min(CONCURRENCY, Math.max(1, enough - sink.size))) await read();
     }
     if (batch.length > 0 && sink.size < enough) await read();
-    return { rows: sink.rows, sorted: sink instanceof TopK };
+    return { rows: sink.rows, sorted: sink instanceof TopK || byIndex };
   }
 
   #project(row) {

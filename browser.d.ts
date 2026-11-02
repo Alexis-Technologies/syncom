@@ -65,6 +65,7 @@ export type {
   UpdateOperators,
   WriteByQuery,
   Page,
+  QueryPlan,
   PageToken,
   CollectionEvents,
   DeleteOptions,

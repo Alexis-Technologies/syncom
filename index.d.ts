@@ -1055,8 +1055,13 @@ export interface EntityDefinition {
   idField?: string | false;
   /** Read the schema's indexes and fields, validate nothing (`@alexify/metaschema/definition`). */
   validate?: false;
-  /** Fields with an equality index; read off the schema's `indexes`/`fields` when absent. */
-  index?: readonly string[];
+  /**
+   * The indexes: a field, or a compound key of fields (`['orgId', ['orgId', 'createdAt']]`) — each a
+   * sorted key the catalog keeps, which a query enters by its prefix of equalities and one field more
+   * for a range or the sort; every field named is indexed for equality. Read off the schema's
+   * `indexes` (a compound one stays a key) and `index: true` fields when absent.
+   */
+  index?: ReadonlyArray<string | readonly string[]>;
   /** Unique keys, single or composite; read off the schema when absent. */
   unique?: ReadonlyArray<string | readonly string[]>;
   /**
@@ -2648,6 +2653,8 @@ export type QueryRow<R = RecordData> = R & { id: string };
 export interface Cursor<T = QueryRow> {
   /** Whether a document (its data, with or without `id`) matches the cursor's query; the filter aside. */
   matches(doc: object): boolean;
+  /** How the cursor is answered — the scan, the index chosen and how it is entered, whether the rows come sorted by it; a copy. */
+  explain(): QueryPlan;
   order(field: string): this;
   desc(field: string): this;
   limit(n: number): this;
@@ -2697,6 +2704,30 @@ export interface Cursor<T = QueryRow> {
   /** Every match deleted as ONE transaction; `data` rides on each tombstone: `{ matched, written }`. */
   delete(options?: TransactOptions & { data?: object }): Promise<WriteByQuery>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
+}
+
+/** How a cursor is answered (`explain()`): over the collection's declared indexes, decided once. */
+export interface QueryPlan {
+  /** The text index's ranking, a sorted index, the posting lists of equalities, or every record of the collection. */
+  scan: 'text' | 'index' | 'postings' | 'collection';
+  /** The index chosen: its fields, or null. */
+  index: string[] | null;
+  /** The equality values the index is entered by, one per field of its prefix. */
+  prefix: unknown[];
+  /** The bounds on the field after the prefix, either side open, or null. */
+  range: {
+    field: string;
+    lower: { value: unknown; inclusive: boolean } | null;
+    upper: { value: unknown; inclusive: boolean } | null;
+  } | null;
+  /** Scanned backwards (a descending sort the index serves). */
+  desc: boolean;
+  /** The rows come in the result's order from the scan: a window is read as far as `offset + limit` and no further. */
+  sortedByIndex: boolean;
+  /** Only the catalog is read: the query's fields, the order's and the projection's are all indexed, and no filter. */
+  covered: boolean;
+  /** Whether the predicate still runs over what the scan yields. */
+  residual: boolean;
 }
 
 /** Where a page ends: the last row's order keys and its id — what `after()` takes. Opaque; JSON. */

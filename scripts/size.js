@@ -176,7 +176,8 @@ const ENTRIES = [
   // C1.7–C1.8). 67.5, raised by name.
   // 67.7 with an entity's methods and statics and the collection events (collections plan, C1.9–C1.10). 68, raised by name.
   // 68.2 with `collection.remove()`, `drop()`/`dropDatabase()` and src/layout.js (collections plan, C1.11). 68.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 68.5 },
+  // 68.8 with the catalog's sorted indexes (compound keys, `scan`) and `compare` shared, an array keyed per element (collections plan, C3.1). 69.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 69.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -391,7 +392,8 @@ const ENTRIES = [
   // 150.1 with live queries kept by event-reduce, watchCount and the query cache (collections plan, C2.2). 150.5,
   // raised by name.
   // 151.2 with keyset paging, distinct/countBy and nearest (collections plan, C2.3). 151.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 151.5 },
+  // 152.8 with compound indexes, the planner and explain() (collections plan, C3.1–C3.2). 153.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 153.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -536,7 +538,9 @@ const ENTRIES = [
   // (src/query/cache.js; collections plan, C2.2). 10.5, raised by name.
   // 11.3 with keyset paging (`page`/`after`), `distinct`/`countBy` and `nearest` over src/search/distance.js
   // (collections plan, C2.3). 11.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 11.5 },
+  // 12.8 with the planner (src/query/plan.js), `explain()` and the catalog's sorted indexes it reads (collections plan,
+  // C3.1–C3.2). 13.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 13.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

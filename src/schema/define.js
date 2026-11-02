@@ -188,7 +188,27 @@ const fieldNames = (value, entity, what) => {
   return [...names];
 };
 
-const explicitIndex = (value, entity) => fieldNames(value, entity, 'index');
+// `index: ['orgId', ['orgId', 'createdAt']]` — a field, or a compound key
+// of fields, each: `{ index }` every field named (what a catalog row keeps),
+// `{ indexes }` the keys as given, singles as one-field keys, each once.
+const explicitIndex = (value, entity) => {
+  if (!Array.isArray(value)) throw fail(entity, 'index must be an array of field names and compound keys');
+  const keys = [];
+  for (let i = 0; i < value.length; i++) {
+    const key = isField(value[i]) ? [value[i]] : fieldList(value[i]);
+    if (key === null) throw fail(entity, 'index takes field names and arrays of them');
+    keys.push(key);
+  }
+  return indexSet(keys);
+};
+
+// The fields of every key, each once, and the keys each once.
+const indexSet = (keys) => {
+  const index = new Set();
+  const indexes = dedupe(keys);
+  for (let i = 0; i < indexes.length; i++) for (let j = 0; j < indexes[i].length; j++) index.add(indexes[i][j]);
+  return { index: [...index], indexes };
+};
 
 // The fields `$text` searches, joined into the record's catalog row and
 // handed to the injected text index (`createDatabase({ search })`); never derived from
@@ -212,21 +232,22 @@ const explicitUnique = (value, entity) => {
 // true` / `index: true` on a field. A `many` relation, or anything else, is
 // left alone.
 const derivedIndexes = (schema) => {
-  const index = new Set();
+  const keys = [];
   const unique = [];
-  if (!isObject(schema)) return { index, unique };
+  if (!isObject(schema)) return { ...indexSet(keys), unique };
   if (isObject(schema.indexes)) {
     const names = Object.keys(schema.indexes);
     for (let i = 0; i < names.length; i++) {
       const spec = schema.indexes[names[i]];
       if (!isObject(spec)) continue;
-      const keys = fieldList(spec.unique);
-      if (keys !== null) {
-        unique.push(keys);
+      const key = fieldList(spec.unique);
+      if (key !== null) {
+        unique.push(key);
         continue;
       }
+      // A compound index stays a compound key, in the order the schema lays it.
       const fields = fieldList(spec.index) ?? fieldList(spec.primary);
-      if (fields !== null) for (let j = 0; j < fields.length; j++) index.add(fields[j]);
+      if (fields !== null) keys.push(fields);
     }
   }
   if (isObject(schema.fields)) {
@@ -236,10 +257,10 @@ const derivedIndexes = (schema) => {
       const spec = schema.fields[field];
       if (!isObject(spec)) continue;
       if (spec.unique === true) unique.push([field]);
-      else if (spec.index === true) index.add(field);
+      else if (spec.index === true) keys.push([field]);
     }
   }
-  return { index, unique };
+  return { ...indexSet(keys), unique };
 };
 
 const dedupe = (keys) => {
@@ -347,7 +368,7 @@ const normalizeEntity = (name, def, validator) => {
   const idField = def.idField === undefined ? deriveIdField(schema, name) : def.idField;
   if (idField !== false && !isField(idField)) throw fail(name, 'idField must be a field name or false');
   const derived = def.index === undefined || def.unique === undefined ? derivedIndexes(schema) : null;
-  const index = def.index === undefined ? [...derived.index] : explicitIndex(def.index, name);
+  const { index, indexes } = def.index === undefined ? derived : explicitIndex(def.index, name);
   const unique = dedupe(def.unique === undefined ? derived.unique : explicitUnique(def.unique, name));
   const validates = schema !== undefined && validate !== false;
   return {
@@ -358,6 +379,7 @@ const normalizeEntity = (name, def, validator) => {
     idField,
     id,
     index,
+    indexes,
     unique,
     fields: fields ?? null,
     search: def.search === undefined ? [] : explicitSearch(def.search, name),

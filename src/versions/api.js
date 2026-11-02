@@ -180,6 +180,8 @@ const sourceAt = (core, name) => {
     ids: (entity) => catalog().ids(entity),
     row: (id) => catalog().row(id),
     indexed: (entity) => catalog().indexed(entity),
+    indexes: (entity) => catalog().indexes(entity),
+    scan: (entity, plan) => catalog().scan(entity, plan),
     searches: () => {
       throw new TypeError(`select(): $text is not served at tag ${name}: a tag keeps no text index`);
     },

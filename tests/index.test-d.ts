@@ -1001,6 +1001,12 @@ storage.record<Post>('id').then((record) => {
     expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().order('n').after(page.next));
   expectType<Promise<unknown[]>>(db.Tag.distinct('n', { k: 1 }));
   expectType<AsyncIterableIterator<syncom.QueryRow<RecordData>>>(db.Tag.select().stream({ batch: 50 }));
+  const made = db.Tag.select({ n: 1 }).order('k').explain();
+  expectType<'text' | 'index' | 'postings' | 'collection'>(made.scan);
+  expectType<string[] | null>(made.index);
+  expectType<boolean>(made.sortedByIndex);
+  expectAssignable<syncom.EntityDefinition>({ index: ['a', ['a', 'b']] });
+  expectError<syncom.EntityDefinition>({ index: [['a', 1]] });
   expectType<Promise<{ value: unknown; count: number }[]>>(db.Tag.select().countBy('n'));
   expectType<Promise<{ distance: number; row: syncom.QueryRow<RecordData> }[]>>(
     db.Tag.select().nearest('v', [1, 2], 3, { distance: 'euclidean' }),

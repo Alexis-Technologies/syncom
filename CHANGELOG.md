@@ -66,6 +66,14 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Compound indexes, a planner, `explain()`.** An entity's `index` takes compound keys beside fields —
+  `index: ['orgId', ['orgId', 'createdAt']]`, or a metaschema `indexes` entry kept whole — each a sorted
+  key the catalog keeps (in memory, rebuilt from the rows at load) beside the equality postings. A cursor
+  is planned once over them: the index with the longest prefix of equalities, then one field more for a
+  range (`$gt`/`$gte`/`$lt`/`$lte`) or the sort; where the rows come sorted by the index an ordered,
+  limited cursor reads `offset + limit` records and no more, a sort it cannot serve is read by the prefix
+  and sorted after. `cursor.explain()` shows the plan: the scan (`text`, `index`, `postings`,
+  `collection`), the index and how it is entered, `sortedByIndex`, `covered`, `residual`.
 - **Keyset paging, `distinct()`/`countBy()`, `nearest()`.** `cursor.page()` hands back `{ rows, next }` and
   `cursor.after(next)` the cursor from after that row — keyset paging in the result's one order (the
   keys, then the id), so a row is never read twice and one that came between the pages is taken where

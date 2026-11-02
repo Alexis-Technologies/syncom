@@ -9,6 +9,8 @@ src/query/query.js        @alexify/syncom/query — the query plugin: setup hand
                           on a Collection go through storage[CURSOR], PLUGIN_MISSING without it
 src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]; requires live.js, cache.js
                           beside the core's shape.js and catalog.js
+src/query/plan.js         plan — how a cursor is answered over the declared indexes (the prefix of equalities, a range, the sort), what
+                          explain() shows — no requires
 src/query/live.js         Live — a live query kept by event-reduce over the catalog's action stream (rows, or a count) — requires shape.js only
 src/query/cache.js        QueryCache, keyOf — a result by its key with the catalog's generation, the one live run every watch() of a
                           key shares, an LRU of unobserved results — no requires
@@ -30,6 +32,15 @@ src/query/cache.js        QueryCache, keyOf — a result by its key with the cat
   predicate compares them. Unique keys are checked after validation and
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
+- **A cursor is planned over the catalog's sorted indexes.** An entity's `index` is a list of keys — a
+  field, or a compound key of fields — each a sorted index the catalog keeps (`Catalog#keyed`: the
+  entries `{ keys, id }` in `compare` order then id, binary insertion, rebuilt from the rows at load)
+  beside the equality postings of every field named. `plan()` (src/query/plan.js, pure) picks the index
+  with the longest prefix of equalities, then one field more for a range or the sort; `Catalog.scan(type,
+plan)` reads the entries between two binary searches, forward or backward; where `sortedByIndex` the
+  cursor reads the window and stops (`enough`), otherwise a TopK or a sort after. `compare`/`rankOf` are
+  the catalog's, shared with the cursor. `explain()` is the plan as a copy. A `$text` query keeps the
+  ranking and plans nothing.
 - **A cursor is immutable, a result has one order, a live query is kept, not run.** Every builder hands
   back a new Cursor (`#clone`). A result is ordered by its keys then the id (`compareFully`; a `$text`
   query without keys keeps the index's ranking), so a page has an edge and a live result places a row
