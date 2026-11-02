@@ -1804,9 +1804,9 @@
         },
         "tombstoneCleanup": {
           "mark": "✅",
-          "text": "`cleanup(db, { minimumDeletedTime, runEach, awaitSync })` (`@alexify/syncom/cleanup`): an old tombstone's file folded into its catalog row once every enabled node acknowledged the delete — the stamps stay, a late op is still moot; `run({ drop: true })` takes the row too",
-          "source": "src/cleanup/cleanup.js; src/catalog.js (fold); docs/guide/cleanup.md",
-          "detail": "Checked: a deleted record's file is `{ data: {}, meta: { deleted } }`, a purged one adds `purged`. The op log is bounded by retention; tombstone files and chain blocks are not."
+          "text": "`cleanup(db, { minimumDeletedTime, runEach, awaitSync })` (`@alexify/syncom/cleanup`): an old tombstone folded whole into the `tombstones` kv namespace in one write set with its file's removal, once every enabled node acknowledged the delete — the meta stays, a late op is still moot, a catalog rebuild reads it; `run({ drop: true })` takes the entry and the row too",
+          "source": "src/cleanup/cleanup.js; src/entries.js (foldMany); docs/guide/cleanup.md",
+          "detail": "Checked: a deleted record's file is `{ data: {}, meta: { deleted } }`, a purged one adds `purged`. The op log is bounded by retention; tombstone files are folded by cleanup, chain blocks are never pruned (chain.md, Retention)."
         },
         "deleteDatabase": {
           "mark": "✅",

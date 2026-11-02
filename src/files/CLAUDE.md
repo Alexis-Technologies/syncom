@@ -6,7 +6,8 @@ The engine every fsi becomes: today's layout, byte for byte. The engine contract
 
 ```
 src/files/files.js        filesEngine(fsi), a root export of @alexify/syncom: a kv namespace is a directory under the path and a key a file in it,
-                          a record data/<id>.json, its pieces data/<id>~<n>.json, a tag's copies tags/<tag>/data/<id>.json; write(batch)
+                          a record data/<id>.json, its pieces data/<id>~<n>.json, a folded tombstone tombstones/<id> (a kv key: no suffix),
+                          a tag's copies tags/<tag>/data/<id>.json; write(batch)
                           lands the kv puts, then each record (its new pieces, its file, the pieces it drops), then the copies and the kv
                           removals — not atomic; remove(path) is the sweep a branch drops with; db.log is the journal store below —
                           requires backend.js, engine.js, layout.js, write-set.js, shape.js, errors.js, journal.js only

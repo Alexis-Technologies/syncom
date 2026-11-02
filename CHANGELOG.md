@@ -21,6 +21,11 @@ refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystr
 or typed through a transaction or a handle that continue each other are one op, so one `change`
 and one `commit` event, not one per call.
 
+**Upgrading a checkout from before review №6** (nothing published): the catalog is format 5 — a tombstone's row
+keeps its collection and its `deleted` stamp — so the live catalog is rebuilt once at the first open (a tag's
+format-4 catalog still reads). Tombstones folded by the format-4 build were stamps on a catalog row alone and were
+lost at any rebuild: a database that ran that build's `cleanup` is best re-synced from a peer.
+
 ### Changed
 
 - **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
@@ -67,12 +72,15 @@ and one `commit` event, not one per call.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
 - **Tombstone cleanup: `@alexify/syncom/cleanup`.** `cleanup(db, { minimumDeletedTime, runEach, awaitSync })`
-  folds the file of an old tombstone into its catalog row (`EntryStore.fold`): the stamps that keep the
-  record dead ride on the row (the persisted catalog's format 4), a read of the id rebuilds the
-  tombstone from them, and the file and its pieces are gone — a peer's op stamped below it is still
-  moot, a revival above it writes a file again, a snapshot still hands the deletion on. With `awaitSync`
-  a tombstone this node made is folded only once every enabled registered node acknowledged its
-  delete; `run({ drop: true })` forgets the row too.
+  folds an old tombstone whole — its collection, the data the delete carried, its meta — into the `tombstones`
+  kv namespace and removes the file and its pieces in ONE write set (`EntryStore.foldMany`); the catalog row
+  stays, and a read of the id finds the tombstone in the namespace — a peer's op stamped below it is still
+  moot (below an unset or a set removal above the delete too), a revival above it writes a file again and
+  takes the kv entry away in the same set, a snapshot still hands the deletion on whole, a rebuild of the
+  catalog reads the namespace beside the records. The sweep reads no file: a tombstone's row keeps its
+  collection and its `deleted` stamp (catalog format 5). With `awaitSync` a tombstone this node made is folded
+  only once every enabled registered node acknowledged its delete (one the log no longer retains folds but is
+  never dropped); `run({ drop: true })` takes the entry and the row too.
 - **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
   over every change of a collection, once, in order, inside one transaction per turn, and keeps the turn's
   log position as its checkpoint after the transaction landed — a reopen resumes from it (the turns since

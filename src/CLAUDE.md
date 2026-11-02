@@ -17,7 +17,7 @@ src/local/local.js        @alexify/syncom/local — the local plugin: db.local o
 src/state/state.js        @alexify/syncom/state — createState(db, name): app state by path over a record or a local document (its own CLAUDE.md)
 src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
 src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
-src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded into their catalog rows (its own CLAUDE.md)
+src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded whole into the tombstones kv namespace (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
@@ -64,7 +64,7 @@ src/observe.js            Observers — `observe()`'s registry over the `transac
 src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
 src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on applyPatches); appliedHere lives in log.js
-src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`), the bounded cache, the catalog row each change leaves
+src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`), the bounded cache, the catalog row each change leaves, the folded tombstones in the tombstones kv namespace
 src/document.js           Reference, Document — what the application holds of one record; public API + the symbols only
 src/collection.js         Collection — an entity's records, `db.<Entity>`; public API + SOURCE/CURSOR only
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`); `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
@@ -523,7 +523,9 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   never waits for the catalog file. Do not `await` a save inside a write path.
   `list()`/`hasRecord()` read it, and so does `snapshot()`: a tombstone is a
   row flagged `gone` (there, not listed; it keeps the record's `type` and its `deleted` stamp), so a page is a slice of
-  `catalog.all()` and never a directory listing. A new way of changing a
+  `catalog.all()` and never a directory listing. The catalog is derived from the records AND the `tombstones` kv
+  namespace (a folded tombstone's whole entry, `EntryStore.foldMany`; a fold changes no row; `#loadCatalog` rebuilds
+  from both). A new way of changing a
   record's file must put too, or the catalog lies until the next rebuild.
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
