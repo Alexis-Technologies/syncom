@@ -234,10 +234,16 @@ query searches the entity's `search` fields, best first unless ordered.
 | `one()` | `Promise<QueryRow<R> \| null>` |
 | `watch(listener, { onError }?)` | `listener(rows)` now and whenever the rows change — the result is kept as the collection changes without running the cursor again (the record that changed is read once, matched and placed; a full window that lost a row, or a `$text` query, runs the cursor again) and emitted only when an id came, went or moved or a row reads as another; every `watch()` of one query (the same entity, query, order, window, projection, populated fields) shares one run, and a `fetch()` of it reads nothing while the run lasts. Returns the stop function |
 | `watchCount(listener, { onError }?)` | `listener(count)` now and whenever the number of matches moves — the matching ids kept, one in or out per change, never counted again. Returns the stop function |
+| `page()` | `Promise<{ rows, next }>` — `limit` rows at most and the token of the page after (`null` at the last: fewer rows than the limit); `after(next).page()` is the next page. A `$text` query without an order has no edge to page by (a `TypeError`) |
+| `after(next)` | The cursor from after the row `next` names (a page's `next`): keyset paging in the result's one order — the keys, then the id — so a row is never read twice and one that came meanwhile is taken where it sorts; `offset` does not apply from here. `for await (const row of cursor)` walks the pages of a limited cursor |
+| `distinct(field)` | `Promise<unknown[]>` — the distinct values of `field` among the matches, in the sort order, each once (an array field by the whole array; a record without the field under `null`); from the catalog alone where the field is indexed and the query covered. A collection's `distinct(field, query?)` is the same |
+| `countBy(field)` | `Promise<[{ value, count }]>` — the distinct values with how many matches hold each, in the sort order. A collection's `countBy(field, query?)` is the same |
+| `nearest(field, vector, k, { distance }?)` | `Promise<[{ distance, row }]>` — the `k` matches nearest to `vector` by `field` (an array of numbers of the vector's length; a row without one is skipped), nearest first, by `'cosine'` (the default), `'euclidean'`, `'manhattan'`, `'dot'` (the negated product) or a function of two vectors — the distances of `@alexify/syncom/search`. A scan over the matches with the `k` best kept: no index |
 | `update(delta, { actor, message, source }?)` | Every match updated — fields, or the [operators](../guide/database#update-operators) — as ONE transaction over the matches when it started: `Promise<{ matched, written }>` (a record gone meanwhile is skipped). A cursor at a tag is read-only (a `TypeError`) |
 | `modify(fn, options?)` | Every match changed by `fn`, as `modify()` does, as ONE transaction: `{ matched, written }` |
 | `delete({ actor, data }?)` | Every match deleted as ONE transaction, `data` on each tombstone: `{ matched, written }` |
-| `[Symbol.asyncIterator]` | `for await (const row of cursor)` |
+| `stream({ batch }?)` | The rows `fetch()` would give — the window applied — read lazily, `batch` (100) at a time by keyset, so a result of any size is walked in bounded memory; `for await (const row of cursor)` is `stream()` |
+| `[Symbol.asyncIterator]` | `for await (const row of cursor)` — `stream()` |
 
 The shapes on the wire and on disk — the op's slots, the payloads, the
 signed header, the log and record files, the procedures — are in

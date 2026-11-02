@@ -390,7 +390,8 @@ const ENTRIES = [
   // 149, raised by name.
   // 150.1 with live queries kept by event-reduce, watchCount and the query cache (collections plan, C2.2). 150.5,
   // raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 150.5 },
+  // 151.2 with keyset paging, distinct/countBy and nearest (collections plan, C2.3). 151.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 151.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -533,7 +534,9 @@ const ENTRIES = [
   // 8.7 with immutable builders, `$type`/`$size`/`$mod`/`$all`/`$elemMatch`/`$nor` and `matches` (collections plan, C2.1). 9, raised by name.
   // 10.3 with live queries kept by event-reduce (src/query/live.js), `watchCount` and the query cache
   // (src/query/cache.js; collections plan, C2.2). 10.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 10.5 },
+  // 11.3 with keyset paging (`page`/`after`), `distinct`/`countBy` and `nearest` over src/search/distance.js
+  // (collections plan, C2.3). 11.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 11.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

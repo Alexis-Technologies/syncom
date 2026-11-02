@@ -64,6 +64,8 @@ export type {
   ModifyFn,
   UpdateOperators,
   WriteByQuery,
+  Page,
+  PageToken,
   CollectionEvents,
   DeleteOptions,
   UpdateOptions,

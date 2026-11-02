@@ -6,6 +6,8 @@
 
 ```
 src/search/search.js      the @alexify/syncom/search subpath — the trigram text index behind `$text`; the core knows only the TextIndex contract
+src/search/distance.js   isVector, cosine, euclidean, manhattan, dot, DISTANCES — the distances `cursor.nearest()` ranks a vector field
+                          by, smaller nearer (`dot` negated) — no requires
 ```
 
 ## Rules

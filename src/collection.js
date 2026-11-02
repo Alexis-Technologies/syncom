@@ -294,6 +294,16 @@ class Collection extends Emitter {
     return this.select(query).count();
   }
 
+  /** The distinct values of `field` among the records matching `query` — the cursor's `distinct()`. */
+  distinct(field, query) {
+    return this.select(query).distinct(field);
+  }
+
+  /** The distinct values of `field` with how many records hold each — the cursor's `countBy()`. */
+  countBy(field, query) {
+    return this.select(query).countBy(field);
+  }
+
   /** Replaces the record wholesale, stamped as this collection's. */
   async set(id, data, options) {
     if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');

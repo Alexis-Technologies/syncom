@@ -994,6 +994,18 @@ storage.record<Post>('id').then((record) => {
   expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().populate(['author']));
   expectType<boolean>(db.Tag.select({ n: { $mod: [2, 1] }, tags: { $all: ['a'], $size: 1 } }).matches({ n: 1 }));
   expectType<() => void>(db.Tag.select().watchCount((count) => expectType<number>(count)));
+  const page = await db.Tag.select().order('n').limit(10).page();
+  expectType<syncom.QueryRow<RecordData>[]>(page.rows);
+  expectType<syncom.PageToken | null>(page.next);
+  if (page.next !== null)
+    expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().order('n').after(page.next));
+  expectType<Promise<unknown[]>>(db.Tag.distinct('n', { k: 1 }));
+  expectType<AsyncIterableIterator<syncom.QueryRow<RecordData>>>(db.Tag.select().stream({ batch: 50 }));
+  expectType<Promise<{ value: unknown; count: number }[]>>(db.Tag.select().countBy('n'));
+  expectType<Promise<{ distance: number; row: syncom.QueryRow<RecordData> }[]>>(
+    db.Tag.select().nearest('v', [1, 2], 3, { distance: 'euclidean' }),
+  );
+  expectError(db.Tag.select().nearest('v', [1, 2], 3, { distance: 'nope' }));
   expectAssignable<syncom.MangoQuery>({
     $nor: [{ a: 1 }],
     v: { $type: 'null' },

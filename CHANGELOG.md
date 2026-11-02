@@ -66,6 +66,15 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Keyset paging, `distinct()`/`countBy()`, `nearest()`.** `cursor.page()` hands back `{ rows, next }` and
+  `cursor.after(next)` the cursor from after that row — keyset paging in the result's one order (the
+  keys, then the id), so a row is never read twice and one that came between the pages is taken where
+  it sorts; `cursor.stream({ batch })` — what `for await` is — reads the rows `fetch()` would give a batch
+  at a time by keyset, in bounded memory. `distinct(field)` and `countBy(field)` on a
+  cursor and a collection group the matches by a field, from the catalog alone where it is indexed.
+  `nearest(field, vector, k, { distance })` ranks the matches by a vector field — cosine, euclidean,
+  manhattan, dot (`@alexify/syncom/search` exports the four, and `isVector`) or a function — a scan with
+  the `k` best kept.
 - **Live queries kept, not run again; `watchCount()`; the query cache.** `watch()` keeps its rows as the
   collection changes: the record that changed is read once, matched and placed (in and matching → moved
   to where it sorts; in and not → out; not in and matching → in; a full window that lost a row, or a

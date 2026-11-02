@@ -10,6 +10,7 @@ const { deepEqual } = require('../shape.js');
 const { valueOf } = require('../catalog.js');
 const { Live } = require('./live.js');
 const { keyOf } = require('./cache.js');
+const { DISTANCES, isVector } = require('../search/distance.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
@@ -325,6 +326,8 @@ class Cursor {
   #filter = null;
   #projection = null;
   #populate = null;
+  // Keyset paging: the row the page starts after — its order keys and its id — or null.
+  #after = null;
   // The query cache (./cache.js) of the database, null at a tag's source.
   #cache;
 
@@ -348,7 +351,123 @@ class Cursor {
     copy.#filter = this.#filter;
     copy.#projection = this.#projection;
     copy.#populate = this.#populate;
+    copy.#after = this.#after;
     return copy;
+  }
+
+  // The row a page starts after, as a row the order compares: its keys under the order's fields.
+  #edge() {
+    const { keys, id } = this.#after;
+    const row = { id };
+    for (let i = 0; i < this.#order.length; i++) row[this.#order[i].field] = keys[i];
+    return row;
+  }
+
+  // The token of the page that comes after `row`: the row's order keys and its id.
+  #next(row) {
+    const keys = [];
+    for (let i = 0; i < this.#order.length; i++) keys.push(valueOf(row, this.#order[i].field));
+    return { keys, id: row.id };
+  }
+
+  /**
+   * The cursor from after the row `next` names — what `page()` handed back
+   * as `next`: keyset paging, in the result's one order (the keys, then the
+   * id), so a page is never read twice and a row that came or went
+   * meanwhile is taken where it sorts. A `$text` query without an order has
+   * no edge to page by. `offset` does not apply from here.
+   */
+  after(next) {
+    const valid = isObject(next) && Array.isArray(next.keys) && typeof next.id === 'string';
+    if (!valid || next.keys.length !== this.#order.length) throw new TypeError('after() takes the next of a page()');
+    if (this.#ranked()) throw new TypeError('after(): a $text query without an order has no edge to page by');
+    const copy = this.#clone();
+    copy.#after = { keys: next.keys.slice(), id: next.id };
+    copy.#offset = 0;
+    return copy;
+  }
+
+  /**
+   * One page: `{ rows, next }` — `limit` rows at most (every row when there
+   * is none), and the token of the page after, null at the last one (fewer
+   * rows than the limit). `cursor.after(next).page()` is the next page.
+   */
+  async page() {
+    if (this.#ranked() && this.#limit !== Infinity) {
+      throw new TypeError('page(): a $text query without an order has no edge to page by');
+    }
+    const top = await this.#top();
+    const rows = top.slice(this.#offset);
+    const out = await this.#deliver(rows);
+    const next = this.#limit !== Infinity && rows.length === this.#limit ? this.#next(rows[rows.length - 1]) : null;
+    return { rows: out, next };
+  }
+
+  /**
+   * The distinct values of `field` among the matches, in the sort order
+   * (nothing, booleans, numbers, strings, then the rest), each once —
+   * compared as the predicate compares them. From the catalog alone where
+   * the field is indexed and the query covered.
+   */
+  async distinct(field) {
+    const groups = await this.#groups(field, 'distinct');
+    const out = [];
+    for (let i = 0; i < groups.length; i++) out.push(groups[i].value);
+    return out;
+  }
+
+  /** The distinct values of `field` with how many matches hold each: `[{ value, count }]`, in the sort order. */
+  countBy(field) {
+    return this.#groups(field, 'countBy');
+  }
+
+  async #groups(field, method) {
+    if (typeof field !== 'string' || field.length === 0) throw new TypeError(`${method}() takes a field name`);
+    const { rows } = await this.projection([field]).#matching(true, Infinity);
+    const groups = new Map();
+    for (let i = 0; i < rows.length; i++) {
+      const value = valueOf(rows[i], field);
+      const key = value === undefined ? undefined : keyOf(value);
+      const group = groups.get(key);
+      if (group === undefined) {
+        groups.set(key, { value: value === undefined ? null : JSON.parse(JSON.stringify(value)), count: 1 });
+      } else group.count++;
+    }
+    const out = [...groups.values()];
+    out.sort((a, b) => compare(a.value, b.value));
+    return out;
+  }
+
+  /**
+   * The `k` matches nearest to `vector` by `field` (an array of numbers of
+   * the vector's length): `[{ distance, row }]`, nearest first, by
+   * `distance` — `'cosine'` (the default), `'euclidean'`, `'manhattan'`,
+   * `'dot'`, or a function of two vectors. Every match is read and
+   * measured: a scan, with the `k` best kept.
+   */
+  async nearest(field, vector, k, { distance = 'cosine' } = {}) {
+    if (typeof field !== 'string' || field.length === 0) throw new TypeError('nearest() takes a field name');
+    if (!isVector(vector)) throw new TypeError('nearest() takes a vector: a non-empty array of finite numbers');
+    const metric = typeof distance === 'function' ? distance : DISTANCES[distance];
+    if (typeof metric !== 'function') {
+      throw new TypeError("nearest(): distance is 'cosine', 'euclidean', 'manhattan', 'dot' or a function");
+    }
+    // The records themselves: a catalog row (a covered projection) holds no vector.
+    const whole = this.#clone();
+    whole.#projection = null;
+    const { rows } = await whole.#matching(true, Infinity);
+    const best = new TopK((a, b) => a.distance - b.distance, count('nearest', k));
+    for (let i = 0; i < rows.length; i++) {
+      const value = valueOf(rows[i], field);
+      if (!isVector(value) || value.length !== vector.length) continue;
+      best.push({ distance: metric(vector, value), row: rows[i] });
+    }
+    const out = [];
+    for (let i = 0; i < best.rows.length; i++) {
+      const { distance: d, row } = best.rows[i];
+      out.push({ distance: d, row: JSON.parse(JSON.stringify(this.#project(row))) });
+    }
+    return out;
   }
 
   #key(field, desc) {
@@ -466,7 +585,7 @@ class Cursor {
   // no name) or without a cache (a tag's source).
   #cacheKey() {
     if (this.#cache === null || this.#filter !== null) return null;
-    const window = [this.#limit === Infinity ? null : this.#limit, this.#offset];
+    const window = [this.#limit === Infinity ? null : this.#limit, this.#offset, this.#after];
     return keyOf([this.#entity, this.#query, this.#order, window, this.#projection, this.#populate]);
   }
 
@@ -500,13 +619,21 @@ class Cursor {
     // A source that reads its catalog at first use (a tag's) hands `ready`.
     if (this.#source.ready !== undefined) await this.#source.ready();
     const { candidates, ids, row, load } = this.#source;
-    const found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
+    let found = candidates(this.#entity, this.#query) ?? ids(this.#entity);
     const ordered = needsRows && this.#order.length > 0;
     const wanted = this.#offset + limit;
     const enough = needsRows && !ordered ? wanted : Infinity;
+    // An unordered cursor that stops at enough rows reads its candidates in id order — the result's
+    // order without keys — so what it stops at is the window a run of every candidate would give.
+    if (enough !== Infinity && !this.#ranked() && !Array.isArray(found)) found = [...found].sort();
     const sink = ordered && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
+    // From after the edge of the page before, where there is one.
+    const edge = this.#after === null ? null : this.#edge();
+    const byOrder = edge === null ? null : compareFully(this.#order);
     const take = (candidate) => {
-      if (this.#predicate(candidate) && (this.#filter === null || this.#filter(candidate))) sink.push(candidate);
+      if (!this.#predicate(candidate) || (this.#filter !== null && !this.#filter(candidate))) return;
+      if (edge !== null && byOrder(candidate, edge) <= 0) return;
+      sink.push(candidate);
     };
     if (this.#covered(needsRows)) {
       for (const id of found) {
@@ -723,8 +850,32 @@ class Cursor {
     return this.#live(listener, onError, 'count');
   }
 
-  async *[Symbol.asyncIterator]() {
-    for (const row of await this.fetch()) yield row;
+  /**
+   * The rows `fetch()` would give — the window applied — read lazily, `batch`
+   * at a time by keyset (each page after the last row of the one before), so
+   * a result of any size is walked in bounded memory. A `$text` query without
+   * an order has no edge: one page. `for await (const row of cursor)` is this.
+   */
+  async *stream({ batch = 100 } = {}) {
+    const size = count('stream', batch);
+    if (size === 0) throw new TypeError('stream() takes a batch of one or more');
+    if (this.#ranked()) {
+      for (const row of await this.fetch()) yield row;
+      return;
+    }
+    let remaining = this.#limit;
+    let cursor = this.limit(Math.min(size, remaining));
+    for (;;) {
+      const { rows, next } = await cursor.page();
+      for (let i = 0; i < rows.length; i++) yield rows[i];
+      remaining -= rows.length;
+      if (next === null || remaining <= 0) return;
+      cursor = cursor.after(next).limit(Math.min(size, remaining));
+    }
+  }
+
+  [Symbol.asyncIterator]() {
+    return this.stream();
   }
 }
 

@@ -2669,6 +2669,27 @@ export interface Cursor<T = QueryRow> {
   watch(listener: (rows: T[]) => void, options?: { onError?: (error: Error) => void }): () => void;
   /** Calls `listener(count)` now and whenever the number of matches moves — one in or out per change, never counted again. Returns the stop function. */
   watchCount(listener: (count: number) => void, options?: { onError?: (error: Error) => void }): () => void;
+  /** The rows `fetch()` would give, read lazily `batch` (100) at a time by keyset: a result of any size in bounded memory. `for await` is this. */
+  stream(options?: { batch?: number }): AsyncIterableIterator<T>;
+  /** One page: `limit` rows at most and the token of the page after (null at the last); `after(next).page()` is the next. */
+  page(): Promise<Page<T>>;
+  /** The cursor from after the row a page's `next` names: keyset paging in the result's order (the keys, then the id); `offset` does not apply. */
+  after(next: PageToken): this;
+  /** The distinct values of `field` among the matches, in the sort order, each once. */
+  distinct(field: string): Promise<unknown[]>;
+  /** The distinct values of `field` with how many matches hold each, in the sort order. */
+  countBy(field: string): Promise<{ value: unknown; count: number }[]>;
+  /**
+   * The `k` matches nearest to `vector` by `field` (an array of numbers of the vector's length):
+   * `[{ distance, row }]` nearest first — a scan over the matches, the `k` best kept. `distance`:
+   * `'cosine'` (the default), `'euclidean'`, `'manhattan'`, `'dot'` (the negated product), or a function.
+   */
+  nearest(
+    field: string,
+    vector: readonly number[],
+    k: number,
+    options?: { distance?: 'cosine' | 'euclidean' | 'manhattan' | 'dot' | ((a: readonly number[], b: readonly number[]) => number) },
+  ): Promise<{ distance: number; row: T }[]>;
   /** Every match updated — fields or operators — as ONE transaction over the matches when it starts: `{ matched, written }`. */
   update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
   /** Every match changed by a function (see `modify()`), as ONE transaction: `{ matched, written }`. */
@@ -2676,6 +2697,18 @@ export interface Cursor<T = QueryRow> {
   /** Every match deleted as ONE transaction; `data` rides on each tombstone: `{ matched, written }`. */
   delete(options?: TransactOptions & { data?: object }): Promise<WriteByQuery>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
+}
+
+/** Where a page ends: the last row's order keys and its id — what `after()` takes. Opaque; JSON. */
+export interface PageToken {
+  readonly keys: readonly unknown[];
+  readonly id: string;
+}
+
+/** One page of a cursor: the rows, and the token of the page after (`null` at the last). */
+export interface Page<T = QueryRow> {
+  rows: T[];
+  next: PageToken | null;
 }
 
 /** What a write by query resolves to: the matches when it started, and how many were written (a record gone meanwhile is skipped). */
@@ -2899,6 +2932,10 @@ export interface SyncomCollection<R = RecordData, I = R> {
   /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
   select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
   count(query?: MangoQuery<R>): Promise<number>;
+  /** The distinct values of `field` among the records matching `query`, in the sort order. */
+  distinct(field: string, query?: MangoQuery<R>): Promise<unknown[]>;
+  /** The distinct values of `field` with how many records hold each. */
+  countBy(field: string, query?: MangoQuery<R>): Promise<{ value: unknown; count: number }[]>;
   /** Replaces the record wholesale, stamped as this collection's. */
   set(id: string, data: I, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: DeleteOptions): Promise<void>;
