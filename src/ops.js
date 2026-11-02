@@ -983,7 +983,10 @@ const applyOp = (previous, op, limits = null) => {
   changes.covered = new Set();
   const outcome = (changed, whole = false) => {
     if (whole) delete changes.covered;
-    else changesOf(entry, delta, changes, plugins);
+    else {
+      if (changed) revived(previous, entry, delta, changes.covered);
+      changesOf(entry, delta, changes, plugins);
+    }
     // The newest stamp, carried: the source's and this op's (a merge joins
     // another meta's stamps — walked when asked). Only along a line a write
     // path has asked (`latestHeld`): an entry made from nothing, or folded by
@@ -1068,6 +1071,7 @@ const applyOp = (previous, op, limits = null) => {
         const moved =
           joined.meta.base !== (before ? before.base : null) ||
           joined.meta.deleted !== (before ? before.deleted : null);
+        revived(previous, joined, delta, changes.covered);
         const gone = isAlive(joined) ? changesOf(joined, delta, changes, plugins) : [{ action: 'delete' }];
         return { entry: joined, changed: true, delta, rejected, moved, changes: gone };
       }
@@ -1117,6 +1121,21 @@ const applyOp = (previous, op, limits = null) => {
     meta.base !== (before ? before.base : null) ||
     meta.deleted !== (before ? before.deleted : null);
   return outcome(changed);
+};
+
+// A record alive again — an op above its tombstone, a joined state — reads
+// what the tombstone carried too (`delete(id, { data })`, below what keeps
+// a record alive): reported with the op that revived it, as the resets of
+// the fields its own path did not report, so the changes say what the
+// reading shows (EVT-1). Nothing to add for a record that was alive, or is
+// not, or whose tombstone carried nothing.
+const revived = (previous, entry, delta, covered) => {
+  if (!previous || previous.meta.deleted === null || isAlive(previous) || !isAlive(entry)) return;
+  const { data } = entry;
+  for (const field of Object.keys(data)) {
+    if (Object.hasOwn(delta, field) || (covered !== undefined && covered.has(field))) continue;
+    delta[field] = data[field];
+  }
 };
 
 // The changes of an op, completed from its delta: a field the op's own path

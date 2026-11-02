@@ -329,9 +329,11 @@ const runCollectionTests = async (t, assert, createStorage) => {
       assert.deepStrictEqual(await db.Post.select({ org: 'a' }).delete(), { matched: 4, written: 4 });
       assert.deepStrictEqual(await db.Post.select({ org: 'a' }).update({ x: 1 }), { matched: 0, written: 0 });
       await assert.rejects(db.Post.select().modify('nope'), TypeError);
-      // A view at a tag reads alone.
-      await db.tag('t');
-      await assert.rejects(db.at('t').collection('Post').select().update({ a: 1 }), TypeError);
+      // A view at a tag reads alone (the versions plugin's; the lean suite runs without it).
+      if (db.plugins.includes('versions')) {
+        await db.tag('t');
+        await assert.rejects(db.at('t').collection('Post').select().update({ a: 1 }), TypeError);
+      }
     },
   );
 
