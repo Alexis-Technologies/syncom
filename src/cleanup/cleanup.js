@@ -3,18 +3,23 @@
 // Tombstone cleanup (@alexify/syncom/cleanup): a deleted record keeps a
 // tombstone — its file with the stamps that keep it dead, so a late op from
 // a peer stamped below them stays moot and a snapshot hands the deletion
-// on. `cleanup(db, options)` folds the FILE of an old tombstone into its
-// catalog row (`EntryStore.fold`): the stamps ride on the row, a read of
-// the id rebuilds the tombstone from them, and the file and its pieces are
-// gone. Only a tombstone deleted `minimumDeletedTime` ago or more (31 days),
-// and — with `awaitSync` — only one whose delete this node made that every
-// enabled registered node has acknowledged (`node.acked` against the op's
-// seq), or that a peer made; a tombstone this node has not delivered yet
-// is left as it is. `run({ drop: true })` takes the row too — a late op
-// then makes a new record, and a peer that never saw the deletion keeps
-// its copy: documented, not the default. `runEach` runs it on a timer.
-// `leader` is kept for a database shared by several instances. Requires
-// symbols.js and vector.js only.
+// on. `cleanup(db, options)` folds an old tombstone whole — its collection,
+// its data, its meta — into the `tombstones` kv namespace (`EntryStore.foldMany`,
+// ONE write set with the file's removal): a read finds it there, the catalog
+// row stays, the file and its pieces are gone. Only a tombstone deleted
+// `minimumDeletedTime` ago or more (31 days; the stamp is on the catalog
+// row, so nothing is read to decide), and — with `awaitSync` — only one
+// whose delete this node made that every enabled registered node has
+// acknowledged (`node.acked` against the op's seq), or that a peer made; a
+// tombstone this node has not delivered yet is left as it is. A delete of
+// this node's own that the log no longer retains folds (nothing is lost) but
+// is never dropped under `awaitSync`: a node that only hosts cannot prove it
+// was delivered. `run({ drop: true })` takes the kv entry and the row too —
+// a late op then makes a new record, and a peer that never saw the deletion
+// keeps its copy: documented, not the default. Folds and drops go `BATCH`
+// ids a turn of the queue. `runEach` runs a sweep on a timer, stopped with
+// the database. `leader` is kept for a database shared by several instances.
+// Requires symbols.js and vector.js only.
 
 const { SOURCE } = require('../symbols.js');
 const { opKey } = require('../vector.js');
@@ -22,6 +27,8 @@ const { opKey } = require('../vector.js');
 const DAY = 24 * 60 * 60 * 1000;
 const MINIMUM_DELETED_TIME = 31 * DAY;
 const RUN_EACH = 5 * 60 * 1000;
+// How many tombstones one write set folds or drops.
+const BATCH = 100;
 
 const isDatabase = (value) =>
   value !== null &&
@@ -68,10 +75,14 @@ const cleanup = (
   let timer = null;
   let running = null;
 
-  // Whether every enabled registered node holds this node's delete op of the record.
-  const acknowledged = (id) => {
+  // Whether every enabled registered node holds this node's delete op of the
+  // record. The op no longer retained: a peer's delete is theirs to deliver;
+  // this node's own folds (nothing is lost) and, under `awaitSync`, is never
+  // dropped — a node that only hosts cannot prove its compacted delete
+  // reached anyone, and a drop is the one irreversible outcome.
+  const acknowledged = (id, row, forDrop) => {
     const op = ownDelete(seam.entriesOf(id), db.nodeId);
-    if (op === null) return true;
+    if (op === null) return row.deleted[1] !== db.nodeId || !forDrop;
     const key = opKey(op);
     const nodes = seam.nodes();
     for (let i = 0; i < nodes.length; i++) {
@@ -81,33 +92,45 @@ const cleanup = (
     return true;
   };
 
+  // One sweep over the catalog's rows: nothing of a record is read here —
+  // the stamp and the collection are on the row — and the folds and drops go
+  // `BATCH` at a time, one write set and one turn of the queue each.
   const sweep = async ({ drop = false } = {}) => {
     const counts = { folded: 0, dropped: 0, skipped: 0 };
-    const ids = seam.all().slice();
     const horizon = now() - minimumDeletedTime;
+    const ids = seam.all().slice();
+    let folding = [];
+    let dropping = [];
+    const flush = async () => {
+      if (folding.length > 0) {
+        const done = await seam.foldMany(folding);
+        counts.folded += done.length;
+        if (drop) for (let i = 0; i < done.length; i++) dropping.push(done[i]);
+        folding = [];
+      }
+      if (dropping.length > 0) {
+        counts.dropped += await seam.forgetMany(dropping);
+        dropping = [];
+      }
+    };
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       const row = seam.row(id);
       if (row === null || !row.gone) continue;
-      if (row.folded !== undefined) {
+      if (seam.folded(id)) {
         if (!drop) continue;
-        await seam.forget(id);
-        counts.dropped++;
-        continue;
-      }
-      const entry = await seam.entry(id);
-      if (entry === null || entry.encrypted || entry.meta.deleted === null || entry.meta.purged) continue;
-      if (entry.meta.deleted[0] > horizon || (awaitSync && !acknowledged(id))) {
+        if (!awaitSync || acknowledged(id, row, true)) dropping.push(id);
+        else counts.skipped++;
+      } else if (
+        row.deleted === undefined ||
+        row.deleted[0] > horizon ||
+        (awaitSync && !acknowledged(id, row, false))
+      ) {
         counts.skipped++;
-        continue;
-      }
-      if (!(await seam.fold(id))) continue;
-      counts.folded++;
-      if (drop) {
-        await seam.forget(id);
-        counts.dropped++;
-      }
+      } else folding.push(id);
+      if (folding.length + dropping.length >= BATCH) await flush();
     }
+    await flush();
     stats.runs++;
     stats.folded += counts.folded;
     stats.dropped += counts.dropped;
@@ -118,23 +141,25 @@ const cleanup = (
   const handle = {
     leader,
     stats,
-    /** One sweep; `drop: true` takes the folded rows away too. Resolves to `{ folded, dropped, skipped }`. */
+    /** One sweep; `drop: true` takes the folded tombstones away too. Resolves to `{ folded, dropped, skipped }`. */
     run(options = {}) {
       if (running === null) running = sweep(options).finally(() => void (running = null));
       return running;
     },
-    /** Runs a sweep every `runEach` ms until `stop()`; a failed sweep is logged. */
+    /** Runs a sweep every `runEach` ms until `stop()` or the database closes; a failed sweep is logged. */
     start() {
       if (timer !== null) return;
       timer = setInterval(() => {
         handle.run().catch((error) => db.logger.warn({ event: 'cleanup.failed', err: error }));
       }, runEach);
       timer.unref?.();
+      db.on('close', handle.stop);
     },
     stop() {
       if (timer === null) return;
       clearInterval(timer);
       timer = null;
+      db.off('close', handle.stop);
     },
   };
   return handle;

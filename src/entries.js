@@ -23,9 +23,23 @@
 // `file()` hands it whole too, so a copy of it (a tag's) stands alone.
 
 const { isRecordId, isPlainObject } = require('./shape.js');
+const { kvNamespace } = require('./engine.js');
 const { isAlive } = require('./ops.js');
 const { SyncomError } = require('./errors.js');
 const { now } = require('./telemetry/writer.js');
+
+// The kv namespace a folded tombstone's whole entry lives in (`foldMany`); its key is the record's id.
+const TOMBSTONES = 'tombstones';
+
+const unreadableTombstone = (id, cause) =>
+  new SyncomError('INTEGRITY', `Tombstone ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+
+// A write set's kv part with the tombstones' removals added — the chain's puts never edited in place.
+const withRemovals = (kv, removals) => {
+  const out = kv === null ? {} : { ...kv };
+  if (removals.length > 0) out.remove = kv !== null && Array.isArray(kv.remove) ? kv.remove.concat(removals) : removals;
+  return out;
+};
 
 const isThenable = (value) => value !== null && typeof value === 'object' && typeof value.then === 'function';
 
@@ -58,6 +72,9 @@ class EntryStore {
   // A block assembled from pieces at a read → the names it came from: one
   // written again unchanged keeps them.
   #plain = new WeakMap();
+  // The folded tombstones: the ids whose entry lives in the `tombstones` kv namespace (derived: listed at open).
+  #tombstones;
+  #folded = new Set();
 
   // `pinned(id)` says whether the application holds a live Record of `id`
   // (its entry stays cached); `verify(id, data, block)` checks a cold read
@@ -78,6 +95,7 @@ class EntryStore {
     measure = null,
   }) {
     this.#db = db;
+    this.#tombstones = kvNamespace(db.kv, 'tombstones');
     this.#max = max;
     this.#logger = logger;
     this.#catalog = catalog;
@@ -181,6 +199,24 @@ class EntryStore {
     return cached;
   }
 
+  /** Lists the `tombstones` namespace once — the ids whose entry lives there. Run at open, before the catalog loads. */
+  async open() {
+    const ids = await this.#tombstones.list();
+    for (let i = 0; i < ids.length; i++) if (isRecordId(ids[i])) this.#folded.add(ids[i]);
+  }
+
+  /** Whether `id` is a folded tombstone: its entry in the `tombstones` kv namespace, no record file. */
+  folded(id) {
+    return this.#folded.has(id);
+  }
+
+  /** The folded ids, sorted — a copy. */
+  foldedIds() {
+    const ids = [];
+    for (const id of this.#folded) ids.push(id);
+    return ids.sort();
+  }
+
   async load(id, stored = undefined) {
     if (!isRecordId(id)) return null;
     // `stored` given — read by a page's `getMany` — is taken as the record; the cache is asked otherwise.
@@ -192,47 +228,103 @@ class EntryStore {
       }
       stored = await this.#db.records.get(id);
     }
-    if (stored === null) return this.#folded(id);
+    if (stored === null) return this.#fromTombstone(id);
     const entry = await this.#fromStored(id, stored);
     this.remember(id, entry);
     return entry;
   }
 
-  // A tombstone whose file was folded into its catalog row (`fold`): the
-  // entry rebuilt from the stamps the row keeps — dead, and what every op
-  // below them is moot against — or null where the row holds none.
-  #folded(id) {
-    const row = this.#catalog.row(id);
-    if (row === null || row.folded === undefined) return null;
-    const { base, deleted, v } = row.folded;
-    const meta = { clock: {}, base, deleted, counters: {}, sets: {}, blocks: {}, gone: {} };
-    if (v !== null && v !== undefined) meta.v = v;
-    const entry = { data: {}, meta, encrypted: false, block: null };
+  // A tombstone whose file was folded into the `tombstones` kv namespace
+  // (`foldMany`): the whole entry read back from there — dead, and what every
+  // op below its stamps is moot against — or null where there is none. The
+  // row gates the read for a follower, whose set is as of its open: a gone
+  // row with no record file is asked of the namespace.
+  async #fromTombstone(id) {
+    if (!this.#folded.has(id) && this.#catalog.row(id)?.gone !== true) return null;
+    const text = await this.#tombstones.get(id);
+    if (text === null) return null;
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error) {
+      throw unreadableTombstone(id, error);
+    }
+    if (!isPlainObject(parsed) || !isPlainObject(parsed.meta)) throw unreadableTombstone(id, null);
+    const data = isPlainObject(parsed.data) ? parsed.data : {};
+    const entry = { data, meta: parsed.meta, encrypted: false, block: null };
+    if (typeof parsed.type === 'string') entry.type = parsed.type;
+    this.#folded.add(id);
     this.remember(id, entry);
     return entry;
   }
 
   /**
-   * Folds a tombstone's file into its catalog row (`@alexify/syncom/cleanup`):
-   * the record's file and pieces removed, the stamps that keep it dead kept
-   * on the row, from which a read rebuilds it. Only a tombstone that is not
-   * purged; answers whether it did.
+   * Folds tombstones (`@alexify/syncom/cleanup`): each record's whole entry —
+   * its collection, its data, its meta — written to the `tombstones` kv
+   * namespace and its file removed, in ONE write set (atomic where the engine
+   * has transactions; the kv put before the file on files), so a read finds
+   * the tombstone whole whichever side a crash left. The catalog row does
+   * not change: the catalog is derived from the records and the tombstones
+   * alike. A live, encrypted or folded record is left as it is; a gone row
+   * with nothing behind it is taken off. Answers the ids folded.
    */
-  async fold(id) {
-    const entry = await this.load(id);
-    if (entry === null || entry.encrypted || isAlive(entry) || entry.meta.purged || entry.meta.deleted === null) {
-      return false;
+  async foldMany(ids) {
+    const puts = [];
+    const removals = [];
+    const copies = [];
+    const marks = [];
+    const folded = [];
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      if (this.#folded.has(id)) continue;
+      const entry = await this.load(id);
+      if (entry === null) {
+        // A gone row and no record behind it: nothing to fold, nothing to keep.
+        this.#catalog.put(id, null);
+        continue;
+      }
+      if (entry.encrypted || isAlive(entry) || !Array.isArray(entry.meta.deleted)) continue;
+      const keeping = await this.#changing(id);
+      if (keeping !== null) {
+        copies.push(keeping.copy);
+        marks.push(keeping.done);
+      }
+      const type = typeof entry.data.$type === 'string' ? entry.data.$type : (this.#catalog.row(id)?.type ?? null);
+      puts.push([TOMBSTONES, id, JSON.stringify({ type, data: entry.data, meta: entry.meta })]);
+      removals.push(id);
+      folded.push([id, entry]);
     }
-    const row = this.#catalog.row(id);
-    if (row === null || !row.gone || row.folded !== undefined) return false;
-    const keeping = await this.#changing(id);
-    const batch = { remove: [id] };
-    if (keeping !== null) batch.copies = { put: [keeping.copy] };
+    if (removals.length === 0) return [];
+    const batch = { kv: { put: puts }, remove: removals };
+    if (copies.length > 0) batch.copies = { put: copies };
     await this.#write(batch);
-    keeping?.done();
-    await this.#drop(id, new Set(), 0);
-    this.#cache.delete(id);
-    return this.#catalog.fold(id, { base: entry.meta.base, deleted: entry.meta.deleted, v: entry.meta.v });
+    for (let i = 0; i < marks.length; i++) marks[i]();
+    for (let i = 0; i < folded.length; i++) {
+      const [id, entry] = folded[i];
+      await this.#drop(id, new Set(), 0);
+      this.#folded.add(id);
+      this.remember(id, entry);
+    }
+    return removals;
+  }
+
+  /**
+   * Takes folded tombstones away for good (`cleanup({ drop: true })`): the kv
+   * entries removed in one write set, the catalog rows with them — a late op
+   * then makes a new record. An id that is not folded is left alone. Answers how many.
+   */
+  async dropMany(ids) {
+    const removals = [];
+    for (let i = 0; i < ids.length; i++) if (this.#folded.has(ids[i])) removals.push([TOMBSTONES, ids[i]]);
+    if (removals.length === 0) return 0;
+    await this.#write({ kv: { remove: removals } });
+    for (let i = 0; i < removals.length; i++) {
+      const id = removals[i][1];
+      this.#folded.delete(id);
+      this.#cache.delete(id);
+      this.#catalog.put(id, null);
+    }
+    return removals.length;
   }
 
   /**
@@ -265,7 +357,7 @@ class EntryStore {
     for (let i = 0; i < wanted.length; i++) {
       const stored = found.get(wanted[i]) ?? null;
       if (stored === null) {
-        const folded = this.#folded(wanted[i]);
+        const folded = await this.#fromTombstone(wanted[i]);
         if (folded !== null) out.set(wanted[i], folded);
         continue;
       }
@@ -550,10 +642,15 @@ class EntryStore {
     }
     // ONE write set: the kv puts — a chain block and its tail — the tags' copies of the records as they were,
     // the records with the pieces they make and drop. Atomic where the engine has transactions.
+    // A folded id written again — a revival above its stamps, a purge, a repair: its tombstone leaves the
+    // namespace in the same set.
+    const unfolding = [];
+    for (const [id] of touched) if (this.#folded.has(id)) unfolding.push([TOMBSTONES, id]);
     const batch = { records: rows };
-    if (kv !== null) batch.kv = kv;
+    if (kv !== null || unfolding.length > 0) batch.kv = withRemovals(kv, unfolding);
     if (copies.length > 0) batch.copies = { put: copies };
     await this.#write(batch);
+    for (let i = 0; i < unfolding.length; i++) this.#folded.delete(unfolding[i][1]);
     for (let i = 0; i < marks.length; i++) marks[i]();
     for (let i = 0; i < after.length; i++) {
       const [id, entry, kept, gen] = after[i];
@@ -595,9 +692,11 @@ class EntryStore {
     const keeping = await this.#changing(id);
     const stored = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
     const batch = { records: [{ id, stored }] };
-    if (kv !== null) batch.kv = kv;
+    const unfolding = this.#folded.has(id) ? [[TOMBSTONES, id]] : [];
+    if (kv !== null || unfolding.length > 0) batch.kv = withRemovals(kv, unfolding);
     if (keeping !== null) batch.copies = { put: [keeping.copy] };
     await this.#write(batch);
+    this.#folded.delete(id);
     keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
@@ -608,8 +707,10 @@ class EntryStore {
   async remove(id) {
     const keeping = await this.#changing(id);
     const batch = { remove: [id] };
+    if (this.#folded.has(id)) batch.kv = { remove: [[TOMBSTONES, id]] };
     if (keeping !== null) batch.copies = { put: [keeping.copy] };
     await this.#write(batch);
+    this.#folded.delete(id);
     keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.#cache.delete(id);

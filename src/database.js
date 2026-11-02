@@ -593,6 +593,8 @@ class Database extends Emitter {
     });
     await this.#loadIdentity();
     await this.#loadSchema();
+    // The folded tombstones listed before the catalog loads: what a read of a gone row falls back to.
+    await this.#entries.open();
     await this.#loadCatalog();
     if (this.#tags !== null) await this.#tags.load();
     this.#core = this.#lend();
@@ -1262,13 +1264,15 @@ class Database extends Emitter {
       purgeMany: (ids, options) => this.#purgeMany(ids, options),
       // Every id the catalog holds a row for — live, encrypted, a tombstone — sorted (shared: read it).
       all: () => catalog.all(),
-      // A tombstone's file folded into its row (@alexify/syncom/cleanup): inside the queue, behind the
-      // landings, so nothing of the record is in flight meanwhile.
-      fold: (id) => this.#run(() => this.#landing(() => this.#entries.fold(id))),
+      // Whether `id` is a folded tombstone: its entry in the `tombstones` kv namespace, no record file.
+      folded: (id) => this.#entries.folded(id),
+      // Tombstones folded into the `tombstones` kv namespace (@alexify/syncom/cleanup), one write set: inside the
+      // queue, behind the landings, so nothing of the records is in flight meanwhile.
+      foldMany: (ids) => this.#run(() => this.#landing(() => this.#entries.foldMany(ids))),
       // The log's retained entries of a record, and the registered nodes' acked vectors (the sync plugin's).
       entriesOf: (id) => this.#log.entriesOf(id),
-      // A folded tombstone's row taken away (`cleanup({ drop: true })`): the catalog forgets the id.
-      forget: (id) => this.#run(() => void this.#catalog.put(id, null)),
+      // Folded tombstones taken away with their rows (`cleanup({ drop: true })`): the catalog forgets the ids.
+      forgetMany: (ids) => this.#run(() => this.#landing(() => this.#entries.dropMany(ids))),
       nodes: () => (this.#sync === null ? [] : this.#sync.listNodes()),
       load: async (id) => {
         const entry = await this.#entries.load(id);

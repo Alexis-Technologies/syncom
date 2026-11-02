@@ -27,7 +27,8 @@ const FILE = 'catalog.json';
 // The key `ids()` caches the whole live list under.
 const ALL = Symbol('syncom.catalog.all');
 // 4: a folded tombstone's stamps ride on its row (`folded`, the eighth cell; @alexify/syncom/cleanup).
-// 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell).
+// 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell); a
+//    folded tombstone lives in the `tombstones` kv namespace, whole, and its row is any tombstone's.
 const FORMAT = 5;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
@@ -124,8 +125,6 @@ const sameRow = (a, b) => {
   if (a.type !== b.type || a.v !== b.v || a.encrypted !== b.encrypted || a.gone !== b.gone || a.text !== b.text) {
     return false;
   }
-  if ((a.folded === undefined) !== (b.folded === undefined)) return false;
-  if (a.folded !== undefined && keyOf(a.folded) !== keyOf(b.folded)) return false;
   if (!sameStamp(a.deleted, b.deleted)) return false;
   const keys = Object.keys(a.fields);
   if (keys.length !== Object.keys(b.fields).length) return false;
@@ -576,24 +575,6 @@ class Catalog {
     if (row !== null) this.#insert(id, row);
   }
 
-  /**
-   * A tombstone's file folded into its row (`@alexify/syncom/cleanup`): the
-   * stamps that keep the record dead — `{ base, deleted, v }` — ride on the
-   * row, and a read of the id rebuilds the tombstone from them (src/entries.js).
-   * The row stays a tombstone's: listed by `all()`, never by `ids()`.
-   */
-  fold(id, stamps) {
-    const was = this.#rows.get(id);
-    if (was === undefined || !was.gone) return false;
-    const row = { ...was, folded: { base: stamps.base, deleted: stamps.deleted, v: stamps.v ?? null } };
-    this.#rows.set(id, row);
-    this.#sorted = null;
-    this.#dirty++;
-    this.#generation++;
-    this.#changed.set(id, row);
-    return true;
-  }
-
   /** Whether `$text` can be asked of this collection: it has search fields and an index. */
   searches(type) {
     return this.#text.has(type);
@@ -798,7 +779,7 @@ class Catalog {
     if (!usable) return null;
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
-      const [id, type, v, encrypted, fields, gone, seventh, folded] = row;
+      const [id, type, v, encrypted, fields, gone, seventh] = row;
       this.#remove(id);
       const loaded = {
         type: typeof type === 'string' ? type : null,
@@ -809,7 +790,6 @@ class Catalog {
       if (gone === true) {
         loaded.gone = true;
         if (Array.isArray(seventh) && typeof seventh[0] === 'number') loaded.deleted = seventh;
-        if (isObject(folded) && Array.isArray(folded.deleted)) loaded.folded = folded;
       } else if (typeof seventh === 'string') loaded.text = seventh;
       // Replayed through #insert: the text index is rebuilt here, under the
       // file's stamp, from the rows alone.
@@ -861,8 +841,7 @@ class Catalog {
       const cells = [id, row.type, row.v, row.encrypted, row.fields];
       if (row.gone) {
         cells.push(true);
-        if (row.deleted !== undefined || row.folded !== undefined) cells.push(row.deleted ?? null);
-        if (row.folded !== undefined) cells.push(row.folded);
+        if (row.deleted !== undefined) cells.push(row.deleted);
       } else if (row.text !== undefined) cells.push(false, row.text);
       rows.push(cells);
     }
