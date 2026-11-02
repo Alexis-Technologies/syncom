@@ -32,7 +32,7 @@ const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT } = require('../shape.js');
-const { SIGNER, REWIND } = require('../symbols.js');
+const { SIGNER, REWIND, DB } = require('../symbols.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
@@ -50,7 +50,7 @@ const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
 
-// The hooks a manager accepts (`open({ sync: { hooks } })`). There is no
+// The hooks a manager accepts (`createDatabase({ sync: { hooks } })`). There is no
 // hook on what leaves for a peer: seqs run contiguously per origin and
 // scope, so an op withheld from one peer is a gap that stops every later
 // op of that stream at it — per-peer visibility is what scopes are for.
@@ -118,7 +118,7 @@ class SyncManager extends Emitter {
       throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');
     }
     // The registry lives where the storage does: over its backend.
-    this.#registry = new NodeRegistry(storage.fsi, storage.path, storage.logger);
+    this.#registry = new NodeRegistry(storage[DB].kv, storage.logger);
     return this.#init();
   }
 
@@ -1113,6 +1113,17 @@ class SyncManager extends Emitter {
    * src/sync/hosting.js from what both halves share.
    */
   unit(options = {}) {
+    // A follower's log and vector are as of its open (the shared log is to
+    // come): a feed served from it would never move, so it hosts no more than
+    // it dials. A writer whose lease was lost is the same from then on.
+    if (this.#storage.readOnly) {
+      const { path } = this.#storage;
+      throw new SyncomError('READ_ONLY', `Storage at ${path} is read-only: it does not host`, {
+        path,
+        lease: this.#storage.stats().lock !== null,
+        reason: 'hosting',
+      });
+    }
     return createUnit(this, options, {
       storage: this.#storage,
       otel: this.#otel,

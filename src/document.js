@@ -1,15 +1,14 @@
 'use strict';
 
-// What a storage hands the application: a Record (a live view of one record
-// that saves through the storage), a Reference (a record named by another's
-// field) and a Collection (an entity's records). They use the storage's
-// public API and the three module-private symbols — nothing below them.
+// What a database hands the application: a Document (a live view of one record
+// that saves through the database) and a Reference (a record named by
+// another's field). They use the database's public API and the module-private
+// symbols — nothing below them. The Collection lives in src/collection.js.
 
 const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
 const { isPlainObject } = require('./shape.js');
-const { COMMIT, REFRESH, SOURCE, CURSOR } = require('./symbols.js');
-const { SyncomError } = require('./errors.js');
+const { COMMIT, REFRESH } = require('./symbols.js');
 
 class Reference {
   #id;
@@ -20,12 +19,18 @@ class Reference {
     this.#storage = storage;
   }
 
-  async record() {
-    return await this.#storage.record(this.#id);
+  /** The live Document the reference names. */
+  async document() {
+    return await this.#storage.document(this.#id);
+  }
+
+  /** @deprecated `document()` — the name before the rename. */
+  record() {
+    return this.document();
   }
 }
 
-class Record extends Emitter {
+class Document extends Emitter {
   #id;
   #storage = null;
   #data = null;
@@ -329,82 +334,4 @@ class Record extends Emitter {
   }
 }
 
-class Collection {
-  #storage;
-  #name;
-
-  constructor(storage, name) {
-    this.#storage = storage;
-    this.#name = name;
-  }
-
-  get name() {
-    return this.#name;
-  }
-
-  // A live record of another collection (or of none): what the catalog says
-  // of `id`. An unknown id is not foreign — it is simply absent.
-  #foreign(id) {
-    const row = this.#storage[SOURCE].row(id);
-    return row !== null && !row.gone && row.type !== this.#name;
-  }
-
-  #mine(id) {
-    if (this.#foreign(id)) {
-      throw new SyncomError('NOT_FOUND', `Record ${id} is not a ${this.#name}`, { id, entity: this.#name });
-    }
-  }
-
-  async insert(data, options = {}) {
-    const record = { ...data, $type: this.#name };
-    const id = await this.#storage.insert(record, options);
-    return this.#storage.record(id);
-  }
-
-  /** The record, or null when it is absent or belongs to another collection. */
-  async get(id, options = {}) {
-    if (this.#foreign(id)) return null;
-    return this.#storage.get(id, options);
-  }
-
-  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. */
-  select(query) {
-    return this.#storage[CURSOR](this.#name, query);
-  }
-
-  /** How many records of this collection match `query`. */
-  count(query) {
-    return this.select(query).count();
-  }
-
-  /** Replaces the record wholesale, stamped as this collection's. */
-  async set(id, data, options) {
-    if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
-    return this.#storage.set(id, { ...data, $type: this.#name }, options);
-  }
-
-  async delete(id, options = {}) {
-    this.#mine(id);
-    return this.#storage.delete(id, options);
-  }
-
-  async update(id, delta, options = {}) {
-    if (isPlainObject(delta) && Object.hasOwn(delta, '$type')) {
-      throw new TypeError('$type is immutable; update() may not name it');
-    }
-    this.#mine(id);
-    return this.#storage.update(id, delta, options);
-  }
-
-  async unset(id, fields, options = {}) {
-    this.#mine(id);
-    return this.#storage.unset(id, fields, options);
-  }
-
-  async record(id) {
-    this.#mine(id);
-    return this.#storage.record(id);
-  }
-}
-
-module.exports = { Reference, Record, Collection };
+module.exports = { Reference, Document, Record: Document };

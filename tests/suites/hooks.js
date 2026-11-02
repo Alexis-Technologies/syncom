@@ -34,7 +34,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     await storage.remove(id, 'tags', ['x']);
     await storage.splice(id, 'body', 0, 0, 'hi');
     await storage.treeMove(id, 'outline', 'n');
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     record.title = 'c';
     await record.save();
     await storage.delete(id);
@@ -237,7 +237,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     });
     const id = await storage.insert({ s: 1 });
     await storage.update(id, { t: 2 });
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     const updates = [];
     record.on('update', (data) => updates.push(data));
     await storage.delete(id);
@@ -295,7 +295,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.loadData(id), { name: 'Ada', ssn: '***' });
     assert.strictEqual(await storage.get(hidden), null, 'afterRead may hide a record from get');
     assert.strictEqual(await storage.has(hidden), true, 'has() is raw');
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     assert.strictEqual(record.ssn, '***', 'a Record view reads through get');
     // …and after a change too: the refresh reads as get() does, once the write is done.
     const refreshed = new Promise((resolve) => record.once('update', () => resolve()));
@@ -673,7 +673,7 @@ const runHooksTests = async (t, assert, createStorage) => {
       },
     });
     const id = await storage.insert({ n: 1 });
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     record.on('update', () => order.push('update'));
     storage.on('change', () => order.push('change'));
     order.length = 0;

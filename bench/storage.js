@@ -1,5 +1,5 @@
 /**
- * `Storage` — the full write path end to end: hash the record, append a block
+ * `Database` — the full write path end to end: hash the record, append a block
  * (two more file writes, see bench/chain.js), write the entry, populate the
  * cache. That makes `insert` the most expensive operation in the library, and
  * the gap between it and a cached `get` is the number worth watching.
@@ -22,20 +22,20 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/all/all.js');
+const { createDatabase } = require('../src/all/all.js');
 const nodeFsi = require('../src/fsi.js');
 const { memory } = require('../src/memory/memory.js');
 const { layered } = require('../src/layered/layered.js');
 
 const main = async () => {
-  console.log(`Storage benchmark — Node ${process.version}\n`);
+  console.log(`Database benchmark — Node ${process.version}\n`);
 
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syncom-bench-storage-'));
 
   try {
-    // Key generation is RSA-2048 and happens once per Storage; keeping a
+    // Key generation is RSA-2048 and happens once per Database; keeping a
     // single instance keeps that cost out of every row below.
-    const storage = await open({ path: root, lock: false });
+    const storage = await createDatabase({ path: root, lock: false });
 
     const record = { name: 'Example', email: 'example@example.com', hits: 0 };
 
@@ -45,7 +45,7 @@ const main = async () => {
     // from the queue: what a node that answers from memory and still persists
     // pays per write.
     const stack = layered([memory(), nodeFsi], { write: 'back' });
-    const stacked = await open({ path: `${root}-layered`, lock: false, fsi: stack });
+    const stacked = await createDatabase({ path: `${root}-layered`, lock: false, fsi: stack });
     await bench('insert — small record, layered([memory(), node:fs], write: back)', () => stacked.insert(record), {
       warmup: 20,
     });
@@ -60,7 +60,7 @@ const main = async () => {
       async () => {
         // A second instance on the same directory, closed after the read:
         // left open, every iteration would leak a log and a lock.
-        const cold = await open({ path: root, lock: false });
+        const cold = await createDatabase({ path: root, lock: false });
         try {
           return await cold.get(id);
         } finally {
@@ -111,7 +111,7 @@ const main = async () => {
 
     // Queries: a covered equality is posting lists and catalog rows; an
     // order with a limit still sorts every candidate; a filter reads them.
-    const indexed = await open({
+    const indexed = await createDatabase({
       path: path.join(root, 'indexed'),
       lock: false,
       logger: false,
@@ -129,7 +129,7 @@ const main = async () => {
     await bench(
       `open — catalog caught up from the log (${many} records)`,
       async () => {
-        const reopened = await open({ path: root, lock: false });
+        const reopened = await createDatabase({ path: root, lock: false });
         await reopened.close();
       },
       { warmup: 1, measureMs: 2000 },
@@ -138,7 +138,7 @@ const main = async () => {
     await bench(
       `open — catalog rebuilt from a scan (${many} records, integrity lazy)`,
       async () => {
-        const rebuilt = await open({ path: root, lock: false, integrity: 'lazy', logger: false });
+        const rebuilt = await createDatabase({ path: root, lock: false, integrity: 'lazy', logger: false });
         await fs.rm(path.join(root, 'index'), { recursive: true, force: true });
         await rebuilt.close();
       },

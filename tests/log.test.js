@@ -4,7 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { OpLog, fileOf, segmentOf, readSegment } = require('../src/log.js');
+const { fileOf, segmentOf, readSegment } = require('../src/log.js');
+const { openLog } = require('./utils/log.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { openGroups, withoutAppend } = require('./utils/groups.js');
 const nodeFsi = require('../src/fsi.js');
@@ -23,7 +24,7 @@ test('OpLog', async (t) => {
   await t.test('append assigns seqs, tracks the vector and answers since()', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir);
+      const log = await openLog(dir);
       assert.strictEqual(log.floor, 1);
       assert.strictEqual(log.next, 1);
       assert.deepStrictEqual(log.since(undefined), []);
@@ -80,12 +81,12 @@ test('OpLog', async (t) => {
   await t.test('reopen restores epoch, next, vector and entries', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir);
+      const log = await openLog(dir);
       await log.append([op('A', 1), op('A', 2)]);
       const { epoch } = log;
       await log.close();
 
-      const reopened = await new OpLog(dir);
+      const reopened = await openLog(dir);
       assert.strictEqual(reopened.epoch, epoch);
       assert.strictEqual(reopened.next, 3);
       assert.deepStrictEqual(reopened.vector, { A: 2 });
@@ -103,7 +104,7 @@ test('OpLog', async (t) => {
   await t.test('rolls open files into a segment and compacts past retention', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      const log = await openLog(dir, { rollAfter: 2, retention: { ops: 4 } });
       assert.strictEqual(log.retainedOps, 4);
       for (let seq = 1; seq <= 8; seq++) await log.append([op('A', seq)]);
       const names = (await fs.readdir(path.join(dir, 'log'))).sort();
@@ -121,7 +122,7 @@ test('OpLog', async (t) => {
       );
       assert.strictEqual(log.tail().length, 0);
 
-      const reopened = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      const reopened = await openLog(dir, { rollAfter: 2, retention: { ops: 4 } });
       assert.strictEqual(reopened.floor, log.floor);
       assert.strictEqual(reopened.length, log.length);
       assert.deepStrictEqual(reopened.vector, { A: 8 });
@@ -133,7 +134,7 @@ test('OpLog', async (t) => {
   await t.test('age-based retention drops old segments', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir, { rollAfter: 2, retention: { ops: 0, days: 1 } });
+      const log = await openLog(dir, { rollAfter: 2, retention: { ops: 0, days: 1 } });
       assert.strictEqual(log.retainedOps, Infinity, 'no count bounds a log retained by age only');
       const old = Date.now() - 3 * 86_400_000;
       await log.append([op('A', 1, { ts: old })]);
@@ -156,7 +157,7 @@ test('OpLog', async (t) => {
       try {
         const warnings = [];
         const logger = { warn: (entry) => warnings.push(entry), error: (entry) => warnings.push(entry) };
-        const log = await new OpLog(dir, { rollAfter: 2, logger });
+        const log = await openLog(dir, { rollAfter: 2, logger });
         for (let seq = 1; seq <= 5; seq++) await log.append([op('A', seq)]);
         await log.close();
         const logDir = path.join(dir, 'log');
@@ -169,7 +170,7 @@ test('OpLog', async (t) => {
         await fs.writeFile(path.join(logDir, segment), sealed.replace('"data":{"v":1}', '"data":{"v":99}'));
         const batch = fileOf([{ seq: 6, op: op('A', 6) }]).replace(/"c":"[0-9a-f]{8}"/, '"c":"00000000"');
         await fs.writeFile(path.join(logDir, 'open', '0000000006.json'), batch);
-        const reopened = await new OpLog(dir, { rollAfter: 2, logger });
+        const reopened = await openLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
           warnings.map((entry) => [entry.event, entry.reason]),
           [
@@ -197,7 +198,7 @@ test('OpLog', async (t) => {
         const text = await fs.readFile(path.join(logDir, last), 'utf8');
         assert.strictEqual(readSegment(text).reason, null, 'whole before it is altered');
         await fs.writeFile(path.join(logDir, last), text.replace(/,"c":"[0-9a-f]{8}"\}$/, '}'));
-        const hashless = await new OpLog(dir, { rollAfter: 2, logger });
+        const hashless = await openLog(dir, { rollAfter: 2, logger });
         assert.deepStrictEqual(
           hashless.since(hashless.formatId(0)).map((entry) => entry.seq),
           [3, 4],
@@ -211,7 +212,7 @@ test('OpLog', async (t) => {
       // retention 'all': nothing is ever dropped.
       const keep = await createTemp();
       try {
-        const log = await new OpLog(keep, { rollAfter: 2, retention: 'all' });
+        const log = await openLog(keep, { rollAfter: 2, retention: 'all' });
         for (let seq = 1; seq <= 40; seq++) await log.append([op('A', seq)]);
         assert.strictEqual(log.retainedOps, Infinity);
         assert.strictEqual(log.floor, 1);
@@ -236,7 +237,7 @@ test('OpLog', async (t) => {
             return nodeFsi.write(at, name, content, options);
           },
         };
-        const log = await new OpLog(dir, { rollAfter: 2, fsi });
+        const log = await openLog(dir, { rollAfter: 2, fsi });
         for (let seq = 1; seq <= 6; seq++) await log.append([op('A', seq, { id: seq % 2 === 0 ? 'x' : `r${seq}` })]);
         assert.strictEqual(await log.scrub('x'), 3);
         written.length = 0;
@@ -261,7 +262,7 @@ test('OpLog', async (t) => {
   await t.test('a log file that is there but cannot be read fails the open, and is kept', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir, { rollAfter: 100 });
+      const log = await openLog(dir, { rollAfter: 100 });
       for (let seq = 1; seq <= 3; seq++) await log.append([op('A', seq)]);
       await log.close();
       const real = require('../src/fsi.js');
@@ -274,7 +275,7 @@ test('OpLog', async (t) => {
         },
       };
       await assert.rejects(
-        () => new OpLog(dir, { rollAfter: 100, fsi: failing }),
+        () => openLog(dir, { rollAfter: 100, fsi: failing }),
         (error) => {
           assert.strictEqual(error.code, 'CORRUPT');
           assert.strictEqual(error.cause.code, 'EIO');
@@ -282,14 +283,14 @@ test('OpLog', async (t) => {
         },
       );
       // Nothing was taken for torn: the next open reads every op.
-      const reopened = await new OpLog(dir, { rollAfter: 100 });
+      const reopened = await openLog(dir, { rollAfter: 100 });
       assert.deepStrictEqual(
         reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
         [1, 2, 3],
       );
       // Groups still open (a journal, not sealed): their read failing fails the open too.
       for (let seq = 4; seq <= 5; seq++) await reopened.append([op('A', seq)]);
-      await assert.rejects(() => new OpLog(dir, { rollAfter: 100, fsi: failing }), { code: 'CORRUPT' });
+      await assert.rejects(() => openLog(dir, { rollAfter: 100, fsi: failing }), { code: 'CORRUPT' });
       await reopened.close();
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
@@ -305,7 +306,7 @@ test('OpLog', async (t) => {
         error: (entry) => warnings.push(entry),
         info: (entry) => warnings.push(entry),
       };
-      const log = await new OpLog(dir, { rollAfter: 3, logger });
+      const log = await openLog(dir, { rollAfter: 3, logger });
       for (let seq = 1; seq <= 4; seq++) await log.append([op('A', seq)]);
       const { epoch } = log;
       await log.close();
@@ -319,7 +320,7 @@ test('OpLog', async (t) => {
       // Crash mid-append: a torn file for a batch nobody was told about.
       await fs.writeFile(path.join(logDir, 'open', '0000000009.json'), '{"e":[[9,null,');
 
-      const reopened = await new OpLog(dir, { rollAfter: 3, logger });
+      const reopened = await openLog(dir, { rollAfter: 3, logger });
       assert.strictEqual(reopened.epoch, epoch);
       assert.deepStrictEqual(
         reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
@@ -334,7 +335,7 @@ test('OpLog', async (t) => {
 
       // A lost index is a new epoch: old ids cannot resume, data is kept.
       await fs.rm(path.join(logDir, 'index.json'));
-      const fresh = await new OpLog(dir, { rollAfter: 3, logger });
+      const fresh = await openLog(dir, { rollAfter: 3, logger });
       assert.notStrictEqual(fresh.epoch, epoch);
       assert.strictEqual(fresh.since(`${epoch}.2`), null);
       assert.strictEqual(fresh.since(fresh.formatId(0)).length, 4);
@@ -345,7 +346,7 @@ test('OpLog', async (t) => {
       // what the open files hold survives.
       await fs.rm(path.join(logDir, 'open', '0000000001.json'));
       await fs.writeFile(path.join(logDir, segment), 'not json');
-      const damaged = await new OpLog(dir, { rollAfter: 3, logger });
+      const damaged = await openLog(dir, { rollAfter: 3, logger });
       assert.ok(warnings.some((entry) => entry.event === 'log.segment.unreadable'));
       assert.deepStrictEqual(
         damaged.since(damaged.formatId(0)).map((entry) => entry.seq),
@@ -359,7 +360,7 @@ test('OpLog', async (t) => {
   await t.test('a skipped op is logged, served and flagged through a reopen', async () => {
     const dir = await createTemp();
     try {
-      let log = await new OpLog(dir);
+      let log = await openLog(dir);
       const skip = op('A', 2);
       const entries = await log.append([op('A', 1), skip, op('A', 3)], { skipped: new Set([skip]) });
       assert.deepStrictEqual(
@@ -369,7 +370,7 @@ test('OpLog', async (t) => {
       assert.deepStrictEqual(log.vector, { A: 3 }, 'a skipped op moves the vector like any other');
       assert.strictEqual(log.since(undefined).length, 3, 'and is served to resuming peers');
       await log.close();
-      log = await new OpLog(dir);
+      log = await openLog(dir);
       assert.deepStrictEqual(
         log.since(log.formatId(0)).map((entry) => entry.skipped),
         [undefined, true, undefined],
@@ -383,7 +384,7 @@ test('OpLog', async (t) => {
   await t.test('held entries are flagged, listed, kept through a reopen, and counted when compacted away', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      const log = await openLog(dir, { rollAfter: 2, retention: { ops: 4 } });
       const ops = [op('A', 1, { v: 2 }), op('A', 2)];
       const entries = await log.append(ops, { skipped: new Set([ops[0]]), held: new Map([[ops[0], 2]]) });
       assert.deepStrictEqual(entries, [
@@ -394,7 +395,7 @@ test('OpLog', async (t) => {
       assert.strictEqual(log.droppedHeld, 0);
       await log.close();
 
-      const reopened = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      const reopened = await openLog(dir, { rollAfter: 2, retention: { ops: 4 } });
       assert.deepStrictEqual(reopened.held(), [{ seq: 1, op: ops[0], skipped: true, held: 2 }]);
       // Append past retention: the segment holding it is dropped, and that is counted.
       for (let seq = 3; seq <= 14; seq++) await reopened.append([op('A', seq)]);
@@ -402,7 +403,7 @@ test('OpLog', async (t) => {
       assert.strictEqual(reopened.droppedHeld, 1);
       await reopened.close();
 
-      const again = await new OpLog(dir, { rollAfter: 2, retention: { ops: 4 } });
+      const again = await openLog(dir, { rollAfter: 2, retention: { ops: 4 } });
       assert.strictEqual(again.droppedHeld, 1, 'persisted with the index');
       await again.resetDroppedHeld();
       assert.strictEqual(again.droppedHeld, 0);
@@ -418,7 +419,7 @@ test('OpLog', async (t) => {
   await t.test('scrub strips an id’s payload from memory, the segments and the open files', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir, { rollAfter: 2 });
+      const log = await openLog(dir, { rollAfter: 2 });
       await log.append([op('A', 1, { id: 'secret', data: { ssn: 'SECRET-1' } }), op('A', 2)]);
       await log.append([op('A', 3, { id: 'secret', type: 'add', key: 'tags', value: ['SECRET-3'] })]);
       await log.append([op('A', 4, { id: 'other', data: { ssn: 'OTHER' } })]);
@@ -456,7 +457,7 @@ test('OpLog', async (t) => {
       }
       assert.ok((await fs.readFile(path.join(dir, 'log', 'seg-0000000004.json'), 'utf8')).includes('OTHER'));
       await log.close();
-      const reopened = await new OpLog(dir, { rollAfter: 2 });
+      const reopened = await openLog(dir, { rollAfter: 2 });
       assert.deepStrictEqual(reopened.vector, { A: 5 });
       assert.strictEqual(reopened.since(undefined)[0].scrubbed, true);
       assert.strictEqual(reopened.since(undefined)[0].op.origin, 'A');
@@ -471,7 +472,7 @@ test('OpLog', async (t) => {
     async () => {
       const dir = await createTemp();
       try {
-        const log = await new OpLog(dir, { rollAfter: 1, sealApplied: true });
+        const log = await openLog(dir, { rollAfter: 1, sealApplied: true });
         await log.append([op('A', 1)]);
         await log.append([op('A', 2)]); // rolls — nothing is applied yet
         assert.strictEqual(log.tail().length, 2);
@@ -493,7 +494,7 @@ test('OpLog', async (t) => {
           [2, 3, 4],
           'a clean close seals nothing past it either',
         );
-        const reopened = await new OpLog(dir, { rollAfter: 1, sealApplied: true });
+        const reopened = await openLog(dir, { rollAfter: 1, sealApplied: true });
         assert.deepStrictEqual(
           reopened.tail().map((entry) => entry.seq),
           [2, 3, 4],
@@ -513,7 +514,7 @@ test('OpLog', async (t) => {
   await t.test('flush seals the open files on demand', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir);
+      const log = await openLog(dir);
       await log.flush();
       await log.append([op('A', 1)]);
       await log.flush();
@@ -529,7 +530,7 @@ test('OpLog', async (t) => {
 test('droppedTs is the newest stamp compaction dropped; a pin holds a segment past retention', async () => {
   const dir = await createTemp();
   try {
-    const log = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
+    const log = await openLog(dir, { rollAfter: 1, retention: { ops: 2 } });
     assert.strictEqual(log.droppedTs, 0, 'nothing dropped yet');
     // Stamps out of seq order: the newest DROPPED stamp is kept, not the last.
     await log.append([op('A', 1, { ts: 5 })]);
@@ -567,7 +568,7 @@ test('droppedTs is the newest stamp compaction dropped; a pin holds a segment pa
     assert.throws(() => log.pin('x'), TypeError);
     await log.close();
     // Reopen: droppedTs rides in the index.
-    const reopened = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 } });
+    const reopened = await openLog(dir, { rollAfter: 1, retention: { ops: 2 } });
     assert.strictEqual(reopened.droppedTs, 10);
     await reopened.close();
     // An index with a field missing is no index of this log's: a new
@@ -576,27 +577,27 @@ test('droppedTs is the newest stamp compaction dropped; a pin holds a segment pa
     const stale = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
     delete stale.droppedTs;
     await fs.writeFile(path.join(dir, 'log', 'index.json'), JSON.stringify(stale));
-    const old = await new OpLog(dir, { rollAfter: 1, retention: { ops: 2 }, logger: false });
+    const old = await openLog(dir, { rollAfter: 1, retention: { ops: 2 }, logger: false });
     assert.notStrictEqual(old.epoch, stale.epoch, 'a new incarnation');
     assert.strictEqual(old.droppedTs, old.latestTs);
     await old.close();
     // A segment that cannot be read is as good as dropped.
     const fresh = await createTemp();
     try {
-      const whole = await new OpLog(fresh, { rollAfter: 1 });
+      const whole = await openLog(fresh, { rollAfter: 1 });
       await whole.append([op('A', 1, { ts: 100 })]);
       await whole.append([op('A', 2, { ts: 200 })]);
       await whole.close();
       assert.strictEqual(whole.droppedTs, 0);
       const names = (await fs.readdir(path.join(fresh, 'log'))).filter((name) => name.startsWith('seg-')).sort();
       await fs.writeFile(path.join(fresh, 'log', names[0]), '{ torn');
-      const torn = await new OpLog(fresh, { rollAfter: 1, logger: false });
+      const torn = await openLog(fresh, { rollAfter: 1, logger: false });
       assert.strictEqual(torn.droppedTs, 200, 'up to the newest stamp known');
       await torn.close();
       // No index at all with retained entries that start above 1: the same.
       await fs.rm(path.join(fresh, 'log', 'index.json'));
       await fs.rm(path.join(fresh, 'log', names[0]));
-      const orphan = await new OpLog(fresh, { rollAfter: 1, logger: false });
+      const orphan = await openLog(fresh, { rollAfter: 1, logger: false });
       assert.ok(orphan.floor > 1);
       assert.strictEqual(orphan.droppedTs, orphan.latestTs);
       await orphan.close();
@@ -618,7 +619,7 @@ test('a new epoch is said out loud when a log was there', async () => {
       info() {},
       error() {},
     };
-    const fresh = await new OpLog(dir, { logger });
+    const fresh = await openLog(dir, { logger });
     await fresh.append([op('A', 1)]);
     await fresh.close();
     assert.deepStrictEqual(
@@ -627,11 +628,11 @@ test('a new epoch is said out loud when a log was there', async () => {
       'a brand-new log whispers',
     );
     await fs.rm(path.join(dir, 'log', 'index.json'));
-    await new OpLog(dir, { logger });
+    await openLog(dir, { logger });
     const loud = entries.filter(([, e]) => e.event === 'log.epoch.new').at(-1);
     assert.deepStrictEqual([loud[0], loud[1].reason, loud[1].entries], ['warn', 'no index', 1]);
     await fs.writeFile(path.join(dir, 'log', 'index.json'), '{broken');
-    await new OpLog(dir, { logger });
+    await openLog(dir, { logger });
     assert.strictEqual(entries.filter(([, e]) => e.event === 'log.epoch.new').at(-1)[1].reason, 'unreadable index');
   } finally {
     await cleanupTemp(dir);
@@ -642,12 +643,12 @@ test('latestTs rides in the index: a reopen with everything sealed still knows t
   const dir = await createTemp();
   try {
     const ahead = Date.now() + 3_600_000;
-    const log = await new OpLog(dir, { rollAfter: 1 });
+    const log = await openLog(dir, { rollAfter: 1 });
     await log.append([{ origin: 'A', seq: 1, ts: ahead, type: 'write', id: 'r', data: {} }]);
     await log.close();
     const index = JSON.parse(await fs.readFile(path.join(dir, 'log', 'index.json'), 'utf8'));
     assert.strictEqual(index.latestTs, ahead);
-    const reopened = await new OpLog(dir, { rollAfter: 1 });
+    const reopened = await openLog(dir, { rollAfter: 1 });
     assert.strictEqual(reopened.latestTs, ahead);
   } finally {
     await cleanupTemp(dir);
@@ -667,7 +668,7 @@ test('a group commit: appends issued together land as one file, in order; a fail
       const dir = await createTemp();
       const fsi = journaled ? nodeFsi : withoutAppend(nodeFsi);
       try {
-        const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true, fsi });
+        const log = await openLog(dir, { rollAfter: 100, sealApplied: true, fsi });
         // Three appends in one tick: seqs reserved at once, the vector ahead
         // of the disk, one group — one file.
         const first = log.append([op('A', 1)]);
@@ -721,7 +722,7 @@ test('a group commit: appends issued together land as one file, in order; a fail
         // The journal holds the unsealed group 5 too: it stays until that one is sealed.
         const still = await fs.readdir(path.join(dir, 'log', 'open'));
         assert.strictEqual(still.length, 1, journaled ? 'the journal stays for group 5' : 'the file of group 5');
-        const reopened = await new OpLog(dir, { rollAfter: 100, sealApplied: true, fsi });
+        const reopened = await openLog(dir, { rollAfter: 100, sealApplied: true, fsi });
         assert.deepStrictEqual(
           reopened.since(undefined).map((entry) => entry.seq),
           [1, 2, 3, 4, 5],
@@ -752,7 +753,7 @@ test('a group commit: appends issued together land as one file, in order; a fail
         const fail = (call) => (failing ? Promise.reject(new Error('disk full')) : call());
         const flaky = { ...fsi, write: (...args) => fail(() => fsi.write(...args)) };
         if (journaled) flaky.append = (...args) => fail(() => fsi.append(...args));
-        const log = await new OpLog(dir, { rollAfter: 100, fsi: flaky });
+        const log = await openLog(dir, { rollAfter: 100, fsi: flaky });
         await log.append([op('A', 1)]);
         failing = true;
         const second = log.append([op('A', 2)]);
@@ -787,7 +788,7 @@ test('a group commit: appends issued together land as one file, in order; a fail
           ...nodeFsi,
           append: (...args) => (failing ? Promise.reject(new Error('disk full')) : nodeFsi.append(...args)),
         };
-        const log = await new OpLog(dir, { rollAfter: 100, fsi: flaky });
+        const log = await openLog(dir, { rollAfter: 100, fsi: flaky });
         const heard = [];
         const first = log.enqueue([op('A', 1)], { onDurable: () => heard.push(['first', log.length]) });
         const second = log.enqueue([op('A', 2)], { onDurable: () => heard.push(['second', log.length]) });
@@ -824,14 +825,14 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
       debug() {},
     };
     try {
-      const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+      const log = await openLog(dir, { rollAfter: 100, sealApplied: true });
       await log.append([op('A', 1)]);
       await log.append([op('A', 2)]);
       await log.append([op('A', 3)]);
       const [journal] = await lines(dir);
       // A crash in the middle of the next append: half a line at the end.
       await fs.appendFile(journal, '{"e":[[4,null,[1,');
-      const torn = await new OpLog(dir, { rollAfter: 100, sealApplied: true, logger });
+      const torn = await openLog(dir, { rollAfter: 100, sealApplied: true, logger });
       assert.deepStrictEqual(
         torn.since(undefined).map((entry) => entry.seq),
         [1, 2, 3],
@@ -846,7 +847,7 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
       const [first, second, ...rest] = text.split('\n');
       await fs.writeFile(journal, [first, second.replace('"A"', '"Z"'), ...rest].join('\n'));
       warnings.length = 0;
-      const altered = await new OpLog(dir, { rollAfter: 100, sealApplied: true, logger });
+      const altered = await openLog(dir, { rollAfter: 100, sealApplied: true, logger });
       assert.deepStrictEqual(
         altered.since(undefined).map((entry) => entry.seq),
         [1, 3, 4],
@@ -873,7 +874,7 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
             if (lying) throw new Error('disk said no');
           },
         };
-        const log = await new OpLog(dir, { rollAfter: 100, sealApplied: true, fsi });
+        const log = await openLog(dir, { rollAfter: 100, sealApplied: true, fsi });
         await log.append([op('A', 1)]);
         lying = true;
         await assert.rejects(log.append([op('A', 2, { id: 'stale' })]), /disk said no/);
@@ -881,7 +882,7 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
         const [{ seq }] = await log.append([op('B', 1, { id: 'fresh' })]);
         assert.strictEqual(seq, 2, 'the seq was handed out again');
         assert.strictEqual((await lines(dir)).length, 2, 'into a journal of its own');
-        const reopened = await new OpLog(dir, { rollAfter: 100, sealApplied: true });
+        const reopened = await openLog(dir, { rollAfter: 100, sealApplied: true });
         assert.deepStrictEqual(
           reopened.since(undefined).map((entry) => [entry.seq, entry.op.origin, entry.op.id]),
           [
@@ -899,7 +900,7 @@ test('a journal: a line per group, a torn last line left out, a failed line shad
   await t.test('a scrub rewrites a journal a line per group; a roll begins a new one', async () => {
     const dir = await createTemp();
     try {
-      const log = await new OpLog(dir, { rollAfter: 3, sealApplied: true });
+      const log = await openLog(dir, { rollAfter: 3, sealApplied: true });
       await log.append([op('A', 1, { id: 'secret', data: { pin: 1234 } })]);
       await log.append([op('A', 2, { id: 'other', data: { n: 1 } })]);
       assert.strictEqual(await log.scrub('secret'), 1);
@@ -933,7 +934,7 @@ test('a roll that fails after the append never holds up the group: the appends l
   };
   const events = [];
   const logger = { warn: (event) => events.push(event), error: (event) => events.push(event), info() {}, debug() {} };
-  const log = await new OpLog('store', { fsi, rollAfter: 2, logger });
+  const log = await openLog('store', { fsi, rollAfter: 2, logger });
   const within = (promise) =>
     Promise.race([
       promise,
@@ -956,7 +957,7 @@ test('a roll that fails after the append never holds up the group: the appends l
   failing = false;
   await within(log.append([op('A', 4)]));
   assert.strictEqual(log.segments, 1);
-  const reopened = await new OpLog('store', { fsi, rollAfter: 2 });
+  const reopened = await openLog('store', { fsi, rollAfter: 2 });
   assert.deepStrictEqual(
     reopened.since(undefined).map((entry) => entry.seq),
     [1, 2, 3, 4],
@@ -984,7 +985,7 @@ test('a scrub cut short as it rewrites a journal loses no group and leaves no pa
     for (const name of await fsi.list('store/log/open')) text += await fsi.read('store/log/open', name);
     return text;
   };
-  const log = await new OpLog('store', { fsi, rollAfter: 100 });
+  const log = await openLog('store', { fsi, rollAfter: 100 });
   for (let seq = 1; seq <= 6; seq++) {
     await log.append([op('me', seq, seq === 2 ? { id: 'secret', data: { pin: 987654 } } : {})]);
   }
@@ -992,7 +993,7 @@ test('a scrub cut short as it rewrites a journal loses no group and leaves no pa
   tearNext = true;
   await assert.rejects(log.scrub('secret'), /killed/);
   assert.ok((await onDisk()).includes('987654'), 'the old journal still has it');
-  const reopened = await new OpLog('store', { fsi, rollAfter: 100 });
+  const reopened = await openLog('store', { fsi, rollAfter: 100 });
   assert.strictEqual(reopened.next, 7, 'no seq of this node handed out twice');
   assert.deepStrictEqual(reopened.vector, { me: 6 });
   assert.deepStrictEqual(
@@ -1000,7 +1001,7 @@ test('a scrub cut short as it rewrites a journal loses no group and leaves no pa
     [1, 2, 3, 4, 5, 6],
   );
   assert.ok(!(await onDisk()).includes('987654'), 'the copy the scrub left behind went at the open');
-  const again = await new OpLog('store', { fsi, rollAfter: 100 });
+  const again = await openLog('store', { fsi, rollAfter: 100 });
   assert.deepStrictEqual(
     again.since(undefined).map((entry) => entry.seq),
     [1, 2, 3, 4, 5, 6],
@@ -1023,14 +1024,14 @@ test('a journal line is a group whole or not at all: a failed group the group af
       }
     },
   };
-  const log = await new OpLog('store', { fsi, rollAfter: 100 });
+  const log = await openLog('store', { fsi, rollAfter: 100 });
   await log.append([op('me', 1)]);
   failNext = true;
   await assert.rejects(log.append([op('me', 2), op('me', 3), op('me', 4)]), /layer down/);
   // The seqs go back: the next group is 2 alone.
   const [entry] = await log.append([op('me', 2, { id: 'after' })]);
   assert.strictEqual(entry.seq, 2);
-  const reopened = await new OpLog('store', { fsi, rollAfter: 100 });
+  const reopened = await openLog('store', { fsi, rollAfter: 100 });
   assert.deepStrictEqual(
     reopened.since(undefined).map((e) => e.seq),
     [1, 2],
@@ -1042,7 +1043,7 @@ test('a journal line is a group whole or not at all: a failed group the group af
 
 test('groups applied out of order: a roll seals up to the oldest group not applied, whatever the holes after it', async () => {
   const { memory } = require('../src/memory/memory.js');
-  const log = await new OpLog('store', { fsi: memory(), rollAfter: 1000, sealApplied: true });
+  const log = await openLog('store', { fsi: memory(), rollAfter: 1000, sealApplied: true });
   for (let seq = 1; seq <= 6; seq++) await log.append([op('A', seq)]);
   log.applied(2);
   log.applied(4, 5);
@@ -1079,7 +1080,7 @@ test('the index is written where compaction dropped something; the segments are 
     if (name === 'index.json') writes++;
     return write(dir, name, text, options);
   };
-  const log = await new OpLog('/l', { fsi, rollAfter: 2, retention: 'all', logger: false });
+  const log = await openLog('/l', { fsi, rollAfter: 2, retention: 'all', logger: false });
   const opened = writes;
   for (let seq = 1; seq <= 12; seq++) await log.append([op('A', seq)]);
   await log.flush();
@@ -1089,7 +1090,7 @@ test('the index is written where compaction dropped something; the segments are 
   const index = JSON.parse(await fsi.read('/l/log', 'index.json'));
   assert.strictEqual(index.segments, undefined, 'the index names no segment');
   // A reopen reads the segments from the listing, and the vector and heads from them.
-  const again = await new OpLog('/l', { fsi, rollAfter: 2, retention: 'all', logger: false });
+  const again = await openLog('/l', { fsi, rollAfter: 2, retention: 'all', logger: false });
   assert.strictEqual(again.segments, log.segments);
   assert.deepStrictEqual(
     again.since(again.formatId(0)).map((entry) => entry.seq),
@@ -1103,7 +1104,7 @@ test('the index is written where compaction dropped something; the segments are 
   await fsi.remove('/l/log', names[1]);
   const events = [];
   const logger = { error: (event) => events.push(event), warn() {}, info() {}, debug() {} };
-  const gapped = await new OpLog('/l', { fsi, rollAfter: 2, retention: 'all', logger });
+  const gapped = await openLog('/l', { fsi, rollAfter: 2, retention: 'all', logger });
   assert.strictEqual(events.filter((event) => event.event === 'log.segment.missing').length, 1);
   assert.strictEqual(gapped.droppedTs, gapped.latestTs, 'what it held is vouched for by nothing');
   await gapped.close();
@@ -1112,14 +1113,14 @@ test('the index is written where compaction dropped something; the segments are 
 test('a segment wholly below the floor is a compaction cut short: removed at open, never read back', async () => {
   const { memory } = require('../src/memory/memory.js');
   const fsi = memory();
-  const log = await new OpLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
+  const log = await openLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
   for (let seq = 1; seq <= 6; seq++) await log.append([op('A', seq)]);
   await log.close();
   const floor = log.floor;
   assert.ok(floor > 1);
   // The file of seqs before the floor comes back (a removal the crash cut short).
   await fsi.write('/l/log', 'seg-0000000001.json', segmentOf([fileOf([{ seq: 1, op: op('A', 1) }])], 1));
-  const reopened = await new OpLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
+  const reopened = await openLog('/l', { fsi, rollAfter: 1, retention: { ops: 2 }, logger: false });
   assert.strictEqual(reopened.floor, floor);
   assert.ok(!(await fsi.list('/l/log')).includes('seg-0000000001.json'));
   assert.ok(reopened.since(reopened.formatId(floor - 1)).every((entry) => entry.seq >= floor));
@@ -1131,7 +1132,7 @@ test('a segment wholly below the floor is a compaction cut short: removed at ope
 test('a segment is the lines its groups were journaled as, and a trailer: a line altered, gone or moved is told, whole', async () => {
   const { memory } = require('../src/memory/memory.js');
   const fsi = memory();
-  const log = await new OpLog('/s', { fsi, rollAfter: 3, logger: false });
+  const log = await openLog('/s', { fsi, rollAfter: 3, logger: false });
   await log.append([op('A', 1)]);
   await log.append([op('A', 2), op('A', 3)]);
   const [journal] = await fsi.list('/s/log/open');
@@ -1156,7 +1157,7 @@ test('a segment is the lines its groups were journaled as, and a trailer: a line
   ];
   for (const variant of forged) assert.strictEqual(readSegment(variant.join('\n')).reason, 'checksum');
   await fsi.write('/s/log', segment, [lines[1], lines[0], lines[2], lines[3]].join('\n'));
-  const reopened = await new OpLog('/s', { fsi, rollAfter: 3, logger: false });
+  const reopened = await openLog('/s', { fsi, rollAfter: 3, logger: false });
   assert.strictEqual(reopened.corrupt, 1, 'counted');
   assert.deepStrictEqual(reopened.since(reopened.formatId(0)), [], 'and none of it read');
   await reopened.close();
@@ -1165,7 +1166,7 @@ test('a segment is the lines its groups were journaled as, and a trailer: a line
 test('a group scrubbed before its roll is sealed as the scrub left it: no segment carries a payload a purge took', async () => {
   const { memory } = require('../src/memory/memory.js');
   const fsi = memory();
-  const log = await new OpLog('/p', { fsi, rollAfter: 100, logger: false });
+  const log = await openLog('/p', { fsi, rollAfter: 100, logger: false });
   await log.append([op('A', 1, { id: 'gone', data: { secret: 'S3CRET' } })]);
   await log.append([op('A', 2)]);
   assert.strictEqual(await log.scrub('gone'), 1);
@@ -1194,13 +1195,13 @@ test('a failed append whose line went down whole does not come back: the journal
       }
     },
   };
-  const log = await new OpLog('/j', { fsi, rollAfter: 100, logger: false });
+  const log = await openLog('/j', { fsi, rollAfter: 100, logger: false });
   await log.append([op('A', 1)]);
   failSync = true;
   await assert.rejects(log.append([op('A', 2, { data: { secret: 'S3CRET' } })]), /sync failed/);
   assert.strictEqual(log.next, 2, 'the seq taken back');
   await log.close();
-  const reopened = await new OpLog('/j', { fsi, rollAfter: 100, logger: false });
+  const reopened = await openLog('/j', { fsi, rollAfter: 100, logger: false });
   assert.deepStrictEqual(
     reopened.since(reopened.formatId(0)).map((entry) => entry.seq),
     [1],
@@ -1216,12 +1217,12 @@ test('a failed append whose line went down whole does not come back: the journal
 test('a position handed out is never handed out again in its epoch: the index keeps the counter where the newest file did not read', async () => {
   const { memory } = require('../src/memory/memory.js');
   const fsi = memory();
-  const log = await new OpLog('/n', { fsi, rollAfter: 100, logger: false });
+  const log = await openLog('/n', { fsi, rollAfter: 100, logger: false });
   await log.append([op('A', 1), op('A', 2), op('A', 3)]);
   await log.close();
   // The journal is gone (a disk that lost it), and its entries with it; the index says what was handed out.
   for (const name of await fsi.list('/n/log/open')) await fsi.remove('/n/log/open', name);
-  const reopened = await new OpLog('/n', { fsi, rollAfter: 100, logger: false });
+  const reopened = await openLog('/n', { fsi, rollAfter: 100, logger: false });
   assert.strictEqual(reopened.next, 4, 'from the index, not from what read');
   const [entry] = await reopened.append([op('A', 4)]);
   assert.strictEqual(entry.seq, 4);
@@ -1231,7 +1232,7 @@ test('a position handed out is never handed out again in its epoch: the index ke
 test('a purge scrubs the evidence copies under corrupt/ too: a copy that names the id is removed whole', async () => {
   const { memory } = require('../src/memory/memory.js');
   const fsi = memory();
-  const log = await new OpLog('/c', { fsi, rollAfter: 100, logger: false });
+  const log = await openLog('/c', { fsi, rollAfter: 100, logger: false });
   await log.append([op('A', 1, { id: 'gone', data: { secret: 'S3CRET' } })]);
   await fsi.write(
     '/c/log/corrupt',

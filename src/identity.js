@@ -12,7 +12,8 @@
 // names the kind plugins the directory ran with: a reopen without one of
 // them would hold fields it cannot apply and lose them at the next write,
 // so it is refused (PLUGIN_MISSING, naming the plugin); more plugins than
-// before is fine and is recorded. Requires errors.js and shape.js only.
+// before is fine and is recorded. `store` is the database's root namespace
+// (node.json a key of it). Requires errors.js and shape.js only.
 
 const { SyncomError, typed } = require('./errors.js');
 const { isStreamName, isKeyId } = require('./shape.js');
@@ -30,12 +31,13 @@ const corruptFile = (file, cause) =>
  * (null without it), `kinds` the kind plugins it runs, `getId()` what mints
  * a fresh id. Writes node.json when it changed.
  */
-const loadIdentity = async ({ fsi, path, keyId, kinds, getId, logger }) => {
+const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
   let nodeId = null;
-  if (await fsi.exists(path, NODE_FILE)) {
+  const text = await store.get(NODE_FILE);
+  if (text !== null) {
     let stored;
     try {
-      stored = JSON.parse(await fsi.read(path, NODE_FILE));
+      stored = JSON.parse(text);
     } catch (error) {
       throw corruptFile(NODE_FILE, error);
     }
@@ -50,7 +52,7 @@ const loadIdentity = async ({ fsi, path, keyId, kinds, getId, logger }) => {
       const name = ran[i];
       if (typeof name !== 'string') continue;
       if (!known.has(name)) {
-        const message = `${NODE_FILE} says this storage runs with the ${name} plugin: open({ plugins }) with it from '@alexify/syncom/${name}'`;
+        const message = `${NODE_FILE} says this storage runs with the ${name} plugin: createDatabase({ plugins }) with it from '@alexify/syncom/${name}'`;
         throw typed('PLUGIN_MISSING', message);
       }
       count++;
@@ -71,11 +73,13 @@ const loadIdentity = async ({ fsi, path, keyId, kinds, getId, logger }) => {
   } else {
     const minted = await getId();
     if (!isStreamName(minted)) {
-      throw new TypeError(`open({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`);
+      throw new TypeError(
+        `createDatabase({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`,
+      );
     }
     nodeId = minted;
   }
-  await fsi.write(path, NODE_FILE, JSON.stringify({ id: nodeId, plugins: kinds }), { atomic: true });
+  await store.put(NODE_FILE, JSON.stringify({ id: nodeId, plugins: kinds }), { atomic: true });
   return nodeId;
 };
 

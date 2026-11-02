@@ -78,7 +78,7 @@ class MemoryLink extends Emitter {
   subscribe(method, args, handlers) {
     const record = { method, args: clone(args), handlers, lastEventId: handlers.lastEventId, controller: null };
     this.#subscriptions.add(record);
-    this.#open(record);
+    this.#createDatabase(record);
     return {
       get lastEventId() {
         return record.lastEventId;
@@ -90,7 +90,7 @@ class MemoryLink extends Emitter {
     };
   }
 
-  #open(record) {
+  #createDatabase(record) {
     const controller = new AbortController();
     record.controller = controller;
     const name = record.method.split('/')[1];
@@ -142,7 +142,7 @@ class MemoryLink extends Emitter {
   async reconnect({ freshClient = true } = {}) {
     this.#down = false;
     if (freshClient) this.client.data = {};
-    for (const record of Array.from(this.#subscriptions)) this.#open(record);
+    for (const record of Array.from(this.#subscriptions)) this.#createDatabase(record);
     await this.emit('open');
     await this.emit('reconnect');
   }

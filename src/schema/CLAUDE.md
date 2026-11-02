@@ -10,7 +10,7 @@ src/schema/define.js      entity definitions, the injected validator (Standard S
 src/schema/lens.js        createLens — how an older record reads under this version (migrations, then the validator)
 src/schema/api.js         what the plugin does over the lent core: loadVersion (schema.json, at open), migrate() and check()
 src/schema/entity.js      project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
-                          the core's side of the schema (commit.js and storage.js require it), shared with the lens — requires shape.js,
+                          the core's side of the schema (commit.js and database.js require it), shared with the lens — requires shape.js,
                           paths.js only
 ```
 

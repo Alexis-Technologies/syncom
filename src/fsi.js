@@ -164,7 +164,7 @@ const list = async (dir) => {
   return names.sort();
 };
 
-// fsync: what `open({ durable: true })` calls after every write. The OPFS
+// fsync: what `createDatabase({ durable: true })` calls after every write. The OPFS
 // half has none — a closed writable is durable there.
 const sync = async (dir, filename) => {
   const handle = await fs.open(path.join(dir, filename), 'r');

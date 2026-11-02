@@ -27,7 +27,7 @@ test('Patches (lean core, plugins by hand)', async (t) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `patches-${n++}-${name}`);
     const plugins = [versions, text, tree, sync, encryption, chain, schema, query];
-    const storage = await core.open({ path: paths.get(key), fsi, logger: false, plugins, ...options });
+    const storage = await core.createDatabase({ path: paths.get(key), fsi, logger: false, plugins, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

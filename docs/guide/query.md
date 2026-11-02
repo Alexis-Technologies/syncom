@@ -11,11 +11,11 @@ whether or not anything queries them, and without the plugin `select()` and
 with it and with `schema` (the entities a collection is).
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { schema } = require('@alexify/syncom/schema');
 const { query } = require('@alexify/syncom/query');
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   plugins: [schema, query],
   schema: { entities: { Task: { index: ['boardId', 'status'], unique: ['key'] } } },
@@ -83,7 +83,7 @@ query there is a `TypeError`.
 
 The entity's `index` fields and `unique` keys — explicit, or read off a
 [metaschema schema](./schema#a-metaschema-model) — are what the
-[catalog](./storage#the-catalog-and-the-cache) keeps per record. A cursor
+[catalog](./database#the-catalog-and-the-cache) keeps per record. A cursor
 reads from it twice:
 
 - an **equality** on an indexed field (`field: value`, `$eq`, `$in`) narrows
@@ -114,17 +114,17 @@ every equality narrows that order rather than replacing it.
 
 ## Full-text search
 
-An entity names the fields to search, and `open({ search })` gives the index
+An entity names the fields to search, and `createDatabase({ search })` gives the index
 that searches them — `createSearch()` from the `@alexify/syncom/search`
 subpath, so a node that never searches ships none of it:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { schema } = require('@alexify/syncom/schema');
 const { query } = require('@alexify/syncom/query');
 const { createSearch } = require('@alexify/syncom/search');
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   plugins: [schema, query],
   schema: { entities: { Note: { index: ['boardId'], search: ['title', 'body'] } } },
@@ -146,7 +146,7 @@ Rows come back **best first** unless the cursor has an `order()`; `limit()`
 and `one()` stop reading at enough matches, and `count()` counts every match.
 `watch()` runs again when a matching record lands. Scores are not handed out.
 
-**What is searched.** The record as it reads — the [lens](./storage#reading-across-versions)
+**What is searched.** The record as it reads — the [lens](./database#reading-across-versions)
 applied — through the `search` fields: a string field, and the string elements
 of an array field, joined by a space. An encrypted record and a deleted one
 never match, and neither does a record of another collection.

@@ -887,7 +887,7 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const b = mesh.get('B');
     const id = await a.insert({ title: 'Draft', views: 0 });
     await settle([a, b]);
-    const record = await b.record(id);
+    const record = await b.document(id);
     const seen = [];
     record.on('update', (data, delta) => seen.push(delta));
     record.title = 'B edit';

@@ -6,7 +6,7 @@ the node talks to, and every replica converges on the same records without a coo
 engine also covers what an application keeps next to replication:
 
 - **Storage.** Records on `node:fs`, OPFS, IndexedDB or memory, schema-driven collections,
-  live `Record`s with their own delta, compare-and-swap, encryption at rest, and fields that
+  live `Document`s with their own delta, compare-and-swap, encryption at rest, and fields that
   are counters, sets, lists, texts or trees as well as plain values.
 - **Schema and queries.** Validation with a metaschema model, any Standard Schema, ajv or a
   compiled JSON Schema, on every node a write reaches. Versions travel with every op, and old

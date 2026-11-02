@@ -41,7 +41,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     await storage.splice(person.id, 'notes', 0, 0, SECRET);
     const keep = await storage.insert({ ssn: 'KEEP' });
     assert.strictEqual(await holdsSecret(storage), true, 'before: the payload is in the log and the record');
-    const record = await storage.record(person.id);
+    const record = await storage.document(person.id);
     const updates = [];
     record.on('update', (data) => updates.push(data));
     await storage.purge(person.id, { actor: 'dpo' });

@@ -39,9 +39,10 @@ src/versions/api.js      the versions API — get(id, { at }), history, diff/res
   walk, the untag move-down and the lazy read of an older tag are the header
   of `src/versions/tags.js` (the versions plugin's: without the plugin
   `core.tags` is null, `stats().tags` null, and a directory with tags is
-  refused at open — `#hasTags`). What crosses modules: record files are copied by
-  `EntryStore.#changing` (`before(id, file)`) ahead of
-  `write`/`writeSealed`/`remove`, into the NEWEST tag only, once per record,
+  refused at open — `#hasTags`). What crosses modules: a record's copy is taken by
+  `EntryStore.#changing` (`before(id, file)` → `{ copy, done }`) and rides in the
+  write set of `write`/`writeSealed`/`remove` ahead of the record — `done()` marks
+  it once the set is down — into the NEWEST tag only, once per record,
   only for a record the tag's catalog holds live — so the newest tag is read
   at open and after every drop, an older one at its first use, and the sync
   readers `hasAt`/`rowAt`/`catalogOf` come after `ensure(name)` (a Cursor at
@@ -49,7 +50,7 @@ src/versions/api.js      the versions API — get(id, { at }), history, diff/res
   refuses (`UNPERSISTED`) while a record is held — its file is behind the
   cache and a copy from memory would carry no block to verify; a record held
   since the tag reads as its file, still the tag's state. An unreadable
-  `tags.json` never fails `open()` (`tags.corrupt.json`, `stats().tags`,
+  `tags.json` never fails `createDatabase()` (`tags.corrupt.json`, `stats().tags`,
   `take()` refuses `CORRUPT`, the copies wait under `tags/.pending/data/` for
   the next good open); never rebuild `tags.json` from the disk — fsi lists
   files, not directories. Every purge path goes through `core.scrub` (log +

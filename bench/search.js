@@ -18,7 +18,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/all/all.js');
+const { createDatabase } = require('../src/all/all.js');
 const { createSearch } = require('../src/search/search.js');
 
 const RECORDS = 2000;
@@ -69,7 +69,7 @@ const main = async () => {
     const schema = { entities: { Item: { index: ['group'], search: ['title', 'body'] } } };
     // Inserts into a store of their own: however many the row writes, the
     // queries below run over exactly the corpus.
-    const scratch = await open({
+    const scratch = await createDatabase({
       path: path.join(root, 'scratch'),
       lock: false,
       logger: false,
@@ -81,7 +81,7 @@ const main = async () => {
       warmup: 20,
     });
     await scratch.close();
-    const storage = await open({
+    const storage = await createDatabase({
       path: path.join(root, 'corpus'),
       lock: false,
       logger: false,
@@ -98,7 +98,7 @@ const main = async () => {
     await bench(
       `open — catalog reloaded with text (${RECORDS} records)`,
       async () => {
-        const reopened = await open({
+        const reopened = await createDatabase({
           path: path.join(root, 'corpus'),
           lock: false,
           logger: false,

@@ -5,7 +5,7 @@ const { SyncomError } = require('./errors.js');
 // file is reached from the browser bundle, and scripts/size.js fails on any
 // import that is not a relative file.
 //
-// A hook is one function per name, configured up front (`open({ hooks })`)
+// A hook is one function per name, configured up front (`createDatabase({ hooks })`)
 // and awaited INSIDE the operation it belongs to: it can alter the operation
 // or abort it by throwing. An event is what `on()` subscribes to from the
 // outside: many listeners, none of which can affect the operation — a

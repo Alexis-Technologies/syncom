@@ -12,7 +12,7 @@ src/search/search.js      the @alexify/syncom/search subpath — the trigram tex
 
 - **`$text` is the catalog's.** An entity's `search` fields are joined into
   its catalog row as `row.text` (format 3, a seventh cell) and handed to the
-  injected `TextIndex` (`open({ search })`, built per entity in
+  injected `TextIndex` (`createDatabase({ search })`, built per entity in
   `#defineSchema`) LAZILY: `#insert`/`#remove` leave the last word per id in
   `#textPending`, and `candidates` flushes it before a `$text` query reads the
   index (re-indexing a text on every keystroke cost the whole text each time)

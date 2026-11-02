@@ -20,10 +20,10 @@ npm install @alexify/syncom @alexify/wrpc
 
 ```js
 const { Server, defineRouter } = require('@alexify/wrpc');
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { sync } = require('@alexify/syncom/sync');
 
-const storage = await open({ path: 'data', plugins: [sync] });
+const storage = await createDatabase({ path: 'data', plugins: [sync] });
 
 const router = defineRouter({
   syncom: storage.sync.unit({
@@ -46,11 +46,11 @@ until one has a session. Either open it with `'public'` and gate with
 
 ```js
 const { WrpcClient } = require('@alexify/wrpc');
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   plugins: [sync],
   sync: {
@@ -77,12 +77,12 @@ dial other nodes; that is what makes a [mesh](./sync#protocol).
 The subpath has no Node.js code, so the same two imports work in a bundle:
 
 ```js
-import { open } from '@alexify/syncom';
+import { createDatabase } from '@alexify/syncom';
 import { sync } from '@alexify/syncom/sync';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { WrpcClient } from '@alexify/wrpc';
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'app',
   plugins: [sync],
   sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },

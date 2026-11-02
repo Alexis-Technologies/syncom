@@ -17,7 +17,7 @@ test('Storage over IndexedDB', async (t) => {
   await t.test('insert, get, replicate-shaped reads, reopen', async () => {
     const factory = new IDBFactory();
     const fsi = createIdbFsi({ indexedDB: factory, name: 'app' });
-    const storage = await browser.open({ path: 'store', fsi, logger: false });
+    const storage = await browser.createDatabase({ path: 'store', fsi, logger: false });
     const id = await storage.insert({ title: 'Draft' });
     await storage.update(id, { title: 'Final' });
     assert.deepStrictEqual(await storage.get(id), { title: 'Final' });
@@ -29,7 +29,7 @@ test('Storage over IndexedDB', async (t) => {
     assert.deepStrictEqual(await browser.list('store/data'), []);
     assert.deepStrictEqual(await fsi.list('store/data'), [`${id}.json`]);
 
-    const reopened = await browser.open({ path: 'store', fsi, logger: false });
+    const reopened = await browser.createDatabase({ path: 'store', fsi, logger: false });
     assert.strictEqual(reopened.nodeId, nodeId);
     assert.deepStrictEqual(await reopened.get(id), { title: 'Final' });
     await reopened.close();

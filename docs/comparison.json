@@ -260,7 +260,7 @@
         },
         "node": {
           "mark": "✅",
-          "text": "≥22, `node:fs`",
+          "text": "≥24, `node:fs`",
           "source": "package.json engines; src/fsi.js"
         },
         "browser": {
@@ -281,7 +281,7 @@
         "model": {
           "mark": "",
           "text": "JSON records in collections",
-          "source": "docs/guide/storage.md"
+          "source": "docs/guide/database.md"
         },
         "schema": {
           "mark": "✅",
@@ -409,7 +409,7 @@
         "purge": {
           "mark": "✅",
           "text": "`purge()` scrubs the op log",
-          "source": "src/log.js; docs/guide/storage.md#purge",
+          "source": "src/log.js; docs/guide/database.md#purge",
           "note": "The chain keeps an unsalted SHA-256 of every version of the record, which can confirm a guessed record."
         },
         "history": {
@@ -419,7 +419,7 @@
         },
         "hooks": {
           "mark": "✅",
-          "text": "`open({ hooks })`: writes, reads, peer batches",
+          "text": "`createDatabase({ hooks })`: writes, reads, peer batches",
           "source": "src/hooks.js; docs/guide/hooks.md"
         },
         "observability": {
@@ -785,7 +785,7 @@
         "browser": {
           "mark": "✅",
           "text": "IndexedDB (`storage-indexeddb`)",
-          "source": "@automerge/automerge-repo-storage-indexeddb@2.6.0-alpha.3; automerge-repo README 'Storage adapters'"
+          "source": "@automerge/automerge-repo-storage-indexeddb@2.6.0-alpha.3; automerge-repo README 'Database adapters'"
         },
         "mobile": {
           "mark": "⚠️",
@@ -3609,7 +3609,7 @@
         "browser": {
           "mark": "✅",
           "text": "OPFS only; in-memory fallback",
-          "source": "https://docs.livestore.dev/platform-adapters/web-adapter/ (Storage, Private browsing mode)",
+          "source": "https://docs.livestore.dev/platform-adapters/web-adapter/ (Database, Private browsing mode)",
           "detail": "Where OPFS is missing (Safari/Firefox private mode) it silently falls back to memory; check `store.storageMode`."
         },
         "mobile": {
@@ -4948,13 +4948,13 @@
         "browser": {
           "mark": "⚠️",
           "text": "IndexedDB cache: recent queries, pending txs",
-          "source": "core src/Reactor.js:295 (Storage = IndexedDBStorage), :458-494 (_initStorage: querySubs + kv PersistedObjects); src/IndexedDBStorage.ts:186; docs https://instantdb.com/docs/init.md (queryCacheLimit); custom `Store` option in src/index.ts InstantConfig",
+          "source": "core src/Reactor.js:295 (Database = IndexedDBStorage), :458-494 (_initStorage: querySubs + kv PersistedObjects); src/IndexedDBStorage.ts:186; docs https://instantdb.com/docs/init.md (queryCacheLimit); custom `Store` option in src/index.ts InstantConfig",
           "detail": "Only the results of recently subscribed queries are cached (`queryCacheLimit` default 10), not a full dataset."
         },
         "mobile": {
           "mark": "✅",
           "text": "`@instantdb/react-native` (AsyncStorage, MMKV, expo-sqlite)",
-          "source": "@instantdb/react-native@1.0.67 src/Storage.native.ts; npm @instantdb/react-native-mmkv and @instantdb/expo-sqlite 1.0.67; https://instantdb.com/docs/start-rn.md"
+          "source": "@instantdb/react-native@1.0.67 src/Database.native.ts; npm @instantdb/react-native-mmkv and @instantdb/expo-sqlite 1.0.67; https://instantdb.com/docs/start-rn.md"
         },
         "server": {
           "mark": "⚠️",

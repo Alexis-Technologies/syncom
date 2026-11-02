@@ -15,7 +15,7 @@
 
 const { bench } = require('./support/harness.js');
 const T = require('../src/tree/moves.js');
-const { applyOp, open } = require('../src/all/all.js');
+const { applyOp, createDatabase } = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 
 const op = (ts, origin, value) => ({ origin, seq: ts, ts, type: 'tree', id: 'r', key: 'outline', value });
@@ -132,7 +132,7 @@ const main = async () => {
     warmup: 3,
   });
 
-  const storage = await open({ path: '/bench', fsi: memory(), logger: false });
+  const storage = await createDatabase({ path: '/bench', fsi: memory(), logger: false });
   const id = await storage.insert({});
   await storage.treeMove(id, 'outline', 'root');
   for (let i = 0; i < 300; i++) await storage.treeMove(id, 'outline', `n${i}`, 'root');

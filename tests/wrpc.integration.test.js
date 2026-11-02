@@ -32,7 +32,7 @@ const { createChannelPair } = require('./utils/fake-channel.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };

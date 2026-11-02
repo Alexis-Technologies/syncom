@@ -12,12 +12,12 @@ manager itself is the `sync` plugin — `@alexify/syncom/sync`, registered by
 `@alexify/syncom/all`; the examples on this page open the core with it:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 const { WrpcClient } = require('@alexify/wrpc');
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   plugins: [sync],
   sync: {
@@ -51,17 +51,17 @@ in the log:
 | `mark` | `mark()`, `unmark()`, `unmarkById()`, `record.mark()`, `record.unmark()`, `record.unmarkById()` | Styles a range of a text field between two anchors, or switches a mark off |
 | `tree` | `treeMove()`, `treeRemove()`, `record.treeMove()`, `record.treeRemove()` | Moves a node of a tree field under a parent (`$trash`: removed) at a place among its siblings — see [Trees](./lists#trees) |
 | `delete` | `delete()`, `record.delete()` | Leaves a tombstone; a newer write revives the record |
-| `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./storage#purge)) |
+| `purge` | `purge()` | Erases the record for good: wins at any stamp, nothing later lands, and every entry of the id is scrubbed from the log (see [Purge](./database#purge)) |
 | `merge` | a snapshot page being joined | Joins a whole entry (see [Bootstrap](#bootstrap)) |
 | `advance` | a snapshot being joined | Records which ops the joined state already covers |
 
 `origin` is the node that made the op, `seq` its sequence number on that node,
 `ts` a millisecond stamp that never runs backwards and never falls behind a
 stamp the node has seen from a peer (see [Clocks](#clocks)). `v` is the
-[schema version](./storage#schema-versions) of the node that made it — absent
+[schema version](./database#schema-versions) of the node that made it — absent
 on a node without a schema, and on `merge`/`advance` — and a record remembers
 the version of its last whole-record write as `meta.v`. `actor` is who made
-it: `open({ actor })` (a string, or a function asked per write — the
+it: `createDatabase({ actor })` (a string, or a function asked per write — the
 signed-in user) or the write's own `{ actor }`, absent when neither says. It
 rides on the op, into every log and every `change` and `beforeApply` on the
 way, and never into the record: an audit trail is the log, not the state.
@@ -310,7 +310,7 @@ restore and that hello reused seqs the host had, and are lost to it.
 Without proof — no signing plugin, `signatures: false`, or a host whose log no
 longer retains that op — the stream stays where the node's log has it, and
 nothing of it goes to that host until the next hello (the host would take it
-for what it holds). `open({ sync: { rewind: 'adopt' } })` takes the host's
+for what it holds). `createDatabase({ sync: { rewind: 'adopt' } })` takes the host's
 word instead: the stream moves without proof (up to
 `Number.MAX_SAFE_INTEGER − 2^32`, never past it). Decide before the node
 writes on that stream again: a write made meanwhile takes a seq the host
@@ -328,7 +328,7 @@ peer lacks from this node's log by that peer's version vector, the way a push
 does. A transport of the application's own carries the pages:
 
 ```js
-const { open, outbound } = require('@alexify/syncom');
+const { createDatabase, outbound } = require('@alexify/syncom');
 
 // what `a` has that `b` lacks, by b's vector; then b takes it
 const { ops } = outbound(a.log, { exclude: b.nodeId, vector: b.vector, own: a.nodeId });
@@ -345,10 +345,10 @@ Signatures are the `signing` plugin — `@alexify/syncom/signing`, registered by
 `@alexify/syncom/all`:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { signing } = require('@alexify/syncom/signing');
 
-const storage = await open({ path: 'data', plugins: [signing] });
+const storage = await createDatabase({ path: 'data', plugins: [signing] });
 ```
 
 With it every op a node makes is signed with its Ed25519 key, and the node's
@@ -378,7 +378,7 @@ digest = SHA-256( nonce + "\n" + canonical(payload) )
 (below); the digest by a node that signs, which is how a signed op's
 fingerprint covers its payload as well as its header.
 
-The split is what lets a [purge](./storage#purge) scrub the payload and the
+The split is what lets a [purge](./database#purge) scrub the payload and the
 nonce out of the log and leave an op whose header still verifies — a resuming
 peer takes the scrubbed op as the no-op it is — and the nonce is what keeps a
 scrubbed op's digest from giving a low-entropy payload away by brute force. A
@@ -386,7 +386,7 @@ scrubbed op's digest from giving a low-entropy payload away by brute force. A
 a payload like any other. The three fields ride in `packOps` slots 15 to 17,
 and `prev` in the nineteenth.
 
-`open({ sync: { signatures } })` picks the mode:
+`createDatabase({ sync: { signatures } })` picks the mode:
 
 | Mode | This node | A peer's op with a signature | A peer's op without one |
 | --- | --- | --- | --- |
@@ -395,7 +395,7 @@ and `prev` in the nineteenth.
 | `false` | signs nothing | taken, unverified | taken |
 | without the plugin (`'verify'`) | signs nothing — its id is no key | taken, unverified | taken |
 
-`'require'` without the plugin is refused at `open()` (`PLUGIN_MISSING`): the
+`'require'` without the plugin is refused at `createDatabase()` (`PLUGIN_MISSING`): the
 mode has nothing to check with.
 
 A refused op is counted (`forged`, `unsigned` in the apply result and the
@@ -544,7 +544,7 @@ land.
 ### Schemas
 
 `schema` in both directions is `{ version, hash }` — the node's
-[schema version](./storage#schema-versions) and the hash of its `snapshot` —
+[schema version](./database#schema-versions) and the hash of its `snapshot` —
 or `null` for a node without one. The host's `authorize(context, hello)` sees
 it and may refuse; the dialer keeps it as `listNodes()[0].remote.schema`,
 and the `peer` and `hello` events carry it. The same version with another
@@ -564,7 +564,7 @@ backpressure; otherwise, or above the host's `pageBytes`, it comes inline. The d
 block, every record a `merge` op of its own (`mergeEntry`) — adopts the host's
 vector as of the first page, and re-subscribes from that page's event id.
 Whatever landed while paging replays and folds in as a no-op. A record the
-dialer keeps sealed ([encrypted](./storage#encryption-at-rest)) is left as it
+dialer keeps sealed ([encrypted](./database#encryption-at-rest)) is left as it
 is, and a record stamped beyond `sync.maxSkew` or under an id that is no
 record id is left out; the rest of the page lands. The metadata is rebuilt
 into the shape the engine trusts before it is joined, and a list or text
@@ -588,7 +588,7 @@ replicate a subset, assign records to scopes and register the peer with the
 scopes it should carry:
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   sync: {
     connect,
@@ -726,7 +726,7 @@ once `close()` was called is refused at once.
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
 | `sharedLog` | — | Reserved for a hub mode on a broker's log; refused in this version — see [Scaling](./scaling#hubs) |
 
-The `telemetry` option sits beside `sync` on `open()`, not inside it — see
+The `telemetry` option sits beside `sync` on `createDatabase()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.
 
 ## Hosting
@@ -914,11 +914,11 @@ the engine's own tests run on.
   refused, and a `beforeApply` that throws (the whole page is refused, and
   offered again).
 - **fsync is opt-in.** Files are written with the platform's default
-  durability; `open({ durable: true })` adds an fsync after every write on a
+  durability; `createDatabase({ durable: true })` adds an fsync after every write on a
   backend that has one (`node:fs`). On OPFS there is no rename either, so a
   torn write can only affect the newest, unannounced batch.
 - **Encrypted records do not sync.** They are sealed for this node's key alone
-  — see [Storage](./storage#encryption-at-rest).
+  — see [Database](./database#encryption-at-rest).
 - **A purge forgets, a scrub tears.** `purge()` strips an id's entries from
   the log in place (there is no rename); a crash mid-scrub leaves a torn
   file, which a resuming peer answers with a bootstrap. Idempotent: run it
@@ -935,6 +935,6 @@ the engine's own tests run on.
   `({ op, peer }) => op.actor === userOf(peer.node)` — and skip the op
   otherwise.
 - **A held op lives in the log.** With `ahead: 'hold'` an op from a newer
-  [schema version](./storage#reading-across-versions) waits as a flagged
+  [schema version](./database#reading-across-versions) waits as a flagged
   entry; retention that drops its segment before the upgrade loses it, which
   `schemaInfo.held.lost` reports once. Hence the 1000-op floor on retention.

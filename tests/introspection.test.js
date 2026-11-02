@@ -16,7 +16,7 @@ const { waitUntil, settle } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -26,7 +26,7 @@ test('storage.stats() reads the node without I/O', async (t) => {
   const ids = [];
   for (let i = 0; i < 3; i++) ids.push(await storage.insert({ i }));
   await storage.delete(ids[2]);
-  const pinned = await storage.record(ids[0]);
+  const pinned = await storage.document(ids[0]);
   const stats = storage.stats();
   assert.strictEqual(stats.closed, false);
   assert.strictEqual(stats.queue, 0);
@@ -39,7 +39,7 @@ test('storage.stats() reads the node without I/O', async (t) => {
   assert.ok(stats.log.segments >= 1, 'rollAfter 2: something was sealed');
   assert.ok(stats.log.latestTs > 0);
   assert.strictEqual(typeof stats.chain.tail, 'string');
-  assert.deepStrictEqual(stats.lock, { mode: 'fail' });
+  assert.deepStrictEqual(stats.lock, { kind: 'kv', mode: 'fail', expiresAt: null, lost: false });
   assert.strictEqual(pinned.i, 0);
   const bare = await openTemp(t, { chain: false, lock: false });
   assert.strictEqual(bare.stats().chain, null);

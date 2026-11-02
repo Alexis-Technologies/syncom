@@ -2,8 +2,8 @@
 
 // Everything in one import (@alexify/syncom/all): the core with every plugin
 // the package ships registered — the lists, the texts and the trees — the
-// way the package worked before it was taken apart into blocks. `open()`
-// here is `open()` of the core with those plugins ahead of the caller's
+// way the package worked before it was taken apart into blocks. `createDatabase()`
+// here is `createDatabase()` of the core with those plugins ahead of the caller's
 // (a plugin given twice is given once); `applyOp` and `mergeEntry` fold
 // under the same registry. The exports are spelled out — the core spread
 // whole, the rest by name — the shape cjs-module-lexer reads for an ESM
@@ -16,7 +16,7 @@ const { tree } = require('../tree/tree.js');
 const { signing } = require('../signing/signing.js');
 const { chain } = require('../chain/chain.js');
 const { encryption } = require('../encryption/encryption.js');
-const { memory } = require('../memory/memory.js');
+const { memory, memoryEngine } = require('../memory/memory.js');
 const { layered } = require('../layered/layered.js');
 const { sync } = require('../sync/sync.js');
 const { schema } = require('../schema/schema.js');
@@ -40,7 +40,7 @@ const withAll = (given = []) => {
   return plugins;
 };
 
-class Storage extends core.Storage {
+class Database extends core.Database {
   constructor(options = {}) {
     super(
       options === null || typeof options !== 'object' ? options : { ...options, plugins: withAll(options.plugins) },
@@ -48,7 +48,8 @@ class Storage extends core.Storage {
   }
 }
 
-const open = (options) => new Storage(options);
+const createDatabase = (options) => new Database(options);
+const open = createDatabase;
 const applyOp = (entry, op, limits = null) =>
   core.applyOp(entry, op, { ...limits, plugins: limits?.plugins ?? registry });
 const mergeEntry = (a, b, limits = null) => core.mergeEntry(a, b, { ...limits, plugins: limits?.plugins ?? registry });
@@ -60,8 +61,11 @@ module.exports = {
   ...require('../encryption/encryption.js'),
   ...require('../sync/sync.js'),
   memory,
+  memoryEngine,
   layered,
-  Storage,
+  Database,
+  createDatabase,
+  Storage: Database,
   open,
   applyOp,
   mergeEntry,

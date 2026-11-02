@@ -1,6 +1,6 @@
 'use strict';
 
-// open({ defer }): a local write's record file lags the log by at most the
+// createDatabase({ defer }): a local write's record file lags the log by at most the
 // window — the log is durable at once, reads see every write, tag() and
 // close() flush first, a peer's write of the record settles what waited.
 
@@ -15,7 +15,7 @@ const { waitUntil } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return { dir, storage };
 };
@@ -53,7 +53,7 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     async (t2) => {
       const { memory } = require('../src/memory/memory.js');
       // Over memory() every await settles in a microtask: the window's timer never fires inside the loop.
-      const storage = await syncom.open({
+      const storage = await syncom.createDatabase({
         path: '/busy',
         fsi: memory(),
         logger: false,
@@ -92,7 +92,7 @@ test('open({ defer }): record files lag the log by the window, never the reads',
     assert.deepStrictEqual(await file(dir, id), { n: 2 }, 'deferred again');
     await storage.close();
     assert.deepStrictEqual(await file(dir, id), { n: 3 }, 'flushed by close');
-    const again = await syncom.open({ path: dir, logger: false, defer: 10_000 });
+    const again = await syncom.createDatabase({ path: dir, logger: false, defer: 10_000 });
     t2.after(() => again.close().catch(() => {}));
     assert.deepStrictEqual(await again.get(id), { n: 3 });
     assert.deepStrictEqual(
@@ -163,7 +163,7 @@ test('open({ defer }): record files lag the log by the window, never the reads',
           return inner.write(dir, name, text);
         },
       };
-      const storage = await syncom.open({ path: '/slow', fsi: slow, logger: false, defer: 5 });
+      const storage = await syncom.createDatabase({ path: '/slow', fsi: slow, logger: false, defer: 5 });
       t2.after(() => storage.close().catch(() => {}));
       const id = await storage.insert({ title: 'doc' });
       await storage.flush();
@@ -210,8 +210,8 @@ test('open({ defer }): record files lag the log by the window, never the reads',
   await t.test('the option is a non-negative integer of milliseconds', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    assert.throws(() => syncom.open({ path: dir, logger: false, defer: -1 }), TypeError);
-    assert.throws(() => syncom.open({ path: dir, logger: false, defer: '50' }), TypeError);
+    assert.throws(() => syncom.createDatabase({ path: dir, logger: false, defer: -1 }), TypeError);
+    assert.throws(() => syncom.createDatabase({ path: dir, logger: false, defer: '50' }), TypeError);
   });
 });
 

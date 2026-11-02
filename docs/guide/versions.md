@@ -8,9 +8,9 @@ give. The past is the `versions` plugin — `@alexify/syncom/versions`,
 registered by `@alexify/syncom/all`: `get(id, { at })`, `history()`, `diff()`
 between versions, `restore()` and the tags; without it those throw
 `PLUGIN_MISSING`, `stats().tags` is null, and a directory that holds tags
-is refused at `open()` (their copies would not be kept). `applyPatches()`
+is refused at `createDatabase()` (their copies would not be kept). `applyPatches()`
 and `compact()` — the present and its patches — are the core's. The examples
-on this page assume `open({ plugins: [versions] })`.
+on this page assume `createDatabase({ plugins: [versions] })`.
 
 ```js
 const id = await storage.insert({ title: 'Draft' });
@@ -85,7 +85,7 @@ at })` rejects with `HISTORY_GONE` and `reason: 'compacted'` for a cut it
 cannot give exactly, and for a cut before anything retained of a record that
 exists. A record that never existed here reads as `null` at any version.
 
-One exception the reset rule has, the same one [`repair()`](./storage#repair)
+One exception the reset rule has, the same one [`repair()`](./database#repair)
 has: a counter slot that was alive across the reset keeps a sum older
 increments went into, so the fold from the reset lacks them. The fold of
 everything retained is compared with the record as it is, which shows the
@@ -151,7 +151,7 @@ reported `UNPERSISTED` and kept in memory, its file untouched, so the tag
 still reads the file — and the next write of it lands with the copy. For
 the same reason `tag()` refuses with `UNPERSISTED` while a record is held:
 there is no file of it to copy from until it lands. Under
-[`open({ defer })`](./storage), where a local write's file waits for the
+[`createDatabase({ defer })`](./database), where a local write's file waits for the
 window, `tag()` lands the waiting files first, so the tag's catalog and the
 files agree; a record written after the tag whose file still waits reads at
 the tag from that file — still the tag's state — and the copy is taken when
@@ -253,7 +253,7 @@ cycle, a sibling not there or a type change refuses the whole list, with the
 error the method would have thrown (`OUT_OF_RANGE`, `FIELD_KIND`, `CYCLE`,
 `NOT_FOUND`, `TYPE_IMMUTABLE`), before anything is appended: a restore lands
 whole or not at all. The patches then land as one
-[transaction](./storage#transactions): the hooks and the validator run on
+[transaction](./database#transactions): the hooks and the validator run on
 each op as it is made, and one that throws on a later op rejects the call
 with its error and leaves nothing written — no version in `history()`, no
 op on its way to the peers.
@@ -303,11 +303,11 @@ made when a concurrent op had already taken part of it.
 storage.on('commit', ({ op, seq, txn, source, before, after, kinds, changes }) => { … });
 ```
 
-Every local write — a call of the write API, a `Record`'s `save()`,
+Every local write — a call of the write API, a `Document`'s `save()`,
 `applyPatches()`, `restore()`, `compact()` — raises `commit` once its op is
 durable: the op, its seq in the log, `txn` (the seq of the first op of the
 transaction it was made in — its own for a single write), the `source` (the
-`Record` whose `save()` it was, or what `transact()`/`applyPatches()` was
+`Document` whose `save()` it was, or what `transact()`/`applyPatches()` was
 given; `null` otherwise), the record `before` and `after` as copies of what
 is stored (no lens), every field's `kinds` (`register`, `counter`, `set`,
 `list`, `text`, `tree` — of the fields there before and after) and its
@@ -381,7 +381,7 @@ record on every step. The manager pins the log from the oldest step it holds
 (conflicts are read from the log's entries), so a long stack holds segments
 past retention until `clear()` or `stop()`.
 
-A [transaction](./storage#transactions)'s commits are one step whatever the
+A [transaction](./database#transactions)'s commits are one step whatever the
 interval, and `group(fn)` — or `groupStart()` … `groupEnd()` — makes one of
 everything committed while `fn` runs. Every step carries `meta`, an object
 of the application's: put there on `push`, read back on `pop`, carried to
@@ -404,7 +404,7 @@ await storage.transact((tx) => tx.splice(id, 'body', 5, 0, ' there'), { source: 
 ```
 
 `trackedSources` keeps the stack to commits whose `source` is one of them (a
-transaction's, a `Record`'s save), `records` to these ids (or a predicate on
+transaction's, a `Document`'s save), `records` to these ids (or a predicate on
 the id), `paths` to these fields and what hangs under them: a step's inverse
 then keeps to those fields, and a whole-record change — an insert, a delete
 — is not the manager's business. A write at a prefix of a step's field, or

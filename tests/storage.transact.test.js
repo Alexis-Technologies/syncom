@@ -10,8 +10,8 @@ const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { openGroups } = require('./utils/groups.js');
 
-const open = async (t, options = {}) => {
-  const storage = await syncom.open({ path: '/t', fsi: memory(), logger: false, ...options });
+const createDatabase = async (t, options = {}) => {
+  const storage = await syncom.createDatabase({ path: '/t', fsi: memory(), logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -20,7 +20,7 @@ test('transactions', async (t) => {
   await t.test(
     'transact() lands its ops as one append: all or none, one log file, the events after; a throw or a refusal leaves nothing',
     async (t2) => {
-      const storage = await open(t2, { defer: 0 });
+      const storage = await createDatabase(t2, { defer: 0 });
       const events = [];
       const changes = [];
       const turns = [];
@@ -142,7 +142,7 @@ test('transactions', async (t) => {
       // Nothing written: no op, fn's value back; swap and delete inside; a Record follows.
       assert.strictEqual(await storage.transact(() => 42), 42);
       assert.strictEqual(storage.log.length, before);
-      const record = await storage.record(id);
+      const record = await storage.document(id);
       const swapped = await storage.transact(async (tx) => {
         const ok = await tx.swap(id, { n: 10 }, { n: 1 });
         const no = await tx.swap(id, { n: 11 }, { n: 1 });
@@ -169,7 +169,7 @@ test('transactions', async (t) => {
   await t.test(
     'applyPatches() is a transaction: a validator refusing a later op leaves nothing written',
     async (t2) => {
-      const storage = await open(t2, {
+      const storage = await createDatabase(t2, {
         defer: 0,
         schema: {
           entities: {
@@ -227,8 +227,13 @@ test('transactions', async (t) => {
   await t.test(
     'a transaction under defer lands at the flush; its message reaches a peer in the signed header, a changed one is forged',
     async (t2) => {
-      const a = await open(t2);
-      const b = await syncom.open({ path: '/b', fsi: memory(), logger: false, sync: { signatures: 'require' } });
+      const a = await createDatabase(t2);
+      const b = await syncom.createDatabase({
+        path: '/b',
+        fsi: memory(),
+        logger: false,
+        sync: { signatures: 'require' },
+      });
       t2.after(() => b.close().catch(() => {}));
       const id = await a.transact(
         async (tx) => {
@@ -269,7 +274,7 @@ test('transactions', async (t) => {
       delete long.sig;
       assert.strictEqual(
         (
-          await syncom.open({ path: '/c', fsi: memory(), logger: false }).then(async (c) => {
+          await syncom.createDatabase({ path: '/c', fsi: memory(), logger: false }).then(async (c) => {
             const out = await c.applyRemote([long]);
             await c.close();
             return out;
@@ -284,9 +289,9 @@ test('transactions', async (t) => {
     'a transaction refreshes a live Record once per record, with the delta of all its ops; each op still has its commit event',
     async (t2) => {
       for (const defer of [0, 16]) {
-        const storage = await open(t2, { defer, path: `/refresh-${defer}` });
+        const storage = await createDatabase(t2, { defer, path: `/refresh-${defer}` });
         const id = await storage.insert({ a: 0, b: 0 });
-        const record = await storage.record(id);
+        const record = await storage.document(id);
         const updates = [];
         record.on('update', (data, delta) => updates.push([{ ...data }, Object.keys(delta).sort()]));
         const commits = [];
@@ -315,7 +320,7 @@ test('transactions', async (t) => {
     // gc through the flag set at run time: the heap is read after a collection.
     require('node:v8').setFlagsFromString('--expose-gc');
     const gc = require('node:vm').runInNewContext('gc');
-    const storage = await open(t2, { defer: 0, path: '/large' });
+    const storage = await createDatabase(t2, { defer: 0, path: '/large' });
     const id = await storage.insert({ title: 't' });
     gc();
     const before = process.memoryUsage().heapUsed;

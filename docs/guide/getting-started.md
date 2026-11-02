@@ -25,7 +25,7 @@ npm install @alexify/syncom
 
 ## Opening a storage
 
-`open()` is asynchronous: it sets its plugins up — with `@alexify/syncom/all`
+`createDatabase()` is asynchronous: it sets its plugins up — with `@alexify/syncom/all`
 that generates or loads two key pairs, RSA to seal encrypted records and
 Ed25519 to sign ops, whose public key is the node id, and initialises the
 chain — opens the operation log, and returns once the storage is ready to
@@ -36,10 +36,10 @@ is a UUID, and the security blocks are plugins it takes
 ```js
 'use strict';
 
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 
 const main = async () => {
-  const storage = await open({ path: 'data' });
+  const storage = await createDatabase({ path: 'data' });
 
   const id = await storage.insert({ name: 'Ada', email: 'ada@example.com' });
   console.log(await storage.get(id)); // { name: 'Ada', email: 'ada@example.com' }
@@ -51,7 +51,7 @@ const main = async () => {
 main();
 ```
 
-`open()` takes one options object; `path` (or `name`) selects the directory,
+`createDatabase()` takes one options object; `path` (or `name`) selects the directory,
 and it defaults to `syncom`. Under it syncom keeps:
 
 | Entry | Contents |
@@ -65,17 +65,17 @@ and it defaults to `syncom`. Under it syncom keeps:
 | `log/` | the operation log — what peers replicate from |
 | `remote/` | one JSON file per registered sync node, from the first `addNode()` |
 
-[Storage](./storage#on-disk) lists the rest — `schema.json`, and `tags.json` and
+[Database](./database#on-disk) lists the rest — `schema.json`, and `tags.json` and
 `tags/` once a tag is taken.
 
 ## Records
 
-A `Record` is a live view of one stored object. Its properties are real
+A `Document` is a live view of one stored object. Its properties are real
 getters and setters: assigning to one stages a change and emits an `update`
 event, and `save()` writes the accumulated delta.
 
 ```js
-const record = await storage.record(id);
+const record = await storage.document(id);
 
 record.on('update', (data, delta) => {
   console.log('changed', delta);
@@ -86,7 +86,7 @@ console.log(record.delta()); // { name: 'Ada Lovelace' }
 await record.save();
 ```
 
-See [Storage](./storage) for collections, CAS writes and the explicit API.
+See [Database](./database) for collections, CAS writes and the explicit API.
 
 ## Fields that merge
 
@@ -139,7 +139,7 @@ the modified data. The chain is the `chain` plugin, registered by `/all`. See
 
 ## Syncing with other nodes
 
-Hand `open()` a way to reach a peer and register it; from then on writes flow
+Hand `createDatabase()` a way to reach a peer and register it; from then on writes flow
 both ways and converge without coordination:
 
 ```js
@@ -147,7 +147,7 @@ const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 const { WrpcClient } = require('@alexify/wrpc');
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   plugins: [sync],
   sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)) },

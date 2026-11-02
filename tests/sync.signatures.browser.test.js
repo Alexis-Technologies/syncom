@@ -12,7 +12,7 @@ test('Signatures (browser halves)', async (t) => {
 
   let n = 0;
   await runSignatureTests(t, assert, async (t2, name, options = {}) => {
-    const storage = await browser.open({ path: `signatures-${n++}-${name}`, logger: false, ...options });
+    const storage = await browser.createDatabase({ path: `signatures-${n++}-${name}`, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

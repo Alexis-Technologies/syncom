@@ -22,11 +22,12 @@ byte-level reference (slots, codes, payloads, the signed header, the log and rec
 files, the procedures, the bounds): a change to `packOps`, `wellFormed`, `signedMessage`,
 a file format, a procedure or a bound lands with its row there — `docs/guide/hooks.md` with the hook and
 event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`,
-`src/storage.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
+`src/database.js` and `src/sync/manager.js`, `docs/guide/schema.md` with
 `src/schema/` (metaschema is the first-class example there; zod/ajv/JSON
 Schema are the alternatives), `docs/guide/query.md` with `src/query/cursor.js` and
-`src/catalog.js`, `docs/guide/backends.md` with `src/backend.js`, `src/lock.js`
-and the two `fsi` halves. The browser-only WebRTC recipes in
+`src/catalog.js`, `docs/guide/backends.md` with `src/engine.js`, `src/files/files.js`, `src/backend.js`,
+`src/lock.js`, the two `fsi` halves and the engines (`src/memory/engine.js`, `src/idb/engine.js`,
+`src/sqlite/sqlite.js`, `src/mongodb/mongodb.js`). The browser-only WebRTC recipes in
 `docs/guide/webrtc.md` follow wrpc's documented API and the raw-channel
 integration tests; they cannot be run here.
 

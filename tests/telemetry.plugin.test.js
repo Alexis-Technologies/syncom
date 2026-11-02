@@ -36,22 +36,22 @@ test('telemetry as a plugin', async (t) => {
   await t.test('without the plugin an api or a tracer is PLUGIN_MISSING; a writer is taken as it is', async (t2) => {
     const fsi = memory();
     await assert.rejects(
-      () => core.open({ path: 'api', fsi, logger: false, telemetry: { api: { trace: {}, metrics: {} } } }),
+      () => core.createDatabase({ path: 'api', fsi, logger: false, telemetry: { api: { trace: {}, metrics: {} } } }),
       {
         name: 'TypeError',
         code: 'PLUGIN_MISSING',
         message:
-          "open({ telemetry }) needs the telemetry plugin: open({ plugins: [telemetry] }) from '@alexify/syncom/telemetry'",
+          "createDatabase({ telemetry }) needs the telemetry plugin: createDatabase({ plugins: [telemetry] }) from '@alexify/syncom/telemetry'",
       },
     );
     await assert.rejects(
-      () => core.open({ path: 'tracer', fsi, logger: false, telemetry: { tracer: createTracer() } }),
+      () => core.createDatabase({ path: 'tracer', fsi, logger: false, telemetry: { tracer: createTracer() } }),
       {
         code: 'PLUGIN_MISSING',
       },
     );
     // The disabled writer is what a storage without telemetry records through.
-    const plain = await core.open({ path: 'plain', fsi, logger: false });
+    const plain = await core.createDatabase({ path: 'plain', fsi, logger: false });
     t2.after(() => plain.close().catch(() => {}));
     assert.strictEqual(plain.telemetry, DISABLED);
     await plain.insert({ a: 1 });
@@ -59,7 +59,7 @@ test('telemetry as a plugin', async (t) => {
     const tracer = createTracer();
     const writer = createTelemetry({ tracer });
     assert.notStrictEqual(writer, DISABLED);
-    const traced = await core.open({ path: 'writer', fsi, logger: false, telemetry: writer });
+    const traced = await core.createDatabase({ path: 'writer', fsi, logger: false, telemetry: writer });
     t2.after(() => traced.close().catch(() => {}));
     assert.strictEqual(traced.telemetry, writer);
     assert.strictEqual(traced.log.telemetry ?? writer, writer);
@@ -73,7 +73,7 @@ test('telemetry as a plugin', async (t) => {
   await t.test('with the plugin the api and the pre-built instances are adapted, on the lean core', async (t2) => {
     const fsi = memory();
     const tracer = createTracer();
-    const storage = await core.open({
+    const storage = await core.createDatabase({
       path: 'adapted',
       fsi,
       logger: false,
@@ -91,7 +91,7 @@ test('telemetry as a plugin', async (t) => {
     assert.ok(commits.every((span) => span.ended));
     assert.deepStrictEqual(storage.stats().commits, { fast: 1, queued: 1, coalesced: 0 });
     // An empty bag, or an api with neither trace nor metrics: the disabled writer, no refusal.
-    const quiet = await core.open({ path: 'quiet', fsi, logger: false, plugins: [telemetry], telemetry: {} });
+    const quiet = await core.createDatabase({ path: 'quiet', fsi, logger: false, plugins: [telemetry], telemetry: {} });
     t2.after(() => quiet.close().catch(() => {}));
     assert.strictEqual(quiet.telemetry, DISABLED);
   });

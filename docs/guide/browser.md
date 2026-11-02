@@ -5,7 +5,7 @@ bundler that honours `package.json#exports` and `#browser` picks it up with no
 configuration:
 
 ```js
-import { open, diff, merge } from '@alexify/syncom';
+import { createDatabase, diff, merge } from '@alexify/syncom';
 ```
 
 Under the hood the entry resolves to `browser.js`, and four modules are
@@ -49,11 +49,11 @@ RSA-OAEP (SHA-256), and the signature is Ed25519 over the same bytes. Keys,
 ciphertext and signatures move between the platforms: a signing pair on disk
 is one node id on both.
 
-**Storage is origin-private.** `fsi.browser.js` resolves paths against
-`navigator.storage.getDirectory()`, so `open({ path: 'data' })` creates a
+**Database is origin-private.** `fsi.browser.js` resolves paths against
+`navigator.storage.getDirectory()`, so `createDatabase({ path: 'data' })` creates a
 `data/` directory inside the origin's OPFS rather than on disk. It is
 per-origin and the browser may evict it. Another backend goes in through
-`open({ fsi })` — `memory()` for a node that must not persist, or
+`createDatabase({ fsi })` — `memory()` for a node that must not persist, or
 IndexedDB (see [Backends](./backends)).
 
 ## OPFS or IndexedDB
@@ -63,11 +63,11 @@ it, a profile that evicts it, an app that already lives in IndexedDB — the
 `@alexify/syncom/idb` subpath is the same contract over IndexedDB:
 
 ```js
-import { open } from '@alexify/syncom';
+import { createDatabase } from '@alexify/syncom';
 import { createIdbFsi } from '@alexify/syncom/idb';
 
-const fsi = createIdbFsi({ name: 'app' }); // one database, one store `files`
-const storage = await open({ path: 'data', fsi });
+const fsi = createIdbFsi({ name: 'app' }); // one database, one store `files` — the file store; idbEngine() below is the engine
+const storage = await createDatabase({ path: 'data', fsi });
 // …
 await storage.close();
 await fsi.close();
@@ -80,6 +80,25 @@ deletes it; a write resolves once its transaction completed, which is as
 durable as IndexedDB gets (`durable: true` is a no-op here). `close()` is the
 backend's own: the storage never closes a backend it was handed, since two
 storages may share one.
+
+**The engine over IndexedDB** is the other way in, and the one to prefer: object
+stores instead of files, a write set in one transaction, the log as rows, a tab's
+writes heard by the others through a `BroadcastChannel`:
+
+```js
+import { createDatabase } from '@alexify/syncom';
+import { idbEngine } from '@alexify/syncom/idb';
+
+const engine = idbEngine({ name: 'app' });            // one IndexedDB database, six stores, every path in it
+const db = await createDatabase({ path: 'data', engine });
+// …
+await db.close();
+await engine.close();                                  // the connection; engine.destroy() deletes the database
+```
+
+A record is the object it was handed, read back as an object — no JSON text
+made or parsed — and `engine.remove(path)` takes one database's rows out of
+every store. See [Engines](./backends#engines).
 
 **A browser node dials a hub, and hosts for its peers over WebRTC.** Its
 registry, log and cursors live in OPFS like everything else, so a reload

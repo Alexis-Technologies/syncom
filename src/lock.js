@@ -1,12 +1,14 @@
 'use strict';
 
 const { SyncomError } = require('./errors.js');
+const { fsiNamespace } = require('./engine.js');
 // Exclusive open. Two storages over one directory would both read the log's
 // vector and both mint the next `origin:seq` — the same number for two
 // different ops, which a peer drops as a duplicate and nothing ever
 // reconciles. So a directory is held by one instance at a time: through the
 // Web Locks API where there is one (the browser releases it when the tab
-// dies), through `<path>/lock.json` otherwise. No requires beyond ./errors.js: shared code.
+// dies), through the `lock.json` key of the database's root namespace
+// otherwise. Requires errors.js and engine.js only: shared code.
 
 const LOCK_FILE = 'lock.json';
 const DEFAULT_STALE = 30 * 60 * 1000;
@@ -38,7 +40,7 @@ const stale = (lock, staleAfter) => {
 };
 
 // The lockfile's text, or null when there is none.
-const readRaw = async (fsi, path) => ((await fsi.exists(path, LOCK_FILE)) ? fsi.read(path, LOCK_FILE) : null);
+const readRaw = (store) => store.get(LOCK_FILE);
 
 const parseLock = (raw) => {
   if (raw === null) return null;
@@ -50,7 +52,7 @@ const parseLock = (raw) => {
   }
 };
 
-const readLock = async (fsi, path) => parseLock(await readRaw(fsi, path));
+const readLock = async (store) => parseLock(await readRaw(store));
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -76,11 +78,14 @@ const webLock = (locks, name, mode) =>
  * Holds `path` for this instance: `{ release() }`. `mode` is `'fail'` (an
  * `Error` with `code: 'LOCKED'` when another instance holds it) or `'wait'`
  * (poll until it is free or stale — or `timeout` ms have passed, then
- * `LOCKED` too). A backend with `create` (exclusive) makes two openers racing
+ * `LOCKED` too). A store with `create` (exclusive) makes two openers racing
  * for a free lock lose deterministically; without it the last write wins and
- * the other reads it back and tries again.
+ * the other reads it back and tries again. `store` is the database's root
+ * namespace (src/engine.js `kvNamespace`); an `fsi` with the `path` as its
+ * directory is taken instead where one is given.
  */
-const acquireLock = async ({ fsi, path, mode, staleAfter = DEFAULT_STALE, poll = 100, timeout = Infinity }) => {
+const acquireLock = async ({ store, fsi, path, mode, staleAfter = DEFAULT_STALE, poll = 100, timeout = Infinity }) => {
+  const lockStore = store ?? fsiNamespace(fsi, path);
   // Web Locks only where a lock outlives nothing but the tab: Node has a
   // `navigator.locks` too, scoped to one process, which is not what two
   // processes over one directory need.
@@ -93,16 +98,16 @@ const acquireLock = async ({ fsi, path, mode, staleAfter = DEFAULT_STALE, poll =
   }
   const id = random();
   const pid = globalThis.process?.pid ?? null;
-  const exclusive = typeof fsi.create === 'function';
+  const exclusive = typeof lockStore.create === 'function';
   const deadline = Number.isFinite(timeout) ? Date.now() + timeout : Infinity;
   const holder = {
     release: async () => {
-      const now = await readLock(fsi, path);
-      if (now?.id === id) await fsi.remove(path, LOCK_FILE);
+      const now = await readLock(lockStore);
+      if (now?.id === id) await lockStore.remove(LOCK_FILE);
     },
   };
   for (;;) {
-    const raw = await readRaw(fsi, path);
+    const raw = await readRaw(lockStore);
     const current = parseLock(raw);
     if (current === null || stale(current, staleAfter)) {
       const body = JSON.stringify({ pid, id, since: Date.now() });
@@ -110,18 +115,18 @@ const acquireLock = async ({ fsi, path, mode, staleAfter = DEFAULT_STALE, poll =
         // A stale or unreadable file is removed first — if it is still the
         // same file: another opener may have taken the lock meanwhile, and
         // theirs is not ours to remove. Then only one creator succeeds.
-        if (raw !== null && (await readRaw(fsi, path)) === raw) await fsi.remove(path, LOCK_FILE);
+        if (raw !== null && (await readRaw(lockStore)) === raw) await lockStore.remove(LOCK_FILE);
         try {
-          await fsi.create(path, LOCK_FILE, body);
+          await lockStore.create(LOCK_FILE, body);
           return holder;
         } catch (error) {
           if (error?.code !== 'EEXIST') throw error;
         }
       } else {
-        await fsi.write(path, LOCK_FILE, body);
+        await lockStore.put(LOCK_FILE, body);
         // Two openers racing for a free lock: the one whose write landed
         // last owns it, the other reads that back and tries again.
-        const written = await readLock(fsi, path);
+        const written = await readLock(lockStore);
         if (written?.id === id) return holder;
       }
     } else if (mode === 'fail') {

@@ -1,6 +1,7 @@
 'use strict';
 
-// A storage's entries: the record files under `data/`, the bounded cache in
+// A storage's entries: the records in the engine's `records` store (the files
+// engine: `data/<id>.json`), the bounded cache in
 // front of them, and the catalog row each change leaves behind. An entry is
 // `{ data, meta, encrypted, block }` — `meta` is the replication bookkeeping
 // (see ops.js); an encrypted entry has none, it is stored as ciphertext for
@@ -24,6 +25,7 @@
 const { isRecordId, isPlainObject } = require('./shape.js');
 const { isAlive } = require('./ops.js');
 const { SyncomError } = require('./errors.js');
+const { now } = require('./telemetry/writer.js');
 
 const isThenable = (value) => value !== null && typeof value === 'object' && typeof value.then === 'function';
 
@@ -31,8 +33,7 @@ const isThenable = (value) => value !== null && typeof value === 'object' && typ
 const EVICT_SCAN = 64;
 
 class EntryStore {
-  #fsi;
-  #dir;
+  #db;
   #cache = new Map();
   #max;
   #logger;
@@ -47,6 +48,7 @@ class EntryStore {
   #held = new Set();
 
   #before;
+  #measure;
   #plugins;
   // Per record in pieces: the counter of its piece files and the names its
   // file holds now — what a write keeps or removes.
@@ -62,9 +64,20 @@ class EntryStore {
   // against its chain block, or is null; `view(id, entry)` is the lensed
   // read the catalog indexes; `before(id, file)` runs ahead of every change
   // of a record's file with `file()` the file as it is (the tags' copy).
-  constructor({ fsi, path, max, logger, catalog, pinned, verify, decrypt, view, before = null, plugins = null }) {
-    this.#fsi = fsi;
-    this.#dir = `${path}/data`;
+  constructor({
+    db,
+    max,
+    logger,
+    catalog,
+    pinned,
+    verify,
+    decrypt,
+    view,
+    before = null,
+    plugins = null,
+    measure = null,
+  }) {
+    this.#db = db;
     this.#max = max;
     this.#logger = logger;
     this.#catalog = catalog;
@@ -74,12 +87,26 @@ class EntryStore {
     this.#view = view;
     this.#before = before;
     this.#plugins = plugins;
+    this.#measure = measure;
+  }
+
+  // One write set of the engine, its time told (`measure(ms, ok)`): what `stats().engine` and the engine's histogram count.
+  async #write(batch) {
+    if (this.#measure === null) return void (await this.#db.write(batch));
+    const started = now();
+    try {
+      await this.#db.write(batch);
+    } catch (error) {
+      this.#measure(now() - started, false);
+      throw error;
+    }
+    this.#measure(now() - started, true);
   }
 
   /** The record's file as it is — its text — or null when there is none. */
   async file(id) {
-    if (!(await this.#fsi.exists(this.#dir, `${id}.json`))) return null;
-    const text = await this.#fsi.read(this.#dir, `${id}.json`);
+    const text = await this.#db.records.raw(id);
+    if (text === null) return null;
     // A record in pieces is handed whole: a copy of it stands alone.
     if (!text.includes('"parts":')) return text;
     let stored = null;
@@ -89,9 +116,9 @@ class EntryStore {
       return text;
     }
     if (!isPlainObject(stored) || stored.encrypted) return text;
-    await this.#assemble(id, stored.meta, undefined, false);
-    delete stored.gen;
-    return JSON.stringify(stored);
+    const whole = { ...stored, meta: await this.#assemble(id, stored.meta, undefined, false) };
+    delete whole.gen;
+    return JSON.stringify(whole);
   }
 
   /** Whether `id` is held: logged, in the cache, its file behind. */
@@ -104,8 +131,12 @@ class EntryStore {
     return new Set(this.#held);
   }
 
-  async #changing(id) {
-    if (this.#before !== null) await this.#before(id, () => this.file(id));
+  // What the newest tag keeps of the record before its file changes —
+  // `{ copy: [tag, id, text], done }` or null: the copy rides in the write
+  // set, ahead of the record, and `done()` marks it once the set is down.
+  #changing(id) {
+    if (this.#before === null) return null;
+    return this.#before(id, () => this.file(id));
   }
 
   get size() {
@@ -150,17 +181,19 @@ class EntryStore {
     return cached;
   }
 
-  async load(id) {
+  async load(id, stored = undefined) {
     if (!isRecordId(id)) return null;
-    const cached = this.#cache.get(id);
-    if (cached !== undefined) {
-      this.remember(id, cached);
-      return cached;
+    // `stored` given — read by a page's `getMany` — is taken as the record; the cache is asked otherwise.
+    if (stored === undefined) {
+      const cached = this.#cache.get(id);
+      if (cached !== undefined) {
+        this.remember(id, cached);
+        return cached;
+      }
+      stored = await this.#db.records.get(id);
     }
-    const exists = await this.#fsi.exists(this.#dir, `${id}.json`);
-    if (!exists) return null;
-    const raw = await this.#fsi.read(this.#dir, `${id}.json`);
-    const entry = await this.parse(id, raw);
+    if (stored === null) return null;
+    const entry = await this.#fromStored(id, stored);
     this.remember(id, entry);
     return entry;
   }
@@ -180,24 +213,48 @@ class EntryStore {
       cause = error;
     }
     if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
-      throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable`, { id, cause });
+      throw new SyncomError('INTEGRITY', `Record ${id} is unreadable`, { id, cause });
     }
+    return this.#fromStored(id, stored);
+  }
+
+  // A stored record (the engine's, parsed) as an entry: checked against its
+  // chain block, decrypted when sealed, its pieces made whole.
+  async #fromStored(id, stored) {
     const { data, meta, encrypted, block } = stored;
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
-      if (!isValid) throw new SyncomError('INTEGRITY', `Storage record ${id} is invalid`, { id });
+      if (!isValid) throw new SyncomError('INTEGRITY', `Record ${id} is invalid`, { id });
     }
     if (encrypted) return { data: await this.#decrypt(data), meta: null, encrypted: true, block };
     return { data, meta: await this.#assemble(id, meta, stored.gen, true), encrypted: false, block };
   }
 
   // A block in pieces made whole: each named piece read and its runs laid
-  // into one map — `meta` was just parsed, so it is changed in place. With
-  // `track`, the record's pieces are what its file names now.
-  async #assemble(id, meta, gen, track) {
-    const blocks = meta?.blocks;
-    if (!isPlainObject(blocks)) return meta;
+  // into one map. The stored record is the engine's — a native engine hands
+  // out the object it holds — so the meta is copied at its first block in
+  // pieces, never changed in place. With `track`, the record's pieces are
+  // what its file names now.
+  async #assemble(id, stored, gen, track) {
+    const blocks = stored?.blocks;
+    if (!isPlainObject(blocks)) return stored;
+    let meta = stored;
     let names = null;
+    // Every piece the blocks name, read in ONE call of the engine: a round trip a piece was the cold read's cost.
+    const wanted = [];
+    for (const field of Object.keys(blocks)) {
+      const held = blocks[field];
+      if (!isPlainObject(held) || !Array.isArray(held.parts)) continue;
+      for (let i = 0; i < held.parts.length; i++) {
+        const name = held.parts[i];
+        if (name === null) continue;
+        if (typeof name !== 'string' || !name.startsWith(`${id}~`) || !name.endsWith('.json')) {
+          throw new SyncomError('INTEGRITY', `Record ${id} names a piece not its own`, { id });
+        }
+        wanted.push(name);
+      }
+    }
+    const texts = wanted.length > 0 ? await this.#db.pieces.getMany(id, wanted) : new Map();
     for (const field of Object.keys(blocks)) {
       const held = blocks[field];
       if (!isPlainObject(held) || !Array.isArray(held.parts)) continue;
@@ -205,16 +262,15 @@ class EntryStore {
       for (let i = 0; i < held.parts.length; i++) {
         const name = held.parts[i];
         if (name === null) continue;
-        if (typeof name !== 'string' || !name.startsWith(`${id}~`) || !name.endsWith('.json')) {
-          throw new SyncomError('INTEGRITY', `Storage record ${id} names a piece not its own`, { id });
-        }
         let piece;
         try {
-          piece = JSON.parse(await this.#fsi.read(this.#dir, name));
+          const text = texts.get(name) ?? null;
+          if (text === null) throw new SyncomError('INTEGRITY', `piece ${name} is missing`, { id });
+          piece = JSON.parse(text);
         } catch (cause) {
-          throw new SyncomError('INTEGRITY', `Storage record ${id} is unreadable: its piece ${name}`, { id, cause });
+          throw new SyncomError('INTEGRITY', `Record ${id} is unreadable: its piece ${name}`, { id, cause });
         }
-        if (!isPlainObject(piece)) throw new SyncomError('INTEGRITY', `Storage record ${id}: piece ${name}`, { id });
+        if (!isPlainObject(piece)) throw new SyncomError('INTEGRITY', `Record ${id}: piece ${name}`, { id });
         const keys = Object.keys(piece);
         for (let k = 0; k < keys.length; k++) if (keys[k] !== '__proto__') runs[keys[k]] = piece[keys[k]];
         (names ??= new Set()).add(name);
@@ -223,7 +279,8 @@ class EntryStore {
       const keys = Object.keys(held);
       for (let k = 0; k < keys.length; k++) if (keys[k] !== 'parts') plain[keys[k]] = held[keys[k]];
       plain.runs = runs;
-      blocks[field] = plain;
+      if (meta === stored) meta = { ...stored, blocks: { ...blocks } };
+      meta.blocks[field] = plain;
       this.#plain.set(plain, held.parts);
     }
     if (track && (names !== null || Number.isSafeInteger(gen))) {
@@ -282,24 +339,37 @@ class EntryStore {
       if (out === meta) out = { ...meta, blocks: { ...blocks } };
       out.blocks[field] = { ...head, parts: names };
     }
-    return { meta: out, writes, kept, gen };
+    // The pieces the record named and names no more: dropped in the write set, after its file.
+    const dropped = [];
+    if (known !== undefined) {
+      for (const name of known.names) {
+        if (!kept.has(name)) dropped.push(name);
+      }
+    }
+    return { meta: out, writes, dropped, kept, gen };
   }
 
-  // The pieces of `id` its file no longer names, removed — after the file.
+  // The pieces a record holds now, remembered — none, forgotten.
+  #parted(id, kept, gen) {
+    if (gen > 0) this.#parts.set(id, { gen, names: kept });
+    else this.#parts.delete(id);
+  }
+
+  // The pieces of `id` its file no longer names, removed — after the file;
+  // a sealed or a removed record's (a write set carries a record's own).
   async #drop(id, kept, gen) {
     const known = this.#parts.get(id);
     if (known !== undefined) {
       for (const name of known.names) {
         if (kept.has(name)) continue;
         try {
-          await this.#fsi.remove(this.#dir, name);
+          await this.#db.pieces.remove(id, name);
         } catch (err) {
           this.#logger.warn({ event: 'storage.piece.unremoved', id, name, err });
         }
       }
     }
-    if (gen > 0) this.#parts.set(id, { gen, names: kept });
-    else this.#parts.delete(id);
+    this.#parted(id, kept, gen);
   }
 
   // The catalog's view of an entry: what `put` takes — at once, a promise
@@ -332,10 +402,10 @@ class EntryStore {
 
   // Puts what the record `id` is now; a record that fails its integrity
   // check is left out, like a replay leaves it alone.
-  async index(id) {
+  async index(id, stored = undefined) {
     let entry;
     try {
-      entry = await this.load(id);
+      entry = await this.load(id, stored);
     } catch (error) {
       this.#logger.warn({ event: 'catalog.skipped', id, err: error });
       return;
@@ -346,21 +416,65 @@ class EntryStore {
   // A replicated entry: the file, the cache, the catalog row — unless the
   // row is right already (the entry held by `hold` landing on its file: the
   // catalog read it then, and a watcher must not hear of it twice).
-  async write(id, entry, blockHash) {
-    await this.#changing(id);
-    const { meta, writes, kept, gen } = this.#split(id, entry.meta);
-    for (let i = 0; i < writes.length; i++) await this.#fsi.write(this.#dir, writes[i][0], writes[i][1]);
-    const stored = { data: entry.data, meta, encrypted: false, timestamp: Date.now(), block: blockHash };
-    if (gen > 0) stored.gen = gen;
-    await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
-    await this.#drop(id, kept, gen);
-    const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
-    const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
-    this.#held.delete(id);
-    // The composed view rides along: it reads data and meta alone, and both are the same objects here.
-    const cached = { data: entry.data, meta: entry.meta, encrypted: false, block: blockHash, composed: entry.composed };
-    this.remember(id, cached);
-    if (!indexed) this.#catalog.put(id, await this.row(id, cached));
+  async write(id, entry, blockHash, kv = null) {
+    await this.writeMany(new Map([[id, entry]]), blockHash, kv);
+  }
+
+  /**
+   * A batch of replicated entries landed as ONE write set of the engine
+   * (atomic where the engine has transactions): each record's new pieces and
+   * its stored form, in id order as given; then, per record, the pieces its
+   * file no longer names dropped, the cache and the catalog row — unless the
+   * row is right already (the entry held by `hold` landing on its file: the
+   * catalog read it then, and a watcher must not hear of it twice).
+   */
+  async writeMany(touched, blockHash, kv = null) {
+    const rows = [];
+    const after = [];
+    const copies = [];
+    const marks = [];
+    for (const [id, entry] of touched) {
+      const keeping = await this.#changing(id);
+      if (keeping !== null) {
+        copies.push(keeping.copy);
+        marks.push(keeping.done);
+      }
+      const { meta, writes, dropped, kept, gen } = this.#split(id, entry.meta);
+      const stored = { data: entry.data, meta, encrypted: false, timestamp: Date.now(), block: blockHash };
+      if (gen > 0) stored.gen = gen;
+      const row = { id, stored };
+      if (writes.length > 0 || dropped.length > 0) {
+        row.pieces = {};
+        if (writes.length > 0) row.pieces.put = writes;
+        if (dropped.length > 0) row.pieces.remove = dropped;
+      }
+      rows.push(row);
+      after.push([id, entry, kept, gen]);
+    }
+    // ONE write set: the kv puts — a chain block and its tail — the tags' copies of the records as they were,
+    // the records with the pieces they make and drop. Atomic where the engine has transactions.
+    const batch = { records: rows };
+    if (kv !== null) batch.kv = kv;
+    if (copies.length > 0) batch.copies = { put: copies };
+    await this.#write(batch);
+    for (let i = 0; i < marks.length; i++) marks[i]();
+    for (let i = 0; i < after.length; i++) {
+      const [id, entry, kept, gen] = after[i];
+      this.#parted(id, kept, gen);
+      const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
+      const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;
+      this.#held.delete(id);
+      // The composed view rides along: it reads data and meta alone, and both are the same objects here.
+      const cached = {
+        data: entry.data,
+        meta: entry.meta,
+        encrypted: false,
+        block: blockHash,
+        composed: entry.composed,
+      };
+      this.remember(id, cached);
+      if (!indexed) this.#catalog.put(id, await this.row(id, cached));
+    }
   }
 
   // An entry whose op is logged but whose file (or chain block) could not be
@@ -380,10 +494,14 @@ class EntryStore {
 
   // An entry sealed for this node's key: `record` is the ciphertext the
   // file holds, `data` what the cache (and so a read) holds.
-  async writeSealed(id, record, data, blockHash) {
-    await this.#changing(id);
+  async writeSealed(id, record, data, blockHash, kv = null) {
+    const keeping = await this.#changing(id);
     const stored = { data: record, meta: null, encrypted: true, timestamp: Date.now(), block: blockHash };
-    await this.#fsi.write(this.#dir, `${id}.json`, JSON.stringify(stored));
+    const batch = { records: [{ id, stored }] };
+    if (kv !== null) batch.kv = kv;
+    if (keeping !== null) batch.copies = { put: [keeping.copy] };
+    await this.#write(batch);
+    keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.remember(id, { data, meta: null, encrypted: true, block: blockHash });
     this.#catalog.put(id, { type: data?.$type, v: null, encrypted: true });
@@ -391,8 +509,11 @@ class EntryStore {
 
   // A sealed entry removed: an encrypted record has no op, so no tombstone.
   async remove(id) {
-    await this.#changing(id);
-    await this.#fsi.remove(this.#dir, `${id}.json`);
+    const keeping = await this.#changing(id);
+    const batch = { remove: [id] };
+    if (keeping !== null) batch.copies = { put: [keeping.copy] };
+    await this.#write(batch);
+    keeping?.done();
     await this.#drop(id, new Set(), 0);
     this.#cache.delete(id);
     this.#catalog.put(id, null);

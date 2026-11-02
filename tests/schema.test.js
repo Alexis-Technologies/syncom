@@ -89,12 +89,12 @@ test('normalizeSchema', async (t) => {
   });
 
   await t.test('the shape is checked at open, with TypeErrors that name the problem', () => {
-    assert.throws(() => normalizeSchema('nope'), typeError('open({ schema }): schema must be an object'));
-    assert.throws(() => normalizeSchema({ lenses: {} }), typeError("open({ schema }): unknown key 'lenses'"));
+    assert.throws(() => normalizeSchema('nope'), typeError('createDatabase({ schema }): schema must be an object'));
+    assert.throws(() => normalizeSchema({ lenses: {} }), typeError("createDatabase({ schema }): unknown key 'lenses'"));
     for (const version of [0, -1, 1.5, '2', null]) {
       assert.throws(
         () => normalizeSchema({ version }),
-        typeError('open({ schema }): version must be a positive integer'),
+        typeError('createDatabase({ schema }): version must be a positive integer'),
         String(version),
       );
     }
@@ -104,7 +104,7 @@ test('normalizeSchema', async (t) => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { uniqe: ['slug'] } } }),
       typeError(
-        "open({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search)",
+        "createDatabase({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search)",
       ),
     );
     assert.throws(() => normalizeSchema({ entities: { Post: { validate: true } } }), /validate may only be false/);
@@ -176,7 +176,7 @@ test('normalizeSchema', async (t) => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { schema: json } } }),
       typeError(
-        'open({ schema }): entity Post: a schema without ~standard needs open({ validator }) or validate: false',
+        'createDatabase({ schema }): entity Post: a schema without ~standard needs createDatabase({ validator }) or validate: false',
       ),
     );
     assert.throws(
@@ -200,14 +200,14 @@ test('normalizeSchema', async (t) => {
     assert.strictEqual(entities.get('Post').standard, false);
     assert.throws(
       () => normalizeSchema({ entities: { Post: { schema: json } } }, { validator: { compile: () => 'nope' } }),
-      typeError('open({ schema }): entity Post: validator.compile() must return a function'),
+      typeError('createDatabase({ schema }): entity Post: validator.compile() must return a function'),
     );
   });
 
   await t.test('a ~standard property must carry validate()', () => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { schema: { '~standard': { version: 1 } } } } }),
-      typeError('open({ schema }): entity Post: ~standard has no validate()'),
+      typeError('createDatabase({ schema }): entity Post: ~standard has no validate()'),
     );
     const { entities } = normalizeSchema({ entities: { Post: { schema: standard((v) => ({ value: v })) } } });
     assert.strictEqual(entities.get('Post').standard, true);
@@ -257,7 +257,7 @@ test('createLens', async (t) => {
     assert.deepStrictEqual(await lens('x', { n: 1, $type: 'Nope' }, 3), { n: 1, $type: 'Nope' });
     await assert.rejects(() => lensOf({ version: 2, migrations: { 2: { up: () => null } } })('x', { n: 1 }, 1), {
       name: 'TypeError',
-      message: 'open({ schema }): migrations[2] must return an object (x)',
+      message: 'createDatabase({ schema }): migrations[2] must return an object (x)',
     });
   });
 

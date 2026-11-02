@@ -15,7 +15,7 @@ test('Patches (browser halves)', async (t) => {
   await runPatchTests(t, assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `patches-${n++}-${name}`);
-    const storage = await browser.open({ path: paths.get(key), logger: false, ...options });
+    const storage = await browser.createDatabase({ path: paths.get(key), logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

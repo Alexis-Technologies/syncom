@@ -16,7 +16,7 @@ test('Patches (node)', async (t) => {
       dirs.set(key, dir);
       t2.after(() => cleanupTemp(dir));
     }
-    const storage = await syncom.open({ path: dir, logger: false, ...options });
+    const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

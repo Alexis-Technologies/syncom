@@ -13,24 +13,24 @@ test('Exclusive open (browser halves)', async (t) => {
   const browser = requireBrowserAll();
 
   await t.test('without Web Locks: a lockfile in OPFS, held while the storage is open', async () => {
-    const first = await browser.open({ path: 'locked', logger: false });
+    const first = await browser.createDatabase({ path: 'locked', logger: false });
     assert.strictEqual(await browser.exists('locked', 'lock.json'), true);
-    await assert.rejects(() => browser.open({ path: 'locked', logger: false }), { code: 'LOCKED' });
+    await assert.rejects(() => browser.createDatabase({ path: 'locked', logger: false }), { code: 'LOCKED' });
     await first.close();
     assert.strictEqual(await browser.exists('locked', 'lock.json'), false);
-    const second = await browser.open({ path: 'locked', logger: false });
+    const second = await browser.createDatabase({ path: 'locked', logger: false });
     await second.close();
   });
 
   await t.test("with Web Locks: 'fail' is refused at once, 'wait' waits, close() releases", async (t2) => {
     const locks = installMockLocks();
     t2.after(() => locks.uninstall());
-    const first = await browser.open({ path: 'web', logger: false });
+    const first = await browser.createDatabase({ path: 'web', logger: false });
     assert.deepStrictEqual(globalThis.navigator.locks.held(), ['syncom:web']);
     assert.strictEqual(await browser.exists('web', 'lock.json'), false, 'no lockfile with Web Locks');
-    await assert.rejects(() => browser.open({ path: 'web', logger: false }), { code: 'LOCKED' });
+    await assert.rejects(() => browser.createDatabase({ path: 'web', logger: false }), { code: 'LOCKED' });
     let resolved = false;
-    const waiting = browser.open({ path: 'web', logger: false, lock: 'wait' }).then((s) => {
+    const waiting = browser.createDatabase({ path: 'web', logger: false, lock: 'wait' }).then((s) => {
       resolved = true;
       return s;
     });
@@ -53,7 +53,7 @@ test('Exclusive open (browser halves)', async (t) => {
       remove: browser.remove,
       list: browser.list,
     };
-    await assert.rejects(() => browser.open({ path: 'web', logger: false, fsi }), /nope/);
+    await assert.rejects(() => browser.createDatabase({ path: 'web', logger: false, fsi }), /nope/);
     assert.deepStrictEqual(globalThis.navigator.locks.held(), []);
   });
 });

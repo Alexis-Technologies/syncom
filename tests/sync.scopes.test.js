@@ -14,7 +14,7 @@ const { waitUntil } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -257,11 +257,11 @@ test('Scopes bound the records an op writes', async (t) => {
       // Written under a scope function that read every record; opened again under one that does not.
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const before = await syncom.open({ path: dir, logger: false });
+      const before = await syncom.createDatabase({ path: dir, logger: false });
       const fine = await before.insert({ $type: 'Other', n: 1 });
       await before.insert({ $type: 'Other', boom: true });
       await before.close();
-      const host = await syncom.open({ path: dir, logger, sync: { scope: picky } });
+      const host = await syncom.createDatabase({ path: dir, logger, sync: { scope: picky } });
       t2.after(() => host.close().catch(() => {}));
       const page = await host.snapshot({ scopes: ['Other'] });
       assert.deepStrictEqual(

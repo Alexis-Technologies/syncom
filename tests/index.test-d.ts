@@ -39,12 +39,14 @@ expectError(syncom.open({ fsi: {} }));
 expectError(syncom.open({ durable: 'yes' }));
 expectAssignable<StorageOptions>({ lock: 'wait' });
 expectAssignable<StorageOptions>({ lock: false });
+expectAssignable<StorageOptions>({ readOnly: true });
+expectError(syncom.open({ readOnly: 'yes' }));
 expectError(syncom.open({ lock: 'maybe' }));
 expectError(syncom.open({ lock: true }));
 expectAssignable<StorageOptions>({ cache: { max: 100 }, integrity: 'lazy', catalog: { flushEvery: 10 } });
 expectError(syncom.open({ integrity: 'trust' }));
 expectError(syncom.open({ cache: { max: 'many' } }));
-expectType<Fsi>(storage.fsi);
+expectType<Fsi | null>(storage.fsi);
 expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { fsi: memory() }));
 
 // fsi
@@ -452,6 +454,7 @@ storage.once('apply', (batch) => {
 });
 storage.on('error', (error) => {
   if (error.code === 'UNPERSISTED') return void expectType<string[]>(error.ids);
+  if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') return void expectType<string>(error.path);
   if (error.code === 'EQUIVOCATION') {
     expectType<'seq' | 'chain'>(error.reason);
     expectType<string>(error.held);
@@ -522,6 +525,7 @@ expectError(storage.applyRemote([], { bound: 'Doc' }));
 storage.on('error', (error) => {
   expectAssignable<SyncomError>(error);
   if (error.code === 'UNPERSISTED' || error.code === 'EQUIVOCATION') return;
+  if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') return;
   expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
   expectType<string>(error.op.origin);
 });
@@ -569,6 +573,31 @@ expectType<void>(log.retain((entry) => entry.op.type === 'write'));
 expectType<void>(log.retain(null));
 expectError(log.retain(true));
 expectType<number>(storage.stats().cache.pinned);
+expectType<string>(storage.stats().engine.name);
+expectType<{ heard: number; failed: number; caughtUp: number } | null>(storage.stats().follow);
+expectType<number>(storage.stats().engine.writes);
+expectType<boolean>(storage.stats().engine.capabilities.atomicBatch);
+expectType<boolean>(storage.stats().readOnly);
+expectType<boolean>(storage.readOnly);
+declare const engineDb: syncom.EngineDb;
+expectType<(() => void) | undefined>(engineDb.changes?.subscribe((message) => message.records));
+expectType<Promise<syncom.EngineLease> | undefined>(engineDb.lock?.({ mode: 'wait', onLost: () => {} }));
+declare const lease: syncom.EngineLease;
+expectType<number | undefined>(lease.gen);
+expectType<number | null | undefined>(lease.expiresAt);
+expectType<(() => void) | undefined>(lease.subscribe?.((event) => expectType<'renewed' | 'late'>(event.state)));
+expectType<Promise<void>>(lease.release());
+expectType<{ kind: 'kv' | 'native'; mode: 'fail' | 'wait'; expiresAt: number | null; lost: boolean } | null>(
+  storage.stats().lock,
+);
+storage.on('lease', (event) => {
+  expectType<'renewed' | 'late' | 'lost'>(event.state);
+  expectType<string>(event.path);
+});
+expectAssignable<syncom.SyncomErrorCode>('READ_ONLY');
+expectAssignable<syncom.SyncomErrorCode>('LEASE_LOST');
+expectAssignable<syncom.SyncomErrorCode>('FOLLOW_LOST');
+engineDb.changes?.subscribe((message) => expectType<Error | undefined>(message.error));
 expectType<{ tail: string } | null>(storage.stats().chain);
 expectType<{ count: number; corrupt: boolean } | null>(storage.stats().tags);
 expectType<number>(storage.stats().deferred);
@@ -747,6 +776,7 @@ expectType<syncom.ApplyResult>(syncom.applyOp(null, {} as syncom.SyncOp, { pendi
 declare const typedStorage: syncom.Storage;
 typedStorage.on('error', (error) => {
   if (error.code === 'UNPERSISTED') expectType<string[]>(error.ids);
+  else if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') expectType<string>(error.path);
   else expectType<syncom.SyncOp>(error.op);
 });
 declare const removal: syncom.WriteContext;
@@ -853,3 +883,42 @@ storage.record<Post>('id').then((record) => {
   record.likes = 3;
   expectType<Promise<void>>(record.save());
 });
+
+// The rename (2026-11): Database / Collection / Document, with the old names as aliases.
+{
+  const db = await syncom.createDatabase({ fsi: memory() });
+  expectType<syncom.DatabaseConstructor>(syncom.Database);
+  expectType<syncom.DatabaseConstructor>(syncom.Storage);
+  expectAssignable<syncom.Database>(db);
+  expectAssignable<Storage>(db);
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(db.document('id'));
+  expectType<Promise<syncom.Document<{ title: string }>>>(db.document<{ title: string }>('id'));
+  expectType<Promise<SyncomRecord<RecordData>>>(db.record('id'));
+  const doc = await db.document<{ title: string }>('id');
+  expectType<string>(doc.title);
+  expectAssignable<syncom.DatabaseOptions>({ fsi: memory() });
+  const typed = await syncom.createDatabase({ schema: { entities: { Post: {} } } });
+  expectAssignable<syncom.Collection>(typed.Post);
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(typed.Post.document('id'));
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(typed.Post.record('id'));
+  const legacy = await syncom.open({ fsi: memory() });
+  expectAssignable<syncom.Database>(legacy);
+}
+
+// The engine contract: an fsi becomes the files engine.
+{
+  const engine: syncom.Engine = syncom.filesEngine(memory());
+  expectType<boolean>(syncom.isEngine(engine));
+  expectType<string>(engine.name);
+  expectType<boolean>(engine.capabilities.atomicBatch);
+  const db: syncom.EngineDb = await engine.open('app');
+  expectType<Promise<string | null>>(db.kv.get('', 'node.json'));
+  expectType<Promise<syncom.StoredRecord | null>>(db.records.get('id'));
+  expectType<Promise<string[]>>(db.records.ids({ after: 'a', limit: 10 }));
+  expectAssignable<syncom.EngineWriteSet>({ records: [{ id: 'a', text: '{}' }], kv: { put: [['', 'k', 'v']] } });
+  expectError(engine.open(42));
+  const viaEngine = await syncom.createDatabase({ engine });
+  expectType<syncom.Engine>(viaEngine.engine);
+  expectType<Fsi | null>(viaEngine.fsi);
+  expectError(syncom.createDatabase({ engine: {} }));
+}

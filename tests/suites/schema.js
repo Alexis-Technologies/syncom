@@ -67,7 +67,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     });
     await assert.rejects(
       () => createStorage(t2, 'bad2', { schema: { entities: { Post: { schema: { type: 'object' } } } } }),
-      /needs open\({ validator }\) or validate: false/,
+      /needs createDatabase\({ validator }\) or validate: false/,
     );
     await assert.rejects(
       () => createStorage(t2, 'bad3', { validator: {} }),
@@ -75,7 +75,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
     );
     await assert.rejects(() => createStorage(t2, 'bad4', { getId: 'nope' }), {
       name: 'TypeError',
-      message: 'open({ getId }): getId must be a function',
+      message: 'createDatabase({ getId }): getId must be a function',
     });
   });
 
@@ -701,7 +701,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
           'replication is raw',
         );
         assert.deepStrictEqual(b.getCachedData(post.id), { title: 'x', $type: 'Post' }, 'the cache peek is raw');
-        const record = await b.record(post.id);
+        const record = await b.document(post.id);
         assert.strictEqual(record.name, 'x', 'a Record view reads through the lens');
         assert.strictEqual(await b.swap(post.id, { desc: 'swapped' }, { name: 'x' }), true, 'swap compares the view');
         await settle([a, b]);
@@ -907,7 +907,10 @@ const runSchemaTests = async (t, assert, createStorage) => {
       'version 1: nothing older to migrate',
     );
     const none = await createStorage(t2, 'N');
-    await assert.rejects(() => none.migrate(), { name: 'TypeError', message: 'migrate() needs open({ schema })' });
+    await assert.rejects(() => none.migrate(), {
+      name: 'TypeError',
+      message: 'migrate() needs createDatabase({ schema })',
+    });
   });
 
   await t.test(

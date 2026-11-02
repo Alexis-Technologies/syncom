@@ -11,10 +11,10 @@
 // active context. syncom itself never carries trace context: ops are durable
 // and traces are not, and wrpc already puts W3C context on every packet.
 //
-// The `telemetry` plugin builds the writer from `open({ telemetry })` —
+// The `telemetry` plugin builds the writer from `createDatabase({ telemetry })` —
 // `{ api }` or `{ tracer, meter }` — and hands it to the core, which records
 // through the contract of src/telemetry/writer.js (DISABLED, `traced`). Without the
-// plugin `open({ telemetry: { api } })` is PLUGIN_MISSING; a writer given as
+// plugin `createDatabase({ telemetry: { api } })` is PLUGIN_MISSING; a writer given as
 // it is the core takes without the plugin. Every recording path is
 // contained — a tracer, meter, span or instrument that throws must never
 // break a write.
@@ -179,6 +179,7 @@ const createTelemetry = (telemetry) => {
   let flushDuration = null;
   let hookDuration = null;
   let lockWait = null;
+  let engineWrite = null;
   let refused = null;
   let presenceRefused = null;
   let handleFlushes = null;
@@ -249,7 +250,11 @@ const createTelemetry = (telemetry) => {
       });
       lockWait = meter.createHistogram('syncom.lock.wait', {
         unit: 'ms',
-        description: 'Time open() spent taking the directory lock',
+        description: 'Time createDatabase() spent taking the directory lock',
+      });
+      engineWrite = meter.createHistogram('syncom.engine.write', {
+        unit: 'ms',
+        description: 'A write set of the engine, from the call to its return, by engine',
       });
       refused = meter.createCounter('syncom.hello.refused', {
         unit: '{call}',
@@ -293,6 +298,7 @@ const createTelemetry = (telemetry) => {
       flushDuration = null;
       hookDuration = null;
       lockWait = null;
+      engineWrite = null;
       refused = null;
       gauges = null;
     }
@@ -415,6 +421,10 @@ const createTelemetry = (telemetry) => {
       record(lockWait, elapsed);
     },
 
+    recordEngineWrite(name, elapsed, ok) {
+      record(engineWrite, elapsed, { 'syncom.engine': name, 'syncom.ok': ok });
+    },
+
     recordRefusal(code) {
       add(refused, 1, { 'syncom.code': String(code) });
     },
@@ -448,7 +458,7 @@ const createTelemetry = (telemetry) => {
   });
 };
 
-/** The plugin: the writer built from `open({ telemetry })`, handed to the core. */
+/** The plugin: the writer built from `createDatabase({ telemetry })`, handed to the core. */
 const telemetry = Object.freeze({
   name: 'telemetry',
   setup({ options }) {

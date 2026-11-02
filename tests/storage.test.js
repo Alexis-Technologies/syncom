@@ -22,9 +22,9 @@ test('Storage module', async (t) => {
   await t.test('Storage constructor and initialization', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
-      assert.ok(storage instanceof syncom.Storage);
+      assert.ok(storage instanceof syncom.Database);
       assert.strictEqual(await directoryExists(tempDir), true);
     } finally {
       await cleanupTemp(tempDir);
@@ -34,7 +34,7 @@ test('Storage module', async (t) => {
   await t.test('Storage saveData and loadData without encryption', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
       const testData = { message: 'Hello, Storage!', number: 123 };
       await storage.saveData('test-1', testData);
@@ -49,7 +49,7 @@ test('Storage module', async (t) => {
   await t.test('Storage saveData and loadData with encryption', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
       const testData = { secret: 'encrypted data', value: 456 };
       await storage.saveData('test-2', testData, { encrypted: true });
@@ -64,7 +64,7 @@ test('Storage module', async (t) => {
   await t.test('Storage loadData with non-existent data', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
       const result = await storage.loadData('nonexistent');
       assert.strictEqual(result, null);
@@ -76,7 +76,7 @@ test('Storage module', async (t) => {
   await t.test('Storage validate method', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
       const testData = { message: 'Test validation' };
       await storage.saveData('test-3', testData);
@@ -103,7 +103,7 @@ test('Storage module', async (t) => {
   await t.test('Storage loadData throws if tampered', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
       await storage.saveData('tampered', { ok: true });
 
       const filePath = path.join(tempDir, 'data', 'tampered.json');
@@ -113,7 +113,7 @@ test('Storage module', async (t) => {
       await storage.close();
 
       // Quiet: the reopen's log replay notices the damage and warns.
-      const storage2 = await syncom.open({ defer: 0, path: tempDir, logger: false });
+      const storage2 = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
       await assert.rejects(() => storage2.loadData('tampered'), /invalid/);
     } finally {
       await cleanupTemp(tempDir);
@@ -123,7 +123,7 @@ test('Storage module', async (t) => {
   await t.test('Storage insert set swap and update errors', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
       const id = await storage.insert({ n: 1 });
       assert.strictEqual(typeof id, 'string');
@@ -149,12 +149,12 @@ test('Storage module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       assert.strictEqual(storage.schema, mockSchema);
-      assert.ok(storage.Post instanceof syncom.Storage.Collection);
-      assert.ok(storage.Author instanceof syncom.Storage.Collection);
-      assert.ok(storage.Comment instanceof syncom.Storage.Collection);
+      assert.ok(storage.Post instanceof syncom.Database.Collection);
+      assert.ok(storage.Author instanceof syncom.Database.Collection);
+      assert.ok(storage.Comment instanceof syncom.Database.Collection);
       assert.strictEqual(storage.Post.name, 'Post');
       assert.strictEqual(storage.Author.name, 'Author');
     } finally {
@@ -172,10 +172,10 @@ test('Storage module', async (t) => {
         ]),
       };
       const options = { path: tempDir, schema: mapSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
-      assert.ok(storage.User instanceof syncom.Storage.Collection);
-      assert.ok(storage.Article instanceof syncom.Storage.Collection);
+      assert.ok(storage.User instanceof syncom.Database.Collection);
+      assert.ok(storage.Article instanceof syncom.Database.Collection);
       assert.strictEqual(storage.User.name, 'User');
       assert.strictEqual(storage.Article.name, 'Article');
 
@@ -191,7 +191,7 @@ test('Storage module', async (t) => {
   await t.test('Storage without schema has no collections', async () => {
     const tempDir = await createTemp();
     try {
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
 
       assert.strictEqual(storage.schema, null);
       assert.strictEqual(storage.Post, undefined);
@@ -207,12 +207,12 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const authorData = { name: 'John', email: 'john@example.com' };
       const authorRecord = await storage.Author.insert(authorData);
 
-      assert.ok(authorRecord instanceof syncom.Storage.Record);
+      assert.ok(authorRecord instanceof syncom.Database.Document);
       assert.ok(authorRecord.id);
       assert.strictEqual(authorRecord.name, 'John');
       assert.strictEqual(authorRecord.email, 'john@example.com');
@@ -225,7 +225,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const postData = { title: 'Hello', content: 'World' };
       const postRecord = await storage.Post.insert(postData);
@@ -243,7 +243,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const authorRecord = await storage.Author.insert({
         name: 'Jane',
@@ -263,7 +263,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const postRecord = await storage.Post.insert({
         title: 'Original',
@@ -284,7 +284,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const commentRecord = await storage.Comment.insert({
         text: 'Nice post!',
@@ -307,7 +307,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const authorRecord = await storage.Author.insert({
         name: 'Bob',
@@ -315,8 +315,8 @@ test('Collection module', async (t) => {
       });
       const id = authorRecord.id;
 
-      const record = await storage.Author.record(id);
-      assert.ok(record instanceof syncom.Storage.Record);
+      const record = await storage.Author.document(id);
+      assert.ok(record instanceof syncom.Database.Document);
       assert.strictEqual(record.id, id);
       assert.strictEqual(record.name, 'Bob');
     } finally {
@@ -328,7 +328,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const author = await storage.Author.insert({
         name: 'Alice',
@@ -365,7 +365,7 @@ test('Collection module', async (t) => {
     const tempDir = await createTemp();
     try {
       const options = { path: tempDir, schema: mockSchema };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const post = await storage.Post.insert({
         title: 'Draft',
@@ -385,10 +385,10 @@ test('Collection module', async (t) => {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 test('Storage id generation', async (t) => {
-  await t.test('Storage.generateId returns unique UUIDs', () => {
-    const id = syncom.Storage.generateId();
+  await t.test('Database.generateId returns unique UUIDs', () => {
+    const id = syncom.Database.generateId();
     assert.match(id, UUID);
-    assert.notStrictEqual(id, syncom.Storage.generateId());
+    assert.notStrictEqual(id, syncom.Database.generateId());
   });
 
   await t.test('custom getId is used once per insert', async () => {
@@ -396,7 +396,7 @@ test('Storage id generation', async (t) => {
     try {
       let calls = 0;
       const getId = () => `custom-${++calls}`;
-      const storage = await syncom.open({ defer: 0, path: tempDir, getId });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir, getId });
 
       assert.strictEqual(await storage.insert({ a: 1 }), 'custom-1');
       assert.strictEqual(await storage.insert({ a: 2 }), 'custom-2');
@@ -411,7 +411,7 @@ test('Storage id generation', async (t) => {
     const tempDir = await createTemp();
     try {
       const getId = async () => 'async-id';
-      const storage = await syncom.open({ defer: 0, path: tempDir, getId });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir, getId });
 
       const id = await storage.insert({ a: 1 });
       assert.strictEqual(id, 'async-id');
@@ -427,7 +427,7 @@ test('Storage id generation', async (t) => {
       let calls = 0;
       const getId = () => `rec_${++calls}`;
       const options = { path: tempDir, schema: mockSchema, getId };
-      const storage = await syncom.open(options);
+      const storage = await syncom.createDatabase(options);
 
       const author = await storage.Author.insert({ name: 'John' });
       assert.strictEqual(author.id, 'rec_1');
@@ -443,11 +443,11 @@ test('Storage id generation', async (t) => {
   await t.test('a non-function getId is refused at open', async () => {
     const tempDir = await createTemp();
     try {
-      await assert.rejects(async () => syncom.open({ defer: 0, path: tempDir, getId: 'nope' }), {
+      await assert.rejects(async () => syncom.createDatabase({ defer: 0, path: tempDir, getId: 'nope' }), {
         name: 'TypeError',
-        message: 'open({ getId }): getId must be a function',
+        message: 'createDatabase({ getId }): getId must be a function',
       });
-      const storage = await syncom.open({ defer: 0, path: tempDir });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir });
       assert.match(await storage.insert({ a: 1 }), UUID);
     } finally {
       await cleanupTemp(tempDir);
@@ -459,7 +459,7 @@ test('Storage id generation', async (t) => {
     try {
       let calls = 0;
       const getId = () => `01ARZ3NDEKTSV4RRFFQ69G5FA${calls++}`;
-      const storage = await syncom.open({ defer: 0, path: tempDir, getId });
+      const storage = await syncom.createDatabase({ defer: 0, path: tempDir, getId });
 
       const id = await storage.insert({ title: 'Draft', hits: 0 });
       assert.deepStrictEqual(await storage.get(id), { title: 'Draft', hits: 0 });
@@ -468,7 +468,7 @@ test('Storage id generation', async (t) => {
       await storage.update(id, { hits: 1 });
       assert.strictEqual(await storage.swap(id, { hits: 2 }, { hits: 1 }), true);
 
-      const record = await storage.record(id);
+      const record = await storage.document(id);
       assert.strictEqual(record.id, id);
       assert.strictEqual(await storage.validate(), true);
 
@@ -485,10 +485,10 @@ test('Record: a field named like a method never shadows it', async (t) => {
   t.after(() => cleanupTemp(tempDir));
   const warnings = [];
   const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger });
   t.after(() => storage.close());
   const id = await storage.insert({ save: 'no', delete: 1, data: 'd', on: 'x', title: 'ok' });
-  const record = await storage.record(id);
+  const record = await storage.document(id);
   assert.strictEqual(typeof record.save, 'function');
   assert.strictEqual(typeof record.delete, 'function');
   assert.strictEqual(typeof record.on, 'function');
@@ -504,7 +504,7 @@ test('Record: a field named like a method never shadows it', async (t) => {
 test('validate(id, data, block) checks the block is the one it is filed under', async (t) => {
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
   t.after(() => storage.close());
   const id = await storage.insert({ n: 1 });
   const stored = JSON.parse(await storage.fsi.read(`${tempDir}/data`, `${id}.json`));
@@ -521,7 +521,7 @@ test('the private key is written owner-only where the backend has permissions', 
   const nodePath = require('node:path');
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
   await storage.close();
   const { mode } = await fsp.stat(nodePath.join(tempDir, 'keys', 'private.pem'));
   if (process.platform !== 'win32') assert.strictEqual(mode & 0o777, 0o600);
@@ -532,7 +532,7 @@ test('the private key is written owner-only where the backend has permissions', 
 test('what crosses the boundary is a copy', async (t) => {
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
   t.after(() => storage.close());
   const input = { title: 'a', tags: ['x'], nested: { n: 1 } };
   const id = await storage.insert(input);
@@ -550,7 +550,7 @@ test('what crosses the boundary is a copy', async (t) => {
   delta.nested.n = 6;
   assert.deepStrictEqual((await storage.get(id)).nested, { n: 5 });
   // A cursor's rows are copies too; the cache is the raw object.
-  const typed = await syncom.open({
+  const typed = await syncom.createDatabase({
     defer: 0,
     path: `${tempDir}-typed`,
     logger: false,
@@ -568,7 +568,7 @@ test('what crosses the boundary is a copy', async (t) => {
 test('swap compares inside the queue: two swaps on one expectation cannot both pass', async (t) => {
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
   t.after(() => storage.close());
   const id = await storage.insert({ hits: 1 });
   const results = await Promise.all([
@@ -590,7 +590,7 @@ test('chain: false keeps no chain, writes less, and says so when asked to valida
   const nodePath = require('node:path');
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false, chain: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false, chain: false });
   const id = await storage.insert({ n: 1 });
   await storage.update(id, { n: 2 });
   await storage.inc(id, 'hits', 3);
@@ -606,13 +606,16 @@ test('chain: false keeps no chain, writes less, and says so when asked to valida
   assert.strictEqual(stored.block, null);
   await storage.close();
   // A cold read trusts the file: there is no block to check against.
-  const again = await syncom.open({ defer: 0, path: tempDir, logger: false, chain: false });
+  const again = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false, chain: false });
   t.after(() => again.close());
   assert.deepStrictEqual(await again.get(id), { n: 2, hits: 3 });
   assert.deepStrictEqual((await again.snapshot()).records.map((r) => r.id).sort(), [id, 'r'].sort());
-  assert.throws(() => syncom.open({ defer: 0, path: `${tempDir}-bad`, logger: false, chain: 'no' }), TypeError);
-  assert.throws(() => syncom.open(`${tempDir}-bad`), TypeError, 'a path alone is not options');
-  assert.throws(() => syncom.open(null), TypeError);
+  assert.throws(
+    () => syncom.createDatabase({ defer: 0, path: `${tempDir}-bad`, logger: false, chain: 'no' }),
+    TypeError,
+  );
+  assert.throws(() => syncom.createDatabase(`${tempDir}-bad`), TypeError, 'a path alone is not options');
+  assert.throws(() => syncom.createDatabase(null), TypeError);
 });
 
 test(
@@ -621,11 +624,11 @@ test(
   async (t) => {
     const tempDir = await createTemp();
     t.after(() => cleanupTemp(tempDir));
-    const storage = await syncom.open({ defer: 0, path: tempDir, logger: false, cache: { max: 2 } });
+    const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false, cache: { max: 2 } });
     t.after(() => storage.close());
-    let dropped = await storage.record(await storage.insert({ n: 1 }));
+    let dropped = await storage.document(await storage.insert({ n: 1 }));
     const droppedId = dropped.id;
-    const kept = await storage.record(await storage.insert({ n: 2 }));
+    const kept = await storage.document(await storage.insert({ n: 2 }));
     dropped = null;
     globalThis.gc();
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -640,15 +643,15 @@ test(
 test('a live Record is the same instance while held, and a new one after delete', async (t) => {
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
   t.after(() => storage.close());
   const id = await storage.insert({ n: 1 });
-  const a = await storage.record(id);
-  const b = await storage.record(id);
+  const a = await storage.document(id);
+  const b = await storage.document(id);
   assert.strictEqual(a, b);
   await storage.delete(id);
   await storage.set(id, { n: 2 });
-  const c = await storage.record(id);
+  const c = await storage.document(id);
   assert.notStrictEqual(a, c);
   assert.strictEqual(c.n, 2);
 });
@@ -656,12 +659,18 @@ test('a live Record is the same instance while held, and a new one after delete'
 test('maxListeners: a hundred by default, tunable, enforced on the storage and its sync manager', async (t) => {
   const tempDir = await createTemp();
   t.after(() => cleanupTemp(tempDir));
-  const storage = await syncom.open({ defer: 0, path: tempDir, logger: false });
+  const storage = await syncom.createDatabase({ defer: 0, path: tempDir, logger: false });
   t.after(() => storage.close());
   // The sync manager holds one `change` listener of its own.
   for (let i = 0; i < 99; i++) storage.on('change', () => i);
   assert.throws(() => storage.on('change', () => 100), /MaxListenersExceededWarning/);
-  const tight = await syncom.open({ defer: 0, path: `${tempDir}-tight`, logger: false, lock: false, maxListeners: 2 });
+  const tight = await syncom.createDatabase({
+    defer: 0,
+    path: `${tempDir}-tight`,
+    logger: false,
+    lock: false,
+    maxListeners: 2,
+  });
   t.after(() => tight.close());
   t.after(() => cleanupTemp(`${tempDir}-tight`));
   tight.on('change', () => 1);
@@ -669,13 +678,16 @@ test('maxListeners: a hundred by default, tunable, enforced on the storage and i
   tight.sync.on('peer', () => 1);
   tight.sync.on('peer', () => 2);
   assert.throws(() => tight.sync.on('peer', () => 3), /MaxListenersExceededWarning/);
-  assert.throws(() => syncom.open({ defer: 0, path: tempDir, logger: false, lock: false, maxListeners: 0 }), TypeError);
+  assert.throws(
+    () => syncom.createDatabase({ defer: 0, path: tempDir, logger: false, lock: false, maxListeners: 0 }),
+    TypeError,
+  );
 });
 
 test('A collection answers for its own records only', async (t) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({
+  const storage = await syncom.createDatabase({
     defer: 0,
     path: dir,
     logger: false,
@@ -691,7 +703,7 @@ test('A collection answers for its own records only', async (t) => {
   for (const call of [
     () => storage.Todo.update(note.id, { text: 'theirs' }),
     () => storage.Todo.delete(note.id),
-    () => storage.Todo.record(note.id),
+    () => storage.Todo.document(note.id),
   ]) {
     await assert.rejects(call, (error) => {
       assert.ok(error instanceof syncom.SyncomError);
@@ -703,7 +715,7 @@ test('A collection answers for its own records only', async (t) => {
   }
   assert.deepStrictEqual(await storage.get(note.id), { text: 'mine', $type: 'Note' }, 'untouched');
   await storage.Note.update(note.id, { text: 'edited' });
-  assert.strictEqual((await storage.Note.record(note.id)).text, 'edited');
+  assert.strictEqual((await storage.Note.document(note.id)).text, 'edited');
   await storage.Note.delete(note.id);
   assert.strictEqual(await storage.Note.get(note.id), null);
 });
@@ -715,12 +727,12 @@ test('An entity name the storage answers to is refused at open', async (t) => {
     const entities = Object.create(null);
     entities[name] = {};
     await assert.rejects(
-      async () => syncom.open({ defer: 0, path: dir, logger: false, schema: { entities } }),
+      async () => syncom.createDatabase({ defer: 0, path: dir, logger: false, schema: { entities } }),
       (error) => error instanceof TypeError && error.message.includes(`'${name}'`),
       name,
     );
     // Refused before anything was opened: the directory is free.
-    const storage = await syncom.open({ defer: 0, path: dir, logger: false });
+    const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
     await storage.close();
   }
 });

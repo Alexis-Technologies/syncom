@@ -18,7 +18,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { observedTags, packOps, unpackOps } = require('../src/ops.js');
-const { applyOp, open } = require('../src/all/all.js');
+const { applyOp, createDatabase } = require('../src/all/all.js');
 const { generateSigningKeys } = require('../src/signing/ed25519.js');
 const { signOp, verifyOp } = require('../src/signing/sign.js');
 const S = require('../src/text/sequence.js');
@@ -79,7 +79,11 @@ const main = async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syncom-bench-apply-'));
   try {
     for (const chain of [true, false]) {
-      const storage = await open({ path: path.join(root, chain ? 'chained' : 'plain'), chain, logger: false });
+      const storage = await createDatabase({
+        path: path.join(root, chain ? 'chained' : 'plain'),
+        chain,
+        logger: false,
+      });
       const label = chain ? '' : ' (chain: false)';
       // One origin per page size: a stream's seqs must start at 1 and run
       // contiguously, or every op of it is a gap.

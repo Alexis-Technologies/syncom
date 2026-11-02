@@ -3,7 +3,7 @@
 // What the schema plugin does over the core beyond the definitions: the
 // version file a directory remembers (`loadVersion`, at setup), and the
 // storage's methods — `migrate()` and `check()` — over the `core` Storage
-// lends (src/storage.js #lend). The core applies the definitions; nothing
+// lends (src/database.js #lend). The core applies the definitions; nothing
 // here reaches the storage's state but through `core`.
 
 const { SyncomError } = require('../errors.js');
@@ -19,13 +19,14 @@ const SCHEMA_FILE = 'schema.json';
 // deterministic, a hand-written one is as stable as its author keeps it.
 // A downgrade under `ahead: 'hold'` is refused: its own records are of the
 // version it ran. Resolves to `{ hash, previous }`.
-const loadVersion = async ({ fsi, path, logger, hash: sha256 }, { version, snapshot, ahead }) => {
+const loadVersion = async ({ db, logger, hash: sha256 }, { version, snapshot, ahead }) => {
   const hash = snapshot === undefined ? null : await sha256(snapshot);
   let stored = null;
-  if (await fsi.exists(path, SCHEMA_FILE)) {
+  const text = await db.kv.get('', SCHEMA_FILE);
+  if (text !== null) {
     let raw;
     try {
-      raw = JSON.parse(await fsi.read(path, SCHEMA_FILE));
+      raw = JSON.parse(text);
     } catch (error) {
       const message = `${SCHEMA_FILE} is unreadable (${error.message}); restore it or remove the directory`;
       throw new SyncomError('CORRUPT', message, { cause: error });
@@ -50,7 +51,7 @@ const loadVersion = async ({ fsi, path, logger, hash: sha256 }, { version, snaps
   // `migrated`: when this version first ran here — kept across a snapshot
   // change of the same version.
   const migrated = stored?.version === version && Number.isInteger(stored.migrated) ? stored.migrated : Date.now();
-  await fsi.write(path, SCHEMA_FILE, JSON.stringify({ version, migrated, hash }), { atomic: true });
+  await db.kv.put('', SCHEMA_FILE, JSON.stringify({ version, migrated, hash }), { atomic: true });
   return { hash, previous };
 };
 
@@ -77,7 +78,7 @@ const entityNames = (entities) => {
  * event loop.
  */
 const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
-  if (core.version === null) throw new TypeError('migrate() needs open({ schema })');
+  if (core.version === null) throw new TypeError('migrate() needs createDatabase({ schema })');
   const names = entityNames(entities);
   if (names === undefined) throw new TypeError('migrate({ entities }) takes an array of entity names');
   if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');

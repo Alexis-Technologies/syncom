@@ -27,7 +27,13 @@ test('Sync engine (IndexedDB backend)', async (t) => {
       backends.set(key, fsi);
       t2.after(() => fsi.close());
     }
-    const storage = await browser.open({ defer: 0, path: name, fsi: backends.get(key), logger: false, ...options });
+    const storage = await browser.createDatabase({
+      defer: 0,
+      path: name,
+      fsi: backends.get(key),
+      logger: false,
+      ...options,
+    });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

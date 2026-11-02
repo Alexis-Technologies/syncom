@@ -287,7 +287,7 @@ const runPatchTests = async (t, assert, createStorage) => {
     await storage.update(id, { n: 2 });
     await storage.inc(id, 'hits', 1);
     await storage.add(id, 'tags', ['x']);
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     record.n = 3;
     await record.save();
     await storage.delete(id);

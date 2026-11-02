@@ -21,8 +21,108 @@ refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystr
 or typed through a transaction or a handle that continue each other are one op, so one `change`
 and one `commit` event, not one per call.
 
+### Changed
+
+- **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
+  `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
+  `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.
+- **The names are RxDB's: `createDatabase()`, `Database`, `Collection`, `Document`.** A storage is a
+  database — a directory, a node, a log — and a live record a document, so the classes say so:
+  `createDatabase(options)` opens one (`src/database.js`), `db.document(id)` and `collection.document(id)`
+  hand out a `Document` (`src/document.js`), `Collection` has a module of its own (`src/collection.js`),
+  and the types follow (`Database`, `DatabaseConstructor`, `DatabaseOptions`, `Document<R>`,
+  `SyncomDocument`, `Collection<R, I>`). The names before the rename — `open()`, `Storage`, `Record`,
+  `record()`, `SyncomRecord`, `StorageConstructor` — stay as aliases until 1.0 and are gone from the
+  docs; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
+  `/guide/database`. Importing the `Document` type shadows the DOM's inside that module —
+  `SyncomDocument` is the same type under a name that does not.
+
 ### Added
 
+- **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
+  its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
+  `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),
+  `records` by id with `raw`, `getMany` and `ids` in id order, `pieces`, a tag's `copies`, `log`
+  (the op log's medium) and `write(batch)` — one write set per batch of records, atomic where the
+  medium has transactions. `filesEngine(fsi)` (`src/files/`) is the engine every backend becomes,
+  today's layout byte for byte; `createDatabase({ fsi })` builds it, so nothing on disk changes.
+  `isEngine`, `storage.engine`, `storage.fsi` (`null` under a native engine); `capabilities` say what a
+  medium can do; `tests/suites/engine.js` is the contract as a test, run over every backend that
+  ships. The log's medium is a store too (`src/files/journal.js`: the journals, segments, `corrupt/`
+  and `index.json` behind `load`/`append`/`seal`/`sealed`/`segments`/`drop`/`saveIndex`/`scrub`;
+  `new OpLog(path, { store })`), and `loadKeys(ns, { kv })`, `loadSigningKeys(ns, { kv })`,
+  `new Blockchain(path, { kv })` take a kv beside an fsi. A plugin's `setup(ctx)` and `open(ctx)`
+  carry `db`. See [Engines](https://syncomjs.vercel.app/guide/backends#engines).
+- **The engine in memory: `memoryEngine()`** (`@alexify/syncom/memory`, beside `memory()`). A record is
+  kept as the object it was handed, the op log as rows, the catalog's rows as they are: nothing is
+  stringified or parsed on the way in or out. One engine object serves every database that opens
+  through it — a mesh in one process, a path per node — and a path outlives its instance until
+  `engine.remove(path)`, so a reopen reads what the last instance wrote. `EntryStore` copies a meta at
+  its first block in pieces instead of changing the stored object in place, since a native engine shares it.
+- **The engine over IndexedDB: `idbEngine()`** (`@alexify/syncom/idb`, beside `createIdbFsi()`). Six object
+  stores keyed by the database's path — `kv`, `records` (the object as handed), `pieces`, `copies`, `log`
+  (a row per entry), `meta` (the log's index and segments, the catalog's rows) — a write set in ONE
+  readwrite transaction, a log group in one, key ranges for every listing, another tab's writes heard
+  through a `BroadcastChannel` (`db.changes`); `engine.close()`, `engine.destroy()`. A database's write costs
+  two transactions where the file store spent one per file and rewrote the catalog whole — with the chain
+  on too: `Blockchain.block(data)` hands the block and its tail back as the kv puts of the landing's write
+  set, `committed(hash)` moves the tail once they are down (`addBlock` writes at once, for a chain of its own).
+- **The engine over SQLite: `sqliteEngine()`** (`@alexify/syncom/sqlite`, Node only). Six tables keyed by the
+  database's path in one file, `:memory:` by default — `kv`, `records` (the JSON text), `pieces`, `copies`, `log` (a
+  row per entry), `meta` — through `node:sqlite`, required inside the factory (experimental in Node: a warning at the
+  require, which the engine does not silence), or a driver with `exec` and `prepare` → `{ run, get, all }` whose answers
+  may be promises (better-sqlite3, expo-sqlite). A write set is one transaction, a log group one, every statement goes
+  through one lane; WAL for a file, `synchronous = FULL` once a database opens `durable`; `engine.close()`,
+  `engine.destroy()`.
+- **The engine over MongoDB: `mongoEngine()`** (`@alexify/syncom/mongodb`, Node only, the driver's client
+  injected — `mongodb` is a devDependency for one test under `MONGODB_URL`, `tests/utils/fake-mongo.js` the
+  driver every other test runs over). Six collections keyed by the database's path in one MongoDB database —
+  `kv`, `records` (the JSON text), `pieces`, `copies`, `log` (a document per entry), `meta` — a document's `_id`
+  its key as JSON, the key's fields flat beside it over an index per collection. A write set is a bulk write per
+  collection: one session transaction under `transactions: true` (a replica set; `atomicBatch`), in order
+  otherwise, every put an upsert so a set that failed midway is landed again whole by the replay; a log group
+  is one bulk write. Another process hears every record and log document through a change stream
+  (`db.changes`), this instance's own told apart by the writer's token on each document; `changes: false` on
+  a standalone server. `engine.destroy()` drops the database; nothing is connected or closed here. The database
+  is held by a lease (`capabilities.lock: 'native'`, `db.lock()`): one document per path on the server's clock
+  (`$$NOW`, never the client's), renewed every third of `lock.staleAfter` (30 s by default), a lapsed one taken
+  over with its generation `gen` one up. Every document a holder writes carries that generation and every put,
+  removal and log group is fenced to its generation or older, so a writer whose lease another instance took
+  cannot write over anything the new holder wrote (`LEASE_LOST` from the engine; under `transactions: true` the
+  lease is checked inside the transaction first): it hears `error` `LEASE_LOST` once, is read-only from then on
+  (`READ_ONLY` on every write) and writes nothing more — not at its close, where what it had logged but not landed
+  is held as `UNPERSISTED`. A renewal that fails is tried again every `lock.poll` ms while two thirds of
+  `staleAfter` are left, then given up; the `lease` event tells of every renewal (`renewed`), the first failure
+  of a run (`late`, the log event `storage.lease.late`) and the loss (`lost`), and `stats().lock` is
+  `{ kind: 'kv' | 'native', mode, expiresAt, lost }`. A log group whose write failed after it landed (the
+  acknowledgement lost) is wiped by the next group and left out by a reopen, never replayed. The driver is 6.0
+  or later; `engine.remove(path)` takes the lease document too.
+- **An engine over a message port, and a database moved between engines: `@alexify/syncom/engines`.**
+  `serveEngine(engine, port)` answers the engine contract over a `MessagePort` (a worker thread, a
+  SharedWorker, Electron's main process); `remoteEngine(port, { name, capabilities })` and
+  `connectEngine(port)` are the engine on the other side — every call a message, an error back with its
+  code, a change stream and a lease's loss pushed, a failed append failing its group here. The database stays
+  where it is opened; only its bytes cross. `copyEngine(from, to, { path, batch })` copies a database between
+  engines — records with their pieces, a tag's copies, every kv text, the op log with its index — so the node
+  opens on the new engine as itself (identity, epoch, vector, heads) and no peer bootstraps; both databases
+  closed and held for the copy, the target empty (`TARGET_NOT_EMPTY`).
+- **An engine encrypted at rest: `atRest(engine, options)`** (`@alexify/syncom/encryption`, beside `atRest(fsi)`).
+  The same key over an engine's stores: every record (as one text), piece, copy, kv text, log entry and the
+  log's index a ciphertext bound to its place (`data/<id>.json`, `log/<seq>`…), the keys and the index's `floor`
+  in the clear; `capabilities.indexes` off. A database over it reads nothing from the plain engine and the plain
+  engine nothing of it (`DECRYPT_FAILED` either way). The files engine is wrapped at its backend.
+- **A follower: `createDatabase({ readOnly: true })`.** Reads what another instance writes through the same
+  engine and writes nothing — no lock, no replay of the log's tail, no catalog save, not even the log's index;
+  every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `READ_ONLY`.
+  Only an engine several instances may open at once takes a follower (`capabilities.shared`: memory, IndexedDB,
+  MongoDB); the files engine and SQLite refuse one with a `TypeError`. A follower's log and vector are as of its
+  open: it reads; it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` is `READ_ONLY`,
+  `reason: 'hosting'`) until the shared log lands. Over an engine with a change stream (IndexedDB across tabs,
+  MongoDB across processes) a record the writer lands is read again, a live `Document` of it refreshed and its
+  watchers woken — subscribed before the load, so nothing landed while the follower opens is missed; a stream
+  that ends (an error, a close) is `error` `FOLLOW_LOST` once, the follower subscribes again and reads every
+  record again. The MongoDB stream is matched to the database's path on the server and carries no record text;
+  the `log` collection is not watched. `stats().readOnly`, `storage.readOnly`.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
   (the `text` plugin's). `insert`, `insertEmbed`, `delete`, `format` and `applyDelta` edit at once
   over the handle's reading — the field as announced, its edits on top — and `toString()`,
@@ -144,7 +244,7 @@ and one `commit` event, not one per call.
   are undo and redo over the storage's undo stack. ProseMirror is an
   optional peer dependency (types only).
 - **Framework stores.** `@alexify/syncom/store`: `toStore(source)` makes a
-  query cursor (its rows), a live `Record` (its data), a presence (its
+  query cursor (its rows), a live `Document` (its data), a presence (its
   states) or a storage and a record id (the record as `get()` reads it, or
   one field by path) one store object — `subscribe(run)` with Svelte's
   contract, `getSnapshot()` stable for React's `useSyncExternalStore`, the
@@ -185,7 +285,7 @@ and one `commit` event, not one per call.
   the types alone read). `SyncomCollection<R, I>`: `get` is `R | null`,
   `insert`/`set` take `I`, `update` a `Partial<I>` plus any field by path,
   `select`/`count` a `MangoQuery<R>` that names the record's fields, `id` or a
-  dotted path, a cursor of `QueryRow<R>`; `SyncomRecord<R>` has a property
+  dotted path, a cursor of `QueryRow<R>`; `SyncomDocument<R>` has a property
   per field, `data()` as `R | null`, `delta()` as `Partial<R>`. The storage's
   own readers take the type — `get<R>`, `record<R>`, `getCachedData<R>`, a
   tag view's `get<R>`/`collection<R>`, a transaction's `get<R>` — or infer it
@@ -236,7 +336,7 @@ and one `commit` event, not one per call.
   them), and `onPush`/`onPop`. A write at a prefix of a step's field, or
   under it, counts as a change of the field.
 - **Observe, deltas and positions.** `observe(id, path?, listener)` — on a
-  `Record` too — hands a listener one record's changes a turn at a time,
+  `Document` too — hands a listener one record's changes a turn at a time,
   under a path or whole, local and a peer's alike, until the returned
   function is called. The `text` plugin adds `toDelta(changes, field?)`,
   composing a text's changes into one delta in Quill's form (an embed slot as
@@ -287,7 +387,7 @@ and one `commit` event, not one per call.
   set or a block holds its prefix alone (`FIELD_KIND` with `prefix`; from a
   peer, what hung under it goes), and a record holds at most 4 096 fields
   (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`). `/` is reserved for
-  paths. A hook's `current`, a validator, a query and a `Record` see the
+  paths. A hook's `current`, a validator, a query and a `Document` see the
   paths composed; the ops, the log and a snapshot keep them apart.
 - **Children of elements and nodes.** A list's element and a tree's node
   carry fields of their own, named through the element's name or the node's
@@ -301,7 +401,7 @@ and one `commit` event, not one per call.
   `SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points
   where a pair is about, and content with a lone half is a `TypeError`.
 - **`unset()`, and `compareVectors()`.** `unset(id, fields)` — on the storage,
-  a collection and a `Record`, and as the `unset` patch — removes fields of
+  a collection and a `Document`, and as the `unset` patch — removes fields of
   any kind: an `unset` op (wire code `u`) moves the fields' own reset
   watermark (`meta.gone`), so what they held below it goes, an older
   concurrent write of them is moot and a newer one makes them again; a
@@ -315,7 +415,7 @@ and one `commit` event, not one per call.
   next write at the append, which builds on the entry in flight, while the
   disk, the record file, the `afterWrite` hook and the events follow in log
   order — what the caller awaits (`stats().inflight`). Record files lag the
-  log by 16 ms by default (`open({ defer })`; `0` lands every write at once),
+  log by 16 ms by default (`createDatabase({ defer })`; `0` lands every write at once),
   and `storage.flush()` lands them now. Writes queued behind one another are
   signed on the thread pool. On the memory backend a text takes 44 000
   keystrokes a second pipelined (from 5 000) and 19 000 awaited one by one
@@ -337,7 +437,7 @@ and one `commit` event, not one per call.
   `total` properties. The `text` entry's budget is 22 KB (21.5 measured), the
   `all` entry's 80 KB.
 - **Plugins, and the package in blocks.** The kinds beyond registers, counters
-  and sets are plugins registered per storage — `open({ plugins: [text, tree] })`
+  and sets are plugins registered per storage — `createDatabase({ plugins: [text, tree] })`
   with `text` from `@alexify/syncom/text` (lists and texts) and `tree` from
   `@alexify/syncom/tree` — never process-wide; `@alexify/syncom/all` is the
   core with every shipped plugin registered, the API as it was. The main
@@ -365,11 +465,11 @@ and one `commit` event, not one per call.
   `decrypt` — and `Blockchain` moved to those subpaths off the root, each
   with its own browser types where Web Crypto is async. Without `signing` the
   node id is what `getId` mints (a UUID by default; cuid, ulid… through
-  `open({ getId })`), nothing is signed or checked, and a directory keeps the
+  `createDatabase({ getId })`), nothing is signed or checked, and a directory keeps the
   key it was given as its id (one born without the plugin is rekeyed once,
   with `identity.rekeyed`, when it arrives); without `chain` no block is
   written and `validate()` is `NO_CHAIN` naming the plugin. What the options
-  ask for and no plugin provides is `PLUGIN_MISSING` at `open()`:
+  ask for and no plugin provides is `PLUGIN_MISSING` at `createDatabase()`:
   `sync.signatures: 'require'` without `signing`, `chain: true` without
   `chain`, `encrypted: true` without `encryption`. The chain and the schema
   hash use SHA-256 through Web Crypto on both platforms (`src/crypto/digest.js`), so
@@ -396,17 +496,17 @@ and one `commit` event, not one per call.
   is 44 KB.
 - **Schema as a block.** The entity definitions — the validators adapted,
   the id fields, the indexes, the migrations and the lens — are the `schema`
-  plugin, `@alexify/syncom/schema`, read once at `open()`; the core applies
+  plugin, `@alexify/syncom/schema`, read once at `createDatabase()`; the core applies
   them (collections, validation on the write path, the catalog's indexes,
   `schemaInfo`, `migrate()`, `check()`) and keeps `ValidationError`. Without
-  the plugin `open({ schema })` and `open({ validator })` are
+  the plugin `createDatabase({ schema })` and `createDatabase({ validator })` are
   `PLUGIN_MISSING`, as are `migrate()` and `check()`, and records are
   untyped. The core is 42 KB.
 - **Telemetry as a block.** The OpenTelemetry adapter — `{ api }` or
   `{ tracer, meter }` into the writer the engine records through — is the
   `telemetry` plugin, `@alexify/syncom/telemetry`, with `createTelemetry()`
   to build a writer by hand; the core keeps the writer contract, the
-  disabled writer and `traced`, takes a writer given to `open({ telemetry })`
+  disabled writer and `traced`, takes a writer given to `createDatabase({ telemetry })`
   as it is, and refuses an api or a tracer without the plugin
   (`PLUGIN_MISSING`). An `OpLog` opened on its own takes a writer. The core
   is 40 KB.
@@ -414,7 +514,7 @@ and one `commit` event, not one per call.
   `fetch()`/`count()`/`one()`/`watch()` — is the `query` plugin,
   `@alexify/syncom/query`: `select()` and `count()` on a collection, and on
   a view at a tag, are its; without it they throw `PLUGIN_MISSING`. The
-  catalog, its indexes and the text index behind `$text` (`open({ search })`)
+  catalog, its indexes and the text index behind `$text` (`createDatabase({ search })`)
   stay in the core, kept whether or not anything queries them. The core is
   39 KB.
 - **Versions as a block.** The past — `get(id, { at })` and `history()`
@@ -424,7 +524,7 @@ and one `commit` event, not one per call.
   `compact()`, the present and its patches, stay in the core (the undo
   subpath stands on them). Without the plugin those methods throw
   `PLUGIN_MISSING`, `stats().tags` is `null`, and a directory that holds tags
-  is refused at `open()`, since its copies would not be kept. The core is
+  is refused at `createDatabase()`, since its copies would not be kept. The core is
   35 KB — from 66 before the blocks; `pnpm size` checks that the core and
   every block bundled together weigh what `/all` weighs, so nothing is
   bundled twice, and every block's suite runs over the lean core with the
@@ -578,7 +678,7 @@ and one `commit` event, not one per call.
   as one move per node) — so what lies under it goes by the reset rule here
   and on every peer and the record reads the same: the answer to a tree's
   move log and a text's runs growing until a reset. It resolves to how many
-  ops it took, `0` for a record that is not there. `open({ defer: ms })`
+  ops it took, `0` for a record that is not there. `createDatabase({ defer: ms })`
   lets a local write's record file and chain block wait up to `ms`: the log
   append is durable at once, the cache and the catalog read the held entry,
   one timer lands every record due, one file each under one block, `tag()` and
@@ -617,7 +717,7 @@ and one `commit` event, not one per call.
   dialer closed and reopened mid-walk; after it the two nodes converge and
   every record folds back to its present.
 - **Full-text search.** An entity names its `search: ['title', 'body']`
-  fields and `open({ search: createSearch() })` gives the index —
+  fields and `createDatabase({ search: createSearch() })` gives the index —
   `@alexify/syncom/search`, a subpath under 1 KB, so a node that never
   searches ships none of it. `select({ $text: 'quick fox', orgId })` is
   fuzzy, typo-tolerant trigram search ranked by TF-IDF over the record's
@@ -634,7 +734,7 @@ and one `commit` event, not one per call.
   peer verifies an op against its `origin` through any relay, with no key
   exchange. The signature covers the header and a salted digest of the
   payload; a purge scrubs the payload and the nonce and leaves a header that
-  still verifies. `open({ sync: { signatures: 'verify' | 'require' | false } })`:
+  still verifies. `createDatabase({ sync: { signatures: 'verify' | 'require' | false } })`:
   A peer's page is verified sixty-four ops at a time, on Node's thread pool
   (Web Crypto in the browser), so a replica is not held to one check after
   another. `'verify'` (the default) checks a signature when there is one, `'require'`
@@ -730,7 +830,7 @@ and one `commit` event, not one per call.
   message changed; three registry argument errors (`addNode` without a url
   or with bad scopes, `start()` without `connect`) are now `TypeError`s.
   Browser budget 35.5 → 36 KB.
-- **`open({ chain: false })`.** A node that only replicates — a hub — keeps
+- **`createDatabase({ chain: false })`.** A node that only replicates — a hub — keeps
   no hash-linked chain: two file writes less per record (the chain grew by
   one block file per write and was never compacted), reads without the
   block re-check, `validate()` rejecting with `code: 'NO_CHAIN'`.
@@ -762,9 +862,9 @@ and one `commit` event, not one per call.
   copied onto all four procedures for a wrpc `onRequest` hook to read.
   `isSharedLog()` and the `SharedLog` type reserve the contract of the
   broker-backed hub mode (the shape of wrpc's `BrokerLog`);
-  `open({ sync: { sharedLog } })` is refused until that mode exists.
+  `createDatabase({ sync: { sharedLog } })` is refused until that mode exists.
   Browser budget raised 26.5 → 27.5 KB.
-- **Who wrote it.** `open({ actor })` — a string, or a function asked per
+- **Who wrote it.** `createDatabase({ actor })` — a string, or a function asked per
   write — and a per-write `{ actor }` on `insert`, `set`, `update`, `inc`,
   `delete`, `swap`, `saveData`, `Record.save/inc/delete`, the collection's
   methods and `migrate()` stamp the op with `actor` (the 14th packed slot;
@@ -793,27 +893,27 @@ and one `commit` event, not one per call.
   scan of `data/` when it cannot say. `list()` and `hasRecord()` answer from
   it with no I/O — `list()` used to be four reads and a hash per record.
   `cache: { max }` bounds the entry cache (default 5000, LRU, a live
-  `Record` pins its own; absent ids are no longer cached), and
+  `Document` pins its own; absent ids are no longer cached), and
   `integrity: 'lazy'` skips the chain check on a cold read. Browser budget
   raised 23 → 24.5 KB.
-- **One instance per directory.** `open()` holds the directory — Web Locks
+- **One instance per directory.** `createDatabase()` holds the directory — Web Locks
   in the browser, `<path>/lock.json` with the pid elsewhere (stale once the
   process is gone, or after 30 minutes without a pid) — and a second
-  `open()` of it rejects with `code: 'LOCKED'`; `lock: 'wait'` waits,
+  `createDatabase()` of it rejects with `code: 'LOCKED'`; `lock: 'wait'` waits,
   `lock: false` leaves the coordination to the caller. `close()` releases
-  it; an `open()` that fails releases it too. Browser budget raised
+  it; an `createDatabase()` that fails releases it too. Browser budget raised
   22 → 23 KB (with the injected backend).
 - `@alexify/syncom/idb` — `createIdbFsi({ name, store, indexedDB })`, the
   backend over IndexedDB for browsers where OPFS is unavailable or unwanted:
   one object store keyed by `[dir, name]` with an index on `dir`, opened
   lazily, reopened after a `versionchange`, closed by its own `close()`.
   `fake-indexeddb` is a devDependency for its tests.
-- **The backend is injected.** `open({ fsi })` takes any object with the
+- **The backend is injected.** `createDatabase({ fsi })` takes any object with the
   five functions of the contract (`read`, `write`, `exists`, `remove`,
   `list`) and routes the records, the log, the chain, the keys and the
   registry through it; `storage.fsi` is what the storage uses. `isFsi()`,
   `memory()` (a backend in memory, for tests, SSR and benchmarks —
-  two storages opened over one share it), and `open({ durable: true })`:
+  two storages opened over one share it), and `createDatabase({ durable: true })`:
   every write followed by the backend's `sync` (fsync on `node:fs`; a
   backend without one logs at debug). `loadKeys`, `Blockchain` and `OpLog`
   take `{ fsi }` too.
@@ -822,7 +922,7 @@ and one `commit` event, not one per call.
   storage-wide or per entity, `up(data, { entity, id, from, to })`), then
   the entity's Standard Schema validator (aliases and defaults — a metaschema
   model reads a renamed field with no migration written); `schema.lens`
-  picks the steps. `get()`, `Record` and `swap()` read the view, `update()`
+  picks the steps. `get()`, `Document` and `swap()` read the view, `update()`
   validates and folds through it; `snapshot()`, `getCachedData()` and
   replication stay raw. `storage.migrate({ entities?, batch? })` rewrites
   the old records as whole-record writes of their view with the counters
@@ -832,7 +932,7 @@ and one `commit` event, not one per call.
   (`LogEntry.held`, `OpLog.held()`, `droppedHeld`) until an open runs that
   version, reported as `schemaInfo.held = { replayed, lost }`. Browser
   budget raised 20.5 → 22 KB.
-- **Schema versions on the wire.** `open({ schema: { version, snapshot } })`:
+- **Schema versions on the wire.** `createDatabase({ schema: { version, snapshot } })`:
   the version (a positive integer, 1 by default) is stamped on every op this
   node makes as `v` (the 13th slot of the packed shape; older readers ignore
   it), and a record remembers the version of its last whole-record write as
@@ -849,11 +949,11 @@ and one `commit` event, not one per call.
   `{ kind: 'drift', peer, version, hash, local }` plus a warning — never
   refused. `WriteContext.v`.
 - **Schema validation, injected.** An entity definition
-  (`open({ schema: { entities: { Project: { schema, idField, validate, index, unique, fields } } } })`)
+  (`createDatabase({ schema: { entities: { Project: { schema, idField, validate, index, unique, fields } } } })`)
   may carry a validator of any of three shapes, none of them a dependency: a
   Standard Schema (`~standard` — an entity of a metaschema `Model`, zod,
   valibot, arktype), a compiled function (ajv), or a plain object compiled
-  through `open({ validator })` (JSON Schema, TypeBox; an Ajv instance fits).
+  through `createDatabase({ validator })` (JSON Schema, TypeBox; an Ajv instance fits).
   Every write to the collection is validated as the whole record it leaves,
   after the op is applied and before anything is logged; what the validator
   returns (defaults, aliases, stripped keys) is what is written and
@@ -868,13 +968,13 @@ and one `commit` event, not one per call.
   `unique` (explicit or off a metaschema schema) checked at open.
   `@alexify/metaschema` is a devDependency for one skip-guarded integration
   test. Browser budget raised 18 → 20 KB.
-- **Hooks.** `open({ hooks })` — `beforeWrite` (sees the op being made and
+- **Hooks.** `createDatabase({ hooks })` — `beforeWrite` (sees the op being made and
   the record it lands on; may replace the data of a write or a set; a throw
   refuses the write), `afterWrite` (the durable op), `beforeRead` /
   `afterRead` (refuse or redact what `get()` returns — `swap`, `snapshot` and
   the cache stay raw), `beforeApply` (per remote op; `false` skips it here
   while it is still logged and relayed, a throw aborts the batch before
-  anything is durable), `afterApply`. `open({ sync: { hooks } })` —
+  anything is durable), `afterApply`. `createDatabase({ sync: { hooks } })` —
   `beforeConnect` (`false` leaves a node registered but not dialled) and
   `beforeBootstrap` (`false` refuses to join a peer's whole state). Hooks run
   inside the operation; a throw rejects it with `HookError` (`code:
@@ -884,14 +984,14 @@ and one `commit` event, not one per call.
 - **Events are contained.** Every event now goes out through one path:
   listeners are invoked at once, never awaited, and a throwing listener is
   logged at debug instead of failing the write it observed (or, for the
-  fire-and-forget emits in `Record` and `SyncManager`, becoming an unhandled
+  fire-and-forget emits in `Document` and `SyncManager`, becoming an unhandled
   rejection). A `change` listener that writes back queues behind the write.
   New events: `apply` and `close` on the storage; `start`, `stop`, `node`,
   `connect` and (hosting side) `hello` on the manager. Typed event maps
   (`StorageEvents`, `SyncEvents`, `RecordEvents`) and the `SyncManager`
   members the types were missing (`started`, `enableNode`, `sync`, `peers`,
   `unit`).
-- **OpenTelemetry, injected.** `open({ telemetry: { api } })` (the
+- **OpenTelemetry, injected.** `createDatabase({ telemetry: { api } })` (the
   `@opentelemetry/api` module) or `{ tracer, meter }` — the same object wrpc's
   `telemetry` option takes, and no dependency on either. Spans:
   `syncom.commit`, `syncom.apply`, `syncom.replay`, `syncom.push`,
@@ -917,7 +1017,7 @@ and one `commit` event, not one per call.
 - `@alexify/syncom/wrpc` — `createWrpcLink(client)` adapts a `WrpcClient`
   (injected, never a dependency) to the link contract; `isSyncLink`,
   `SYNC_INTROSPECTION`.
-- `Storage`: `inc()`, `list()`, `close()`, `applyRemote()`, `snapshot()`,
+- `Database`: `inc()`, `list()`, `close()`, `applyRemote()`, `snapshot()`,
   `mergeSnapshot()`, `adoptVector()`, `nodeId`, `vector`, `log`, the `change`
   and `error` events; `Record.inc()`; live records follow remote changes and
   keep unsaved edits on top. Options `logger`, `encrypted`, `sync`.
@@ -926,7 +1026,7 @@ and one `commit` event, not one per call.
   `sync.scope`) for partial replication.
 - Encryption at rest is a hybrid envelope (AES-256-GCM under an RSA-OAEP
   SHA-256 wrapped key), identical in both halves, with no payload ceiling;
-  `open({ encrypted: true })` and `insert/set(…, { encrypted })`.
+  `createDatabase({ encrypted: true })` and `insert/set(…, { encrypted })`.
 - `fsi.list(dir)`; `OpLog`, `applyOp`, `mergeEntry`, `isAlive` exports.
 - `src/utils.js` and `src/utils.browser.js` — the `Emitter`, `generateUUID`,
   `between`, `fileExists` and `directoryExists` helpers the source needs,
@@ -1004,7 +1104,7 @@ and one `commit` event, not one per call.
   is extended by its own origin alone; pending work per field — a run whose
   anchor has not arrived, a cut or an extension of a run not here, a
   register of an element not here, a mark switched off before it arrived —
-  is bounded by `open({ sync: { pendingMax } })` (4,096 by default,
+  is bounded by `createDatabase({ sync: { pendingMax } })` (4,096 by default,
   `Infinity` to disable), all of it on the op path and in a snapshot block
   alike (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`); a
   place is a fractional index of at most 1,024 characters, a tree reads 512
@@ -1060,11 +1160,96 @@ and one `commit` event, not one per call.
   of minting a new one that orphans every sealed record; `private.pem` is
   written `0o600` where the backend has permissions (`fsi.write`'s optional
   `{ mode }` hint).
-- A `Record` field named like a member of the class (`save`, `delete`, `data`,
+- A `Document` field named like a member of the class (`save`, `delete`, `data`,
   `on`) no longer shadows the method (`record.shadowed` is logged once).
 
 ### Fixed
 
+- **A copy reads a page at a time; a roll over the port sends seqs, not entries; a follower counts what it hears.**
+  `copyEngine` read every record and every piece one call at a time (review №5, P-15): a page goes through
+  `records.getMany` and a record's pieces through `pieces.getMany`, a record the medium holds that is no record
+  copied as its text. The proxy over a port sent every entry of a roll to the served store, which seals a range by
+  its count unless it is the files journal (P-14): the seqs alone cross for a native store. `stats().follow` counts a
+  follower's records heard, re-reads failed and catch-ups run (O-6). The chain guide says why blocks are never
+  pruned and what a checkpoint block would change (SC-8).
+- **One renewal timer per MongoDB engine; the op log builds no journal of its own.** A hub with many databases on one
+  MongoDB engine renewed each lease on a timer of its own, a round trip a lease a tick (review №5, SC-9): every lease
+  the engine holds is renewed in ONE bulk write a tick, at the shortest margin among them, and a tick that lands short
+  — a lease taken over — hands each lease its own renewal, so only the lease taken is lost and the per-lease retry
+  (`late`, then lost) stays as it was. `new OpLog(path, { store })` takes the store an engine hands it and builds no
+  files journal by default (M-6): the core no longer requires `src/fsi.js` or the files engine's module; the tests
+  that open a log on their own do so through `tests/utils/log.js`.
+- **A record read as gone while a block of it stood.** `isAlive` compared a block's stamp — a ms alone, no origin — with the
+  tombstone's and called the tie older, while the prune (by `(ts, origin)`, the op model's order) had kept the block's
+  op stamped in that very ms by an origin above the tombstone's: the delete was reported as the record gone, the block
+  stayed, and the next op revived what the change reports said was gone — the seeded mesh test's shadow of a tree
+  field, missing under load, once in a few full runs. The tie counts as newer in `isAlive` as it does in the prune.
+- **One read a record, not a round trip a piece; the follower and the rebuild read a page at a time; the engine
+  measured.** A cold read of a record in pieces made a call per piece, a catalog rebuild and a follower's catch-up read
+  one record at a time, and nothing measured the engine (review №5, P-3, P-4, P-13, O-4): `pieces.getMany(id, names)`
+  is in the contract (every engine, the proxy, at rest, the follower) and the cold read makes one call; the rebuild,
+  the catch-up and what a follower hears go a page of ids and one `records.getMany` at a time; `syncom.engine.write`
+  (a histogram by engine) and `stats().engine` count every write set. On MongoDB the tags' copies land before the
+  records (the files engine's crash order; R-11), the segments list moves once the medium has it (R-21), a log or
+  meta document that does not parse is counted `corrupt` instead of a bare SyntaxError out of the open (R-14), and
+  the catalog is a document a record in a `catalog` collection, saved as it changes — never one document (SC-1).
+  A lease's life (gen, expiresAt, its events) crosses the port. The errors say `Database` and `Record`, not `Storage` (M-8).
+- **At rest, the log was sealed twice and opened one entry at a time; the files engine wrote a set one record at a
+  time.** `atRest(engine)` encrypted every entry again at every roll, though a native medium seals a range by its
+  count alone, and opened ten thousand entries in ten thousand hops to the crypto thread (review №5, P-6): the roll
+  sends the seqs, a seal or an open runs a chunk at a time. The files engine landed the records of a write set one
+  after another (P-8): eight at a time now, each in its own crash order.
+- **The aliases' types, the engines benchmark, the engines' shared errors.** `DatabaseOptions` — the new name — carried the
+  `@deprecated` tag meant for `StorageOptions`, and no alias said when it goes (review №5, M-8): every alias is
+  `@deprecated … removed in 1.0`, and the store subpath types take a `Document`. `bench/engines.js` measured Ed25519
+  signing (every op signed under `/all`, the write made at once off) and the fake MongoDB driver (a scan per
+  operation; G-3): the rows run with signatures off, and MongoDB is measured over the driver alone, under
+  `MONGODB_URL`. The engines' `INTEGRITY` and `EEXIST` errors are made in one place (src/engine.js `unreadableRecord`,
+  `eexist`; M-4), the SQLite tests silence `node:sqlite`'s warning through one helper, and src/CLAUDE.md names the
+  journal's members where they are now (G-9); the keys-and-order guarantees are a row of their own, ENG-2 (G-4), and the convergence suite runs over a served files engine and over SQLite at rest too (G-8).
+- **The catalog was one document on SQLite and MongoDB; an at-rest ciphertext opened in any database of the engine.**
+  Without a rows store of the engine's, the catalog went to `kv` as ONE text — on MongoDB one document, past 16 MiB
+  every save fails and every open rebuilds; on SQLite one row rewritten whole every few thousand changes (review №5,
+  SC-1/SC-2). SQLite keeps the catalog as a row per record in a `catalog` table now: `Catalog` tracks the ids put since
+  the last save and a native rows store takes `{ all, changed, whole }` — a save writes what changed (memory and
+  IndexedDB keep the rows as they were; `capabilities.indexes` says so on all three). `atRest(engine)` sealed a value
+  to its place alone (`data/<id>.json`), under one key for every path — a ciphertext copied to the same place in
+  another database of the engine opened there (S-6); the database's path is in the additional data now (the at-rest
+  format over an engine changes; nothing is published). What the place does not bind is the version: an older
+  ciphertext of the same place opens — the chain tells a record rolled back, nothing tells a kv text or a log entry
+  (S-4, documented).
+- **A landing was more than its write set; a failed COMMIT wedged SQLite; a throw inside an IndexedDB write set kept
+  half of it.** The pieces a text left behind were removed one call at a time after the write set, and a tag's copy of
+  the record put one call before it — neither atomic with the set, two extra transactions per landing on a native
+  engine, and every engine's `pieces.remove` in a row was dead code (review №5, R-10/R-11). Both ride in the ONE write
+  set now: the copies ahead of the records (the files engine writes them first — a crash between leaves a copy, never a
+  changed record without one), the pieces a record drops with its row; `Tags.copyBefore` answers `{ copy, done }` and
+  the copy is marked once the set is down. SQLite's `COMMIT` ran outside the try: one that failed (BUSY, FULL, I/O)
+  left the transaction open and every set after failed (R-5) — rolled back now; `log.load` reads outside a transaction
+  (it took the write lock to read), a connection the caller gave keeps its pragmas (R-22), a log row that does not parse
+  is counted `corrupt` and left out instead of a bare `SyntaxError` out of the open (`log.row.unreadable`,
+  `log.meta.unreadable`; R-14), the segments list moves once the medium has it (R-21). IndexedDB aborts a write set a
+  request threw in (R-20). The files engine's `remove(path)` fails rather than answering done over a directory it could
+  not list (R-23). `atRest` raises `CORRUPT` for a decrypted row that is no JSON. `INTEGRITY` carries `reason` and the
+  parse error as `cause` (G-5).
+- **A served files engine lost log entries to a purge and to a failed append; a copy skipped records; the served side
+  answered any call.** Over `serveEngine(filesEngine(…))` a purge rewrote every segment and journal the purged
+  record touched from the scrubbed entries alone — the rest of each file was gone, the segment read as altered — and a
+  failed append rewrote the journal's other groups as empty lines (review №5, R-1/R-2). The journal now rebuilds nothing
+  from less than it held: a file's own entries with the scrubbed ones swapped, where the log answers less than the whole
+  range (`log.journal.unrewritten`, `log.segment.unscrubbed` where neither is whole). The files engine listed ids in the
+  backend's order (a hash on ext4, `a-b.json` before `a.json` by name), so `copyEngine` paging by the last id skipped
+  records (R-3): ids and a tag's copies are sorted first. The memory engine's `scrub` was a no-op, so under `atRest` or a
+  port — which keep copies — a purged payload stayed in the log (R-17). Compaction over the port read the proxy's
+  segments once and dropped a dropped segment again (R-9). `serveEngine` trusted every message — any store or method
+  (`fsi`, `lock`, an inherited `valueOf`), a path to remove, a key with `..`, an object where MongoDB reads a filter
+  (S-3): every call is checked against the contract (`isKvKey`, `isRecordId`, `checkWriteSet` in src/engine.js — the
+  files engine checks the same before a name becomes a file), `remove(path)` takes what the port opened or `allow` lists,
+  an answer that does not clone crosses as an error, a file system's `path`/`syscall`/`errno` never cross. A port that
+  closes or a worker that exits, and a call past `remoteEngine(port, { timeout })`, fail every call waiting and after as
+  `ENGINE_UNREACHABLE` (`reason`), the served side lets go of what the port held, and `engine.stats()` counts the calls
+  (R-8). `copyEngine` lands the identity last, takes a failed copy away (`to.remove(path)`), fails `LEASE_LOST` when the
+  lease goes, pages the sealed log by `batch`, and keeps the private keys' mode (`KEY_FILE_MODE`; R-18, S-7, R-13).
 - **A tag read as the window laid its record could read the record as it is now.** A record changed
   since the tag and not yet on its file reads as the file — still the tag's state — but a deferred
   flush may be laying it at that moment, the tag's copy first and the new file after; a read of the
@@ -1155,7 +1340,7 @@ and one `commit` event, not one per call.
   of an open group's file (EIO, EMFILE) was taken for a torn write and the
   file removed, and a group file that failed its checksum — whole once, so
   answered — was removed too. A file that is there and cannot be read now
-  fails `open()` with `CORRUPT` (its `cause`), and a group file that fails
+  fails `createDatabase()` with `CORRUPT` (its `cause`), and a group file that fails
   its checksum is moved to `log/corrupt/` and counted as lost. A torn one,
   never answered, is still dropped (`log.open.torn`).
 - **A transaction of many ops on one large record held a copy of the
@@ -1166,7 +1351,7 @@ and one `commit` event, not one per call.
   follows now keeps its op and its changes alone (the record it left only
   while a `commit` listener exists, the hook context only with an
   `afterWrite` hook) — 4.8 MB and 10 MB — and the record is in flight,
-  deferred and refreshed once, as its last op left it: a live `Record`
+  deferred and refreshed once, as its last op left it: a live `Document`
   emits one `update` per transaction, with the delta of all its ops.
 - **A list that a move and a push touched could show an element twice.**
   A local push after a move extended the move's position run, so every
@@ -1193,7 +1378,7 @@ and one `commit` event, not one per call.
 - **An application's plugin had no methods on the storage.** The facade
   carried a stub for every shipped plugin's method and nothing else, so a
   plugin of the application's reached its methods inside a transaction only,
-  though the types promised them on `open()`'s storage. They are installed at
+  though the types promised them on `createDatabase()`'s storage. They are installed at
   open now (a name that would shadow a member of the storage is refused).
 - **`INVALID_VERSION` was typed as a `SyncomError` code it never is.** It is
   a `TypeError`'s (`typed()`), so `error instanceof SyncomError && error.code
@@ -1325,7 +1510,7 @@ and one `commit` event, not one per call.
   now: a failed roll seals nothing, is logged (`log.roll.failed`, at `error`),
   counted (`stats().log.rollFailures`), and the next append rolls again.
 - **A telemetry writer of the application's could hang the same way.** The
-  core took a writer given to `open({ telemetry })` as it was, checked for
+  core took a writer given to `createDatabase({ telemetry })` as it was, checked for
   `enabled` and `withSpan` alone, and called some twenty methods on it: one
   missing or throwing after an append left the writes waiting. A given writer
   is contained now — a method it lacks records nothing, one that throws is
@@ -1455,7 +1640,7 @@ and one `commit` event, not one per call.
   `add`/`remove` without an array applied as nothing and said nothing — the
   sequence and tree ops already reported theirs. They are `OP_REFUSED` with
   `reason: 'malformed'` now, counted, still logged and relayed as no-ops.
-- **A live `Record` reads as `get()` after a change too.** It loaded through
+- **A live `Document` reads as `get()` after a change too.** It loaded through
   the lens and the read hooks, but every change it followed — a write here,
   an op from a peer — handed it the record as stored: a redacted field showed
   its raw value after an unrelated `update()`, and a record of an older
@@ -1539,8 +1724,8 @@ and one `commit` event, not one per call.
   `restore()` could land its reset without the rebuild; the `removals` a
   patch named were kept by reference in the log; a `tags.json` line's name
   became a path under `tags/` unchecked (such a line is dropped at load,
-  `tags.dropped` with `reason: 'name'`); `open('path')` opened the default
-  directory in silence — `open()` takes an options object, and anything
+  `tags.dropped` with `reason: 'name'`); `createDatabase('path')` opened the default
+  directory in silence — `createDatabase()` takes an options object, and anything
   else is a `TypeError`.
 - **A failed undo never inverts a record twice.** A throw on the third
   record of a step — a hook refusing its inverse — put the step back whole,
@@ -1549,7 +1734,7 @@ and one `commit` event, not one per call.
   failure the records taken back leave the step with their way back on the
   redo stack, and the rest wait for another try. The own seqs the manager
   kept are forgotten below its pin instead of growing for its life.
-- **An unreadable `tags.json` no longer fails `open()`.** The tags are
+- **An unreadable `tags.json` no longer fails `createDatabase()`.** The tags are
   auxiliary, yet a torn `tags.json` failed the open like `node.json` does.
   The storage now opens without tags, keeps the file aside as
   `tags.corrupt.json` for a repair by hand, warns `tags.unreadable`,
@@ -1592,8 +1777,8 @@ and one `commit` event, not one per call.
   returned a record of another collection, and `update`, `delete` and
   `record` acted on one; `get` is `null` there now, the others reject with
   `NOT_FOUND`. An entity named like a storage member (`get`, `close`, `log`…)
-  replaced it, or broke `open()` with a bare `TypeError`; it is refused at
-  `open()`.
+  replaced it, or broke `createDatabase()` with a bare `TypeError`; it is refused at
+  `createDatabase()`.
 - **`cursor.one()` leaves the cursor as it was** instead of a `limit(1)` the
   next `fetch()` kept.
 - **Indexed objects match whatever their key order.** `$eq`/`$in` through
@@ -1601,7 +1786,7 @@ and one `commit` event, not one per call.
   now, as the predicate does.
 - **`merge()` and `diff()` walk own keys and never take `__proto__`** as a
   field (a JSON-parsed delta set the result's prototype).
-- **`import { open } from '@alexify/syncom'` works in Node.js ESM.** The root
+- **`import { createDatabase } from '@alexify/syncom'` works in Node.js ESM.** The root
   re-exported through spreads of locals, which Node's CommonJS lexer cannot
   read; both barrels spell their exports out.
 - **Docs that disagreed with the code:** failing listeners and watch runs
@@ -1616,8 +1801,8 @@ and one `commit` event, not one per call.
   "in scope" is defined once in `src/scope.js`. The directory lock uses an
   exclusive create where the backend has one (`fsi.create`, on `node:fs`
   and the memory backend), so openers racing for a free lock lose
-  deterministically; `open({ lock })` takes an object (`mode`, `staleAfter`,
-  `poll`, `timeout` — a `'wait'` that gives up). `open({ maxListeners })`
+  deterministically; `createDatabase({ lock })` takes an object (`mode`, `staleAfter`,
+  `poll`, `timeout` — a `'wait'` that gives up). `createDatabase({ maxListeners })`
   tunes the listener cap, a hundred by default (ten threw at the eleventh
   `change` listener). `$regex` is capped at 1000 characters and
   `projection(['__proto__'])` refused. A torn registry file is reported and
@@ -1633,7 +1818,7 @@ and one `commit` event, not one per call.
   line), `migrate()` without its `actor`, `fetch()` returning ids (rows),
   `schemaInfo` without `held`, `remote` without `schema`, the write hooks
   without `purge`; `storage.logger`, `OpLog.latestTs` and the `Collection`
-  and `Record` constructor types existed at runtime but not in `index.d.ts`;
+  and `Document` constructor types existed at runtime but not in `index.d.ts`;
   the package consistency test now checks the subpaths' exports against
   their types too. Comments that said the opposite of the code are fixed
   (`packOps` is the wire shape, not the log's; a streamed snapshot page is
@@ -1661,8 +1846,8 @@ and one `commit` event, not one per call.
   from `exists()`/`remove()` and lets a denied or broken storage surface.
   The log events are documented as a surface in the telemetry guide.
 - **Every record inserted through a collection stayed in memory for good.**
-  `Collection.insert()` returned a `Record`, and the storage kept every
-  `Record` ever made, which also exempted its cache entry from eviction —
+  `Collection.insert()` returned a `Document`, and the storage kept every
+  `Document` ever made, which also exempted its cache entry from eviction —
   the "bounded" cache was unbounded for collection users. Live Records are
   now held weakly: one the application still references pins its entry and
   follows the record; one it dropped is collected, and the pin with it.
@@ -1756,10 +1941,10 @@ and one `commit` event, not one per call.
 - `OpLog` now receives the storage `logger`, so an unreadable segment or open
   file is reported rather than silently skipped.
 
-- `Storage.saveData()` did not await `encrypt`/`decrypt`, so encryption at
+- `Database.saveData()` did not await `encrypt`/`decrypt`, so encryption at
   rest in the browser stored a serialized promise (`{}`) instead of ciphertext.
 - `apply()` ignored the data of a `write` record and only understood `delete`
-  by `key`; a full write now replaces the state and Storage's own
+  by `key`; a full write now replaces the state and Database's own
   `{ type: 'delete', id }` shape empties it.
 - `Blockchain.validate({ from })` threw on an unknown hash instead of
   answering `false`.
@@ -1767,12 +1952,12 @@ and one `commit` event, not one per call.
   the pair is regenerated.
 - `SyncManager` persisted nodes under `<host>.json`, so two peers on one host,
   or a url without a port, overwrote each other.
-- `Storage.validate()` threw `Cannot use 'in' operator` when called with no
+- `Database.validate()` threw `Cannot use 'in' operator` when called with no
   arguments, and silently returned `false` for `validate({})`. It discriminated
   on `'last' in idOrOptions`; it now keys off whether the first argument is a
   record id (a string), which is what actually separates the two call shapes.
 - `Emitter.emit` dropped every argument after the first, so the `update` event
-  a `Record` emits delivered `data` but never `delta` — despite `index.d.ts`
+  a `Document` emits delivered `data` but never `delta` — despite `index.d.ts`
   typing the listener as `(data, delta) => void`.
 - `browser.js` was a hand-inlined 810-line duplicate of `src/`, importing a
   `./metautil.js` that did not exist and calling an `fsi` binding that was
@@ -1974,7 +2159,7 @@ and one `commit` event, not one per call.
   text. A write that leaves a record's catalog row as it was (a field the
   catalog does not hold) posts nothing, saves nothing, and does not run a
   watch the catalog covers.
-- **A live `Record` no longer copies the whole record on every write.** It
+- **A live `Document` no longer copies the whole record on every write.** It
   took a JSON copy of the record, walked it for references and redefined its
   accessors on every change — a 200 KB text made each keystroke of another
   field cost the text. It lays the fields the write changed over what it
@@ -2014,7 +2199,7 @@ and one `commit` event, not one per call.
   had grown back to 1,821 lines: `src/fields.js` (`inc` … `treeRemove`,
   `spans`, `cursor`, `index`) and `src/versions.js` (`get(id, { at })`,
   `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`,
-  `at`) run over the core Storage lends its write paths, the facade one
+  `at`) run over the core Database lends its write paths, the facade one
   delegate per method; the run-length content of a run is `src/rle.js`, out
   of `src/sequence.js`; the write API's argument checks are `src/args.js`,
   shared with `realize()` in `src/patch.js` and so with the undo subpath. No
@@ -2058,8 +2243,8 @@ and one `commit` event, not one per call.
   op: prepare, validate, persist, announce), `src/apply.js` (a peer's batch:
   admit, apply, persist, announce) and `src/bootstrap.js` (snapshot pages,
   merge pages, `adoptVector`). Record files, the cache and the catalog rows
-  live in `src/entries.js` (`EntryStore`); `Reference`/`Record`/`Collection`
-  in `src/record.js`; `open()`'s option checks in `src/options.js`; the
+  live in `src/entries.js` (`EntryStore`); `Reference`/`Document`/`Collection`
+  in `src/record.js`; `createDatabase()`'s option checks in `src/options.js`; the
   entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
   the hosting side of replication in `src/sync/hosting.js` (`createUnit`), with
   `src/sync/protocol.js` for what both halves share. No public name, error
@@ -2083,7 +2268,7 @@ and one `commit` event, not one per call.
   `adoptFrom`: an `advance` is adopted only when its origin is that node.
 - `storage.on('error')` payloads carry `code` — `OP_REFUSED`, `OP_INVALID`,
   `SKEW`.
-- `open({ sync: { maxSkew } })` (default 24 hours) bounds how far ahead of the
+- `createDatabase({ sync: { maxSkew } })` (default 24 hours) bounds how far ahead of the
   node's clock a peer's stamp may be.
 - A hosted unit refuses `push` ops outside the peer's hello scopes (answer
   field `outOfScope`, `refused` event) and serves `snapshot`/`changes` for the
@@ -2093,7 +2278,7 @@ and one `commit` event, not one per call.
 - `fsi.write(dir, name, content, options?)` takes an optional `{ mode }` hint;
   `withSync` forwards it. Adapters without permissions ignore it.
 
-- **`open()` is exclusive by default.** A second instance over the same
+- **`createDatabase()` is exclusive by default.** A second instance over the same
   directory used to open silently and mint the seqs of the first; it now
   rejects with `code: 'LOCKED'` unless `lock: 'wait'` or `lock: false`.
 - **Smart contracts moved to `@alexify/syncom/contracts`.** `SmartContract`
@@ -2101,16 +2286,16 @@ and one `commit` event, not one per call.
   `SmartContract.load` runs code from the chain, and a process that never
   imports the subpath — a hub — never does.
 - An entity definition is `{ schema?, idField?, validate?, index?, unique?,
-  fields?, search? }` and any other key is a `TypeError` at `open()`; a legacy field
+  fields?, search? }` and any other key is a `TypeError` at `createDatabase()`; a legacy field
   map (`Post: { title: 'string' }`) goes under `fields`. A `schema` with a
   key other than `version` and `entities`, and a `getId` that is not a
-  function, are refused at `open()` too (the latter used to be ignored).
+  function, are refused at `createDatabase()` too (the latter used to be ignored).
 - `SyncManager` is constructed as `new SyncManager(storage, options)`; nodes
   no longer carry `type: 'uplink' | 'downlink'` — every registered node is
   dialed, and any node can host. `src/sync.browser.js` is gone: one
   `src/sync.js` over `fsi` serves both halves, and the browser registry is
   persisted in OPFS.
-- The in-memory `Storage.#updates` array and `addUpdate()` are gone; the
+- The in-memory `Database.#updates` array and `addUpdate()` are gone; the
   operation log replaces them. `set()` on an existing record is a whole-record
   write; `update()` on a counter field, and `inc()` on a register field, throw.
 - `delete()` leaves a tombstone on disk; `list()`, `get()` and `has()` hide it.
@@ -2120,7 +2305,7 @@ and one `commit` event, not one per call.
 - Browser modules follow the `*.browser.js` pattern:
   `src/{crypto,fsi,sync}-browser.js` → `src/{crypto,fsi,sync}.browser.js`.
 - The default storage directory is `syncom` (was `gs`).
-- Type names `GsRecord` / `GsCollection` → `SyncomRecord` / `SyncomCollection`.
+- Type names `GsRecord` / `GsCollection` → `SyncomDocument` / `SyncomCollection`.
 - `exports` gained a `browser` condition resolving to `browser.js` /
   `browser.d.ts`, and a `./package.json` entry.
 - The `bench:compare` and `size:compare` scripts were removed; they pointed at
@@ -2128,6 +2313,6 @@ and one `commit` event, not one per call.
 
 ### Removed
 
-- `emulation/` — a legacy prototype duplicating `Storage` and `SyncManager`.
+- `emulation/` — a legacy prototype duplicating `Database` and `SyncManager`.
 - The root `example.js` — it required two modules that do not exist.
   `examples/` covers the same ground.

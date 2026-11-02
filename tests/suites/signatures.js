@@ -193,7 +193,7 @@ const runSignatureTests = async (t, assert, createStorage) => {
   await t.test('the option is checked at open()', async (t2) => {
     await assert.rejects(() => createStorage(t2, 'bad', { sync: { signatures: 'yes' } }), {
       name: 'TypeError',
-      message: "open({ sync }): signatures must be 'verify', 'require' or false",
+      message: "createDatabase({ sync }): signatures must be 'verify', 'require' or false",
     });
     await assert.rejects(() => createStorage(t2, 'bad2', { sync: { signatures: true } }), TypeError);
   });

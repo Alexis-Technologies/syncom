@@ -51,6 +51,8 @@ const keywords = [
   'nodejs',
   'browser',
   'indexeddb',
+  'sqlite',
+  'mongodb',
   'opentelemetry',
   'observability',
 ].join(', ');
@@ -165,7 +167,7 @@ export default withMermaid({
           {
             text: 'Core',
             items: [
-              { text: 'Storage', link: '/guide/storage' },
+              { text: 'Database', link: '/guide/database' },
               { text: 'Schema and validation', link: '/guide/schema' },
               { text: 'TypeScript', link: '/guide/typescript' },
               { text: 'Queries', link: '/guide/query' },

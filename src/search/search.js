@@ -135,7 +135,7 @@ class TrigramIndex {
   }
 }
 
-/** For `open({ search })`: a fresh trigram index per searchable entity. */
+/** For `createDatabase({ search })`: a fresh trigram index per searchable entity. */
 const createSearch = ({ minOverlap = 0.3 } = {}) => {
   if (typeof minOverlap !== 'number' || !(minOverlap >= 0 && minOverlap <= 1)) {
     throw new TypeError('createSearch({ minOverlap }): minOverlap must be a number between 0 and 1');

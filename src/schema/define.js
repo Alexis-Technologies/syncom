@@ -1,14 +1,14 @@
 'use strict';
 
 // Entity definitions and the injected validator — what the schema plugin
-// (./schema.js) reads `open({ schema, validator })` into, once, at open. No
+// (./schema.js) reads `createDatabase({ schema, validator })` into, once, at open. No
 // requires beyond the core's errors: this file ships to the browser, and
 // scripts/size.js fails on any import that is not a relative file.
 //
-// `open({ schema: { entities } })` names the collections. Each entity may
+// `createDatabase({ schema: { entities } })` names the collections. Each entity may
 // carry a `schema` — any Standard Schema (`~standard`: metaschema, zod,
 // valibot, arktype), a compiled validator function (ajv), or a plain object
-// that `open({ validator })` knows how to compile (JSON Schema, TypeBox) —
+// that `createDatabase({ validator })` knows how to compile (JSON Schema, TypeBox) —
 // plus the indexes the record catalog keeps. The engine never requires a
 // validation library: it reads one property and calls one function, and
 // everything a validator returns or throws is normalized here, once, so the
@@ -24,7 +24,7 @@ const LENS = new Set(['migrations', 'validate', 'both']);
 const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search'];
 const ENTITY_KEY = new Set(ENTITY_KEYS);
 
-const fail = (entity, text) => new TypeError(`open({ schema }): entity ${entity}: ${text}`);
+const fail = (entity, text) => new TypeError(`createDatabase({ schema }): entity ${entity}: ${text}`);
 
 // One issue as syncom keeps it, from either shape it meets: a Standard
 // Schema issue (`path` of keys or `{ key }` segments) or an ajv error
@@ -118,7 +118,9 @@ const normalizeValidator = (schema, entity, validator) => {
   }
   if (typeof schema === 'function') return fromFunction(schema, entity);
   if (!isObject(schema)) throw fail(entity, 'schema must be an object or a function');
-  if (validator === null) throw fail(entity, 'a schema without ~standard needs open({ validator }) or validate: false');
+  if (validator === null) {
+    throw fail(entity, 'a schema without ~standard needs createDatabase({ validator }) or validate: false');
+  }
   const compiled = validator.compile(schema, { entity });
   if (typeof compiled !== 'function') throw fail(entity, 'validator.compile() must return a function');
   return fromFunction(compiled, entity);
@@ -177,7 +179,7 @@ const fieldNames = (value, entity, what) => {
 const explicitIndex = (value, entity) => fieldNames(value, entity, 'index');
 
 // The fields `$text` searches, joined into the record's catalog row and
-// handed to the injected text index (`open({ search })`); never derived from
+// handed to the injected text index (`createDatabase({ search })`); never derived from
 // a schema — no validator has a notion of "searchable".
 const explicitSearch = (value, entity) => fieldNames(value, entity, 'search');
 
@@ -268,7 +270,7 @@ const normalizeEntity = (name, def, validator) => {
 };
 
 const addEntity = (entities, name, def, compiler) => {
-  if (!isField(name)) throw new TypeError('open({ schema }): entity names must be non-empty strings');
+  if (!isField(name)) throw new TypeError('createDatabase({ schema }): entity names must be non-empty strings');
   entities.set(name, normalizeEntity(name, def, compiler));
 };
 
@@ -280,28 +282,34 @@ const isMigration = (value) =>
 // is accepted and reserved. A Map of version → `{ up }` | Map<entity, { up }>.
 const normalizeMigrations = (migrations, version) => {
   if (migrations === undefined) return null;
-  if (!isObject(migrations)) throw new TypeError('open({ schema }): migrations must be an object keyed by version');
+  if (!isObject(migrations)) {
+    throw new TypeError('createDatabase({ schema }): migrations must be an object keyed by version');
+  }
   const chain = new Map();
   for (const key of Object.keys(migrations)) {
     const to = Number(key);
     if (!Number.isInteger(to) || to < 2 || String(to) !== key) {
-      throw new TypeError(`open({ schema }): migrations: '${key}' is not a version of 2 or more`);
+      throw new TypeError(`createDatabase({ schema }): migrations: '${key}' is not a version of 2 or more`);
     }
-    if (to > version) throw new TypeError(`open({ schema }): migrations: ${key} is beyond version ${version}`);
+    if (to > version) {
+      throw new TypeError(`createDatabase({ schema }): migrations: ${key} is beyond version ${version}`);
+    }
     const value = migrations[key];
     if (isMigration(value)) {
       chain.set(to, { up: value.up });
       continue;
     }
     if (!isObject(value)) {
-      throw new TypeError(`open({ schema }): migrations[${key}] must be { up } or { [entity]: { up } }`);
+      throw new TypeError(`createDatabase({ schema }): migrations[${key}] must be { up } or { [entity]: { up } }`);
     }
     const perEntity = new Map();
     const entities = Object.keys(value);
     for (let i = 0; i < entities.length; i++) {
       const entity = entities[i];
       const migration = value[entity];
-      if (!isMigration(migration)) throw new TypeError(`open({ schema }): migrations[${key}].${entity} must be { up }`);
+      if (!isMigration(migration)) {
+        throw new TypeError(`createDatabase({ schema }): migrations[${key}].${entity} must be { up }`);
+      }
       perEntity.set(entity, { up: migration.up });
     }
     chain.set(to, perEntity);
@@ -310,7 +318,7 @@ const normalizeMigrations = (migrations, version) => {
 };
 
 /**
- * `open({ schema, validator })` normalized: `{ version, entities, snapshot,
+ * `createDatabase({ schema, validator })` normalized: `{ version, entities, snapshot,
  * migrations, ahead, lens }` — the entities a Map of `{ name, schema,
  * standard, validator, idField, index, unique, fields, search }`, `snapshot` whatever
  * JSON describes the schema (hashed by the storage, exchanged in hello),
@@ -322,28 +330,30 @@ const normalizeMigrations = (migrations, version) => {
  */
 const normalizeSchema = (schema, { validator } = {}) => {
   if (validator !== undefined && (!isObject(validator) || typeof validator.compile !== 'function')) {
-    throw new TypeError('open({ validator }): validator must have a compile() method');
+    throw new TypeError('createDatabase({ validator }): validator must have a compile() method');
   }
   const compiler = validator === undefined ? null : validator;
   const entities = new Map();
   if (schema === undefined || schema === null) {
     return { version: 1, entities, snapshot: undefined, migrations: null, ahead: 'apply', lens: 'both' };
   }
-  if (!isObject(schema)) throw new TypeError('open({ schema }): schema must be an object');
+  if (!isObject(schema)) throw new TypeError('createDatabase({ schema }): schema must be an object');
   for (const key of Object.keys(schema)) {
-    if (!SCHEMA_KEYS.has(key)) throw new TypeError(`open({ schema }): unknown key '${key}'`);
+    if (!SCHEMA_KEYS.has(key)) throw new TypeError(`createDatabase({ schema }): unknown key '${key}'`);
   }
   const version = schema.version === undefined ? 1 : schema.version;
   if (!Number.isInteger(version) || version < 1) {
-    throw new TypeError('open({ schema }): version must be a positive integer');
+    throw new TypeError('createDatabase({ schema }): version must be a positive integer');
   }
   const ahead = schema.ahead === undefined ? 'apply' : schema.ahead;
-  if (!AHEAD.has(ahead)) throw new TypeError("open({ schema }): ahead must be 'apply' or 'hold'");
+  if (!AHEAD.has(ahead)) throw new TypeError("createDatabase({ schema }): ahead must be 'apply' or 'hold'");
   const lens = schema.lens === undefined ? 'both' : schema.lens;
-  if (!LENS.has(lens)) throw new TypeError("open({ schema }): lens must be 'migrations', 'validate' or 'both'");
+  if (!LENS.has(lens)) {
+    throw new TypeError("createDatabase({ schema }): lens must be 'migrations', 'validate' or 'both'");
+  }
   const migrations = normalizeMigrations(schema.migrations, version);
   if (lens === 'validate' && migrations !== null) {
-    throw new TypeError("open({ schema }): lens 'validate' skips the migrations the schema declares");
+    throw new TypeError("createDatabase({ schema }): lens 'validate' skips the migrations the schema declares");
   }
   const source = schema.entities;
   if (source !== undefined && source !== null) {
@@ -353,7 +363,7 @@ const normalizeSchema = (schema, { validator } = {}) => {
       const names = Object.keys(source);
       for (let i = 0; i < names.length; i++) addEntity(entities, names[i], source[names[i]], compiler);
     } else {
-      throw new TypeError('open({ schema }): entities must be an object or a Map');
+      throw new TypeError('createDatabase({ schema }): entities must be an object or a Map');
     }
   }
   return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };

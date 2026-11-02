@@ -13,7 +13,7 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 
 test('lastEditorOf, editorsOf and editorOf name the node and the stamp, by kind, the same on every node', async (t) => {
   const createStorage = (t2, name, options) => {
-    const storage = syncom.open({ path: `/${name}`, fsi: memory(), logger: false, defer: 0, ...options });
+    const storage = syncom.createDatabase({ path: `/${name}`, fsi: memory(), logger: false, defer: 0, ...options });
     t2.after(async () => (await storage).close().catch(() => {}));
     return storage;
   };
@@ -52,7 +52,7 @@ test('lastEditorOf, editorsOf and editorOf name the node and the stamp, by kind,
     assert.strictEqual(await storage.editorOf(id, 'title', 0), null);
   }
   // Through a Record; what is not there; arguments.
-  const record = await a.record(id);
+  const record = await a.document(id);
   assert.strictEqual((await record.lastEditorOf('title')).origin, b.nodeId);
   assert.deepStrictEqual(await record.editorsOf(), [a.nodeId, b.nodeId].sort());
   assert.strictEqual((await record.editorOf('body', 5)).origin, b.nodeId);

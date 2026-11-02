@@ -24,5 +24,7 @@ const REWIND = Symbol('syncom.rewind');
 // On a `transaction` event, the entries the turn left its records as (a Map by id), for a text handle
 // (src/text/handle.js) to take the storage's reading instead of applying every op again.
 const ENTRIES = Symbol('syncom.entries');
+// The engine's database (src/engine.js EngineDb) behind a Database: what the sync registry and a branch keep their files in.
+const DB = Symbol('syncom.db');
 
-module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND, ENTRIES };
+module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND, ENTRIES, DB };

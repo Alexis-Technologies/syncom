@@ -13,7 +13,7 @@ const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -29,7 +29,7 @@ test('Actor on ops', async (t) => {
     await storage.swap(id, { n: 3 }, { n: 2 }, { actor: 'cy' });
     const post = await storage.Post.insert({ title: 'a' }, { actor: 'dee' });
     await storage.Post.update(post.id, { title: 'b' }, { actor: 'eve' });
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     record.n = 4;
     await record.save({ actor: 'fay' });
     await record.inc('hits', 1, { actor: 'gus' });
@@ -86,9 +86,9 @@ test('Actor on ops', async (t) => {
       [undefined, 'once'],
     );
     assert.strictEqual('actor' in packOps(plainOps)[0] ? 1 : packOps(plainOps)[0][13], null);
-    await assert.rejects(async () => syncom.open({ path: 'x', actor: 42 }), {
+    await assert.rejects(async () => syncom.createDatabase({ path: 'x', actor: 42 }), {
       name: 'TypeError',
-      message: 'open({ actor }): actor must be a string or a function',
+      message: 'createDatabase({ actor }): actor must be a string or a function',
     });
   });
 
@@ -102,7 +102,7 @@ test('Actor on ops', async (t) => {
           dirs.set(key, await createTemp());
           t3.after(() => cleanupTemp(dirs.get(key)));
         }
-        const storage = await syncom.open({ path: dirs.get(key), logger: false, ...options });
+        const storage = await syncom.createDatabase({ path: dirs.get(key), logger: false, ...options });
         t3.after(() => storage.close().catch(() => {}));
         return storage;
       };

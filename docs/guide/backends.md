@@ -1,9 +1,176 @@
-# Backends
+# Engines and backends
 
-Everything a storage persists — records, the operation log, the chain, the
-keys, the peer registry, the catalog, the tags — goes through one small contract: an
-**fsi**, five functions over "a directory and a file name". The platform's
-own is the default; any other goes in through `open({ fsi })`.
+Everything a database persists — records, the operation log, the chain, the
+keys, the peer registry, the catalog, the tags — goes through its **engine**:
+a factory of databases, each a set of stores. `createDatabase({ engine })` takes
+one; without it the database opens through the **files engine** over a
+backend — an **fsi**, five functions over "a directory and a file name" — the
+platform's own by default, any other through `createDatabase({ fsi })`.
+
+## Engines
+
+```js
+const { createDatabase, filesEngine, isEngine } = require('@alexify/syncom');
+const { memory } = require('@alexify/syncom/memory');
+
+const engine = filesEngine(memory());                 // what createDatabase({ fsi: memory() }) builds
+const db = await createDatabase({ path: 'app', engine });
+db.engine === engine;                                  // the engine given
+db.fsi;                                                // the files engine's backend; null under a native engine
+isEngine(engine);                                      // true
+```
+
+An engine has a `name`, `capabilities`, `open(path, { logger, durable })` and
+`remove(path)` — every store of the database at `path`, gone. The database it
+opens is a set of stores:
+
+| Store | What it holds |
+| --- | --- |
+| `kv` | Small named texts by namespace (`''` the root) and key: `node.json`, `schema.json`, `tags.json`, `branch.json`, `lock.json`, the keys (`keys/`), the chain's blocks (`blockchain/`), the registry (`remote/`), a catalog (`index/`, a tag's `tags/<name>/index/`) — `get`, `has`, `list`, `put`, `remove`, and `create` (exclusive) where the medium can |
+| `records` | The records by id — `get(id)` the stored record as the engine holds it, `raw(id)` its text, `has`, `getMany`, `ids({ after, limit })` in id order, tombstones included |
+| `pieces` | The runs of a large text or list beside its record, by the name the record's meta holds |
+| `copies` | A tag's copies of records, by tag and id |
+| `log` | The op log's medium — what the log writes its groups, segments and index through (the files engine's journal) |
+| `write(batch)` | One write set: a tag's copies of the records as they were, records (each with the pieces it makes and drops), kv puts and removals — whole or not at all where `capabilities.atomicBatch`, in order otherwise |
+
+`capabilities` says what the medium can do — `atomicBatch`, `indexes`,
+`changeStream`, `exclusiveCreate`, `lock`, `shared`, `blobs`, `append` — and
+the database asks nothing a medium lacks. The files engine declares what its
+backend has (`exclusiveCreate` with `create`, `append` with `append`) and
+nothing else: a file system has no transactions, so the log append stays the
+commit point and a landing that fails is `UNPERSISTED`, as it always was.
+A transaction of many records is one write set, a single write one.
+
+### What ships
+
+| Engine | Where | How |
+| --- | --- | --- |
+| `filesEngine(fsi)` | Anywhere | What `createDatabase({ fsi })` builds, and the default over the platform's backend: a directory, today's layout |
+| `idbEngine({ name, indexedDB, IDBKeyRange, durability, channel })` (`@alexify/syncom/idb`) | The browser | The engine over IndexedDB: six object stores keyed by the database's path (`kv`, `records`, `pieces`, `copies`, `log`, `meta`), a record as the object it was handed, one readwrite transaction per write set and per log group, key ranges for listings, a `BroadcastChannel` another tab's writes are heard through (`db.changes`). Where `createIdbFsi` spent a transaction per file and rewrote the catalog whole, this spends two per write. `engine.close()` closes the connection, `engine.destroy()` deletes the IndexedDB database — see [Browser](./browser#opfs-or-indexeddb) |
+| `sqliteEngine({ file, database, driver, durable })` (`@alexify/syncom/sqlite`) | Node.js — or anywhere SQLite runs, through a driver | The engine over SQLite: six tables keyed by the database's path (`kv`, `records`, `pieces`, `copies`, `log`, `meta`) in one file, `:memory:` by default, through `node:sqlite` (Node 22.5+; experimental, so Node warns once at the require — `node --no-warnings=ExperimentalWarning` quiets it) or any driver with `exec(sql)` and `prepare(sql)` → `{ run, get, all }` (better-sqlite3, expo-sqlite; answers may be promises). One transaction per write set and per log group, every statement through one lane; WAL for a file, `synchronous = FULL` once a database opens `durable`. `engine.close()` closes the connection (the file stays), `engine.destroy()` deletes the file |
+| `mongoEngine({ client, db, name, transactions, changes })` (`@alexify/syncom/mongodb`) | Node.js, the driver's client injected | The engine over MongoDB: six collections keyed by the database's path (`kv`, `records`, `pieces`, `copies`, `log`, `meta`) in one MongoDB database, a document's `_id` its key as JSON with the key's fields flat beside it over an index. A write set is a bulk write per collection — in one session transaction under `transactions: true` (a replica set; `atomicBatch`), in order otherwise, where every put is an upsert so a set that failed midway is landed again whole by the replay; a log group is one bulk write. One instance writes: the database is held by a lease (`locks`, a document per path on the **server's** clock — `$$NOW`, never the client's — renewed every third of `lock.staleAfter`, 30 s by default, every lease the engine holds in one bulk write a tick — a renewal that fails is tried again every `lock.poll` ms while two thirds of `staleAfter` are left, the `lease` event saying `late` then `renewed`, or `lost`; a lapsed one is taken over, its generation `gen` one up, and a release leaves it lapsed so the count goes on; `stats().lock` says when it lapses), another instance over the same path is `LOCKED` — or opens with `readOnly: true` and reads what the writer lands, hearing every write through a change stream (`db.changes`; `changes: false` on a standalone server). Every document a holder writes carries its lease's `gen`, and every put, removal and log group is fenced to documents of its generation or older: a writer whose lease was taken by another instance cannot write over anything the new holder wrote (the statement fails as `LEASE_LOST`; under `transactions: true` the lease is checked inside the transaction first, so nothing of an old generation lands at all), hears `LEASE_LOST` once and writes nothing more — what it had logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Nothing is required: the application connects and closes the driver (6.0 or later); `engine.remove(path)` takes the lease document with the rest, `engine.destroy()` drops the database |
+| `memoryEngine()` (`@alexify/syncom/memory`) | Anywhere | The engine in memory: a record kept as the object it was handed (no JSON text), the log as rows (nothing written, nothing read back), the catalog's rows as they are; one engine object is shared by every database that opens through it, and a path outlives its instance until `engine.remove(path)` — a reopen reads what the last instance wrote. Nothing survives the process. What a test, a mesh in one process or a benchmark wants over `memory()` |
+
+```js
+const { createDatabase } = require('@alexify/syncom');
+const { memoryEngine } = require('@alexify/syncom/memory');
+
+const engine = memoryEngine();
+const a = await createDatabase({ path: 'a', engine });      // two databases, one engine, a path each
+const b = await createDatabase({ path: 'b', engine });
+await a.close();
+const again = await createDatabase({ path: 'a', engine });  // what `a` wrote, log and tags included
+await engine.remove('a');                                   // gone for good
+```
+
+```js
+const { createDatabase } = require('@alexify/syncom');
+const { sqliteEngine } = require('@alexify/syncom/sqlite');
+
+const engine = sqliteEngine({ file: 'app.sqlite' });       // one file, every database opened through it
+const db = await createDatabase({ path: 'app', engine });
+await db.insert({ title: 'In SQLite' });
+await db.close();
+await engine.close();                                       // the connection; the file stays
+```
+
+```js
+const { MongoClient } = require('mongodb');                 // the application's driver
+const { createDatabase } = require('@alexify/syncom');
+const { mongoEngine } = require('@alexify/syncom/mongodb');
+
+const client = await new MongoClient(process.env.MONGODB_URL).connect();
+const engine = mongoEngine({ client, name: 'app', transactions: true }); // one MongoDB database, every path in it
+const db = await createDatabase({ path: 'main', engine });
+await db.insert({ title: 'In MongoDB' });
+await db.close();
+await client.close();                                       // the driver is yours
+```
+
+Every engine is held to the same contract as a test — `tests/suites/engine.js`,
+run over the files engine on every backend that ships. An engine of your own
+passes it or it is not one. An engine and a backend together
+(`createDatabase({ engine, fsi })`) is a `TypeError`: the files engine is how a
+backend becomes an engine.
+
+### An engine in a worker
+
+`serveEngine(engine, port)` from `@alexify/syncom/engines` answers the engine
+contract over a message port — a worker thread, a SharedWorker, Electron's
+main process — and `connectEngine(port)` is that engine on the other side:
+every call one message and its answer, so the I/O runs off the thread the
+database lives on. The database stays where it is opened (its seqs are minted
+there); only its bytes cross the port.
+
+```js
+// worker.js
+const { parentPort } = require('node:worker_threads');
+const { memoryEngine } = require('@alexify/syncom/memory');
+const { serveEngine } = require('@alexify/syncom/engines');
+serveEngine(memoryEngine(), parentPort);
+
+// main.js
+const { Worker } = require('node:worker_threads');
+const { createDatabase } = require('@alexify/syncom');
+const { connectEngine } = require('@alexify/syncom/engines');
+const worker = new Worker('./worker.js');
+const engine = await connectEngine(worker);               // asks the worker what it serves
+const db = await createDatabase({ path: 'app', engine });
+```
+
+`remoteEngine(port, { name, capabilities, timeout })` is the same without the
+question, where the main thread knows what it started. An error crosses with
+its code (`EEXIST`, `INTEGRITY`, `LOCKED`…), a change stream and the loss of a
+lease are pushed back, and a group the served store cannot write fails the
+append here, as it would in-process.
+
+The served side trusts the port as it trusts the process, no further: a call
+names a store and a method of the contract and nothing else, every key, id,
+tag and path is checked before a store sees it, and `remove(path)` takes only
+what that port opened — `serveEngine(engine, port, { allow: ['app'] })` lists
+the paths a less trusted side (a renderer) may open and remove at all. A port
+that closes or a worker that exits fails every call waiting and every call
+after with `code: 'ENGINE_UNREACHABLE'` (`reason: 'closed'`), and the served
+side lets go of what the port held — its leases, subscriptions, databases; a
+call that waits longer than `timeout` ms fails the same (`reason: 'timeout'`).
+`engine.stats()` is `{ inflight, oldestMs, calls, failures, closed }`.
+
+### Moving a database between engines
+
+`copyEngine(from, to, { path, batch })` copies the database at `path` from
+one engine to another — every record with its pieces, every tag's copies,
+every kv text (`node.json`, the keys, the chain, the catalog, the registry),
+the op log with its index — so the node opens on the new engine as itself:
+the same identity, epoch, vector and heads, and a peer resumes its cursor
+without a bootstrap. Both databases must be closed (the copy holds them as
+`createDatabase()` would; a lease lost on the way fails it with `LEASE_LOST`),
+and a target that already holds a database at the path is `TARGET_NOT_EMPTY`.
+The identity — the keys, then `node.json` — lands last, so a copy cut short is
+no node of that name, and a copy that fails removes what it wrote from the
+target. Two copies of one node are two writers of one stream: once the copy is
+done, open the database through the new engine only, and remove it from the old
+one (`from.remove(path)`) or never open it there again.
+
+```js
+const { createDatabase, filesEngine } = require('@alexify/syncom');
+const fsi = require('@alexify/syncom/fsi');                 // or the backend the database was opened with
+const { copyEngine } = require('@alexify/syncom/engines');
+const { sqliteEngine } = require('@alexify/syncom/sqlite');
+
+const db = await createDatabase({ path: 'app', fsi });   // the database as it is today
+const files = filesEngine(fsi);                           // where the database is
+const sqlite = sqliteEngine({ file: 'app.sqlite' });      // where it goes
+await db.close();
+const copied = await copyEngine(files, sqlite, { path: 'app' }); // { records, pieces, copies, kv, entries }
+const moved = await createDatabase({ path: 'app', engine: sqlite });
+```
+
+## Backends
+
+Under the files engine a kv namespace is a directory under the path and a key
+a file in it, a record `data/<id>.json`, its pieces `data/<id>~<n>.json`, a
+tag's copies `tags/<tag>/data/<id>.json`, the log its journals and segments
+under `log/`: the layout every database had before the engines, byte for byte.
 
 | Function | Meaning |
 | --- | --- |
@@ -17,8 +184,8 @@ own is the default; any other goes in through `open({ fsi })`.
 | `append(dir, name, content)` *(optional)* | Adds `content` at the end of the file, making the file and the directory when absent; what the op log writes with when present — a line per group of ops into one journal, not a file per group (`node:fs` and the memory backend have it) |
 
 `isFsi(value)` tells whether an object has the five. The check runs at
-`open()`, naming the method that is missing, and the storage never closes a
-backend it was handed — two storages may share one.
+`createDatabase()`, naming the method that is missing, and the database never closes a
+backend it was handed — two databases may share one (`filesEngine(fsi)` is one engine over it).
 
 ## What ships
 
@@ -32,11 +199,11 @@ backend it was handed — two storages may share one.
 | `@alexify/syncom/encryption` | Anywhere | `atRest(fsi, options)` — every file through it encrypted; see [Encrypted at rest](#encrypted-at-rest) |
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { memory } = require('@alexify/syncom/memory');
 
 const fsi = memory();
-const storage = await open({ path: 'app', fsi });     // nothing touches the disk
+const storage = await createDatabase({ path: 'app', fsi });     // nothing touches the disk
 await storage.insert({ a: 1 });
 fsi.size;                                              // 6 files: lock, node.json, log, data, catalog
 Object.keys(fsi.dump());                               // ['app/lock.json', 'app/log/index.json', 'app/node.json', …]
@@ -47,11 +214,11 @@ wants; two storages opened over one of it with different `path`s are a
 mesh in one process, which is how the sync-engine suite runs.
 
 ```js
-import { open } from '@alexify/syncom';
+import { createDatabase } from '@alexify/syncom';
 import { createIdbFsi } from '@alexify/syncom/idb';
 
 const idb = createIdbFsi({ name: 'app' });
-const storage = await open({ path: 'data', fsi: idb });
+const storage = await createDatabase({ path: 'data', fsi: idb });
 // …
 await storage.close();
 await idb.close();                                     // the backend's own
@@ -64,13 +231,13 @@ memory layer over the disk, the disk over a remote store — that reads as a
 multi-level cache and writes to every layer in list order:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { memory } = require('@alexify/syncom/memory');
 const { layered } = require('@alexify/syncom/layered');
 const disk = require('@alexify/syncom'); // read, write, exists, remove, list: the platform's own
 
 const fsi = layered([memory(), disk], { write: 'back' });
-const storage = await open({ path: 'data', fsi });
+const storage = await createDatabase({ path: 'data', fsi });
 // … every read is answered from memory once seen; every write lands in
 // memory first and on the disk from the queue
 await storage.close();
@@ -122,21 +289,36 @@ directory opens over the wrapper with the key and over the bare backend not
 at all.
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { atRest } = require('@alexify/syncom/encryption');
 
 // a key the application holds: 32 bytes, or a Web Crypto AES-GCM CryptoKey
-const storage = await open({ path: 'data', fsi: atRest(fsi, { key }) });
+const storage = await createDatabase({ path: 'data', fsi: atRest(fsi, { key }) });
 
 // or a password: the key is derived by PBKDF2-SHA-256 under a salt the
 // application keeps (8 characters or more), 600 000 rounds by default
-const vault = await open({ path: 'data', fsi: atRest(fsi, { password, salt }) });
+const vault = await createDatabase({ path: 'data', fsi: atRest(fsi, { password, salt }) });
+
+// an engine the same way: every record, piece, copy, kv text and log entry a ciphertext in the engine's stores
+const { memoryEngine } = require('@alexify/syncom/memory');
+const sealed = await createDatabase({ path: 'data', engine: atRest(memoryEngine(), { key }) });
 ```
+
+Over an engine (memory, IndexedDB, SQLite, MongoDB) the wrapper seals every
+value the stores hold — a record as one text, its pieces, a tag's copies, the
+kv texts, each entry of the op log and the log's index — and leaves the keys
+in the clear: an id, a seq, a tag's name, a kv key, the index's `floor`. The
+engine keeps no index of its own over ciphertext (`capabilities.indexes` is
+false; the core's catalog is saved sealed, as kv). The files engine is wrapped
+at its backend — `filesEngine(atRest(fsi, options))` — since its journal reads
+the ops it writes.
 
 Each ciphertext is bound to its file name (the additional data of
 AES-GCM): a file copied over another one of the store — one record's over
 another's — does not decrypt. The directory is not bound, so a store moved
-elsewhere opens. What the wrapper does not hide or prevent: the names of the
+elsewhere opens; under an engine (`atRest(engine)`) the database's path is bound
+too, so a ciphertext moved to the same place in another database of the engine
+— one key serves every path — does not open. What the wrapper does not hide or prevent: the names of the
 files (record ids, tag names, the log's seqs) and their sizes, and an older
 copy of a file put back in its place — that is a backup restored, as far as
 the key can tell.
@@ -144,7 +326,7 @@ the key can tell.
 The key is never written. A file that is not the key's is refused as
 `DECRYPT_FAILED` with a `reason` — `'key'` (another key, or a torn
 ciphertext), `'plain'` (a file that was never encrypted), `'torn'` (not
-base64) — and the first such file fails `open()`. `exists`, `remove`, `list`,
+base64) — and the first such file fails `createDatabase()`. `exists`, `remove`, `list`,
 `sync` and `create` pass through, so a lock and a `durable` open work as they
 do on the bare backend. There is no `append` — a file is one ciphertext — so
 the log under the wrapper writes a sealed file per group. The wrapper
@@ -170,7 +352,7 @@ but the count of files.
 
 ## Durability
 
-Files are written with the platform's default durability. `open({ durable:
+Files are written with the platform's default durability. `createDatabase({ durable:
 true })` follows every write with the backend's `sync`; on `node:fs` that is
 an fsync per file — the log batch, the chain block, the record — and the
 price is the write latency of the disk; an `append` is followed by `sync`
@@ -181,7 +363,7 @@ and a torn open file — or a journal's torn last line — is dropped before
 anyone was told of it. A record file torn the same way reads as `INTEGRITY`
 until `repair(id)` rebuilds it.
 
-`open({ defer: ms })` trades the record files' timing for fewer writes: a local
+`createDatabase({ defer: ms })` trades the record files' timing for fewer writes: a local
 write's record file and chain block wait up to `ms` (one timer for all of
 them), so the writes of one record within the window land as one file, and
 everything due lands under one block; a flush that took longer than `ms` (a
@@ -203,9 +385,9 @@ open replays it onto the files.
 
 ## One instance per directory
 
-`open()` holds the directory — the Web Locks API in a browser, a `lock.json`
-with the pid elsewhere — and a second `open()` of it rejects with
+`createDatabase()` holds the directory — the Web Locks API in a browser, a `lock.json`
+with the pid elsewhere — and a second `createDatabase()` of it rejects with
 `code: 'LOCKED'`; `lock: 'wait'` waits, `lock: false` leaves the
 coordination to you. See
-[One instance per directory](./storage#one-instance-per-directory) for why,
+[One instance per directory](./database#one-instance-per-directory) for why,
 and for what two browser tabs should do.

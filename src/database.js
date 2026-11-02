@@ -1,11 +1,11 @@
 'use strict';
 
-// The engine's front: a Storage opens a directory (through an injected
+// The engine's front: a Database opens a directory (through an injected
 // backend), owns the mutation queue every write runs in, and lends its
 // collaborators to the three write paths — the local one in src/commit.js,
 // a peer's batch in src/apply.js, a bootstrap page in src/bootstrap.js.
 // Records live in src/entries.js, what the application holds in
-// src/record.js, the options in src/options.js. The API of the field kinds
+// src/document.js and src/collection.js, the options in src/options.js. The API of the field kinds
 // beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
@@ -13,7 +13,8 @@ const { Emitter, generateUUID, createLogger } = require('./utils.js');
 const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
-const { Record, Collection } = require('./record.js');
+const { Document } = require('./document.js');
+const { Collection } = require('./collection.js');
 const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
@@ -26,6 +27,9 @@ const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { project } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
+const { checkEngine, checkEngineDb, kvNamespace } = require('./engine.js');
+const { readOnlyDb } = require('./readonly.js');
+const { filesEngine } = require('./files/files.js');
 const { acquireLock } = require('./lock.js');
 const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
@@ -39,7 +43,7 @@ const { compose, composeData } = require('./compose.js');
 
 // The ids a `storage.unpersisted` line names; past them it says how many.
 const UNPERSISTED_NAMED = 32;
-const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed } = require('./errors.js');
 const { loadIdentity } = require('./identity.js');
@@ -47,7 +51,7 @@ const { loadIdentity } = require('./identity.js');
 // What a storage without the schema plugin runs with: no entities, version 1.
 const NO_SCHEMA = Object.freeze({ version: 1, entities: new Map(), snapshot: undefined, ahead: 'apply', view: null });
 
-// The hooks a storage accepts (`open({ hooks })`). Writes and reads run
+// The hooks a storage accepts (`createDatabase({ hooks })`). Writes and reads run
 // their hooks inside this storage; the apply pair runs per peer batch.
 const STORAGE_HOOKS = ['beforeWrite', 'afterWrite', 'beforeRead', 'afterRead', 'beforeApply', 'afterApply'];
 
@@ -76,7 +80,7 @@ const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
 
-class Storage extends Emitter {
+class Database extends Emitter {
   #path;
   #identity = null;
   #seal = null;
@@ -102,9 +106,24 @@ class Storage extends Emitter {
   #catalog = null;
   #catalogSave = null;
   #flushEvery;
-  #fsi;
+  // The engine the database stores its bytes through, and its database of stores (src/engine.js).
+  #engine;
+  #db = null;
   #lock = null;
   #lockOptions;
+  // How the database is held: through a lock key, or the engine's own lease — and the lease's renewals heard.
+  #lockKind = 'kv';
+  #unleash = null;
+  // A follower (`readOnly: true`), or a writer whose lease was lost: every write is READ_ONLY.
+  #readOnly = false;
+  #leaseLost = false;
+  // What another instance wrote, heard through the engine's change stream (a
+  // follower): read one message after another; what came before the
+  // collections were up waits.
+  #heard = Promise.resolve();
+  #unhear = null;
+  #hearing = false;
+  #heardEarly = [];
   #schema = null;
   #entities = null;
   #version = null;
@@ -118,6 +137,10 @@ class Storage extends Emitter {
   #logger;
   #otel;
   #lockWait = 0;
+  // The engine's write sets: how many, how many failed, the time they took (ms) — `stats().engine`.
+  #engineStats = { writes: 0, failures: 0, ms: 0 };
+  // A follower's: the records heard through the change stream, the re-reads that failed, the catch-ups run.
+  #followStats = { heard: 0, failed: 0, caughtUp: 0 };
   #options;
   #nodeId = null;
   #clock = new Clock();
@@ -130,7 +153,7 @@ class Storage extends Emitter {
   // What a transaction's `tx` carries (#transaction): `[name, method]`, the
   // field methods and the plugins' — a plugin's in place of a field's.
   #txMethods = [];
-  // Local writes whose record files wait (`open({ defer })`, src/defer.js).
+  // Local writes whose record files wait (`createDatabase({ defer })`, src/defer.js).
   #defer = 0;
   #window = null;
   // Local writes appended but not yet on disk: id → the entries the record's
@@ -185,10 +208,11 @@ class Storage extends Emitter {
     this.#settings = settings;
     this.#path = settings.path;
     this.#lockOptions = settings.lock;
+    this.#readOnly = settings.readOnly;
     this.#cacheMax = settings.cacheMax;
     this.#verify = settings.verify;
     this.#flushEvery = settings.flushEvery;
-    this.#getId = settings.getId ?? Storage.generateId;
+    this.#getId = settings.getId ?? Database.generateId;
     this.#actor = settings.actor;
     this.#encrypted = settings.encrypted;
     this.#scopeOf = settings.scope ?? (() => GLOBAL_SCOPE);
@@ -219,31 +243,44 @@ class Storage extends Emitter {
     });
     this.#logger = createLogger(options.logger);
     this.#otel = DISABLED;
-    this.#fsi = this.#backend(options, settings.durable);
+    this.#engine = this.#engineOf(options, settings.durable);
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     return this.#init();
   }
 
-  // The backend: node:fs or OPFS by default, anything with the five
-  // functions when injected. `durable` wraps every write with the
-  // adapter's fsync, where it has one.
+  // The engine: the one given, or the files engine over the backend —
+  // node:fs or OPFS by default, anything with the five functions when
+  // injected (`durable` wraps every write with the adapter's fsync, where it
+  // has one). An engine and a backend together make no sense: refused.
+  #engineOf(options, durable) {
+    if (options.engine !== undefined) {
+      if (options.fsi !== undefined) {
+        throw new TypeError('createDatabase({ engine, fsi }): an engine or a backend, not both');
+      }
+      return checkEngine(options.engine, 'createDatabase({ engine })');
+    }
+    return filesEngine(this.#backend(options, durable));
+  }
+
   #backend(options, durable) {
-    const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'open({ fsi })');
+    const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'createDatabase({ fsi })');
     if (!durable) return fsi;
     if (typeof fsi.sync === 'function') return withSync(fsi);
     this.#logger.debug({ event: 'durable.noop' });
     return fsi;
   }
 
-  // The schema is the plugin's to read (`open({ schema, validator })` into
+  // The schema is the plugin's to read (`createDatabase({ schema, validator })` into
   // the entity definitions the write path consults: validators, id fields,
   // indexes) and the core's to apply; without the plugin a schema or a
   // validator given is refused here, naming it, and records are untyped.
   #defineSchema(options, search) {
     const given = this.#schemaHook;
     if (given === null) {
-      if (options.schema !== undefined && options.schema !== null) throw missing('open({ schema })', 'schema');
-      if (options.validator !== undefined) throw missing('open({ validator })', 'schema');
+      if (options.schema !== undefined && options.schema !== null) {
+        throw missing('createDatabase({ schema })', 'schema');
+      }
+      if (options.validator !== undefined) throw missing('createDatabase({ validator })', 'schema');
     }
     const schema = given?.given ?? null;
     const normalized = given ?? NO_SCHEMA;
@@ -252,7 +289,9 @@ class Storage extends Emitter {
     // chain — would replace it or break the open. Refused before anything
     // is opened.
     for (const name of normalized.entities.keys()) {
-      if (name in this) throw new TypeError(`open({ schema }): entity name '${name}' is taken by the storage itself`);
+      if (name in this) {
+        throw new TypeError(`createDatabase({ schema }): entity name '${name}' is taken by the storage itself`);
+      }
     }
     this.#entities = normalized.entities;
     this.#schema = schema;
@@ -263,17 +302,22 @@ class Storage extends Emitter {
     for (const def of normalized.entities.values()) {
       if (def.search.length === 0) continue;
       if (search === null) {
-        const hint = 'give open() an index — createSearch() from @alexify/syncom/search';
-        throw new TypeError(`open({ search }): entity ${def.name} declares search fields; ${hint}`);
+        const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
+        throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
       }
       const index = search(def.name);
       if (!isTextIndex(index)) {
-        throw new TypeError(`open({ search }): the index for ${def.name} must have put(), remove() and query()`);
+        throw new TypeError(
+          `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
+        );
       }
       text.set(def.name, index);
     }
     const { logger } = this;
-    this.#catalog = new Catalog({ fsi: this.#fsi, path: this.#path, entities: normalized.entities, text, logger });
+    // Persisted through the engine's catalog store where it has one (a native
+    // engine keeps the rows as they are), else as catalog.json in the `index` namespace.
+    const where = this.#db.catalog ? { rows: this.#db.catalog } : { store: kvNamespace(this.#db.kv, 'index') };
+    this.#catalog = new Catalog({ ...where, entities: normalized.entities, text, logger });
     // A node with a schema stamps its version on every op it makes; one
     // without stamps nothing, and nothing in hello says what it runs.
     if (schema === null) return;
@@ -285,37 +329,73 @@ class Storage extends Emitter {
     const retention = options.sync?.retention;
     const retained = retention === 'all' ? Infinity : retention?.ops;
     if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
-      throw new TypeError("open({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
+      throw new TypeError("createDatabase({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
   }
 
   async #init() {
+    // A follower opens beside the writer: only an engine whose databases
+    // several instances may open at once (`shared` — memory, IndexedDB,
+    // MongoDB) serves one. The files engine's journal and SQLite's connection
+    // are one instance's: a second reader there would load a group the
+    // writer is still writing.
+    if (this.#readOnly && this.#engine.capabilities.shared !== true) {
+      throw new TypeError(
+        `createDatabase({ readOnly }): the ${this.#engine.name} engine is not shared — one instance per database`,
+      );
+    }
+    // The engine's database: every store the open reads and writes through.
+    const opened = await this.#engine.open(this.#path, { logger: this.#logger, durable: this.#settings.durable });
+    const db = checkEngineDb(opened, 'createDatabase({ engine })');
+    // A follower reads through the engine and writes nothing — not even the
+    // log's index — so it holds no lock: the writer does.
+    this.#db = this.#readOnly ? readOnlyDb(db, (what) => this.#refused(what)) : db;
     // One instance per directory, first: a second one would mint the seqs
     // this one is about to. `lock: false` is for a caller that coordinates.
-    const lock = this.#lockOptions;
-    if (lock !== null) {
-      // Recorded once the writer is set up (a plugin's, after the lock).
-      const started = now();
-      this.#lock = await acquireLock({ fsi: this.#fsi, path: this.#path, ...lock });
-      this.#lockWait = now() - started;
-    }
+    const lock = this.#readOnly ? null : this.#lockOptions;
     try {
+      // A follower hears what the writer lands from before it loads anything:
+      // a record landed between the load and the subscription would be
+      // missed for good. What comes while the open runs waits for the
+      // collections (`#heardEarly`).
+      if (this.#readOnly && db.changes !== undefined) this.#subscribeChanges();
+      if (lock !== null) {
+        // Recorded once the writer is set up (a plugin's, after the lock).
+        const started = now();
+        // The engine's own lease where it has one (MongoDB), the lock key of the root namespace otherwise.
+        const native = db.capabilities.lock === 'native' && typeof db.lock === 'function';
+        this.#lock = native
+          ? await db.lock({ ...lock, onLost: (error) => this.#lostLease(error) })
+          : await acquireLock({ store: kvNamespace(db.kv, ''), path: this.#path, ...lock });
+        this.#lockKind = native ? 'native' : 'kv';
+        // A lease that tells of its renewals (an engine's own; one served over a port does not): the `lease` events.
+        this.#unleash = this.#lock.subscribe?.((event) => this.#leaseState(event)) ?? null;
+        this.#lockWait = now() - started;
+      }
       await this.#open();
     } catch (error) {
+      this.#unhear?.();
       await this.#lock?.release();
+      await this.#db.close();
       throw error;
     }
     return this;
   }
 
   async #open() {
-    const fsi = this.#fsi;
+    const db = this.#db;
+    // The backend behind the files engine, for what still speaks fsi; null under a native engine.
+    const fsi = db.fsi ?? null;
     // The API plugins set up before the log opens — the identity (signing),
     // the sealing of records (encryption), the chain — each handing back the
     // hooks the core takes; what the options ask for and no plugin provides
-    // is refused here, naming the subpath.
+    // is refused here, naming the subpath. They reach the stores through `db`.
+    if (this.#readOnly && typeof this.#options.sync?.connect === 'function') {
+      throw new TypeError('createDatabase({ readOnly }): a read-only database does not dial — it reads and serves');
+    }
     const ctx = {
       fsi,
+      db,
       path: this.#path,
       logger: this.#logger,
       options: this.#options,
@@ -324,9 +404,14 @@ class Storage extends Emitter {
       // SHA-256 of a value's JSON (src/crypto/digest.js), the core's: a plugin
       // hashes with it rather than bundle a digest of its own.
       hash: sha256,
-      // A catalog of a tag (the versions plugin's): the entities are read when
-      // it is made, after the schema is defined.
-      catalogOf: (path) => new Catalog({ fsi, path, entities: this.#entities, logger: this.#logger }),
+      // A catalog of a tag (the versions plugin's), over the tag's own kv
+      // namespace: the entities are read when it is made, after the schema is defined.
+      catalogOf: (name) =>
+        new Catalog({
+          store: kvNamespace(db.kv, `tags/${name}/index`),
+          entities: this.#entities,
+          logger: this.#logger,
+        }),
     };
     let adapted = false;
     for (const mod of this.#plugins.apis) {
@@ -347,14 +432,14 @@ class Storage extends Emitter {
     const given = this.#options.telemetry;
     if (!adapted && given && typeof given === 'object') {
       if (isWriter(given)) this.#otel = writerOf(given);
-      else throw missing('open({ telemetry })', 'telemetry');
+      else throw missing('createDatabase({ telemetry })', 'telemetry');
     }
     if (this.#lockWait > 0 && this.#otel.enabled) this.#otel.recordLockWait(this.#lockWait);
     if (this.#signatures === 'require' && this.#identity === null) {
       throw missing("sync.signatures 'require'", 'signing');
     }
-    if (this.#options.chain === true && this.#chain === null) throw missing('open({ chain: true })', 'chain');
-    if (this.#encrypted && this.#seal === null) throw missing('open({ encrypted: true })', 'encryption');
+    if (this.#options.chain === true && this.#chain === null) throw missing('createDatabase({ chain: true })', 'chain');
+    if (this.#encrypted && this.#seal === null) throw missing('createDatabase({ encrypted: true })', 'encryption');
     this.#defineSchema(this.#options, this.#settings.search);
     this.#installMethods();
     // A directory with tags needs the plugin that keeps their copies: opened
@@ -365,7 +450,8 @@ class Storage extends Emitter {
       retention: this.#options.sync?.retention,
       logger: this.#logger,
       telemetry: this.#otel,
-      fsi,
+      // The log's medium: the engine's (the files engine's journal under log/).
+      store: db.log,
       // A roll seals only what the write paths marked applied — see
       // OpLog.applied: the tail a reopen replays must hold every batch whose
       // records may not have been written.
@@ -380,8 +466,7 @@ class Storage extends Emitter {
     // logged is below what it will stamp next, whatever the wall clock says.
     this.#clock.observe(this.#log.latestTs);
     this.#entries = new EntryStore({
-      fsi,
-      path: this.#path,
+      db,
       max: this.#cacheMax,
       logger: this.#logger,
       catalog: this.#catalog,
@@ -391,6 +476,7 @@ class Storage extends Emitter {
       view: (id, entry) => this.#view(id, entry),
       before: this.#tags === null ? null : (id, file) => this.#tags.copyBefore(id, file),
       plugins: this.#plugins,
+      measure: (ms, ok) => this.#engineWrote(ms, ok),
     });
     await this.#loadIdentity();
     await this.#loadSchema();
@@ -404,16 +490,27 @@ class Storage extends Emitter {
       typeof this.#actor !== 'function' &&
       this.#defer > 0 &&
       this.#lens === null;
-    await this.#replayTail();
-    await this.#replayHeld();
+    // The writer lands the log's tail; a follower reads what it landed.
+    if (!this.#readOnly) {
+      await this.#replayTail();
+      await this.#replayHeld();
+    }
     // The API plugins that need the open log — the sync manager — come
     // after the replay, and hand back what the facade exposes.
-    const opened = { storage: this, options: this.#options, settings: this.#settings, logger: this.#logger };
+    const opened = { storage: this, db, options: this.#options, settings: this.#settings, logger: this.#logger };
     for (const mod of this.#plugins.apis) {
       const hooks = (await mod.open?.(opened)) ?? {};
       if (hooks.sync) this.#sync = hooks.sync;
     }
     this.#initCollections();
+    // A follower's collections are up: what the change stream brought while
+    // the open ran is read now, in order, and what comes next as it comes.
+    if (this.#unhear !== null) {
+      this.#hearing = true;
+      const early = this.#heardEarly;
+      this.#heardEarly = [];
+      for (let i = 0; i < early.length; i++) this.#hearChange(early[i]);
+    }
     // What the observable gauges sample, when a meter was given.
     this.#otel.gauges(() => ({
       outbox: this.#sync === null ? 0 : this.#sync.pendingOps(),
@@ -570,14 +667,22 @@ class Storage extends Emitter {
       const reason = saved === null ? 'no catalog' : 'stamp not resumable';
       this.#logger.debug({ event: 'catalog.rebuild', reason });
       const rebuild = async () => {
+        // A page of ids and ONE read of the page's records, not a read a record.
         let count = 0;
-        for (const name of await this.#fsi.list(`${this.#path}/data`)) {
-          // A record's file, never one of its pieces (`<id>~<n>.json`).
-          if (!name.endsWith('.json') || !isRecordId(name.slice(0, -5))) continue;
-          await this.#entries.index(name.slice(0, -5));
-          count++;
+        const page = 500;
+        let after = null;
+        for (;;) {
+          const ids = await this.#db.records.ids({ after, limit: page });
+          if (ids.length === 0) break;
+          const found = await this.#db.records.getMany(ids);
+          for (let i = 0; i < ids.length; i++) {
+            await this.#entries.index(ids[i], found.get(ids[i]) ?? null);
+            count++;
+          }
+          if (ids.length < page) break;
+          after = ids[ids.length - 1];
         }
-        await this.#catalog.save(this.#log.lastEventId);
+        if (!this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
         return count;
       };
       const otel = this.#otel;
@@ -588,7 +693,7 @@ class Storage extends Emitter {
     const touched = new Set();
     for (const { op } of tail) if (typeof op.id === 'string') touched.add(op.id);
     for (const id of touched) await this.#entries.index(id);
-    if (touched.size > 0) await this.#catalog.save(this.#log.lastEventId);
+    if (touched.size > 0 && !this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
   }
 
   // The persisted catalog is written at close and, in between, off the
@@ -607,13 +712,151 @@ class Storage extends Emitter {
   }
 
   #flushCatalog() {
-    if (this.#catalogSave !== null || this.#catalog.dirty < this.#flushThreshold()) return;
+    if (this.#readOnly || this.#catalogSave !== null || this.#catalog.dirty < this.#flushThreshold()) return;
     this.#catalogSave = this.#catalog
       .save(this.#log.lastEventId)
       .catch((error) => this.#logger.warn({ event: 'catalog.save', err: error }))
       .finally(() => {
         this.#catalogSave = null;
       });
+  }
+
+  // The error a write meets on a read-only database: a follower's, or a
+  // writer's whose lease was lost (nothing of it is written any more: what
+  // was logged but not landed is held as UNPERSISTED).
+  #refused(what) {
+    const why = this.#leaseLost ? 'its lease was lost' : 'it was opened with readOnly: true';
+    return new SyncomError('READ_ONLY', `Database at ${this.#path} is read-only (${why}): ${what} refused`, {
+      path: this.#path,
+      lease: this.#leaseLost,
+    });
+  }
+
+  // The engine's lease on this database went to another instance (not
+  // renewed in time, or taken): from here on every write is READ_ONLY, and
+  // the application hears it once.
+  #lostLease(cause) {
+    if (this.#closed || this.#leaseLost) return;
+    this.#leaseLost = true;
+    this.#readOnly = true;
+    // Nothing of this instance reaches the engine from here on: the stores
+    // refuse as a follower's do, the log's medium with them (a group fails,
+    // a seal, a drop and the index are nothing, close() seals nothing), and
+    // every landing — in flight or deferred — is held, UNPERSISTED. The
+    // engine's own fence refuses what is already on its way.
+    this.#db = readOnlyDb(this.#db, (what) => this.#refused(what));
+    this.#log?.readOnly(this.#db.log);
+    this.#logger.error({ event: 'storage.lease.lost', path: this.#path, err: cause });
+    const message = `Database at ${this.#path} lost its lease: read-only from here on`;
+    notify(this, this.#logger, 'error', new SyncomError('LEASE_LOST', message, { path: this.#path, cause }));
+    notify(this, this.#logger, 'lease', { state: 'lost', path: this.#path });
+  }
+
+  // The lease's life, as the engine tells it: every renewal, and the first
+  // failed one of a run (`late`: retried until a third of `staleAfter` is
+  // left, then lost) — the `lease` event, contained like every event.
+  #leaseState({ state, error }) {
+    if (this.#closed || this.#leaseLost) return;
+    if (state === 'late') this.#logger.warn({ event: 'storage.lease.late', path: this.#path, err: error });
+    notify(this, this.#logger, 'lease', { state, path: this.#path });
+  }
+
+  // The engine's change stream, subscribed: what it brings goes to #hearChange.
+  #subscribeChanges() {
+    this.#unhear = this.#db.changes.subscribe((message) => this.#hearChange(message));
+  }
+
+  // A record another instance wrote, heard through the engine's change
+  // stream: read again, its catalog row and a live Document with it. In
+  // order, one at a time; the log's news is the writer's to apply. The
+  // stream's end (`{ error }`) is a loss: subscribed again, read again whole.
+  #hearChange(message) {
+    if (this.#closed || message === null || typeof message !== 'object') return;
+    if (!this.#hearing) return void this.#heardEarly.push(message);
+    if (message.error !== undefined) return void this.#followLost(message.error);
+    if (!Array.isArray(message.records)) return;
+    const ids = message.records;
+    this.#followStats.heard += ids.length;
+    this.#heard = this.#heard.then(async () => {
+      // The records heard, read in one call; one by one where the engine cannot (a record gone reads as null).
+      let found = null;
+      try {
+        found = await this.#db.records.getMany(ids);
+      } catch (error) {
+        this.#logger.warn({ event: 'follow.failed', id: null, err: error });
+      }
+      for (let i = 0; i < ids.length; i++) {
+        if (this.#closed) return;
+        await this.#reread(ids[i], found === null ? undefined : (found.get(ids[i]) ?? null));
+      }
+    });
+  }
+
+  // One record as the engine holds it now: the cache dropped, the row made
+  // again (a record gone loses it), a live Document refreshed.
+  async #reread(id, stored = undefined) {
+    try {
+      this.#entries.forget(id);
+      await this.#entries.index(id, stored);
+      const entry = this.#entries.peek(id) ?? null;
+      const alive = entry !== null && isAlive(entry);
+      this.#emitUpdate(id, alive ? entry.data : null, alive ? { ...entry.data } : {}, null, entry);
+    } catch (error) {
+      this.#followStats.failed++;
+      this.#logger.warn({ event: 'follow.failed', id, err: error });
+    }
+  }
+
+  // The change stream ended — an error, a close — and what the writer landed
+  // meanwhile was not heard: the application is told once (FOLLOW_LOST),
+  // the stream is subscribed again FIRST (so nothing landed from here on is
+  // missed), and every record is read again, after what was heard before.
+  #followLost(cause) {
+    if (this.#closed) return;
+    this.#unhear?.();
+    this.#unhear = null;
+    this.#logger.warn({ event: 'follow.lost', path: this.#path, err: cause });
+    const message = `Database at ${this.#path} lost the writer's change stream: every record is read again`;
+    notify(this, this.#logger, 'error', new SyncomError('FOLLOW_LOST', message, { path: this.#path, cause }));
+    try {
+      this.#subscribeChanges();
+    } catch (error) {
+      // No stream to be had: the follower reads as of this catch-up.
+      this.#logger.warn({ event: 'follow.lost', path: this.#path, err: error });
+    }
+    this.#heard = this.#heard.then(() => this.#catchUp());
+  }
+
+  // Every record read again, a page of ids at a time — the loop a catalog
+  // rebuild runs — and the row of every record gone meanwhile taken.
+  async #catchUp() {
+    const page = 500;
+    const seen = new Set();
+    let after = null;
+    for (;;) {
+      if (this.#closed) return;
+      let ids;
+      let found;
+      try {
+        ids = await this.#db.records.ids({ after, limit: page });
+        found = await this.#db.records.getMany(ids);
+      } catch (error) {
+        this.#logger.warn({ event: 'follow.failed', id: null, err: error });
+        return;
+      }
+      for (let i = 0; i < ids.length; i++) {
+        seen.add(ids[i]);
+        await this.#reread(ids[i], found.get(ids[i]) ?? null);
+      }
+      if (ids.length < page) break;
+      after = ids[ids.length - 1];
+    }
+    // The catalog's ids are shared: taken before any row goes.
+    const held = this.#catalog.all();
+    const gone = [];
+    for (let i = 0; i < held.length; i++) if (!seen.has(held[i])) gone.push(held[i]);
+    for (let i = 0; i < gone.length; i++) await this.#reread(gone[i]);
+    this.#followStats.caughtUp++;
   }
 
   // The Record the application holds for `id`, if it still does.
@@ -691,8 +934,7 @@ class Storage extends Emitter {
   // Which node this directory is (src/identity.js: the signing key, node.json, or getId).
   async #loadIdentity() {
     this.#nodeId = await loadIdentity({
-      fsi: this.#fsi,
-      path: this.#path,
+      store: kvNamespace(this.#db.kv, ''),
       keyId: this.#identity?.id ?? null,
       kinds: this.kinds,
       getId: this.#getId,
@@ -771,9 +1013,20 @@ class Storage extends Emitter {
     return this.#schema;
   }
 
-  /** The backend every file of this storage goes through — the adapter given to `open()`, or the platform's. */
+  /** The backend every file of this storage goes through — the adapter given to `createDatabase()`, or the platform's. */
   get fsi() {
-    return this.#fsi;
+    return this.#db.fsi ?? null;
+  }
+
+  /** The engine this database stores its bytes through — the one given, or the files engine over the backend. */
+  get engine() {
+    return this.#engine;
+  }
+
+  // The engine's database of stores: what a subpath that keeps side files
+  // (the sync registry, a branch) reaches, never the application.
+  get [DB]() {
+    return this.#db;
   }
 
   // The cursor over a source seam (this storage's by default; a tag's for a
@@ -875,12 +1128,12 @@ class Storage extends Emitter {
     return this.#nodeId;
   }
 
-  /** `'verify'`, `'require'` or `false` — `open({ sync: { signatures } })`. */
+  /** `'verify'`, `'require'` or `false` — `createDatabase({ sync: { signatures } })`. */
   get signatures() {
     return this.#signatures;
   }
 
-  /** The names of the plugins this storage was opened with (`open({ plugins })`). */
+  /** The names of the plugins this storage was opened with (`createDatabase({ plugins })`). */
   get plugins() {
     return this.#plugins.names;
   }
@@ -936,6 +1189,11 @@ class Storage extends Emitter {
     return this.#log.vector;
   }
 
+  /** Whether every write is refused: opened with `readOnly: true` (a follower), or a writer whose lease was lost. */
+  get readOnly() {
+    return this.#readOnly;
+  }
+
   /**
    * The node's health, as an operator reads it: what is queued, cached,
    * catalogued, retained and locked. No I/O — every number is in memory.
@@ -954,7 +1212,7 @@ class Storage extends Emitter {
       cache: { size: this.#entries.size, max: this.#cacheMax, pinned },
       catalog: { entries: this.#catalog.size, dirty: this.#catalog.dirty },
       tags: this.#tags === null ? null : { count: this.#tags.size, corrupt: this.#tags.corrupt },
-      // Records whose files lag the log: deferred by `open({ defer })`, or
+      // Records whose files lag the log: deferred by `createDatabase({ defer })`, or
       // held after a write that failed (replayed at the next open).
       held: this.#entries.heldIds().size,
       deferred: this.#window.size,
@@ -964,7 +1222,7 @@ class Storage extends Emitter {
       // The text handles open (src/text/handle.js): how many, how many hold edits not logged yet, and the
       // run offsets reserved for them over every field.
       handles: this.#handleStats(),
-      // The window `open({ defer })` gave, what the last deferred landing
+      // The window `createDatabase({ defer })` gave, what the last deferred landing
       // took (the next window is at least that), and the positions waiting.
       defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
       observers,
@@ -987,8 +1245,37 @@ class Storage extends Emitter {
         appendFailures: health.appendFailures,
       },
       chain: this.#chain ? { tail: this.#chain.tailHash } : null,
-      lock: this.#lock ? { mode: this.#lockOptions.mode } : null,
+      // How the database is held: the lock key or the engine's lease, when the lease lapses unless renewed
+      // (`null` for a lock key, or once lost) and whether it was lost.
+      lock: this.#lock
+        ? {
+            kind: this.#lockKind,
+            mode: this.#lockOptions.mode,
+            expiresAt: this.#lock.expiresAt ?? null,
+            lost: this.#leaseLost,
+          }
+        : null,
+      readOnly: this.#readOnly,
+      // A follower's count of what it heard; null on a writer.
+      follow: this.#readOnly ? { ...this.#followStats } : null,
+      // The engine and what its write sets cost so far.
+      engine: {
+        name: this.#engine.name,
+        capabilities: this.#engine.capabilities,
+        writes: this.#engineStats.writes,
+        failures: this.#engineStats.failures,
+        ms: Math.round(this.#engineStats.ms),
+      },
     };
+  }
+
+  // One write set of the engine done, in `ms`, or failed: counted, and told to the meter where there is one.
+  #engineWrote(ms, ok) {
+    const stats = this.#engineStats;
+    stats.writes++;
+    if (!ok) stats.failures++;
+    stats.ms += ms;
+    if (this.#otel.enabled) this.#otel.recordEngineWrite(this.#engine.name, ms, ok);
   }
 
   // The record as a write path reads it: the entry its newest in-flight op
@@ -1087,6 +1374,7 @@ class Storage extends Emitter {
   // interleaved writers would race all three.
   #run(task) {
     if (this.#closed) return Promise.reject(new SyncomError('CLOSED', 'Storage is closed'));
+    if (this.#readOnly) return Promise.reject(this.#refused('a write'));
     // A write or apply hook runs inside the queue; a write it issues would
     // wait for the hook that waits for it. Refused here, where the deadlock
     // would otherwise begin. Read hooks run outside the queue and are not
@@ -1216,6 +1504,9 @@ class Storage extends Emitter {
   // onto the files at the next open. Reported, never thrown.
   async #land(touched, fromSeq, toSeq) {
     try {
+      // After a lost lease nothing of this instance is written: what was
+      // logged stays in the log for the next holder's replay, held here.
+      if (this.#leaseLost) throw this.#refused('a landing');
       await this.#persistBatch(touched, fromSeq, toSeq);
     } catch (error) {
       await this.#unpersisted(touched, error);
@@ -1247,16 +1538,19 @@ class Storage extends Emitter {
   }
 
   async #persistBatch(touched, fromSeq, toSeq) {
-    let blockHash = null;
     if (this.#chain) {
       const records = {};
       for (const [id, entry] of touched) records[id] = await sha256(entry.data);
       const from = this.#log.formatId(fromSeq);
       const to = this.#log.formatId(toSeq);
-      blockHash = await this.#chain.addBlock({ records, from, to });
+      const block = await this.#chain.block({ records, from, to });
+      // One write set for the batch — the block, its tail and the records: atomic where the engine has transactions.
+      await this.#entries.writeMany(touched, block.hash, { put: block.puts });
+      this.#chain.committed(block.hash);
+      return block.hash;
     }
-    for (const [id, entry] of touched) await this.#entries.write(id, entry, blockHash);
-    return blockHash;
+    await this.#entries.writeMany(touched, null);
+    return null;
   }
 
   // ---------------------------------------------------------------------
@@ -1295,6 +1589,7 @@ class Storage extends Emitter {
     if (!this.#fastIssue || this.#queued !== 0 || this.#inHook !== 0 || this.#slowSteps !== 0 || this.#closed) {
       return null;
     }
+    if (this.#readOnly) return null;
     if (options.encrypted === true || (options.expect !== undefined && options.expect !== null)) return null;
     const current = this.#currentNow(id);
     if (current === undefined || current === null || current.encrypted || !isAlive(current)) return null;
@@ -1337,8 +1632,8 @@ class Storage extends Emitter {
     const isChainValidation = typeof idOrOptions !== 'string' && !data && !blockHash;
     if (this.#chain === null) {
       const why = this.#plugins.names.includes('chain')
-        ? 'open({ chain: false })'
-        : "the chain plugin is not registered (open({ plugins: [chain] }) from '@alexify/syncom/chain')";
+        ? 'createDatabase({ chain: false })'
+        : "the chain plugin is not registered (createDatabase({ plugins: [chain] }) from '@alexify/syncom/chain')";
       throw typed('NO_CHAIN', `${why}: this storage keeps no chain to validate against`);
     }
     if (isChainValidation) {
@@ -1366,7 +1661,7 @@ class Storage extends Emitter {
     const id = await this.#getId();
     if (!isRecordId(id)) {
       const error = invalidId(id);
-      error.message = `open({ getId }): ${error.message}`;
+      error.message = `createDatabase({ getId }): ${error.message}`;
       throw error;
     }
     await this.saveData(id, data, options);
@@ -1622,7 +1917,7 @@ class Storage extends Emitter {
       // A stub of the facade reaches the registry already.
       if (Object.hasOwn(HOME, name) && name in this) continue;
       if (name in this || name === 'then') {
-        throw new TypeError(`open(): a plugin's method ${name}() is a member of the storage already`);
+        throw new TypeError(`createDatabase(): a plugin's method ${name}() is a member of the storage already`);
       }
       const method = methods[name];
       Object.defineProperty(this, name, {
@@ -1642,9 +1937,10 @@ class Storage extends Emitter {
 
   // Whether the directory holds tags (tags.json with a tag, or unreadable).
   async #hasTags() {
-    if (!(await this.#fsi.exists(this.#path, 'tags.json'))) return false;
+    const text = await this.#db.kv.get('', 'tags.json');
+    if (text === null) return false;
     try {
-      const parsed = JSON.parse(await this.#fsi.read(this.#path, 'tags.json'));
+      const parsed = JSON.parse(text);
       return !Array.isArray(parsed?.tags) || parsed.tags.length > 0;
     } catch {
       return true;
@@ -1904,7 +2200,7 @@ class Storage extends Emitter {
       const id = await this.#getId();
       if (!isRecordId(id)) {
         const error = invalidId(id);
-        error.message = `open({ getId }): ${error.message}`;
+        error.message = `createDatabase({ getId }): ${error.message}`;
         throw error;
       }
       await tx.commit('write', id, { data }, { actor: options.actor });
@@ -1934,14 +2230,20 @@ class Storage extends Emitter {
     return Object.freeze(api);
   }
 
-  async record(id) {
-    let record = this.#live(id);
-    if (record === undefined) {
-      record = await new Record(id, this);
-      this.#records.set(id, new WeakRef(record));
-      this.#reaper.register(record, id);
+  /** The live Document of `id`: one object per id while the application holds it. */
+  async document(id) {
+    let document = this.#live(id);
+    if (document === undefined) {
+      document = await new Document(id, this);
+      this.#records.set(id, new WeakRef(document));
+      this.#reaper.register(document, id);
     }
-    return record;
+    return document;
+  }
+
+  /** @deprecated `document()` — the name before the rename. */
+  record(id) {
+    return this.document(id);
   }
 
   getCachedData(id) {
@@ -2010,7 +2312,7 @@ class Storage extends Emitter {
 
   /**
    * Lands what waits: the writes in flight (their disk, their files), then
-   * the record files deferred under `open({ defer })` — one block, every
+   * the record files deferred under `createDatabase({ defer })` — one block, every
    * file — so what was written is on disk when this resolves. `close()` and
    * `tag()` do the same first.
    */
@@ -2049,20 +2351,28 @@ class Storage extends Emitter {
       await this.#drained();
       await this.#flushDeferred();
       await this.#catalogSave;
-      await this.#catalog.save(this.#log.lastEventId);
+      if (!this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
       await this.#log.close();
     };
     const done = this.#queue.then(seal, seal);
     this.#queue = done.catch(() => {});
     await done;
+    this.#unhear?.();
+    await this.#heard;
+    this.#unleash?.();
     await this.#lock?.release();
+    await this.#db.close();
     notify(this, this.#logger, 'close');
   }
 }
 
-Storage.Collection = Collection;
-Storage.Record = Record;
+Database.Collection = Collection;
+Database.Document = Document;
+// The names before the rename (2026-11): `Storage`, `Record`, `open()` stay
+// as aliases until 1.0; the docs say `Database`, `Document`, `createDatabase()`.
+Database.Record = Document;
 
-const open = (options) => new Storage(options);
+const createDatabase = (options) => new Database(options);
+const open = createDatabase;
 
-module.exports = { Storage, open };
+module.exports = { Database, createDatabase, Storage: Database, open };

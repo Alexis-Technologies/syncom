@@ -25,7 +25,7 @@
 
 const { bench } = require('./support/harness.js');
 const S = require('../src/text/sequence.js');
-const { applyOp, open } = require('../src/all/all.js');
+const { applyOp, createDatabase } = require('../src/all/all.js');
 const { diff } = require('../src/text/myers.js');
 const { memory } = require('../src/memory/memory.js');
 const fs = require('node:fs');
@@ -301,7 +301,7 @@ const main = async () => {
     console.log('(the B4 rows are skipped: run `pnpm bench:compare --scenarios trace` once to download the trace)');
   }
 
-  const storage = await open({ path: '/bench', fsi: memory(), logger: false, defer: 0 });
+  const storage = await createDatabase({ path: '/bench', fsi: memory(), logger: false, defer: 0 });
   const id = await storage.insert({});
   await storage.updateText(id, 'body', before);
   await bench('storage.push — one char (memory fsi, defer: 0)', () => storage.push(id, 'body', 'z'));
@@ -326,7 +326,7 @@ const main = async () => {
   await bench('storage.push — one char into a 10 KB text (memory fsi, defer: 0)', () =>
     storage.push(long, 'body', 'z'));
   await storage.close();
-  const deferred = await open({ path: '/bench-defer', fsi: memory(), logger: false });
+  const deferred = await createDatabase({ path: '/bench-defer', fsi: memory(), logger: false });
   const lazy = await deferred.insert({});
   await deferred.updateText(lazy, 'body', 'x'.repeat(10_000));
   await bench('storage.push — one char into a 10 KB text (memory fsi, defer: 16, the default)', () =>

@@ -15,7 +15,7 @@ src/telemetry/writer.js   the telemetry writer contract: DISABLED, isWriter, wri
 
 - **Telemetry is injected, never required.** `createTelemetry` in
   `src/telemetry/telemetry.js` (the telemetry plugin's) duck-types whatever
-  `open({ telemetry })` was given and returns a writer the plugin's `setup`
+  `createDatabase({ telemetry })` was given and returns a writer the plugin's `setup`
   hands the core (`telemetry` hook); the core takes a writer given to it
   (`isWriter`) CONTAINED by `writerOf` — a missing method is a no-op, a
   throwing one is swallowed, `withSpan` runs the work exactly once (a writer

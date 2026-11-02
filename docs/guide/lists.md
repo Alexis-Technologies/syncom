@@ -2,7 +2,7 @@
 
 ::: tip The kinds on this page are plugins
 Lists and texts are the `text` plugin (`@alexify/syncom/text`), trees the
-`tree` plugin (`/tree`): `open({ plugins: [text, tree] })`, or open through
+`tree` plugin (`/tree`): `createDatabase({ plugins: [text, tree] })`, or open through
 `@alexify/syncom/all`, which has both. See [Entry points](/guide/entry-points).
 :::
 
@@ -32,7 +32,7 @@ await storage.get(id);                              // { …, items: [{ n: 1 }, 
 
 `splice(id, key, index, count, content)` removes `count` elements at `index`
 and inserts `content` there — a string for a text, an array for a list; `push`
-is a splice at the end. A live `Record` has every method of this page with its
+is a splice at the end. A live `Document` has every method of this page with its
 own id (`record.splice(key, index, count, content)`). The first write decides
 the field's kind, and a call that only removes takes it from the field.
 
@@ -134,7 +134,7 @@ await storage.move(id, 'todo', 2, 0);              // ['ship', 'write', 'test it
 ## Children of elements and nodes
 
 A list's element and a tree's node can carry fields of their own, named by
-a [path](./storage#paths) through the element's name or the node's id:
+a [path](./database#paths) through the element's name or the node's id:
 `items/<name>/body`, `outline/<node>/title`. Such a field is a field like
 any other — a register, a counter, a set, a text, a list in its turn — and
 merges on its own; a read composes it into the element (over the element's
@@ -159,7 +159,7 @@ it holds. A write under an element or a node that is not there is refused
 before anything is stamped (`NOT_FOUND` with `field` the list or tree and
 `elem` the name); from a peer such a field lands and waits. A field under an
 element that was removed, or a node under the trash, is *unreachable*: not
-read, not in a diff, kept in the record until [`compact()`](./storage#compact)
+read, not in a diff, kept in the record until [`compact()`](./database#compact)
 rewrites it without. A text's characters carry nothing: a path under a text
 is `FIELD_KIND`. A `setAt()` of the element's value and the children under
 it are apart: the value is one register, the children theirs.
@@ -400,10 +400,10 @@ splices. It resolves to how many ops it took; a difference deeper than a
 thousand edit steps (a paste that replaces most of the text) is one op that
 replaces the middle. Batch keystrokes into one call where you can — a word,
 or a pause — so a burst of typing is one op rather than ten; where you
-cannot, `open({ defer: 50 })` lets a record's file lag the log by that many
+cannot, `createDatabase({ defer: 50 })` lets a record's file lag the log by that many
 milliseconds, so the keystrokes of one burst are one file write and one chain
 block (the log is durable at once, and every read sees every write — see
-[Storage](./storage)). Indices are UTF-16 code units, as
+[Database](./database)). Indices are UTF-16 code units, as
 `String#slice` counts them, and a surrogate pair — a character outside the
 BMP, an emoji — is never split: `splice()`, `mark()`, `unmark()` and
 `cursor()` refuse an index between its halves with `SURROGATE` (`id`,

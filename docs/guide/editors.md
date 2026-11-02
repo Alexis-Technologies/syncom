@@ -9,10 +9,10 @@ indices. Nothing is lost and nothing lands twice. It is the binding every
 editor adapter builds on, and it asks three functions of the editor.
 
 ```js
-const { open } = require('@alexify/syncom/all');
+const { createDatabase } = require('@alexify/syncom/all');
 const { createTextBinding } = require('@alexify/syncom/editor');
 
-const storage = await open({ path: 'data' });
+const storage = await createDatabase({ path: 'data' });
 const binding = createTextBinding(storage, id, 'body', adapter);
 await binding.ready; // the editor holds the field
 // … type …

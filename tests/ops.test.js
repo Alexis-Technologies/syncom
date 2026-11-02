@@ -1394,9 +1394,9 @@ test('ops: a sequence op of the wrong shape is malformed, never a throw: a peer�
     assert.deepStrictEqual(entry.data, { body: 'hello' });
   }
   // Through a peer's page: the malformed op is refused and the page goes on.
-  const { open } = require('../src/all/all.js');
+  const { createDatabase } = require('../src/all/all.js');
   const { memory } = require('../src/memory/memory.js');
-  const storage = await open({
+  const storage = await createDatabase({
     path: '/malformed',
     fsi: memory(),
     logger: false,
@@ -2179,4 +2179,35 @@ test('a delete that a field survives reports the fields that went, not a record 
   const gone = applyOp(plain, op('delete', 3, 'B', { seq: 1 }));
   assert.strictEqual(isAlive(gone.entry), false);
   assert.deepStrictEqual(gone.changes, [{ action: 'delete' }]);
+});
+
+test('a block stamped in the tombstone’s very ms by an origin above it survives the prune and keeps the record alive, either order', () => {
+  // The tie between a block's stamp and a tombstone's is decided by the origin, as the prune decides it: `C` above
+  // `B` stands, `A` below it goes — and `isAlive` must say the same, or a delete reports the record gone while the
+  // block stays, and the next op revives what the changes said was gone.
+  const move = (origin) => op('tree', 5, origin, { key: 'outline', value: { node: 'n4', parent: null, fi: 'V' } });
+  const gone = op('delete', 5, 'B');
+  const read = (entry) =>
+    JSON.parse(JSON.stringify({ data: entry.data, blocks: entry.meta.blocks, deleted: entry.meta.deleted }));
+  // The move, then the tombstone — the block stands, the record is alive, and the delete is reported as what went.
+  const moveFirst = applyOp(applyOp(null, move('C')).entry, gone);
+  assert.strictEqual(isAlive(moveFirst.entry), true, 'the block stands above the tombstone');
+  assert.strictEqual(Object.hasOwn(moveFirst.entry.meta.blocks, 'outline'), true);
+  assert.ok(
+    !moveFirst.changes.some((change) => change.action === 'delete'),
+    `not a record gone: ${JSON.stringify(moveFirst.changes)}`,
+  );
+  // The tombstone, then the move: the same entry, alive.
+  const goneFirst = applyOp(applyOp(null, gone).entry, move('C'));
+  assert.strictEqual(isAlive(goneFirst.entry), true);
+  assert.deepStrictEqual(read(goneFirst.entry), read(moveFirst.entry), 'the same whichever came first');
+  assert.deepStrictEqual(goneFirst.entry.data.outline, [{ id: 'n4', children: [] }]);
+  // An origin below the tombstone's: pruned when it came first, moot when it came after — dead both ways.
+  const olderFirst = applyOp(applyOp(null, move('A')).entry, gone);
+  assert.strictEqual(isAlive(olderFirst.entry), false);
+  assert.deepStrictEqual(olderFirst.changes, [{ action: 'delete' }]);
+  const olderAfter = applyOp(applyOp(null, gone).entry, move('A'));
+  assert.strictEqual(isAlive(olderAfter.entry), false);
+  assert.strictEqual(Object.hasOwn(olderAfter.entry.meta.blocks, 'outline'), false);
+  assert.deepStrictEqual(read(olderAfter.entry), read(olderFirst.entry));
 });

@@ -1,6 +1,6 @@
 import { expectAssignable, expectType } from 'tsd';
-import { memory } from '../src/memory/memory.js';
-import type { Fsi, MemoryFsi } from '../src/memory/memory.js';
+import { memory, memoryEngine } from '../src/memory/memory.js';
+import type { Fsi, MemoryFsi, MemoryEngine, Engine } from '../src/memory/memory.js';
 import { open } from '../index.js';
 
 const fsi = memory();
@@ -10,3 +10,9 @@ expectType<number>(fsi.size);
 expectType<Record<string, string>>(fsi.dump());
 expectType<Promise<void>>(fsi.create('d', 'f.json', '{}'));
 await open({ fsi });
+
+const engine = memoryEngine();
+expectType<MemoryEngine>(engine);
+expectAssignable<Engine>(engine);
+expectType<string[]>(engine.paths);
+await open({ engine });

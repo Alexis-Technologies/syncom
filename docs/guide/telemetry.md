@@ -13,24 +13,24 @@ and that is the point of the design, see
 
 The adapter that turns an OpenTelemetry api or tracer into what the engine
 records through is the `telemetry` plugin — `@alexify/syncom/telemetry`,
-registered by `@alexify/syncom/all`; without it `open({ telemetry: { api } })`
+registered by `@alexify/syncom/all`; without it `createDatabase({ telemetry: { api } })`
 is `PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
 
 ```js
 const otelApi = require('@opentelemetry/api');
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { telemetry } = require('@alexify/syncom/telemetry');
 
 // The api module: syncom derives its own tracer and meter, so spans carry
 // the `@alexify/syncom` instrumentation scope.
-const storage = await open({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
+const storage = await createDatabase({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
 
 // Or pre-built instances — either alone is fine.
-const traced = await open({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
+const traced = await createDatabase({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
 ```
 
 The core itself records through a **writer** — `enabled` and `withSpan`,
-duck-typed — and takes one given to `open({ telemetry })`, plugin or not,
+duck-typed — and takes one given to `createDatabase({ telemetry })`, plugin or not,
 contained: a recording method it lacks records nothing, one that throws is
 swallowed, and `withSpan` runs the work exactly once whatever the writer does
 around it — a writer never breaks or holds up a write. `createTelemetry({ api })`
@@ -133,7 +133,8 @@ appears on one.
 | `syncom.log.append.failures` | Counter | `{group}` | — (groups the log could not write — their seqs taken back, their writes rejected; also `log.append.failed`) |
 | `syncom.defer.flush.duration` | Histogram | `ms` | — (landing the deferred window: the records' files and one chain block; the next window is at least as long) |
 | `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
-| `syncom.lock.wait` | Histogram | `ms` | — (what `open()` spent taking the directory lock) |
+| `syncom.lock.wait` | Histogram | `ms` | — (what `createDatabase()` spent taking the directory lock) |
+| `syncom.engine.write` | Histogram | `ms` | `syncom.engine` (the engine's name), `syncom.ok` — a write set of the engine, from the call to its return |
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
 | `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
 | `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
@@ -194,7 +195,7 @@ syncom.commit            (node A)
 ```js
 const otelApi = require('@opentelemetry/api');
 const { Server, WrpcClient, defineRouter } = require('@alexify/wrpc');
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { sync } = require('@alexify/syncom/sync');
 const { createWrpcLink } = require('@alexify/syncom/wrpc');
 
@@ -202,12 +203,12 @@ const { telemetry: otel } = require('@alexify/syncom/telemetry');
 const telemetry = { api: otelApi };
 
 // the host
-const hub = await open({ path: 'hub', plugins: [sync, otel], telemetry });
+const hub = await createDatabase({ path: 'hub', plugins: [sync, otel], telemetry });
 const router = defineRouter({ syncom: hub.sync.unit({ access: 'public' }) });
 await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http', telemetry }).listen();
 
 // a node
-const node = await open({
+const node = await createDatabase({
   path: 'node',
   plugins: [sync, otel],
   telemetry,
@@ -232,7 +233,7 @@ client spans are there.
 ## Timing
 
 `syncom.commit` and `syncom.apply` start when the write **runs**, not when it
-was queued: `Storage` serialises writes, and time spent waiting on an earlier
+was queued: `Database` serialises writes, and time spent waiting on an earlier
 write is the caller's contention, not this write's cost. They end after the
 `change` listeners have run, because that is what the caller awaits — a slow
 listener shows up in `syncom.write.duration`, and it should.
@@ -249,6 +250,8 @@ alert to key on:
 | error | `log.roll.failed` | sealing the log failed (a segment or the index not written — the disk full); nothing was lost: the groups stay open and durable, the next append rolls again, and `stats().log.rollFailures` counts it |
 | error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw, or a write made at once could not be announced as its group landed (`name: 'log'`); the writes it held are answered all the same |
 | warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) — its own stamp, or one its merge meta holds, beyond `sync.maxSkew` |
+| warn | `follow.failed` | a read-only database could not read a record another instance landed, or its row (`id`, `err`), or a page of ids while reading every record again (`id` null); the next change of the record is read again |
+| warn | `follow.lost` | a read-only database's change stream ended — an error, a close (`path`, `err`): subscribed again and every record read again; also an `error` event (`FOLLOW_LOST`). Twice when no stream is to be had: the follower reads as of that catch-up |
 | warn | `clock.skew.ignored` | a record holds a stamp beyond `sync.maxSkew` (taken under `maxSkew: Infinity`, or before merge metas were checked): not observed into the clock, so a write to the record stamps below it and loses the fields it holds; once per record (`id`, `ts`, `ahead`) |
 | warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
 | warn | `sync.op.equivocation` | a page with ops refused as equivocation — another op than the one held at its seq (`reason: 'seq'`), or one whose `prev` is not the fingerprint held at the seq before it (`'chain'`) — once per page with `origin`, `scope`, `seq`, `held`, `received` and the count; also an `error` event (`EQUIVOCATION`) |
@@ -259,13 +262,19 @@ alert to key on:
 | error | `log.segment.missing` | the sealed segments on disk skip seqs — `from` to `to` — that the floor or the segment before says the log holds: a file gone; what it held is gone from this node (counted in `droppedTs`) |
 | warn | `log.epoch.new` (when a log was there) | the log changed epoch |
 | info | `log.open.torn` | a journal's last line did not read: its append was never acknowledged, so nothing that was answered is lost |
+| warn | `storage.lease.late` | a renewal of the engine's lease on the database (MongoDB) failed (`path`, `err`): tried again every `lock.poll` ms while two thirds of `lock.staleAfter` are left since the last that landed, then `storage.lease.lost`; once per run of failures, also a `lease` event (`late`) |
+| error | `storage.lease.lost` | the engine's lease on the database (MongoDB) went to another instance — not renewed in time, or taken (`path`, `err`): the database is read-only from here on; also an `error` event (`LEASE_LOST`) |
 | error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
 | warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |
-| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Record` not refreshed after a change, a read hook having thrown |
+| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Document` not refreshed after a change, a read hook having thrown |
 | warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
 | warn | `handle.unlogged` | a text handle's flush (`openText()`) could not be logged — the append failed, a hook or a validator refused — and its edits were dropped (`id`, `field`, `edits`); written whether or not anything listens to the handle |
 | warn | `edits.unlogged` | `close()` flushed every open text handle and some could not be logged (`handles`, `edits`); the storage closes all the same |
-| warn | `log.journal.unrewritten` | a group's append failed and the journal could not be written again without what the failed append left of its line (`file`); a reopen reads the line only where no later group shadows it |
+| warn | `log.journal.unrewritten` | a group's append failed, or a scrub reached its journal, and the journal could not be written again whole (`file`, `first`, `reason`): a group's line is not there to reuse and the log did not answer its whole range (a proxy sends the scrubbed entries alone); the journal stays as it is, and a reopen reads the line only where no later group shadows it |
+| warn | `log.segment.unscrubbed` | a purge reached a sealed segment that does not read whole (`file`, `id`, `reason`), so it was not written again: the payload stays in it until the segment is compacted away |
+| warn | `log.row.unreadable` | a row of the log in a native engine (SQLite) did not parse at open (`seq`): counted in `corrupt`, left out, `lost` — what the log holds is less than it held |
+| warn | `log.meta.unreadable` | the log's index or segments row in a native engine (SQLite) did not parse at open (`key`): read as none — the log replays from what its rows hold |
+| warn | `catalog.row.unreadable` | a row of the catalog table in a native engine (SQLite) did not parse at open (`id`): the catalog is read as none and rebuilt from the records, every row replaced |
 | info | `log.corrupt.scrubbed` | a purge removed an evidence copy under `log/corrupt/` that named the id (`file`, `id`): the copy does not read, so nothing could be stripped from it |
 | warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
 | warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |

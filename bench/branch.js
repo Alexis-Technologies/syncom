@@ -12,7 +12,7 @@ const fs = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
-const { open } = require('../src/storage.js');
+const { createDatabase } = require('../src/database.js');
 const { branch, merge, drop } = require('../src/branch/branch.js');
 
 const RECORDS = 200;
@@ -21,7 +21,7 @@ const main = async () => {
   console.log(`Branch benchmark — Node ${process.version}\n`);
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'syncom-bench-branch-'));
   try {
-    const parent = await open({ path: path.join(root, 'parent'), lock: false });
+    const parent = await createDatabase({ path: path.join(root, 'parent'), lock: false });
     for (let i = 0; i < RECORDS; i++) await parent.insert({ n: i, title: `record ${i}` });
     let forks = 0;
     await bench(

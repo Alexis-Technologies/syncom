@@ -17,13 +17,13 @@ const OTHER = new Uint8Array(32).fill(9);
 test('encryption as blocks', async (t) => {
   await t.test('an encrypted write without the plugin is PLUGIN_MISSING, at open() and per call', async (t2) => {
     const fsi = memory();
-    await assert.rejects(() => core.open({ path: 'asked', fsi, logger: false, encrypted: true }), {
+    await assert.rejects(() => core.createDatabase({ path: 'asked', fsi, logger: false, encrypted: true }), {
       name: 'TypeError',
       code: 'PLUGIN_MISSING',
       message:
-        "open({ encrypted: true }) needs the encryption plugin: open({ plugins: [encryption] }) from '@alexify/syncom/encryption'",
+        "createDatabase({ encrypted: true }) needs the encryption plugin: createDatabase({ plugins: [encryption] }) from '@alexify/syncom/encryption'",
     });
-    const plain = await core.open({ path: 'plain', fsi, logger: false });
+    const plain = await core.createDatabase({ path: 'plain', fsi, logger: false });
     t2.after(() => plain.close().catch(() => {}));
     await assert.rejects(() => plain.insert({ a: 1 }, { encrypted: true }), {
       name: 'TypeError',
@@ -32,7 +32,13 @@ test('encryption as blocks', async (t) => {
     assert.deepStrictEqual(await plain.list(), []);
     assert.strictEqual(await fsi.exists('plain/keys', 'public.pem'), false, 'no RSA pair without the plugin');
     // With it: sealed for this node's pair, outside the log, as before.
-    const sealed = await core.open({ path: 'sealed', fsi, logger: false, plugins: [encryption], encrypted: true });
+    const sealed = await core.createDatabase({
+      path: 'sealed',
+      fsi,
+      logger: false,
+      plugins: [encryption],
+      encrypted: true,
+    });
     t2.after(() => sealed.close().catch(() => {}));
     const ops = [];
     sealed.on('change', (op) => ops.push(op));
@@ -53,7 +59,7 @@ test('encryption as blocks', async (t) => {
       // log writes a sealed file per group rather than a journal of plain lines.
       assert.strictEqual(typeof raw.append, 'function');
       assert.strictEqual(atRest(raw, { key: KEY }).append, undefined);
-      const storage = await core.open({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
+      const storage = await core.createDatabase({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
       const id = await storage.insert({ title: 'Secret' });
       await storage.close();
       const files = raw.dump();
@@ -62,19 +68,21 @@ test('encryption as blocks', async (t) => {
         assert.ok(content.startsWith('enc1:'), name);
         assert.ok(!content.includes('Secret') && !content.includes(storage.nodeId), name);
       }
-      const again = await core.open({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
+      const again = await core.createDatabase({ path: 's', fsi: atRest(raw, { key: KEY }), logger: false });
       assert.deepStrictEqual(await again.get(id), { title: 'Secret' });
       assert.strictEqual(again.nodeId, storage.nodeId);
       await again.close();
       // The wrong key does not open the directory: its first file is refused.
-      const error = await core.open({ path: 's', fsi: atRest(raw, { key: OTHER }), logger: false }).catch((e) => e);
+      const error = await core
+        .createDatabase({ path: 's', fsi: atRest(raw, { key: OTHER }), logger: false })
+        .catch((e) => e);
       assert.ok(error.code === 'DECRYPT_FAILED' || error.cause?.code === 'DECRYPT_FAILED', error.message);
       // Derived from a password: the same salt gives the same key.
       const pw = { password: 'correct horse', salt: 'a salt the app keeps', iterations: 1000 };
-      const derived = await core.open({ path: 'p', fsi: atRest(raw, pw), logger: false });
+      const derived = await core.createDatabase({ path: 'p', fsi: atRest(raw, pw), logger: false });
       const other = await derived.insert({ n: 1 });
       await derived.close();
-      const reopened = await core.open({ path: 'p', fsi: atRest(raw, pw), logger: false });
+      const reopened = await core.createDatabase({ path: 'p', fsi: atRest(raw, pw), logger: false });
       assert.deepStrictEqual(await reopened.get(other), { n: 1 });
       await reopened.close();
     },

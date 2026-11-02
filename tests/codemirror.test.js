@@ -31,8 +31,8 @@ const viewOf = (extensions) => ({
   },
 });
 
-const open = async (t, name, options = {}) => {
-  const storage = await syncom.open({ path: `/${name}`, fsi: memory(), logger: false, defer: 0, ...options });
+const createDatabase = async (t, name, options = {}) => {
+  const storage = await syncom.createDatabase({ path: `/${name}`, fsi: memory(), logger: false, defer: 0, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -81,7 +81,7 @@ test('CodeMirror', { skip }, async (t) => {
   await t.test(
     'two editors on two nodes stay the same as the field through edits of several ranges at once',
     async (t2) => {
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], open);
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
       const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
       const id = await sa.insert({});
       await sa.updateText(id, 'body', 'line one\r\nline two');
@@ -131,7 +131,7 @@ test('CodeMirror', { skip }, async (t) => {
   await t.test(
     'line breaks CodeMirror reads otherwise reach the field with an editor’s next edit, never as an answer, once',
     async (t2) => {
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], open);
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
       const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
       const id = await sa.insert({});
       // A lone `\r` and a `\r\n`: CodeMirror shows both as `\n`.
@@ -182,7 +182,7 @@ test('CodeMirror', { skip }, async (t) => {
   );
 
   await t.test('an editor with a line separator of its own fits the field the same way', async (t2) => {
-    const storage = await open(t2, 'separator');
+    const storage = await createDatabase(t2, 'separator');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'a\r\nb');
     const c = CM.createCodeMirror(storage, id, 'body', cm);
@@ -203,7 +203,7 @@ test('CodeMirror', { skip }, async (t) => {
   await t.test(
     'undo and redo are the storage’s commands; a presence room’s cursors are decorations and this editor’s selection is published',
     async (t2) => {
-      const storage = await open(t2, 'undo');
+      const storage = await createDatabase(t2, 'undo');
       const id = await storage.insert({});
       const cmb = CM.createCodeMirror(storage, id, 'body', cm);
       const manager = createUndo(storage, { trackedSources: [cmb.source], records: [id], mergeInterval: 0 });

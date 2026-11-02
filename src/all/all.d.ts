@@ -6,8 +6,8 @@
 // under the same registry.
 
 import type {
-  Storage as CoreStorage,
-  StorageConstructor as CoreStorageConstructor,
+  Database as CoreDatabase,
+  DatabaseConstructor as CoreDatabaseConstructor,
   StorageOptions,
   Schema,
   Collections,
@@ -35,21 +35,31 @@ export * from '../telemetry/telemetry.js';
 export * from '../query/query.js';
 export * from '../versions/versions.js';
 
-/** The storage with every shipped plugin registered: the core's API and the text and tree methods. */
-export interface Storage extends CoreStorage, TextMethods, TextHandleMethods, TreeMethods, SyncApi {}
+/** The database with every shipped plugin registered: the core's API and the text and tree methods. */
+export interface Database extends CoreDatabase, TextMethods, TextHandleMethods, TreeMethods, SyncApi {}
 
-export interface StorageConstructor extends Omit<CoreStorageConstructor, 'prototype' | 'new'> {
-  readonly prototype: Storage;
+export interface DatabaseConstructor extends Omit<CoreDatabaseConstructor, 'prototype' | 'new'> {
+  readonly prototype: Database;
   new <S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
     options?: StorageOptions<S> & { plugins?: P },
-  ): Promise<Storage & Collections<S> & PluginMethods<P>>;
+  ): Promise<Database & Collections<S> & PluginMethods<P>>;
 }
-export declare const Storage: StorageConstructor;
+export declare const Database: DatabaseConstructor;
+/** @deprecated `Database` — the name before the rename. */
+export type Storage = Database;
+/** @deprecated `DatabaseConstructor` — the name before the rename. */
+export type StorageConstructor = DatabaseConstructor;
+/** @deprecated `Database` — the name before the rename. */
+export declare const Storage: DatabaseConstructor;
 
-/** Opens a storage with every shipped plugin registered, ahead of the caller's. */
+/** Opens a database with every shipped plugin registered, ahead of the caller's. */
+export declare function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+  options?: StorageOptions<S> & { plugins?: P },
+): Promise<Database & Collections<S> & PluginMethods<P>>;
+/** @deprecated `createDatabase()` — the name before the rename. */
 export declare function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
-): Promise<Storage & Collections<S> & PluginMethods<P>>;
+): Promise<Database & Collections<S> & PluginMethods<P>>;
 
 /** The fold of one op under the shipped plugins' registry (`limits.plugins` overrides it). */
 export declare function applyOp(entry: Entry | null, op: SyncOp, limits?: FoldLimits | null): ApplyResult;

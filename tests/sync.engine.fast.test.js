@@ -28,7 +28,7 @@ test('Sync engine (the fast path on: deferred files, nothing signed)', async (t)
     // The compaction test counts the segments its rolls seal — with the window on, a roll seals whatever landed
     // since the last flush as one segment, and retention keeps it whole; the window has tests of its own.
     const defer = t2.name.includes('history is compacted') ? 0 : 16;
-    const storage = await core.open({
+    const storage = await core.createDatabase({
       defer,
       sync: { signatures: false },
       path: paths.get(key),

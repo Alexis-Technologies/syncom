@@ -6,35 +6,38 @@
 // against its block on a cold read (`integrity: 'verify'`); `validate()`
 // walks the chain. Blocks are SHA-256 of their JSON (../digest.js:
 // node:crypto, Web Crypto in the browser); each node's chain is its own audit, not
-// shared. `open({ chain: false })` keeps the plugin registered and the
+// shared. `createDatabase({ chain: false })` keeps the plugin registered and the
 // chain off — a hub that only replicates has nothing to audit and saves two
 // file writes per batch.
 
 const defaultFsi = require('../fsi.js');
 const { sha256 } = require('../crypto/digest.js');
 const { checkFsi } = require('../backend.js');
+const { kvNamespace, fsiNamespace } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
 const BLOCKCHAIN = '.blockchain.json';
+const NAMESPACE = 'blockchain';
 
 class Blockchain {
-  #fsi;
+  // The blocks' store: the `blockchain` namespace of a database's kv, or a
+  // directory of an fsi for a chain of its own (the smart contracts').
+  #store;
 
-  constructor(basePath, { fsi = defaultFsi } = {}) {
+  constructor(basePath, { fsi = defaultFsi, kv = null } = {}) {
     this.path = basePath;
     this.tailHash = null;
-    this.#fsi = checkFsi(fsi, 'Blockchain');
+    this.#store = kv === null ? fsiNamespace(checkFsi(fsi, 'Blockchain'), basePath) : kvNamespace(kv, NAMESPACE);
     return this.#init();
   }
 
   async #init() {
-    const exists = await this.#fsi.exists(this.path, BLOCKCHAIN);
-    if (!exists) {
+    const raw = await this.#store.get(BLOCKCHAIN);
+    if (raw === null) {
       const block = { prev: '0', timestamp: Date.now(), data: {} };
       this.tailHash = await this.writeBlock(block);
       await this.writeChain();
     } else {
-      const raw = await this.#fsi.read(this.path, BLOCKCHAIN);
       let chain;
       try {
         chain = JSON.parse(raw);
@@ -49,7 +52,7 @@ class Blockchain {
 
   async writeChain() {
     const chain = { tailHash: this.tailHash };
-    await this.#fsi.write(this.path, BLOCKCHAIN, JSON.stringify(chain), { atomic: true });
+    await this.#store.put(BLOCKCHAIN, JSON.stringify(chain), { atomic: true });
   }
 
   async addBlock(data) {
@@ -62,16 +65,37 @@ class Blockchain {
     return hash;
   }
 
+  /**
+   * The next block for `data` as the kv puts of a write set — the block
+   * under its hash and the tail naming it, in the `blockchain` namespace —
+   * so an engine lands them with the records they name, in one transaction
+   * where it has them; `committed(hash)` moves the tail here once they are
+   * down. The chain the storage keeps is written this way; `addBlock` writes
+   * at once, for a chain of its own.
+   */
+  async block(data) {
+    const block = { prev: this.tailHash, timestamp: Date.now(), data };
+    const hash = await sha256(block);
+    const puts = [
+      [NAMESPACE, `${hash}.json`, JSON.stringify(block), undefined],
+      [NAMESPACE, BLOCKCHAIN, JSON.stringify({ tailHash: hash }), { atomic: true }],
+    ];
+    return { hash, puts };
+  }
+
+  committed(hash) {
+    this.tailHash = hash;
+  }
+
   async writeBlock(block) {
     const hash = await sha256(block);
-    await this.#fsi.write(this.path, `${hash}.json`, JSON.stringify(block));
+    await this.#store.put(`${hash}.json`, JSON.stringify(block));
     return hash;
   }
 
   async readBlock(hash) {
-    const exists = await this.#fsi.exists(this.path, `${hash}.json`);
-    if (!exists) throw new SyncomError('BLOCK_NOT_FOUND', `Block not found: ${hash}`, { hash });
-    const raw = await this.#fsi.read(this.path, `${hash}.json`);
+    const raw = await this.#store.get(`${hash}.json`);
+    if (raw === null) throw new SyncomError('BLOCK_NOT_FOUND', `Block not found: ${hash}`, { hash });
     return JSON.parse(raw);
   }
 
@@ -82,7 +106,7 @@ class Blockchain {
     while (currentHash) {
       // An unknown `from` (or a dangling `prev`) is an invalid chain, not an
       // exception: validate() answers a boolean for every input.
-      const known = await this.#fsi.exists(this.path, `${currentHash}.json`);
+      const known = await this.#store.has(`${currentHash}.json`);
       if (!known) return false;
       const block = await this.readBlock(currentHash);
       const expectedHash = await sha256(block);
@@ -97,12 +121,12 @@ class Blockchain {
   }
 }
 
-/** The chain plugin: `open({ plugins: [chain] })`; `chain: false` keeps it off. */
+/** The chain plugin: `createDatabase({ plugins: [chain] })`; `chain: false` keeps it off. */
 const chain = Object.freeze({
   name: 'chain',
-  async setup({ fsi, path, settings }) {
+  async setup({ db, path, settings }) {
     if (settings.chained === false) return {};
-    return { chain: await new Blockchain(`${path}/blockchain`, { fsi }) };
+    return { chain: await new Blockchain(`${path}/${NAMESPACE}`, { kv: db.kv }) };
   },
 });
 

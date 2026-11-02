@@ -8,6 +8,7 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert');
+const { openLog } = require('./utils/log.js');
 
 const otelApi = require('@opentelemetry/api');
 const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
@@ -69,7 +70,7 @@ const useActiveContext = (t) => {
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return { dir, storage };
 };
@@ -585,7 +586,13 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(errors[0].code, 'UNPERSISTED');
     failing = false;
     await first.close();
-    const second = await syncom.open({ defer: 0, path: dir, logger: false, fsi, telemetry: { tracer, meter } });
+    const second = await syncom.createDatabase({
+      defer: 0,
+      path: dir,
+      logger: false,
+      fsi,
+      telemetry: { tracer, meter },
+    });
     t2.after(() => second.close().catch(() => {}));
     assert.deepStrictEqual(await second.get(id), { n: 1 });
     const [span] = named('syncom.replay');
@@ -630,7 +637,7 @@ test('Sync telemetry', async (t) => {
     async (t2, name, options = {}) => {
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const storage = await syncom.open({
+      const storage = await syncom.createDatabase({
         defer: 0,
         path: dir,
         logger: false,
@@ -799,7 +806,7 @@ test('OpLog telemetry', async (t) => {
     const { meter, points } = createMetrics();
     // A log on its own takes a writer — the adapter is the plugin's.
     const telemetry = createTelemetry({ tracer, meter });
-    const log = await new syncom.OpLog(dir, { telemetry, rollAfter: 2, retention: { ops: 4 } });
+    const log = await openLog(dir, { telemetry, rollAfter: 2, retention: { ops: 4 } });
     for (let seq = 1; seq <= 8; seq++) {
       await log.append([{ origin: 'n', seq, ts: seq, type: 'write', id: 'r', data: {} }]);
     }
@@ -823,7 +830,7 @@ test('OpLog telemetry', async (t) => {
     t2.after(() => cleanupTemp(dir));
     const { tracer, spans } = createTracing();
     const { meter, collect } = createMetrics();
-    const log = await new syncom.OpLog(dir, { telemetry: { tracer, meter } });
+    const log = await openLog(dir, { telemetry: { tracer, meter } });
     assert.deepStrictEqual(await log.append([]), []);
     await log.close();
     assert.strictEqual(spans().length, 0);
@@ -903,7 +910,7 @@ test('What the engine adds beyond the write path', async (t) => {
     // A rebuild: the catalog file gone, the next open scans data/ under a span.
     await storage.close();
     await require('node:fs/promises').rm(require('node:path').join(dir, 'index', 'catalog.json'));
-    const second = await syncom.open({ defer: 0, path: dir, logger: false, telemetry: { tracer, meter } });
+    const second = await syncom.createDatabase({ defer: 0, path: dir, logger: false, telemetry: { tracer, meter } });
     t2.after(() => second.close().catch(() => {}));
     // The first open rebuilt an empty directory too; the last span is this one.
     const rebuild = named('syncom.catalog.rebuild').at(-1);
@@ -969,8 +976,8 @@ test('What the engine adds beyond the write path', async (t) => {
 });
 
 test("containment: an application's writer that lacks a method or throws never breaks or holds up a write", async (t) => {
-  const open = (telemetry) =>
-    syncom.open({ fsi: require('../src/memory/memory.js').memory(), lock: false, defer: 0, telemetry });
+  const createDatabase = (telemetry) =>
+    syncom.createDatabase({ fsi: require('../src/memory/memory.js').memory(), lock: false, defer: 0, telemetry });
   const within = (promise, label) =>
     Promise.race([
       promise,
@@ -978,7 +985,7 @@ test("containment: an application's writer that lacks a method or throws never b
     ]);
 
   await t.test('a writer with only enabled and withSpan', async () => {
-    const storage = await open({ enabled: true, withSpan: (_name, _attributes, fn) => fn(null) });
+    const storage = await createDatabase({ enabled: true, withSpan: (_name, _attributes, fn) => fn(null) });
     t.after(() => storage.close().catch(() => {}));
     const id = await within(storage.insert({ n: 1 }), 'insert');
     await within(storage.update(id, { n: 2 }), 'update');
@@ -991,7 +998,7 @@ test("containment: an application's writer that lacks a method or throws never b
     };
     const writer = { enabled: true, withSpan: (_name, _attributes, fn) => fn(null) };
     for (const name of require('../src/telemetry/writer.js').METHODS) writer[name] = thrower;
-    const storage = await open(writer);
+    const storage = await createDatabase(writer);
     t.after(() => storage.close().catch(() => {}));
     const id = await within(storage.insert({ n: 1 }), 'insert');
     await within(storage.flush(), 'flush');

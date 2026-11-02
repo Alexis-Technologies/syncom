@@ -76,7 +76,7 @@ field)` — for every extension while a handle is open, and a writer whose readi
   field's last handle, the last handle of all clears them, a rehearsal reserves nothing. A new
   local writer of a text resolves through `resolveSplice` with the storage's core, or loses
   characters. A handle follows the record's turns through `core.editing.follow(id, listener)` —
-  ONE `transaction` listener of the storage's, by record id (src/storage.js `#follow`) — never
+  ONE `transaction` listener of the storage's, by record id (src/database.js `#follow`) — never
   through `core.on`: a handle counts against no listener cap, and a turn reaches the handles of
   the records it touched alone (HANDLE-6).
 - **A piece is written again when one of its runs reads otherwise, and only then.** A block of

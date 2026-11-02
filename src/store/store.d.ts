@@ -2,7 +2,7 @@
 // both Svelte's contract and React's useSyncExternalStore read — and Vue
 // and Solid wrap (docs/guide/frameworks.md). No framework is imported.
 
-import type { Cursor, SyncomRecord, Storage, RecordData } from '../../index.js';
+import type { Cursor, SyncomDocument, Database, RecordData } from '../../index.js';
 import type { Presence } from '../presence/presence.js';
 
 /**
@@ -38,12 +38,12 @@ export declare function toStore(
 ): SyncomStore<Map<string, Record<string, unknown>>>;
 /** A live Record's data — a copy per change; `null` once deleted. */
 export declare function toStore<R>(
-  record: SyncomRecord<R>,
+  record: SyncomDocument<R>,
   options?: StoreOptions<R | null>,
 ): SyncomStore<R | null | undefined>;
 /** A record as `get()` reads it — or the field at `path` — read again after every turn that changed it. */
 export declare function toStore<R = RecordData>(
-  storage: Storage,
+  storage: Database,
   id: string,
   options?: StoreOptions<R | null> & { path?: string },
 ): SyncomStore<R | null | undefined>;

@@ -10,7 +10,7 @@ const { memory } = require('../src/memory/memory.js');
 const { inspect, anonymize } = require('../src/inspect/inspect.js');
 
 test('inspect() lays a record out by field and kind with its log; anonymize() keeps the shape and hashes every string', async (t) => {
-  const storage = await syncom.open({ path: '/i', fsi: memory(), logger: false, defer: 0 });
+  const storage = await syncom.createDatabase({ path: '/i', fsi: memory(), logger: false, defer: 0 });
   t.after(() => storage.close().catch(() => {}));
   const id = await storage.insert({ title: 'a', n: 1, profile: { city: 'Kyiv' } });
   await storage.inc(id, 'hits', 2);

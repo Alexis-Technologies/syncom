@@ -150,7 +150,24 @@ const ENTRIES = [
   // that adds a `$type` kept off the fast path (review №4, E2). 56.5, raised by name.
   // 56.5 (over by bytes) with the writes counted by path (`stats().commits`, `syncom.path`), the handles' flushes
   // recorded, a peer's `actor` and `from` bounded, and one close (review №4, E3–E6). 57, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 57 },
+  // 57.1 with the rename to Database / Collection / Document (`createDatabase`, `document()`) and the pre-rename
+  // names kept as aliases until 1.0 (engines plan, E0). 57.5, raised by name.
+  // 58.6 with the engine contract (src/engine.js) and the files engine (src/files/files.js) the core opens every fsi
+  // through — a seam's property names do not minify (engines plan, E1). 59, raised by name.
+  // 59.3 with the log's medium behind a store (src/files/journal.js: load, append, seal, sealed, drop, saveIndex, scrub;
+  // engines plan, E1.2). 59.5, raised by name.
+  // 59.7 with the database opened through its engine: the stores behind EntryStore, the catalog, the lock, the
+  // identity, the tags and the chain; `createDatabase({ engine })` (engines plan, E1.3). 60, raised by name.
+  // 60.6 with a follower (`readOnly`: src/readonly.js, the change stream heard) and an engine's lease (`db.lock`,
+  // LEASE_LOST; engines plan, E5). 61, raised by name.
+  // 61.0 with a follower refused over an engine that is not shared and from hosting, and a lost lease fenced
+  // locally — the stores and the log's medium swapped for the read-only ones, every landing after it held
+  // (review №5, E2: R-4, G-2, S-2). 62, raised by name.
+  // 62.1 with the keys of the contract checked where they become a file name or a filter (src/engine.js isKvKey,
+  // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify; both together 63. 63.5, raised by name.
+  // 63.5 with one read a record (pieces.getMany, a page of records at a time) and the engine measured (stats().engine;
+  // review №5 P-3/P-4/O-4). 64, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -167,7 +184,25 @@ const ENTRIES = [
   },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
-  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'src/idb/idb.js', platform: 'browser', budget: 2 },
+  // 2 was the file store alone. The engine over object stores (src/idb/engine.js: six stores, key ranges, one transaction per
+  // write set, the log's rows, a BroadcastChannel; engines plan, E3). 6, raised by name.
+  { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'src/idb/idb.js', platform: 'browser', budget: 6 },
+  // The engine over SQLite (src/sqlite/sqlite.js): node:sqlite required inside the factory, so a node-only row with no
+  // browser budget (engines plan, E4).
+  { label: 'sqlite engine — node (@alexify/syncom/sqlite)', entry: 'src/sqlite/sqlite.js', platform: 'node' },
+  // The engine over MongoDB (src/mongodb/mongodb.js): the driver injected, node-only, no browser budget (engines plan, E5).
+  { label: 'mongodb engine — node (@alexify/syncom/mongodb)', entry: 'src/mongodb/mongodb.js', platform: 'node' },
+  // An engine over a message port (serveEngine/remoteEngine/connectEngine) and a copy between engines (copyEngine):
+  // platform-neutral, measured as a browser entry (engines plan, E6–E7). 9.1 with the served side checking every
+  // call against the contract (a table of stores, methods and their arguments), the port's death and a timeout heard
+  // (ENGINE_UNREACHABLE, stats()), and a copy that lands the identity last and takes a failure away (review №5 E1).
+  // 9.5, raised by name. 9.7 with a lease's life crossing the port (gen, expiresAt, its events; review №5 O-2). 10, raised by name.
+  {
+    label: 'engines — browser (@alexify/syncom/engines)',
+    entry: 'src/engines/engines.js',
+    platform: 'browser',
+    budget: 10,
+  },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
   { label: 'search — browser (@alexify/syncom/search)', entry: 'src/search/search.js', platform: 'browser', budget: 2 },
@@ -327,7 +362,17 @@ const ENTRIES = [
   // what should give some of it back.
   // 131.5 (over by bytes) with state.js split where its seams are clean — the names (src/text/names.js) and a peer's
   // block normalized (src/text/normalize.js), names across modules unminified (review №4, M-4). 132, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 132 },
+  // 133.4 with the engine contract and the files engine in the core (engines plan, E1). 133.5, raised by name.
+  // 134.1 with the log's store seam (engines plan, E1.2). 134.5, raised by name.
+  // 136.1 with the engine in memory (src/memory/engine.js; engines plan, E2). 136.5, raised by name.
+  // 137.0 with the follower and the lease (engines plan, E5). 137.5, raised by name.
+  // 138.7 with atRest over an engine (src/encryption/at-rest-engine.js; engines plan, E6). 139, raised by name.
+  // 139.0 with a lost lease fenced locally, the lease's renewals heard (`lease` events, `stats().lock`) and a
+  // follower refused from hosting (review №5, E2: S-2, R-7, O-2, G-2). 140, raised by name.
+  // 139.9 with the keys of the contract checked in the core (review №5 E1, see the main entry). 140.5, raised by name.
+  // 140.6 with the catalog's delta, the at-rest place and base64 in chunks (review №5 E4); both branches together
+  // 141.4. 142, raised by name. 142.0 with a follower's counts (stats().follow; review №5 O-6). 142.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 142.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -388,17 +433,26 @@ const ENTRIES = [
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
     platform: 'browser',
-    budget: 6,
+    // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
+    // 6.6 with the engines' shared errors beside the contract (src/engine.js unreadableRecord, eexist; review №5 M-4). 6.75, raised by name.
+    budget: 6.75,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3 },
+  // 3.4 with the blocks in a store — the database's `blockchain` namespace, or a directory (engines plan, E1.3). 3.5, raised by name.
+  // 3.6 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES; review №5 E1). 3.75, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3.75 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
+  // 4.1 with the key pair read through a store (engines plan, E1.3). 4.5, raised by name.
+  // 5.7 with atRest over an engine (src/encryption/at-rest-engine.js: every store's value sealed, the log's entries and
+  // index; engines plan, E6). 6, raised by name.
+  // 6.2 with the place bound to the database too (the path in the additional data; review №5 S-6) and base64 made in
+  // chunks (P-7). 6.5, raised by name.
   {
     label: 'encryption — browser (@alexify/syncom/encryption)',
     entry: 'src/encryption/encryption.js',
     platform: 'browser',
-    budget: 4,
+    budget: 6.5,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).
@@ -406,7 +460,12 @@ const ENTRIES = [
     label: 'memory — browser (@alexify/syncom/memory)',
     entry: 'src/memory/memory.js',
     platform: 'browser',
-    budget: 0.75,
+    // 0.75 was the Map behind five functions. The engine in memory (src/memory/engine.js: the stores, the log's rows,
+    // the catalog's rows kept as they are; engines plan, E2). 3 (2.9 measured), raised by name.
+    // 3.2 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES) and a scrub that swaps a wrapper's copies
+    // (review №5 E1). 3.25, raised by name.
+    // 3.3 with the engines' shared errors beside the contract (review №5 M-4). 3.5, raised by name.
+    budget: 3.5,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',
@@ -447,7 +506,8 @@ const ENTRIES = [
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
   // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 6.5 },
+  // 7.0 with the catalog persisted through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 7.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 7.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.
@@ -469,7 +529,8 @@ const ENTRIES = [
     // 38.0 (over by bytes) with a handle's flush taking what its edits made. 38.5, raised by name.
     // 38.5 (over by bytes) with the log's failed line taken out, the index's counter kept, the evidence copies
     // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
-    budget: 39,
+    // 39.5 with the log's store seam the versions plugin bundles with the log (engines plan, E1.2). 40, raised by name.
+    budget: 40,
   },
 ];
 

@@ -18,7 +18,7 @@ test('Sync engine (memory backend)', async (t) => {
   await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `mesh-${n++}-${name}`);
-    const storage = await syncom.open({ defer: 0, path: paths.get(key), fsi, logger: false, ...options });
+    const storage = await syncom.createDatabase({ defer: 0, path: paths.get(key), fsi, logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

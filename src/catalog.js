@@ -1,11 +1,15 @@
 'use strict';
 
+const { fsiNamespace } = require('./engine.js');
+
 // The record catalog: every live record's id, collection and indexed field
 // values, in memory, so `list()`, `hasRecord()` and a query by an indexed
 // field cost no I/O. It is derived state — rebuilt from `data/` when it is
 // missing or stale — and persisted as `<path>/index/catalog.json` stamped
 // with the log position it reflects, so a reopen catches up from the log
-// instead of scanning. No requires: this file ships to the browser.
+// instead of scanning. Persisted through a store — one kv namespace
+// (src/engine.js): `index` for the live catalog, `tags/<name>/index` for a
+// tag's. Requires engine.js only: this file ships to the browser.
 //
 // Rows hold the indexed field values only (the record itself stays in the
 // cache or on disk); an encrypted record is a row with no fields, so it is
@@ -15,7 +19,7 @@
 //
 // A searchable entity (`search: [...]` fields) keeps the joined text of
 // those fields on its row too, and hands it to an injected text index
-// (`open({ search })`, the TextIndex contract) on every put — the index is
+// (`createDatabase({ search })`, the TextIndex contract) on every put — the index is
 // rebuilt from the rows at load and never persists anything of its own.
 // `$text` in a query then seeds the candidates with the index's ranking.
 
@@ -101,7 +105,7 @@ const textOf = (data, fields) => {
   return parts.join(' ');
 };
 
-// The TextIndex contract — what `open({ search })` must hand back for an
+// The TextIndex contract — what `createDatabase({ search })` must hand back for an
 // entity: put(id, text), remove(id), query(text) → [{ id, score }] best first.
 const isTextIndex = (value) =>
   isObject(value) &&
@@ -134,8 +138,8 @@ const post = (map, value, id, fn) => {
 };
 
 class Catalog {
-  #fsi;
-  #dir;
+  #store;
+  #rowStore;
   #defs = new Map();
   #indexKey;
   #rows = new Map();
@@ -144,15 +148,24 @@ class Catalog {
   #unique = new Map();
   #watchers = new Map();
   #dirty = 0;
+  // The rows put since the last save, by id (null: removed), and whether the
+  // rows store holds this catalog's rows already — what a row store writes.
+  #changed = new Map();
+  #loaded = false;
   #sorted = null;
   #sortedIds = new Map();
   #text;
   #textPending = new Map();
   #logger;
 
-  constructor({ fsi, path, entities, text = new Map(), logger = null }) {
-    this.#fsi = fsi;
-    this.#dir = `${path}/index`;
+  constructor({ store = null, rows = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
+    // A text store given (a kv namespace), a rows store (a native engine's:
+    // `load()` → `{ indexes, stamp, rows }` | null, `save(indexes, stamp, { all,
+    // changed, whole })` — the rows kept as they are, or a row at a time: `all()`
+    // every row, `changed` the ids put since the last save, `whole` when the
+    // store holds none of this catalog's rows), else the `index` directory of an fsi at `path`.
+    this.#rowStore = rows;
+    this.#store = store ?? (rows === null ? fsiNamespace(fsi, `${path}/index`) : null);
     this.#text = text;
     this.#logger = logger;
     const shape = [];
@@ -306,6 +319,7 @@ class Catalog {
     }
     this.#remove(id);
     this.#dirty++;
+    this.#changed.set(id, row);
     if (before !== null) this.#wake(before, true);
     if (!gone && type !== null && type !== before) this.#wake(type, true);
     if (row !== null) this.#insert(id, row);
@@ -480,20 +494,24 @@ class Catalog {
 
   /** Takes rows as `rows()` hands them out — a copy of another catalog, under the same definitions. */
   adopt(rows) {
+    this.#loaded = false;
     for (const [id, row] of rows) {
       this.#remove(id);
       this.#insert(id, row);
       this.#dirty++;
+      this.#changed.set(id, row);
     }
   }
 
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
   // where the rows say what existed and the indexes are those of its day.
   async load({ strict = true } = {}) {
-    if (!(await this.#fsi.exists(this.#dir, FILE))) return null;
+    if (this.#rowStore !== null) return this.#loadRows(strict);
+    const text = await this.#store.get(FILE);
+    if (text === null) return null;
     let parsed = null;
     try {
-      parsed = JSON.parse(await this.#fsi.read(this.#dir, FILE));
+      parsed = JSON.parse(text);
     } catch {
       return null;
     }
@@ -529,7 +547,38 @@ class Catalog {
    * are taken before the first await, so a save may run while puts go on:
    * what lands during the write stays dirty for the next one.
    */
+  // The rows a native engine kept, taken as they are: no text to parse.
+  async #loadRows(strict) {
+    const saved = await this.#rowStore.load();
+    if (saved === null || (strict && saved.indexes !== this.#indexKey) || typeof saved.stamp !== 'string') return null;
+    const rows = saved.rows;
+    for (let i = 0; i < rows.length; i++) {
+      const [id, row] = rows[i];
+      this.#remove(id);
+      this.#insert(id, row);
+    }
+    this.#dirty = 0;
+    this.#changed.clear();
+    this.#loaded = true;
+    return { stamp: saved.stamp };
+  }
+
   async save(stamp) {
+    if (this.#rowStore !== null) {
+      const saved = this.#dirty;
+      const changed = this.#changed;
+      this.#changed = new Map();
+      try {
+        await this.#rowStore.save(this.#indexKey, stamp, { all: () => this.rows(), changed, whole: !this.#loaded });
+      } catch (error) {
+        // What this save carried is still to save: back under what changed since.
+        for (const [id, row] of changed) if (!this.#changed.has(id)) this.#changed.set(id, row);
+        throw error;
+      }
+      this.#loaded = true;
+      this.#dirty -= saved;
+      return;
+    }
     const rows = [];
     for (const [id, row] of this.#rows) {
       const cells = [id, row.type, row.v, row.encrypted, row.fields];
@@ -539,7 +588,7 @@ class Catalog {
     }
     const saved = this.#dirty;
     const text = JSON.stringify({ format: FORMAT, indexes: this.#indexKey, stamp, rows });
-    await this.#fsi.write(this.#dir, FILE, text, { atomic: true });
+    await this.#store.put(FILE, text, { atomic: true });
     this.#dirty -= saved;
   }
 }

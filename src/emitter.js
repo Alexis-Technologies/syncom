@@ -9,7 +9,7 @@
 // delta, which is exactly the contract consumers read from the types.
 // The listener cap is a leak detector, not a quota: a hundred `change`
 // listeners on one storage is a bug worth a throw, ten was a bug worth
-// avoiding in tests. `open({ maxListeners })` tunes the storage's.
+// avoiding in tests. `createDatabase({ maxListeners })` tunes the storage's.
 const DEFAULT_MAX_LISTENERS = 100;
 
 // A listener's call as a promise: a throw becomes a rejection.

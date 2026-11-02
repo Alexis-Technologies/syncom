@@ -15,13 +15,13 @@ test('sync as a plugin', async (t) => {
     'without the plugin storage.sync is PLUGIN_MISSING; two nodes converge by hand through outbound and applyRemote',
     async (t2) => {
       const fsi = memory();
-      const a = await core.open({ path: 'a', fsi, logger: false });
-      const b = await core.open({ path: 'b', fsi, logger: false });
+      const a = await core.createDatabase({ path: 'a', fsi, logger: false });
+      const b = await core.createDatabase({ path: 'b', fsi, logger: false });
       t2.after(() => Promise.all([a.close(), b.close()]).catch(() => {}));
       assert.throws(() => a.sync, {
         name: 'TypeError',
         code: 'PLUGIN_MISSING',
-        message: "storage.sync needs the sync plugin: open({ plugins: [sync] }) from '@alexify/syncom/sync'",
+        message: "storage.sync needs the sync plugin: createDatabase({ plugins: [sync] }) from '@alexify/syncom/sync'",
       });
       assert.deepStrictEqual(a.plugins, []);
       const id = await a.insert({ title: 'x' });
@@ -44,7 +44,7 @@ test('sync as a plugin', async (t) => {
 
   await t.test('with the plugin the storage has its manager, built once the log is open', async (t2) => {
     const fsi = memory();
-    const storage = await core.open({
+    const storage = await core.createDatabase({
       path: 'managed',
       fsi,
       logger: false,

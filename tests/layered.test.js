@@ -251,18 +251,18 @@ test('layered backends', async (t) => {
       t2.after(() => cleanupTemp(dir));
       const top = memory();
       const fsi = layered([top, nodeFsi], { write: 'back' });
-      const storage = await core.open({ path: dir, fsi, logger: false });
+      const storage = await core.createDatabase({ path: dir, fsi, logger: false });
       const id = await storage.insert({ title: 'Layered' });
       await storage.close();
       await fsi.flush();
       // The disk alone has everything, the lock released among it.
-      const alone = await core.open({ path: dir, logger: false });
+      const alone = await core.createDatabase({ path: dir, logger: false });
       assert.deepStrictEqual(await alone.get(id), { title: 'Layered' });
       assert.strictEqual(alone.nodeId, storage.nodeId);
       await alone.close();
       // A fresh memory top over the same disk: the reads fill it.
       const fresh = memory();
-      const again = await core.open({ path: dir, fsi: layered([fresh, nodeFsi]), logger: false });
+      const again = await core.createDatabase({ path: dir, fsi: layered([fresh, nodeFsi]), logger: false });
       assert.deepStrictEqual(await again.get(id), { title: 'Layered' });
       assert.ok(fresh.size > 0, 'filled on read');
       assert.strictEqual(again.nodeId, storage.nodeId);

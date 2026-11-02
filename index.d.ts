@@ -41,6 +41,177 @@ export interface Fsi {
 /** Whether `value` has the five functions of the backend contract. */
 export function isFsi(value: unknown): value is Fsi;
 
+/** What a storage engine's medium can do; `createDatabase()` asks nothing a medium lacks. */
+export interface EngineCapabilities {
+  /** Every write set lands whole or not at all. */
+  readonly atomicBatch: boolean;
+  /** The engine keeps the record indexes (a native catalog). */
+  readonly indexes: boolean;
+  /** Another instance over the same database hears its writes. */
+  readonly changeStream: boolean;
+  /** `kv.create` makes a key exclusively (EEXIST when it is there). */
+  readonly exclusiveCreate: boolean;
+  /** How one instance holds a database: through a lock key, or the engine's own lease. */
+  readonly lock: 'kv' | 'native';
+  /** Several instances may open one database at once (read-only followers). */
+  readonly shared: boolean;
+  /** A blob store for attachments. */
+  readonly blobs: boolean;
+  /** The log's medium appends a line to a journal (a file per group otherwise). */
+  readonly append: boolean;
+}
+
+/** A record as an engine stores it: what the record file holds. */
+export interface StoredRecord {
+  data: unknown;
+  meta: Entry['meta'] | null;
+  encrypted: boolean;
+  timestamp: number;
+  block: string | null;
+  gen?: number;
+}
+
+/** One record of a write set: its stored form (or its text as given), the pieces it makes and drops. */
+export interface EngineWriteRecord {
+  id: string;
+  stored?: StoredRecord;
+  text?: string;
+  pieces?: { put?: ReadonlyArray<readonly [name: string, text: string]>; remove?: readonly string[] };
+}
+
+/** A write set: landed whole where `capabilities.atomicBatch`, in order otherwise — kv puts, records, removals, copies, kv removals. */
+export interface EngineWriteSet {
+  records?: readonly EngineWriteRecord[];
+  remove?: readonly string[];
+  kv?: {
+    put?: ReadonlyArray<
+      readonly [ns: string, key: string, value: string, options?: { atomic?: boolean; mode?: number }]
+    >;
+    remove?: ReadonlyArray<readonly [ns: string, key: string]>;
+  };
+  copies?: {
+    put?: ReadonlyArray<readonly [tag: string, id: string, text: string]>;
+    remove?: ReadonlyArray<readonly [tag: string, id: string]>;
+  };
+}
+
+/**
+ * A lease held on a database: `release()` lets it go; `gen` its generation where the engine counts them
+ * (MongoDB: one up at every takeover — every document the holder writes carries it, and none of an older lease
+ * is ever written over a newer one's).
+ */
+export interface EngineLease {
+  release(): Promise<void>;
+  readonly gen?: number;
+  /** When the lease lapses unless renewed, on this clock; `null` once let go or lost. Absent where the engine does not say. */
+  readonly expiresAt?: number | null;
+  /**
+   * The lease's life, where the engine tells it: every renewal (`renewed`), and the first failed one of a run
+   * (`late`, with the error — retried every `poll` ms while two thirds of `staleAfter` are left, then lost
+   * through `onLost`). Returns the unsubscribe. Over a port the events cross as they happen; `expiresAt` is then the
+   * served side's, on its clock.
+   */
+  subscribe?(listener: (event: { state: 'renewed' | 'late'; error?: Error }) => void): () => void;
+}
+
+/** A database as an engine opens it: a set of stores over one `path`. */
+export interface EngineDb {
+  readonly path: string;
+  readonly capabilities: EngineCapabilities;
+  /**
+   * The engine's own lease on the database, where `capabilities.lock` is `'native'`: held while renewed on the
+   * server's clock, `LOCKED` while another instance holds it; `onLost` hears once when it goes to another
+   * instance. A write set, a log group, a seal, the index or a kv put of a lease another instance took since
+   * rejects with `LEASE_LOST`.
+   */
+  lock?(options: LockOptions & { onLost?: (error: Error) => void }): Promise<EngineLease>;
+  /**
+   * The catalog's rows kept by a native engine — as they are (memory, IndexedDB) or a row at a time (SQLite: `changed`
+   * the ids put since the last save, `null` a row removed; `whole` when the store holds none of this catalog's rows and
+   * `all()` is every row); the core saves to `kv` otherwise.
+   */
+  readonly catalog?: {
+    load(): Promise<{ indexes: unknown; stamp: unknown; rows: unknown } | null>;
+    save(
+      indexes: unknown,
+      stamp: unknown,
+      rows: { all(): Array<[string, unknown]>; changed: Map<string, unknown>; whole: boolean },
+    ): Promise<void>;
+  };
+  /**
+   * What another instance wrote over the same database, where `capabilities.changeStream` — `{ records: ids }`
+   * per message (IndexedDB: `{ log: [first, last] }` for a log group too), never this instance's own; what a
+   * follower (`readOnly`) hears. `{ error }` once when the stream ends — an error, a close — and the subscription
+   * with it: the follower subscribes again and reads every record again (`FOLLOW_LOST`).
+   */
+  readonly changes?: {
+    subscribe(
+      listener: (message: { p: string; records?: string[]; log?: [number, number]; error?: Error }) => void,
+    ): () => void;
+  };
+  /** The files engine's backend; absent on a native engine. */
+  readonly fsi?: Fsi;
+  /** Small named texts beside the records, by namespace (`''` the root) and key. */
+  readonly kv: {
+    get(ns: string, key: string): Promise<string | null>;
+    has(ns: string, key: string): Promise<boolean>;
+    /** The keys of a namespace, sorted; an absent namespace is empty. */
+    list(ns: string): Promise<string[]>;
+    put(ns: string, key: string, value: string, options?: { atomic?: boolean; mode?: number }): Promise<void>;
+    remove(ns: string, key: string): Promise<void>;
+    /** Exclusive — rejects with `code: 'EEXIST'` when the key is there; present when `capabilities.exclusiveCreate`. */
+    create?(ns: string, key: string, value: string): Promise<void>;
+  };
+  readonly records: {
+    /** The stored record, or null; one that does not parse rejects with `INTEGRITY` (`reason: 'unreadable'`). */
+    get(id: string): Promise<StoredRecord | null>;
+    /** The record's text as the medium holds it, or null. */
+    raw(id: string): Promise<string | null>;
+    has(id: string): Promise<boolean>;
+    getMany(ids: readonly string[]): Promise<Map<string, StoredRecord>>;
+    /** Every record id the medium holds — tombstones included — in id order, after `after`, at most `limit`. */
+    ids(options?: { after?: string | null; limit?: number }): Promise<string[]>;
+  };
+  /** The runs of a large block beside its record, by the name the record's meta holds. */
+  readonly pieces: {
+    get(id: string, name: string): Promise<string | null>;
+    /** The pieces named, by name, in one call — the absent left out. */
+    getMany(id: string, names: readonly string[]): Promise<Map<string, string>>;
+    remove(id: string, name: string): Promise<void>;
+  };
+  /** A tag's copies of records, by tag and id. */
+  readonly copies: {
+    get(tag: string, id: string): Promise<string | null>;
+    has(tag: string, id: string): Promise<boolean>;
+    ids(tag: string): Promise<string[]>;
+    put(tag: string, id: string, text: string): Promise<void>;
+    remove(tag: string, id: string): Promise<void>;
+    drop(tag: string): Promise<void>;
+  };
+  /** The op log's medium — what `OpLog` writes its groups, segments and index through; its shape is the store's (src/files/journal.js). */
+  readonly log: object;
+  write(batch: EngineWriteSet): Promise<void>;
+  close(): Promise<void>;
+}
+
+/** A storage engine: a factory of databases, one object shared by every database that opens through it. */
+export interface Engine {
+  readonly name: string;
+  readonly capabilities: EngineCapabilities;
+  /** The files engine's backend; absent on a native engine. */
+  readonly fsi?: Fsi;
+  open(path: string, options?: { logger?: unknown; durable?: boolean }): Promise<EngineDb>;
+  /** Every store of the database at `path`, gone. */
+  remove(path: string): Promise<void>;
+  close?(): Promise<void>;
+}
+
+/** Whether `value` is an engine: `open()`, `remove()`, a `name` and `capabilities`. */
+export function isEngine(value: unknown): value is Engine;
+
+/** The engine every fsi becomes: today's layout byte for byte; `createDatabase({ fsi })` opens through it. */
+export function filesEngine(fsi: Fsi): Engine;
+
 /** A backend in memory — shared by every storage opened over it, gone with the process. */
 
 // The platform's own backend, as functions.
@@ -432,6 +603,11 @@ export type SyncomErrorCode =
   | 'CORRUPT'
   | 'DOWNGRADE'
   | 'LOCKED'
+  | 'READ_ONLY'
+  | 'LEASE_LOST'
+  | 'FOLLOW_LOST'
+  | 'TARGET_NOT_EMPTY'
+  | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
   | 'DECRYPT_FAILED'
   | 'IDENTITY_MISMATCH'
@@ -1114,7 +1290,7 @@ export interface WriteContext {
   /** Sealed for this node: the write is encrypted, or the record already is. */
   encrypted: boolean;
   /** The Record whose `save()` this is, or `null`. */
-  source: SyncomRecord | null;
+  source: SyncomDocument | null;
   /** The link a `merge` came in on; `null` for a local write. */
   via: PeerRef | null;
   /** The peer a `merge` came from; `null` for a local write. */
@@ -1320,9 +1496,9 @@ export interface PeerRef {
 /** The lockfile's knobs: `open({ lock: { mode, staleAfter, poll, timeout } })`. */
 export interface LockOptions {
   mode?: 'fail' | 'wait';
-  /** A lockfile whose process cannot be checked is stale after this many ms (default 30 minutes). */
+  /** A lockfile whose process cannot be checked is stale after this many ms (default 30 minutes); an engine's lease (MongoDB) lapses after it unless renewed (default 30 s). */
   staleAfter?: number;
-  /** How often `'wait'` looks again, in ms (default 100). */
+  /** How often `'wait'` looks again, in ms (default 100); how often a failed renewal of an engine's lease is tried again. */
   poll?: number;
   /** How long `'wait'` waits before `LOCKED`, in ms (default forever). */
   timeout?: number;
@@ -1331,6 +1507,10 @@ export interface LockOptions {
 /** What `storage.stats()` answers — every number from memory, no I/O. */
 export interface StorageStats {
   closed: boolean;
+  /** Opened with `readOnly: true`, or a writer whose lease was lost. */
+  readOnly: boolean;
+  /** A follower's count of what it heard through the engine's change stream: records heard, re-reads that failed, catch-ups run (`null` on a writer). */
+  follow: { heard: number; failed: number; caughtUp: number } | null;
   /** The plugins this storage was opened with, by name, in registration order. */
   plugins: string[];
   /** Writes waiting on, or running in, the mutation queue. */
@@ -1384,7 +1564,13 @@ export interface StorageStats {
   /** Listeners registered through `observe()`. */
   observers: number;
   chain: { tail: string } | null;
-  lock: { mode: 'fail' | 'wait' } | null;
+  /**
+   * How the database is held — through a lock key or the engine's own lease — when the lease lapses unless
+   * renewed (`null` for a lock key, or once lost) and whether it was lost; `null` for a follower or `lock: false`.
+   */
+  lock: { kind: 'kv' | 'native'; mode: 'fail' | 'wait'; expiresAt: number | null; lost: boolean } | null;
+  /** The engine the database stores through, and what its write sets cost so far: how many, how many failed, their time in ms. */
+  engine: { name: string; capabilities: EngineCapabilities; writes: number; failures: number; ms: number };
 }
 
 /** One `applyRemote` call, after its batch is durable. */
@@ -1439,6 +1625,11 @@ export interface StorageOptions<S extends Schema = Schema> {
   name?: string;
   /** The backend; the platform's (`node:fs`, OPFS) when absent. */
   fsi?: Fsi;
+  /**
+   * The storage engine the database stores its bytes through — the files engine over `fsi` (or the
+   * platform's backend) when none is given; `engine` and `fsi` together are a `TypeError`.
+   */
+  engine?: Engine;
   /** Call the backend's `sync` after every write (fsync). A backend without one logs at debug and is as durable as it is. */
   durable?: boolean;
   /**
@@ -1457,6 +1648,16 @@ export interface StorageOptions<S extends Schema = Schema> {
    * `lock.json` with the pid otherwise (stale when its process is gone).
    */
   lock?: 'fail' | 'wait' | false | LockOptions;
+  /**
+   * A follower: reads what another instance writes through the same engine and writes nothing — no lock, no
+   * replay, no catalog save; every write rejects with `READ_ONLY`. Only an engine several instances may open at
+   * once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB) — the files engine and SQLite refuse it
+   * with a `TypeError`. Its log and vector are as of its open: it neither dials (`sync.connect` is a `TypeError`)
+   * nor hosts (`sync.unit()` is `READ_ONLY`, `reason: 'hosting'`) until the shared log lands. Where the engine has
+   * a change stream (IndexedDB, MongoDB) a record the writer lands is read again, its live `Document` refreshed
+   * and its watchers woken.
+   */
+  readOnly?: boolean;
   /** The listener cap of the storage and its sync manager (default 100); exceeding it throws. */
   maxListeners?: number;
   /** The in-memory entry cache: the last `max` records read or written (default 5000); a live Record pins its own. */
@@ -1735,6 +1936,11 @@ export interface StorageEvents {
   /** The log sealed a segment (and maybe dropped old ones): `floor` is where a resume is still possible. */
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**
+   * The engine's lease on the database (MongoDB): renewed; a renewal failed and is being retried (`late`, once
+   * per run of failures); gone to another instance or given up (`lost` — with the `error` event `LEASE_LOST`).
+   */
+  lease: (event: { state: 'renewed' | 'late' | 'lost'; path: string }) => void;
+  /**
    * A peer's op refused by the field-kind rule (`OP_REFUSED`,
    * `rejected`), skipped because the record would not pass its entity's
    * validator (`OP_INVALID`, `entity`, `issues`), refused for a stamp
@@ -1767,7 +1973,11 @@ export interface StorageEvents {
           count: number;
         })
       /** Records logged but not written — held in memory until they land (see Health). */
-      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] }),
+      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] })
+      /** The engine's lease went to another instance: read-only from here on. */
+      | (SyncomError & { code: 'LEASE_LOST'; path: string; cause?: unknown })
+      /** A follower's change stream ended: subscribed again, every record read again. */
+      | (SyncomError & { code: 'FOLLOW_LOST'; path: string; cause?: unknown }),
   ) => void;
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;
@@ -1878,7 +2088,12 @@ export interface TextHandle {
   /** Inserts an embed slot holding `marker` at `index` — an inline embed unless `isEmbed` says otherwise. */
   insertEmbed(
     index: number,
-    marker: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown }; isEmbed?: boolean } | null,
+    marker: {
+      type: string;
+      parents?: readonly string[];
+      attrs?: { [name: string]: unknown };
+      isEmbed?: boolean;
+    } | null,
     attributes?: Record<string, unknown>,
   ): void;
   delete(index: number, count: number): void;
@@ -2066,9 +2281,11 @@ export interface TreeMethods {
   treeRemove(id: string, key: string, node: string, options?: WriteOptions): Promise<void>;
 }
 
-export interface Storage {
-  /** The backend every file goes through — the adapter given to `open()` (wrapped when `durable`), or the platform's. */
-  readonly fsi: Fsi;
+export interface Database {
+  /** The files engine's backend — the adapter given to `createDatabase()` (wrapped when `durable`), or the platform's; `null` under a native engine. */
+  readonly fsi: Fsi | null;
+  /** The engine this database stores its bytes through — the one given, or the files engine over the backend. */
+  readonly engine: Engine;
   readonly schema: Schema | null;
   /** The schema version and snapshot hash this node runs, with `previous` when `schema.json` differed; `null` without a schema. */
   readonly schemaInfo: SchemaStatus | null;
@@ -2078,6 +2295,8 @@ export interface Storage {
   readonly path: string;
   readonly log: OpLog;
   readonly vector: VersionVector;
+  /** Whether every write is refused: opened with `readOnly: true` (a follower), or a writer whose lease was lost. */
+  readonly readOnly: boolean;
   /** The names of the plugins this storage was opened with (`open({ plugins })`), in registration order. */
   readonly plugins: readonly string[];
   /** The names of the kind plugins among them — what `hello` tells a peer this node can hold. */
@@ -2238,8 +2457,10 @@ export interface Storage {
     batch?: number;
     actor?: string;
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
-  /** A live `Record` of `id` — `R` types its fields (`record<Post>(id)`). */
-  record<R = RecordData>(id: string): Promise<Storage.StorageRecord<R>>;
+  /** A live `Document` of `id` — `R` types its fields (`document<Post>(id)`). */
+  document<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
+  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
+  record<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData<R = RecordData>(id: string): R | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
@@ -2339,14 +2560,17 @@ export interface Cursor<T = QueryRow> {
 
 // A string field whose value is a known record id reads back as a Reference.
 export interface Reference {
-  record<R = RecordData>(): Promise<SyncomRecord<R>>;
+  /** The live Document the reference names. */
+  document<R = RecordData>(): Promise<SyncomDocument<R>>;
+  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
+  record<R = RecordData>(): Promise<SyncomDocument<R>>;
 }
 
 /**
- * The methods of a live `Record`; `SyncomRecord<R>` adds a property per
+ * The methods of a live `Document`; `SyncomDocument<R>` adds a property per
  * field of `R`. `data()` is `null` for a record that is not there.
  */
-export interface SyncomRecordApi<R = RecordData> {
+export interface SyncomDocumentApi<R = RecordData> {
   readonly id: string;
   on<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
   once<E extends keyof RecordEvents>(event: E, listener: RecordEvents[E]): void;
@@ -2465,7 +2689,17 @@ export interface SyncomRecordApi<R = RecordData> {
  * `record()`), any name and `unknown` under `RecordData`. A field named
  * like a method never shadows it; `data()` has it.
  */
-export type SyncomRecord<R = RecordData> = SyncomRecordApi<R> & { -readonly [K in keyof R]: R[K] };
+export type SyncomDocument<R = RecordData> = SyncomDocumentApi<R> & { -readonly [K in keyof R]: R[K] };
+/**
+ * `Document<R>`: the live document, by its RxDB-style name. Importing it shadows
+ * the DOM's `Document` inside that module — `SyncomDocument` is the same type
+ * under a name that does not.
+ */
+export type Document<R = RecordData> = SyncomDocument<R>;
+/** @deprecated `SyncomDocumentApi` — the name before the rename; removed in 1.0. */
+export type SyncomRecordApi<R = RecordData> = SyncomDocumentApi<R>;
+/** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
+export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
 
 /**
  * A collection, `storage.<Entity>`. `R` is the record as it reads, `I` what
@@ -2485,45 +2719,74 @@ export interface SyncomCollection<R = RecordData, I = R> {
   /** Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be among them. */
   update(id: string, delta: Partial<I> & PathFields, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
-  record(id: string): Promise<SyncomRecord<R>>;
+  /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
+  document(id: string): Promise<SyncomDocument<R>>;
+  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
+  record(id: string): Promise<SyncomDocument<R>>;
 }
+/** `Collection<R, I>`: a collection, by its RxDB-style name. */
+export type Collection<R = RecordData, I = R> = SyncomCollection<R, I>;
 
-/** `Storage.Collection`: what `storage.<Entity>` is an instance of (a type, not an export of the package). */
+/** `Database.Collection`: what `db.<Entity>` is an instance of (a type, not an export of the package). */
 export interface SyncomCollectionConstructor {
   readonly prototype: SyncomCollection;
-  new <R = RecordData, I = R>(storage: Storage, name: string): SyncomCollection<R, I>;
+  new <R = RecordData, I = R>(database: Database, name: string): SyncomCollection<R, I>;
 }
 
-/** `Storage.Record`: what `storage.record(id)` resolves to an instance of (a type, not an export of the package). */
-export interface SyncomRecordConstructor {
-  readonly prototype: SyncomRecord;
-  new <R = RecordData>(id: string, storage: Storage): Promise<SyncomRecord<R>>;
+/** `Database.Document`: what `db.document(id)` resolves to an instance of (a type, not an export of the package). */
+export interface SyncomDocumentConstructor {
+  readonly prototype: SyncomDocument;
+  new <R = RecordData>(id: string, database: Database): Promise<SyncomDocument<R>>;
 }
+/** @deprecated `SyncomDocumentConstructor` — the name before the rename; removed in 1.0. */
+export type SyncomRecordConstructor = SyncomDocumentConstructor;
 
-export interface StorageConstructor {
-  readonly prototype: Storage;
+export interface DatabaseConstructor {
+  readonly prototype: Database;
   new <S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
     options?: StorageOptions<S> & { plugins?: P },
-  ): Promise<Storage & Collections<S> & PluginMethods<P>>;
+  ): Promise<Database & Collections<S> & PluginMethods<P>>;
   Collection: SyncomCollectionConstructor;
-  Record: SyncomRecordConstructor;
+  Document: SyncomDocumentConstructor;
+  /** @deprecated `Document` — the name before the rename; removed in 1.0. */
+  Record: SyncomDocumentConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }
+/** @deprecated `DatabaseConstructor` — the name before the rename; removed in 1.0. */
+export type StorageConstructor = DatabaseConstructor;
 
-export const Storage: StorageConstructor;
+export const Database: DatabaseConstructor;
 
+export namespace Database {
+  export type DatabaseDocument<R = RecordData> = SyncomDocument<R>;
+  export type DatabaseCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
+}
+
+/** @deprecated `Database` — the name before the rename (the class and the type); removed in 1.0. */
+export const Storage: DatabaseConstructor;
+/** @deprecated `Database` — the name before the rename; removed in 1.0. */
+export type Storage = Database;
 export namespace Storage {
-  export type StorageRecord<R = RecordData> = SyncomRecord<R>;
+  /** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
+  export type StorageRecord<R = RecordData> = SyncomDocument<R>;
+  /** @deprecated `SyncomCollection` — the name before the rename; removed in 1.0. */
   export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
+/** The options of `createDatabase()` under the new name (`StorageOptions` keeps its name). */
+export type DatabaseOptions<S extends Schema = Schema> = StorageOptions<S>;
+
 /**
- * Opens a storage. The result's type follows the options: a collection per
+ * Opens a database. The result's type follows the options: a collection per
  * entity of `schema` (typed by the schema's `Shapes` or the entity's
  * Standard Schema, `RecordData` otherwise) and the methods of every plugin
  * in `plugins`. Both are inferred — no type arguments to pass.
  */
+export function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
+  options?: StorageOptions<S> & { plugins?: P },
+): Promise<Database & Collections<S> & PluginMethods<P>>;
+/** @deprecated `createDatabase()` — the name before the rename; removed in 1.0. */
 export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
-): Promise<Storage & Collections<S> & PluginMethods<P>>;
+): Promise<Database & Collections<S> & PluginMethods<P>>;

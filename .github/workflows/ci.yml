@@ -13,7 +13,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
@@ -34,7 +34,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        node-version: [22, 24, 26]
+        node-version: [24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -43,10 +43,18 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # The MongoDB engine's test over the real driver (tests/engine.mongodb.test.js) runs when MONGODB_URL is
+      # set; change streams and transactions need a replica set, so the service is one of one member.
+      - uses: supercharge/mongodb-github-action@1.12.0
+        with:
+          mongodb-version: '7.0'
+          mongodb-replica-set: rs0
       - run: pnpm test:coverage
+        env:
+          MONGODB_URL: mongodb://localhost:27017/?replicaSet=rs0
       - run: pnpm test:types
 
-  # Node 22 only: the docs build exercises VitePress, not the package runtime,
+  # Node 24 only: the docs build exercises VitePress, not the package runtime,
   # so repeating it across the test matrix would just repeat the same work.
   docs:
     runs-on: ubuntu-latest
@@ -56,7 +64,7 @@ jobs:
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       # A broken docs build (including dead links) should fail the PR, not the deploy.

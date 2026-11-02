@@ -2,7 +2,7 @@
 
 Two ways to attach code to what a storage does, kept deliberately apart:
 
-- **Hooks** run *inside* an operation. They are configured once, in `open()`,
+- **Hooks** run *inside* an operation. They are configured once, in `createDatabase()`,
   one function per name, and awaited where the operation happens — so a hook
   can alter what is written, refuse it, or skip a peer's op. A hook that
   throws fails the operation with a `HookError`; it is never swallowed.
@@ -15,9 +15,9 @@ If the code should be able to change the outcome, it is a hook. If it should
 only ever watch — metrics, an audit trail, a UI — it is a listener.
 
 ```js
-const { open, HookError } = require('@alexify/syncom');
+const { createDatabase, HookError } = require('@alexify/syncom');
 
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   hooks: {
     beforeWrite: ({ type, data, current }) => {
@@ -45,10 +45,10 @@ storage.on('change', (op, via) => metrics.count('ops', { local: via === null }))
 ```
 
 An unknown hook name, or a value that is not a function, is a `TypeError` at
-`open()` — a hook with a typo that silently never runs is a validation that
+`createDatabase()` — a hook with a typo that silently never runs is a validation that
 silently never runs.
 
-## Storage hooks
+## Database hooks
 
 | Hook | Runs | Return | Throw |
 | --- | --- | --- | --- |
@@ -83,7 +83,7 @@ it extends, the cuts, the content).
 `meta` is the joined metadata of a `merge`. `current` is the
 record as it is now (`null` when absent or deleted — read it, do not change
 it), `encrypted` says whether the write is sealed for this node, `source` is
-the `Record` whose `save()` this is or the `source` given to `applyPatches()`
+the `Document` whose `save()` this is or the `source` given to `applyPatches()`
 (`null` otherwise), `v` is this node's schema version and
 `actor` who the op will say made it (`null` when nobody). For a remote op it is `{ op, via, peer, current }`,
 where `peer` is `{ url, node }` — `url` is `null` when this node is the host —
@@ -99,7 +99,7 @@ load the record → beforeWrite → stamp → apply the op → validate → appe
 → chain block → record file → afterWrite → Record 'update' → 'commit' → 'change'
 ```
 
-(under [`open({ defer })`](./storage#when-a-record-file-lags-the-log) — 16 ms
+(under [`createDatabase({ defer })`](./database#when-a-record-file-lags-the-log) — 16 ms
 by default — the chain block and the record file wait for the flush, after
 the events), and of
 a page from a peer:
@@ -115,15 +115,15 @@ then:     append to the log → persist the records → afterApply → 'apply' �
 
 `afterRead` changes what `get()` — and everything that reads through it:
 `get(id, { at })`, `at(name).get(id)`, each version `history()` hands out,
-`Collection.get`, a contract's `DataReader`, a `Record` as it loads — hands
+`Collection.get`, a contract's `DataReader`, a `Document` as it loads — hands
 back. It does not touch the record: `swap()` compares against the raw data,
 `snapshot()` replicates the raw data, `getCachedData()` and `has()` are raw,
 and so is what a cursor (`select()`), `diff()`, `spans()`, `cursor()` and
-`index()` read. A `Record` reads through `get()` as it loads and as it follows
+`index()` read. A `Document` reads through `get()` as it loads and as it follows
 a change — a write here, an op from a peer: with `beforeRead` or `afterRead`
 set, it is refreshed once the write is done, outside the mutation queue (a
-read hook may write), so a redaction holds on a live `Record` for good; a
-`beforeRead` that throws then leaves the `Record` as it was. A `Record` that
+read hook may write), so a redaction holds on a live `Document` for good; a
+`beforeRead` that throws then leaves the `Document` as it was. A `Document` that
 saved a redacted field would write the redaction back; it does not, because
 `save()` writes only the fields that were assigned.
 
@@ -139,7 +139,7 @@ move has the sender offer the same page forever. Skipping is a local decision;
 peers make their own with their own `beforeApply`. A skipped op is flagged in
 the log so a reopen's replay of the unsealed tail leaves it alone too. The
 same path takes an op that would leave the record invalid under this node's
-[schema](./storage#validation): skipped, logged, relayed, and reported through
+[schema](./database#validation): skipped, logged, relayed, and reported through
 the `error` event rather than a hook — and a peer's op on a record this node
 keeps sealed (`encrypted: true`), which is logged and relayed, never applied.
 
@@ -174,7 +174,7 @@ a slow read hook holds no write.
 
 ## Sync hooks
 
-`open({ sync: { hooks } })`:
+`createDatabase({ sync: { hooks } })`:
 
 | Hook | Runs | Return | Throw |
 | --- | --- | --- | --- |
@@ -188,7 +188,7 @@ that stops every later op of that stream at it. Per-peer visibility is what
 receives the scopes it asked for.
 
 ```js
-const storage = await open({
+const storage = await createDatabase({
   path: 'data',
   hooks: {
     // Only the admin node may delete anything here.
@@ -211,24 +211,25 @@ Every listener is contained: it is invoked at once, never awaited, and if it
 throws the failure is logged at `warn` (`{ event: 'listener.error', name }`)
 and the operation carries on. `error` with nobody listening is silent rather
 than a throw. A function is one listener per event — `on()` with it twice
-throws — and an event takes at most `open({ maxListeners })` of them (100 by
+throws — and an event takes at most `createDatabase({ maxListeners })` of them (100 by
 default) on the storage and on its sync manager; one more throws.
 
-### Storage
+### Database
 
 | Event | Payload | When |
 | --- | --- | --- |
 | `change` | `(op, via, { changes })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; keystrokes sent without waiting, or typed through a transaction, that continue each other are one op (typed on at the end of their run, or a chain of cuts), announced once with the changes of each in order; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op) |
-| `commit` | `({ op, seq, source, before, after, kinds, embeds? })` | A local write is durable — any kind of op made through the write API, `transact()`, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Record` whose `save()` it was or the `source` given to `transact()`/`applyPatches()` (`null` otherwise), `before`/`after` the record as copies in the op model's terms — every [path](./storage#paths) a field of its own, not composed (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`), `embeds` the markers of a text's [embed slots](./lists#embeds-and-blocks) by index on each side, when a side holds any; `op.msg` the transaction's message — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Record`'s `update`, before `change`; a transaction's fire once it has landed whole, in op order |
+| `commit` | `({ op, seq, source, before, after, kinds, embeds? })` | A local write is durable — any kind of op made through the write API, `transact()`, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Document` whose `save()` it was or the `source` given to `transact()`/`applyPatches()` (`null` otherwise), `before`/`after` the record as copies in the op model's terms — every [path](./database#paths) a field of its own, not composed (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`), `embeds` the markers of a text's [embed slots](./lists#embeds-and-blocks) by index on each side, when a side holds any; `op.msg` the transaction's message — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Document`'s `update`, before `change`; a transaction's fire once it has landed whole, in op order |
 | `transaction` | `({ local, via, source, message, ops, changes, ts })` | One turn's ops durable and announced, after their `change` events: a local write (`ops` one), a `transact()` (its ops, `source` and `message`), a peer's page (`local` false, `via` the peer), a joined snapshot (`local` true, `via` the host) — `changes` every op's, tagged with its record `id`, `ts` the last op's stamp; built only while something listens |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
-| `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./storage#queries) |
-| `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./storage#reading-across-versions) |
-| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op the engine refused (`OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a [limit](./lists#costs-and-limits) (`detail`: `pending`, `run` or `field`), `malformed` for a payload it does not admit; skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`) |
+| `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./database#queries) |
+| `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./database#reading-across-versions) |
+| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op the engine refused (`OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a [limit](./lists#costs-and-limits) (`detail`: `pending`, `run` or `field`), `malformed` for a payload it does not admit; skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`); the engine's lease gone to another instance (`LEASE_LOST`, `path`) or a follower's change stream ended (`FOLLOW_LOST`, `path`: subscribed again, every record read again) |
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them — see [The log](./sync#the-log) |
+| `lease` | `({ state: 'renewed' \| 'late' \| 'lost', path })` | The engine's lease on the database (MongoDB) was renewed; a renewal failed and is being retried (`late`, once per run of failures); it went to another instance or was given up (`lost`, with the `error` event `LEASE_LOST`) — see [Engines](./backends#engines) |
 | `close` | — | After `close()` sealed the log |
 
-A `Record` emits `update` `(data, delta)` on a staged assignment and when the
+A `Document` emits `update` `(data, delta)` on a staged assignment and when the
 record changes in storage (`null` data once deleted) — once per transaction
 that changed it, with the delta of all its ops.
 
@@ -236,7 +237,7 @@ To follow one record rather than every op, `observe(id, path?, listener)`
 calls the listener after every turn that changed the record — with its
 [changes](./versions#changes) of that turn and the `transaction` event they
 came in — and, under a `path`, with the changes of that field, of what hangs
-under it and of a prefix of it; a `Record` has `observe(path?, listener)`
+under it and of a prefix of it; a `Document` has `observe(path?, listener)`
 too. Observers stand apart from the listener count: a view per record is
 the intended scale.
 

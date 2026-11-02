@@ -16,7 +16,7 @@ const { openGroups } = require('./utils/groups.js');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ defer: 0, path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false, ...options });
   return { dir, storage };
 };
 
@@ -119,7 +119,7 @@ test('Storage replication model', async (t) => {
       await storage.inc(id, 'n', 1);
       assert.strictEqual((await storage.get(id)).n, Number.MAX_SAFE_INTEGER);
       await storage.close();
-      const again = await syncom.open({ defer: 0, path: dir, logger: false });
+      const again = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
       t2.after(() => again.close());
       assert.strictEqual((await again.get(id)).n, Number.MAX_SAFE_INTEGER, 'a reopen reads the same');
     },
@@ -138,7 +138,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.inc(id, 'hits', 'x'), TypeError);
     await assert.rejects(() => storage.inc(id, 7), TypeError);
 
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     await record.inc('hits', -1);
     assert.strictEqual(record.hits, 5);
     // A whole-record write resets the counter along with everything else.
@@ -182,7 +182,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.add(id, 'tags', [undefined]), TypeError);
     await assert.rejects(() => storage.remove(id, 'tags', [() => 1]), TypeError);
     // Through a live Record, which follows along.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     await record.add('tags', ['docs']);
     assert.deepStrictEqual(record.tags, ['api', 'docs', 'ui']);
     await record.remove('tags', ['ui']);
@@ -276,7 +276,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.push(id, 'items', [undefined]), TypeError);
     await assert.rejects(() => storage.push(id, 'items', [() => 1]), TypeError);
     // Through a live Record, which follows along.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     await record.splice('body', 0, 1, 'H');
     assert.strictEqual(record.body, 'Hello');
     await record.push('items', [4]);
@@ -323,7 +323,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.updateText(id, 'body', 5), TypeError);
     await assert.rejects(() => storage.updateText('bad id!', 'body', 'x'), { code: 'INVALID_ID' });
     // Through a live Record; a reset frees the field as for any kind.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     assert.strictEqual(await record.updateText('body', 'hello'), 1);
     assert.strictEqual(record.body, 'hello');
     await storage.set(id, { title: 'note' });
@@ -399,7 +399,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.spans(id, 'title'), null);
     assert.strictEqual(await storage.spans('absent', 'body'), null);
     // Through a live Record.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     const em = await record.mark('body', 0, 1, 'em', true);
     assert.deepStrictEqual((await record.spans('body'))[0], { type: 'text', text: '>', marks: { em: true } });
     await record.unmarkById('body', em);
@@ -575,7 +575,7 @@ test('Storage replication model', async (t) => {
       ]);
       assert.ok((await storage.spans(id, 'body')).some((span) => span.type === 'embed' && span.value === null));
       // Through a live Record.
-      const record = await storage.record(id);
+      const record = await storage.document(id);
       await record.splitBlock('body', 0, { type: 'title' });
       assert.deepStrictEqual((await record.block('body', 0)).type, 'title');
       assert.strictEqual((await record.blocks('body')).length, 2, 'the bare slot is an embed inside the heading block');
@@ -623,7 +623,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.cursor(id, 'n', 0), null);
     await assert.rejects(() => storage.index(id, 'body', 'nope'), TypeError);
     await assert.rejects(() => storage.cursor(id, 'body', 0, { side: 'left' }), TypeError);
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     await record.updateText('body', 'ab');
     const c = await record.cursor('body', 1);
     assert.strictEqual(await record.index('body', c), 1);
@@ -725,7 +725,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { before: 5 }), TypeError);
     await assert.rejects(() => storage.treeRemove(id, 'outline', 'bad\u0001'), TypeError);
     // Through a live Record.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     await record.treeMove('outline', 'd', 'root', { before: 'b' });
     assert.deepStrictEqual(
       record.outline[0].children.map((n) => n.id),
@@ -739,7 +739,7 @@ test('Storage replication model', async (t) => {
     // The tree survives a reopen, from the file and from the log alike.
     const outline = (await storage.get(id)).outline;
     await storage.close();
-    const again = await syncom.open({ defer: 0, path: dir, logger: false });
+    const again = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
     t2.after(() => again.close());
     assert.deepStrictEqual((await again.get(id)).outline, outline);
     assert.ok((await again.repair(id)).ops > 0);
@@ -798,7 +798,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.setAt(id, 'items', 0, undefined), TypeError);
     await assert.rejects(() => storage.move(id, 'items', 'a', 0), TypeError);
     // Through a live Record.
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     await record.move('items', 2, 0);
     assert.deepStrictEqual(record.items, ['c', 'A', 'B']);
     await record.setAt('items', 0, 'C');
@@ -939,7 +939,7 @@ test('Storage replication model', async (t) => {
   await t.test('a live Record follows remote changes and keeps unsaved edits', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ title: 'Draft', views: 0 });
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     const updates = [];
     record.on('update', (data, delta) => updates.push({ data: data === null ? null : { ...data }, delta }));
 
@@ -1052,7 +1052,13 @@ test('Storage replication model', async (t) => {
         return base.write(dir2, name, content, options);
       },
     };
-    const first = await syncom.open({ defer: 0, path: dir, logger: false, fsi, sync: { log: { rollAfter: 1 } } });
+    const first = await syncom.createDatabase({
+      defer: 0,
+      path: dir,
+      logger: false,
+      fsi,
+      sync: { log: { rollAfter: 1 } },
+    });
     const errors = [];
     first.on('error', (error) => errors.push(error));
     const id = await first.insert({ n: 1 });
@@ -1073,7 +1079,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => first.insert({ n: 2 }), /closed/);
     assert.strictEqual(await fsi.exists(path.join(dir, 'data'), 'lost.json'), false);
 
-    const second = await syncom.open({ defer: 0, path: dir, logger: false, fsi });
+    const second = await syncom.createDatabase({ defer: 0, path: dir, logger: false, fsi });
     assert.strictEqual(second.nodeId, nodeId);
     assert.deepStrictEqual(second.vector, { [nodeId]: 2, peer: 1 });
     assert.deepStrictEqual(await second.get('lost'), { p: 1 }, 'replayed from the log');
@@ -1085,7 +1091,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(ops[0].seq, 3, 'the own seq continues, never repeats');
     assert.strictEqual(await second.validate(), true);
     await second.close();
-    const third = await syncom.open({ defer: 0, path: dir, logger: false, fsi });
+    const third = await syncom.createDatabase({ defer: 0, path: dir, logger: false, fsi });
     assert.strictEqual(third.log.tail().length, 0, 'once every record is written, a clean close seals everything');
     await third.close();
   });
@@ -1093,11 +1099,11 @@ test('Storage replication model', async (t) => {
   await t.test('a record this node cannot read does not stop a page: its op is skipped and reported', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const first = await syncom.open({ defer: 0, path: dir, logger: false });
+    const first = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
     const bad = await first.insert({ n: 1 });
     await first.close();
     await fs.writeFile(path.join(dir, 'data', `${bad}.json`), '{not json');
-    const storage = await syncom.open({ defer: 0, path: dir, logger: false });
+    const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
     t2.after(() => storage.close().catch(() => {}));
     const errors = [];
     storage.on('error', (error) => errors.push(error));
@@ -1159,11 +1165,11 @@ test('Storage replication model', async (t) => {
     const ahead = Date.now() + 3_600_000;
     // rollAfter 1 seals every append: the reopen has no tail to replay from.
     const options = { path: dir, logger: false, sync: { log: { rollAfter: 1 } } };
-    const first = await syncom.open(options);
+    const first = await syncom.createDatabase(options);
     await first.applyRemote([{ origin: 'peer', seq: 1, ts: ahead, type: 'write', id: 'r', data: { n: 1 } }]);
     await first.close();
 
-    const second = await syncom.open(options);
+    const second = await syncom.createDatabase(options);
     assert.strictEqual(second.log.tail().length, 0, 'everything is sealed');
     assert.ok(second.log.latestTs >= ahead, 'the log remembers the newest stamp it holds');
     const ops = [];
@@ -1221,7 +1227,7 @@ test('Storage: the seams telemetry shares', async (t) => {
     const segment = (await fs.readdir(logDir)).find((name) => name.startsWith('seg-'));
     assert.ok(segment, 'a segment was sealed');
     await fs.writeFile(path.join(logDir, segment), '{not json');
-    await syncom.open({ defer: 0, path: dir, logger });
+    await syncom.createDatabase({ defer: 0, path: dir, logger });
     assert.strictEqual(
       events.some((entry) => entry.event === 'log.segment.unreadable'),
       true,
@@ -1280,7 +1286,7 @@ test('Storage: events are contained', async (t) => {
     const { entries, logger } = collect();
     const { storage } = await openTemp(t2, { logger });
     const id = await storage.insert({ title: 'a' });
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     const rejections = [];
     const onRejection = (reason) => rejections.push(reason);
     process.on('unhandledRejection', onRejection);
@@ -1413,7 +1419,7 @@ test("Storage: what a peer's op must look like", async (t) => {
     await loose.close();
     const warnings = [];
     const logger = { warn: (entry) => warnings.push(entry), info() {}, debug() {}, error() {} };
-    const storage = await syncom.open({ defer: 0, path: dir, logger });
+    const storage = await syncom.createDatabase({ defer: 0, path: dir, logger });
     t2.after(() => storage.close().catch(() => {}));
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -1546,12 +1552,12 @@ test('a snapshot page is joined as one batch', async (t) => {
     async (t2) => {
       const dir = await createTemp();
       t2.after(() => cleanupTemp(dir));
-      const first = await syncom.open({ defer: 0, path: dir, logger: false });
+      const first = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
       const ids = [];
       for (let i = 0; i < 4; i++) ids.push(await first.insert({ i }));
       await first.close();
       await fs.writeFile(path.join(dir, 'data', `${ids[1]}.json`), '{not json');
-      const storage = await syncom.open({ defer: 0, path: dir, logger: false });
+      const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
       t2.after(() => storage.close().catch(() => {}));
       const page = await storage.snapshot({ limit: 10 });
       assert.deepStrictEqual(
@@ -1602,7 +1608,7 @@ test('Storage: the bounds of the sequence and tree engines', async (t) => {
       );
       assert.strictEqual((await storage.get(id)).body, 'ab');
       const bad = (pendingMax) =>
-        syncom.open({ defer: 0, path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
+        syncom.createDatabase({ defer: 0, path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
       assert.throws(() => bad(0), TypeError);
       assert.throws(() => bad('many'), TypeError);
     },
@@ -1760,7 +1766,7 @@ test('unset() removes fields of any kind', async (t) => {
       await storage.unset(id, ['hits', 'tags']);
       assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', body: 'hi' });
       await storage.Post.unset(id, 'body');
-      const record = await storage.record(id);
+      const record = await storage.document(id);
       await record.unset(['title', 'nope']);
       assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
       await storage.unset(id, 'nope');
@@ -1824,7 +1830,7 @@ test('paths: a field may be a path of stable segments, read composed', async (t)
       (await storage.User.select({ 'profile.city': 'Kyiv' }).fetch()).map((row) => row.id),
       [id],
     );
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     assert.deepStrictEqual(record.profile, { zip: 1, city: 'Kyiv', tags: ['x'] });
     // The whole object written: the children below it go.
     await storage.update(id, { profile: { zip: 2 } });
@@ -1901,7 +1907,7 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
       items: [{ kind: 'note', body: 'hello', hits: 2 }, { body: 'x' }],
     });
     assert.deepStrictEqual(storage.getCachedData(id).items, [{ kind: 'note' }, 'plain'], 'raw: the list as it is');
-    const record = await storage.record(id);
+    const record = await storage.document(id);
     assert.deepStrictEqual(record.items[0].body, 'hello');
     assert.strictEqual(await record.elementAt('items', 0), first);
     // A path under an element that is not there is refused before the stamp.

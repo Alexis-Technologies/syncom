@@ -8,6 +8,7 @@
 const crypto = require('node:crypto');
 const defaultFsi = require('../fsi.js');
 const { loadKeyPair, SIGNING_FILES } = require('../crypto/keys.js');
+const { kvNamespace, fsiNamespace } = require('../engine.js');
 
 const calculateHash = (data) => {
   const block = JSON.stringify(data);
@@ -98,8 +99,9 @@ const verifyAsync = (message, signature, publicKey) =>
     }
   });
 
-const loadSigningKeys = async (basePath, { fsi = defaultFsi } = {}) => {
-  const keys = await loadKeyPair(basePath, fsi, generateSigningKeys, SIGNING_FILES);
+const loadSigningKeys = async (basePath = 'keys', { fsi = defaultFsi, kv = null } = {}) => {
+  const store = kv === null ? fsiNamespace(fsi, basePath) : kvNamespace(kv, basePath);
+  const keys = await loadKeyPair(store, basePath, generateSigningKeys, SIGNING_FILES);
   return { publicKey: keys.publicKey, privateKey: keys.privateKey, id: signingId(keys.publicKey) };
 };
 

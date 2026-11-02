@@ -17,7 +17,7 @@ test('Sync engine (browser halves)', async (t) => {
   await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `mesh-${n++}-${name}`);
-    const storage = await browser.open({ defer: 0, path: paths.get(key), logger: false, ...options });
+    const storage = await browser.createDatabase({ defer: 0, path: paths.get(key), logger: false, ...options });
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   });

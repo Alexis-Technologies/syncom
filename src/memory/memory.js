@@ -5,7 +5,10 @@
 // exclusive `create` the lock prefers, `size` and `dump()`. Nothing survives
 // the process, and two storages opened over one of them share it — a mesh in
 // one process, a node that must not touch the disk, a test, a benchmark. The
-// top layer of a `layered()` backend, as a rule. No requires.
+// top layer of a `layered()` backend, as a rule. `memoryEngine()` (./engine.js)
+// is the engine in memory: objects, not texts. Requires engine.js only.
+
+const { memoryEngine } = require('./engine.js');
 
 const notFound = (key) => Object.assign(new Error(`ENOENT: no such file, ${key}`), { code: 'ENOENT' });
 
@@ -59,4 +62,4 @@ const memory = () => {
   };
 };
 
-module.exports = { memory };
+module.exports = { memory, memoryEngine };

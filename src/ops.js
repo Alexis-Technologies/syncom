@@ -1155,9 +1155,16 @@ const isAlive = (entry) => {
       }
     }
   }
-  // A block touched after the tombstone revives the record too.
+  // A block touched after the tombstone revives the record too. A block's `ts`
+  // carries no origin, so the tie is decided here as the prune decided it: a
+  // block that stands with the tombstone's very stamp holds an op stamped
+  // above it (the same ms, an origin above the tombstone's — what
+  // `pruneField` kept and what a later arrival of that op is admitted by).
+  // Told older, the tombstone would be reported as the record gone while
+  // the block stayed, and the next op would revive what the changes said
+  // was gone (the seeded mesh's shadow of a tree field).
   const blocks = blocksOf(meta);
-  for (const field of Object.keys(blocks)) if (compareClock([blocks[field].ts, ''], meta.deleted) > 0) return true;
+  for (const field of Object.keys(blocks)) if (blocks[field].ts >= meta.deleted[0]) return true;
   return false;
 };
 

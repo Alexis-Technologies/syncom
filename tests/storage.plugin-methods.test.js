@@ -5,7 +5,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { open } = require('../src/index.js');
+const { createDatabase } = require('../src/index.js');
 const { memory } = require('../src/memory/memory.js');
 
 test('a third-party plugin’s methods are on the storage and on a transaction; a name of the storage’s is refused', async (t) => {
@@ -19,7 +19,7 @@ test('a third-party plugin’s methods are on the storage and on a transaction; 
       },
     },
   };
-  const storage = await open({ fsi: memory(), lock: false, logger: false, defer: 0, plugins: [greeter] });
+  const storage = await createDatabase({ fsi: memory(), lock: false, logger: false, defer: 0, plugins: [greeter] });
   t.after(() => storage.close());
   const id = await storage.insert({ n: 1 });
   assert.strictEqual(typeof storage.greet, 'function');
@@ -33,7 +33,7 @@ test('a third-party plugin’s methods are on the storage and on a transaction; 
   for (const name of ['insert', 'then', 'sync']) {
     const clash = { name: `clash-${name}`, setup: () => ({}), methods: { [name]: async () => null } };
     await assert.rejects(
-      open({ fsi: memory(), lock: false, logger: false, plugins: [clash] }),
+      createDatabase({ fsi: memory(), lock: false, logger: false, plugins: [clash] }),
       (error) => error instanceof TypeError && error.message.includes(`${name}()`),
       name,
     );

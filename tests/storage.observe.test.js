@@ -11,8 +11,8 @@ const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { compose, spansToDelta } = require('../src/editor/editor.js');
 const { openGroups } = require('./utils/groups.js');
 
-const open = async (t, options = {}) => {
-  const storage = await syncom.open({ path: '/o', fsi: memory(), logger: false, ...options });
+const createDatabase = async (t, options = {}) => {
+  const storage = await syncom.createDatabase({ path: '/o', fsi: memory(), logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -37,8 +37,8 @@ test('observe and deltas', async (t) => {
   await t.test(
     'observe() hands a record’s changes a turn at a time, under a path or whole, local and a peer’s, until stopped',
     async (t2) => {
-      const storage = await open(t2, { defer: 0 });
-      const peer = await syncom.open({ path: '/p', fsi: memory(), logger: false, defer: 0 });
+      const storage = await createDatabase(t2, { defer: 0 });
+      const peer = await syncom.createDatabase({ path: '/p', fsi: memory(), logger: false, defer: 0 });
       t2.after(() => peer.close().catch(() => {}));
       const id = await storage.insert({ title: 'a', profile: { n: 1 } });
       const other = await storage.insert({ n: 0 });
@@ -90,7 +90,7 @@ test('observe and deltas', async (t) => {
       assert.deepStrictEqual(deleted, [['put'], ['delete']]);
       assert.deepStrictEqual(city.at(-1), ['delete:-']);
       // Through a Record; a listener that throws is contained.
-      const record = await storage.record(other);
+      const record = await storage.document(other);
       const mine = [];
       const off = record.observe('n', (changes) => mine.push(changes[0].value));
       storage.observe(other, () => {
@@ -112,8 +112,8 @@ test('observe and deltas', async (t) => {
   await t.test(
     'a cut of a run that a peer inserted inside reads as one splice per stretch, and its delta gives the reading after',
     async (t2) => {
-      const a = await open(t2, { defer: 0 });
-      const b = await syncom.open({ path: '/b', fsi: memory(), logger: false, defer: 0 });
+      const a = await createDatabase(t2, { defer: 0 });
+      const b = await syncom.createDatabase({ path: '/b', fsi: memory(), logger: false, defer: 0 });
       t2.after(() => b.close().catch(() => {}));
       const exchange = async (from, to) => {
         await to.applyRemote(from.log.since(null).map((entry) => entry.op));
@@ -145,7 +145,7 @@ test('observe and deltas', async (t) => {
   await t.test(
     'toDelta() composes a turn’s changes into Quill’s form; applyDelta() makes a delta the field’s edits as one transaction',
     async (t2) => {
-      const storage = await open(t2, { defer: 0 });
+      const storage = await createDatabase(t2, { defer: 0 });
       const id = await storage.insert({});
       await storage.updateText(id, 'body', 'hello world');
       let turn = null;
@@ -341,7 +341,7 @@ test('observe and deltas', async (t) => {
         { index: 0, side: 'after' },
         { index: (await storage.get(other)).body.length, side: 'before' },
       ]);
-      const record = await storage.record(other);
+      const record = await storage.document(other);
       assert.deepStrictEqual(await record.position('body', after), { index: 5, side: 'after' });
       assert.strictEqual(await storage.position(other, 'title', after), null);
       await storage.set(other, { title: 'reset' });
@@ -355,7 +355,7 @@ test('observe and deltas', async (t) => {
   await t.test('observe() reads the same on disk', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
-    const storage = await syncom.open({ path: dir, logger: false });
+    const storage = await syncom.createDatabase({ path: dir, logger: false });
     t2.after(() => storage.close().catch(() => {}));
     const id = await storage.insert({ n: 1 });
     const seen = [];
@@ -369,11 +369,11 @@ test('observe and deltas', async (t) => {
 test('a live Record lays a write’s fields over what it holds: it reads as get() after every op of a seeded walk', async () => {
   const { memory } = require('../src/memory/memory.js');
   const syncomAll = require('../src/all/all.js');
-  const { Reference } = require('../src/record.js');
-  const storage = await syncomAll.open({ fsi: memory(), lock: false, defer: 0, logger: false });
+  const { Reference } = require('../src/document.js');
+  const storage = await syncomAll.createDatabase({ fsi: memory(), lock: false, defer: 0, logger: false });
   const other = await storage.insert({ name: 'other' });
   const id = await storage.insert({ title: 'a', n: 1 });
-  const record = await storage.record(id);
+  const record = await storage.document(id);
   let seed = 11;
   const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
   const fields = ['title', 'n', 'tags', 'body', 'link', 'list'];

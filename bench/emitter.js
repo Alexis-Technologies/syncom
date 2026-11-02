@@ -1,6 +1,6 @@
 /**
  * `Emitter.emit` — the notification path for every mutation that goes through
- * a live `Record`: `Storage.set`, `Storage.update` and `Storage.swap` all end
+ * a live `Document`: `Database.set`, `Database.update` and `Database.swap` all end
  * in `#emitUpdate`, and a record property setter emits on every assignment.
  * Real call sites have exactly one synchronous listener, so that row is the
  * number that matters; the rest exist to show what the generic path costs by
@@ -41,7 +41,7 @@ const main = async () => {
     await bench('emit awaited — 1 sync listener', () => emitter.emit('update', i++));
   }
   {
-    // What Storage actually emits: (data, delta).
+    // What Database actually emits: (data, delta).
     const emitter = new Emitter();
     emitter.on('update', (data, delta) => void (sink += data.v + delta.v));
     const data = { v: 1 };

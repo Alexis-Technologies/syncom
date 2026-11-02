@@ -7,10 +7,10 @@ framework. The object keeps two contracts at once, so React and Svelte
 take it as it is, and Vue and Solid wrap it in a line.
 
 ```js
-const { open } = require('@alexify/syncom/all');
+const { createDatabase } = require('@alexify/syncom/all');
 const { toStore } = require('@alexify/syncom/store');
 
-const storage = await open({ path: 'data', schema: { entities: { Task: { index: ['done'] } } } });
+const storage = await createDatabase({ path: 'data', schema: { entities: { Task: { index: ['done'] } } } });
 const tasks = toStore(storage.Task.select({ done: false }).order('title'));
 ```
 
@@ -36,7 +36,7 @@ filter that threw, a read that rejected; the value stays as it was.
 | Source | The value |
 | --- | --- |
 | `toStore(cursor)` | The query's rows, as `watch()` gives them — the query runs again after every change to its collection, coalesced |
-| `toStore(record)` | A live `Record`'s data, a new copy per change; `null` once deleted |
+| `toStore(record)` | A live `Document`'s data, a new copy per change; `null` once deleted |
 | `toStore(storage, id)` | The record as `get()` reads it — the lens and the read hooks applied — read again after every turn that changed it |
 | `toStore(storage, id, { path: 'profile/city' })` | One field of it; a write to the field, under it or above it reads it again |
 | `toStore(presence)` | A [presence](./presence) room's states, a `Map` by node |

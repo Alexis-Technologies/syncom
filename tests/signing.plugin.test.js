@@ -29,7 +29,7 @@ test('signing as a plugin', async (t) => {
     'without the plugin the node id is what getId mints, a UUID by default, and its ops carry no signature',
     async (t2) => {
       const fsi = memory();
-      const storage = await core.open({ path: 'plain', fsi, logger: false });
+      const storage = await core.createDatabase({ path: 'plain', fsi, logger: false });
       t2.after(() => storage.close().catch(() => {}));
       assert.match(storage.nodeId, UUID);
       assert.deepStrictEqual(storage.plugins, []);
@@ -42,36 +42,39 @@ test('signing as a plugin', async (t) => {
       assert.strictEqual(ops[0].origin, storage.nodeId);
       assert.deepStrictEqual([ops[0].sig ?? null, ops[0].digest ?? null], [null, null]);
       await storage.close();
-      const again = await core.open({ path: 'plain', fsi, logger: false });
+      const again = await core.createDatabase({ path: 'plain', fsi, logger: false });
       t2.after(() => again.close().catch(() => {}));
       assert.strictEqual(again.nodeId, storage.nodeId, 'node.json keeps it');
       // The id generator is the application's: cuid, ulid, a name — the same
       // one that mints record ids.
       let n = 0;
-      const named = await core.open({ path: 'named', fsi, logger: false, getId: () => `node-${++n}` });
+      const named = await core.createDatabase({ path: 'named', fsi, logger: false, getId: () => `node-${++n}` });
       t2.after(() => named.close().catch(() => {}));
       assert.strictEqual(named.nodeId, 'node-1');
       assert.strictEqual(await named.insert({}), 'node-2');
       // A record id is not always a node id: no '@' in a stream name.
-      await assert.rejects(() => core.open({ path: 'at', fsi, logger: false, getId: () => 'a@b' }), {
+      await assert.rejects(() => core.createDatabase({ path: 'at', fsi, logger: false, getId: () => 'a@b' }), {
         name: 'TypeError',
-        message: /open\(\{ getId \}\): "a@b" cannot be a node id/,
+        message: /createDatabase\(\{ getId \}\): "a@b" cannot be a node id/,
       });
     },
   );
 
   await t.test('require without the plugin is PLUGIN_MISSING; a tampered signature rides along unread', async (t2) => {
     const fsi = memory();
-    await assert.rejects(() => core.open({ path: 'strict', fsi, logger: false, sync: { signatures: 'require' } }), {
-      name: 'TypeError',
-      code: 'PLUGIN_MISSING',
-      message:
-        "sync.signatures 'require' needs the signing plugin: open({ plugins: [signing] }) from '@alexify/syncom/signing'",
-    });
+    await assert.rejects(
+      () => core.createDatabase({ path: 'strict', fsi, logger: false, sync: { signatures: 'require' } }),
+      {
+        name: 'TypeError',
+        code: 'PLUGIN_MISSING',
+        message:
+          "sync.signatures 'require' needs the signing plugin: createDatabase({ plugins: [signing] }) from '@alexify/syncom/signing'",
+      },
+    );
     // 'verify' without the plugin verifies nothing: the semantics an unsigned
     // op always had, now for every op — a node that wants the check
     // registers the plugin.
-    const storage = await core.open({ path: 'lax', fsi, logger: false });
+    const storage = await core.createDatabase({ path: 'lax', fsi, logger: false });
     t2.after(() => storage.close().catch(() => {}));
     assert.strictEqual(storage.signatures, 'verify');
     const peer = await createSigner();
@@ -87,20 +90,20 @@ test('signing as a plugin', async (t) => {
     async () => {
       const fsi = memory();
       const { warnings, logger } = collect();
-      const signed = await core.open({ path: 'keyed', fsi, logger, plugins: [signing] });
+      const signed = await core.createDatabase({ path: 'keyed', fsi, logger, plugins: [signing] });
       const key = signed.nodeId;
       assert.match(key, KEY);
       await signed.close();
       // Without the plugin: the id stays the key (node.json names it, and the
       // key pair is on disk), the ops go out unsigned.
-      const plain = await core.open({ path: 'keyed', fsi, logger });
+      const plain = await core.createDatabase({ path: 'keyed', fsi, logger });
       assert.strictEqual(plain.nodeId, key);
       const ops = [];
       plain.on('change', (op) => ops.push(op));
       await plain.insert({ a: 1 });
       assert.strictEqual(ops[0].sig ?? null, null);
       await plain.close();
-      const back = await core.open({ path: 'keyed', fsi, logger, plugins: [signing] });
+      const back = await core.createDatabase({ path: 'keyed', fsi, logger, plugins: [signing] });
       assert.strictEqual(back.nodeId, key);
       const signedOps = [];
       back.on('change', (op) => signedOps.push(op));
@@ -110,15 +113,15 @@ test('signing as a plugin', async (t) => {
       assert.deepStrictEqual(warnings, [], 'the same key is no rekeying');
       // Born without the plugin: a UUID, which the plugin's first open rekeys —
       // once, with a warning, as a directory from before signing.
-      const born = await core.open({ path: 'born', fsi, logger });
+      const born = await core.createDatabase({ path: 'born', fsi, logger });
       const uuid = born.nodeId;
       assert.match(uuid, UUID);
       await born.close();
-      const rekeyed = await core.open({ path: 'born', fsi, logger, plugins: [signing] });
+      const rekeyed = await core.createDatabase({ path: 'born', fsi, logger, plugins: [signing] });
       assert.match(rekeyed.nodeId, KEY);
       assert.deepStrictEqual(warnings, [{ event: 'identity.rekeyed', from: uuid, to: rekeyed.nodeId }]);
       await rekeyed.close();
-      const settled = await core.open({ path: 'born', fsi, logger, plugins: [signing] });
+      const settled = await core.createDatabase({ path: 'born', fsi, logger, plugins: [signing] });
       assert.strictEqual(settled.nodeId, rekeyed.nodeId);
       assert.strictEqual(warnings.length, 1);
       await settled.close();
@@ -129,7 +132,7 @@ test('signing as a plugin', async (t) => {
     const fsi = memory();
     const createStorage = async (t3, name, options = {}) => {
       const plugins = [sync, ...(options.plugins ?? [])];
-      const storage = await core.open({ path: `mesh-${name}`, fsi, logger: false, ...options, plugins });
+      const storage = await core.createDatabase({ path: `mesh-${name}`, fsi, logger: false, ...options, plugins });
       t3.after(() => storage.close().catch(() => {}));
       return storage;
     };

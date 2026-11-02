@@ -240,7 +240,7 @@ const restore = async (core, id, at, { actor, source = null } = {}) => {
  * (tags do not replicate) as the catalog of the moment plus a copy of
  * each record's file made before its first change after the tag; a tag
  * costs nothing per record until the record changes. `name` is a
- * [record id](../guide/storage#custom-identifiers); rejects with
+ * [record id](../guide/database#custom-identifiers); rejects with
  * `TAG_EXISTS`.
  */
 const tag = async (core, name) => {

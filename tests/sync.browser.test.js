@@ -15,7 +15,7 @@ test('SyncManager (browser)', async (t) => {
   let n = 0;
   await runSyncManagerCoreTests(t, assert, async (t2, previous) => {
     const path = (previous && dirs.get(previous)) || `sync-${n++}`;
-    const storage = await browser.open({ path });
+    const storage = await browser.createDatabase({ path });
     dirs.set(storage.sync, path);
     return storage.sync;
   });

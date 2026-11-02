@@ -15,7 +15,7 @@ test('SyncManager', async (t) => {
       tempDir = await createTemp();
       t2.after(() => cleanupTemp(tempDir));
     }
-    const storage = await syncom.open({ path: tempDir });
+    const storage = await syncom.createDatabase({ path: tempDir });
     dirs.set(storage.sync, tempDir);
     return storage.sync;
   });

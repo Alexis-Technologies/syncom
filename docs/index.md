@@ -49,10 +49,10 @@ features:
     link: /guide/wrpc
     linkText: wrpc transport
   - icon: 💾
-    title: Storage with schema and queries
+    title: Database with schema and queries
     details: "Records on node:fs, OPFS, IndexedDB or memory. A metaschema, Standard Schema or ajv validator runs on every write and on every hub, versions ride on ops, and Mango queries come with indexes, unique keys, watch() and fuzzy full-text search."
-    link: /guide/storage
-    linkText: Storage
+    link: /guide/database
+    linkText: Database
   - icon: 🔗
     title: A signed log you can verify, read back and purge
     details: "With the signing plugin every op is signed by its origin, whose node id is its Ed25519 key, so any peer verifies it through any relay; with the chain plugin writes are committed to a hash-linked chain that reads re-check. The log reads back: a record at any version it retains, tags of the whole storage, diff and restore, an undo stack, branches that merge back. purge() scrubs a payload out of it, and repair(id) rebuilds a record from it."

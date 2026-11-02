@@ -7,7 +7,7 @@
 // salted digest of the payload), and a peer's op is verified against its
 // origin before it is admitted — `sync.signatures` 'verify' (the default)
 // checks what carries a signature, 'require' refuses what carries none.
-// Without the plugin the node id is what `open({ getId })` mints (a UUID
+// Without the plugin the node id is what `createDatabase({ getId })` mints (a UUID
 // by default), nothing is signed, and a peer's signatures are not checked:
 // the 'verify' semantics for unsigned ops, as before — `'require'` without
 // the plugin is PLUGIN_MISSING. The hook the core takes: `identity` — the
@@ -18,8 +18,8 @@ const { signOp, verifyOp, isHeldKey } = require('./sign.js');
 
 const signing = Object.freeze({
   name: 'signing',
-  async setup({ fsi, path }) {
-    const keys = await loadSigningKeys(`${path}/keys`, { fsi });
+  async setup({ db }) {
+    const keys = await loadSigningKeys('keys', { kv: db.kv });
     return {
       identity: {
         id: keys.id,

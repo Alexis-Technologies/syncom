@@ -6,7 +6,7 @@ the three write paths, transactions, the catalog, the present's patches and
 the changes every op reports, and the ops a peer sends or lacks
 (`applyRemote()`, `outbound()`). Everything beyond that is a subpath you
 import when you need it, and nothing is registered process-wide: a storage
-runs with the plugins its `open()` was given, and another storage in the
+runs with the plugins its `createDatabase()` was given, and another storage in the
 same process may run with others.
 
 ## The blocks
@@ -14,35 +14,37 @@ same process may run with others.
 | Import | What it is | Registered how |
 | --- | --- | --- |
 | `@alexify/syncom` | the core | — |
-| `@alexify/syncom/text` | the `list` and `text` kinds: Fugue runs, marks, cursors, `splice` … `move` | `open({ plugins: [text] })` |
-| `@alexify/syncom/tree` | the `tree` kind: a movable tree per field, `treeMove`, `treeRemove` | `open({ plugins: [tree] })` |
-| `@alexify/syncom/signing` | the identity as an Ed25519 key, every own op signed, a peer's verified (`sync.signatures`); the key functions | `open({ plugins: [signing] })` |
-| `@alexify/syncom/chain` | the hash-linked chain: a block per applied batch, the check on a cold read, `validate()`; `Blockchain` | `open({ plugins: [chain] })` |
-| `@alexify/syncom/encryption` | records sealed for this node (`encrypted: true`), and `atRest()`, a backend wrapper that encrypts every file | `open({ plugins: [encryption] })`; `open({ fsi: atRest(fsi, …) })` |
-| `@alexify/syncom/sync` | the sync manager: nodes, links, pushes, the feed, the bootstrap, the hosting unit; the core keeps `applyRemote()` and `outbound()` | `open({ plugins: [sync] })` |
-| `@alexify/syncom/schema` | entity definitions: collections, validation, indexes, migrations and the lens, `migrate()`, `check()` | `open({ plugins: [schema], schema })` |
-| `@alexify/syncom/telemetry` | the OpenTelemetry adapter: `{ api }` or `{ tracer, meter }` into the writer the engine records through; `createTelemetry()` | `open({ plugins: [telemetry], telemetry })` |
-| `@alexify/syncom/query` | the cursor behind `select()`, `count()` and `watch()` on a collection; the catalog stays in the core | `open({ plugins: [query] })` |
-| `@alexify/syncom/versions` | the past: `get(id, { at })`, `history()`, `diff()` between versions, `restore()`, the tags; `applyPatches()` and `compact()` stay in the core | `open({ plugins: [versions] })` |
+| `@alexify/syncom/text` | the `list` and `text` kinds: Fugue runs, marks, cursors, `splice` … `move` | `createDatabase({ plugins: [text] })` |
+| `@alexify/syncom/tree` | the `tree` kind: a movable tree per field, `treeMove`, `treeRemove` | `createDatabase({ plugins: [tree] })` |
+| `@alexify/syncom/signing` | the identity as an Ed25519 key, every own op signed, a peer's verified (`sync.signatures`); the key functions | `createDatabase({ plugins: [signing] })` |
+| `@alexify/syncom/chain` | the hash-linked chain: a block per applied batch, the check on a cold read, `validate()`; `Blockchain` | `createDatabase({ plugins: [chain] })` |
+| `@alexify/syncom/encryption` | records sealed for this node (`encrypted: true`), and `atRest()`, a backend wrapper that encrypts every file | `createDatabase({ plugins: [encryption] })`; `createDatabase({ fsi: atRest(fsi, …) })` |
+| `@alexify/syncom/sync` | the sync manager: nodes, links, pushes, the feed, the bootstrap, the hosting unit; the core keeps `applyRemote()` and `outbound()` | `createDatabase({ plugins: [sync] })` |
+| `@alexify/syncom/schema` | entity definitions: collections, validation, indexes, migrations and the lens, `migrate()`, `check()` | `createDatabase({ plugins: [schema], schema })` |
+| `@alexify/syncom/telemetry` | the OpenTelemetry adapter: `{ api }` or `{ tracer, meter }` into the writer the engine records through; `createTelemetry()` | `createDatabase({ plugins: [telemetry], telemetry })` |
+| `@alexify/syncom/query` | the cursor behind `select()`, `count()` and `watch()` on a collection; the catalog stays in the core | `createDatabase({ plugins: [query] })` |
+| `@alexify/syncom/versions` | the past: `get(id, { at })`, `history()`, `diff()` between versions, `restore()`, the tags; `applyPatches()` and `compact()` stay in the core | `createDatabase({ plugins: [versions] })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |
 | `@alexify/syncom/editor`, `/prosemirror`, `/codemirror` | an editor bound to a text field: the generic binding and its deltas, and adapters for ProseMirror and CodeMirror 6 (their modules injected) | functions over a storage |
 | `@alexify/syncom/store` | a query, a record or a presence as one store — Svelte's contract and React's `useSyncExternalStore` | `toStore(source)` |
 | `@alexify/syncom/inspect` | a record's anatomy, raw, and an anonymized copy for a bug report | functions over a storage |
-| `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `open({ fsi })` |
-| `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, the IndexedDB backend, the wrpc link adapter, smart contracts | injected: `open({ search })`, `open({ fsi })`, `sync.connect` |
+| `@alexify/syncom/memory`, `/layered` | `memory()`, the backend in memory, and `memoryEngine()`, the engine in memory; `layered([top, …, bottom])`, one backend over several as a multi-level cache | `createDatabase({ fsi })`, `createDatabase({ engine })` |
+| `@alexify/syncom/engines` | `serveEngine`/`remoteEngine`/`connectEngine`, an engine over a message port (a worker); `copyEngine`, a database moved between engines | functions over engines |
+| `@alexify/syncom/sqlite`, `/mongodb` | `sqliteEngine()`, the engine over SQLite — `node:sqlite` or a driver; `mongoEngine()`, the engine over MongoDB — the driver's client injected; Node only | `createDatabase({ engine })` |
+| `@alexify/syncom/search`, `/idb`, `/wrpc`, `/contracts` | the text index behind `$text`, IndexedDB as a backend (`createIdbFsi`) and as an engine (`idbEngine`), the wrpc link adapter, smart contracts | injected: `createDatabase({ search })`, `createDatabase({ fsi })` or `({ engine })`, `sync.connect` |
 
 ## Who imports what
 
 A **collaborative text** (the use a document CRDT is picked for):
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { memory } = require('@alexify/syncom/memory');
 const { text } = require('@alexify/syncom/text');
 
-const storage = await open({ fsi: memory(), plugins: [text] });
+const storage = await createDatabase({ fsi: memory(), plugins: [text] });
 const id = await storage.insert({ kind: 'doc' });
 await storage.splice(id, 'body', 0, 0, 'hello');
 ```
@@ -55,19 +57,19 @@ no chain is written. **Signed and audited** — the level of security the
 package had as one piece — is three plugins:
 
 ```js
-const { open } = require('@alexify/syncom');
+const { createDatabase } = require('@alexify/syncom');
 const { signing } = require('@alexify/syncom/signing');
 const { chain } = require('@alexify/syncom/chain');
 const { encryption } = require('@alexify/syncom/encryption');
 
-const storage = await open({ path: 'data', plugins: [signing, chain, encryption] });
+const storage = await createDatabase({ path: 'data', plugins: [signing, chain, encryption] });
 storage.nodeId; // the Ed25519 public key; every op signed, every write chained
 ```
 
 **Everything** is `/all`:
 
 ```js
-const { open } = require('@alexify/syncom/all'); // every plugin: text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions
+const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text, tree, signing, chain, encryption, sync, schema, telemetry, query, versions
 ```
 
 ## What a plugin changes, and what it does not
@@ -97,7 +99,7 @@ const { open } = require('@alexify/syncom/all'); // every plugin: text, tree, si
   `'require'` host refuses its hello (its id is no key). The configuration
   that resists a stripped signature is `'require'` with `signing` on every
   node — see [Signatures](./sync#signatures). What the options ask for and no
-  plugin provides is refused at `open()` with `PLUGIN_MISSING`:
+  plugin provides is refused at `createDatabase()` with `PLUGIN_MISSING`:
   `sync.signatures: 'require'` without `signing`, `chain: true` without
   `chain`, `encrypted: true` without `encryption`. A directory keeps the key
   it was given as its id when opened without `signing`; one born without it

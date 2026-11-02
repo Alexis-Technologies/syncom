@@ -50,7 +50,7 @@
 - [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): insert, update, read, counters, batches, replication, typing into a text, cold start and bundle size against nine libraries, plus syncom's own benchmarks.
 - [Architecture](https://syncomjs.vercel.app/guide/architecture): the facade, the three write paths, replication between nodes, the files on disk.
 - [Getting Started](https://syncomjs.vercel.app/guide/getting-started): install, open a storage, records, validation, a first sync.
-- [Storage](https://syncomjs.vercel.app/guide/storage): explicit API, registers, counters and sets, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.
+- [Database](https://syncomjs.vercel.app/guide/database): explicit API, registers, counters and sets, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.
 - [Sync](https://syncomjs.vercel.app/guide/sync): the operation model, the log and its two cursors, signatures, the protocol, bootstrap, scopes, the registry, the link contract, guarantees and limits.
 - [wrpc transport](https://syncomjs.vercel.app/guide/wrpc): hosting `storage.sync.unit()` on a wrpc server, dialing with `createWrpcLink`, the browser, rooms and presence.
 - [CRDT deltas](https://syncomjs.vercel.app/guide/crdt): diff/merge/apply semantics, grow-only sets, the numeric-addition rule.

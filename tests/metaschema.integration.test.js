@@ -25,7 +25,7 @@ const metaschema = optional('@alexify/metaschema');
 const openTemp = async (t, options = {}) => {
   const dir = await createTemp();
   t.after(() => cleanupTemp(dir));
-  const storage = await syncom.open({ path: dir, logger: false, ...options });
+  const storage = await syncom.createDatabase({ path: dir, logger: false, ...options });
   t.after(() => storage.close().catch(() => {}));
   return storage;
 };
@@ -112,7 +112,7 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
         dirs.set(key, await createTemp());
         t3.after(() => cleanupTemp(dirs.get(key)));
       }
-      const storage = await syncom.open({ path: dirs.get(key), logger: false, ...options });
+      const storage = await syncom.createDatabase({ path: dirs.get(key), logger: false, ...options });
       t3.after(() => storage.close().catch(() => {}));
       return storage;
     };
@@ -159,7 +159,7 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
         dirs.set(key, await createTemp());
         t3.after(() => cleanupTemp(dirs.get(key)));
       }
-      const storage = await syncom.open({ path: dirs.get(key), logger: false, ...options });
+      const storage = await syncom.createDatabase({ path: dirs.get(key), logger: false, ...options });
       t3.after(() => storage.close().catch(() => {}));
       return storage;
     };

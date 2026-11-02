@@ -5,7 +5,7 @@
 // accepts to one stream and serves `changes` from it, so a peer can resume
 // on any hub. It is structurally wrpc's `BrokerLog` (`append`, `read`,
 // `parseId`), so a broker's `.log` — memory, Redis, NATS, Kafka — fits with
-// no adapter. Nothing consumes it yet: `open({ sync: { sharedLog } })` is
+// no adapter. Nothing consumes it yet: `createDatabase({ sync: { sharedLog } })` is
 // refused, and this check is what the option will run. No requires.
 
 const METHODS = ['append', 'read', 'parseId'];
