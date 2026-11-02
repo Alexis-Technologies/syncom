@@ -16,6 +16,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { bench } = require('./support/harness.js');
 const { OpLog, fileOf, segmentOf, readSegment } = require('../src/log.js');
+const { createJournalStore } = require('../src/files/journal.js');
+const fsi = require('../src/fsi.js');
+
+// The log over the files engine's journal store at `dir/log`, as the database opens it.
+const openLog = (dir, options) => new OpLog(dir, { ...options, store: createJournalStore(fsi, `${dir}/log`) });
 
 const op = (seq) => ({ origin: 'bench', seq, ts: seq, type: 'set', id: `r${seq % 100}`, data: { v: seq } });
 
@@ -26,7 +31,7 @@ const main = async () => {
   try {
     // Default roll cadence, unbounded retention: a realistic log that seals
     // as it grows, so the reopen row reads segments, not thousands of files.
-    const log = await new OpLog(root, { retention: { ops: 1_000_000 } });
+    const log = await openLog(root, { retention: { ops: 1_000_000 } });
     let seq = 0;
 
     await bench('append — one op', () => log.append([op(++seq)]), { warmup: 20 });
@@ -58,7 +63,7 @@ const main = async () => {
     await bench('since — 20 from the middle, scoped', () =>
       log.since(log.formatId(1000), { scopes: ['x'], limit: 20 }));
 
-    const rolling = await new OpLog(path.join(root, 'rolling'), { rollAfter: 8, retention: { ops: 10_000 } });
+    const rolling = await openLog(path.join(root, 'rolling'), { rollAfter: 8, retention: { ops: 10_000 } });
     let n = 0;
     await bench('append with a roll every 8 batches', () => rolling.append([op(++n)]), { warmup: 16, measureMs: 500 });
 
@@ -66,7 +71,7 @@ const main = async () => {
     await bench(
       'reopen — index + segments + tail',
       async () => {
-        const reopened = await new OpLog(root, { retention: { ops: 1_000_000 } });
+        const reopened = await openLog(root, { retention: { ops: 1_000_000 } });
         return reopened.length;
       },
       { warmup: 1, measureMs: 500 },

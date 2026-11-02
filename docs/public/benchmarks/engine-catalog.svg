@@ -44,60 +44,60 @@
 <text class="tick" x="676" y="401" text-anchor="middle">100M</text>
 <line class="axis" x1="372" y1="105" x2="372" y2="385"/>
 <g><title>insert, then remove · a row among 100000, two sorted indexes
-312,401 ops/s
-3.2 µs per operation</title>
+302,469 ops/s
+3.31 µs per operation</title>
 <text class="label primary" x="20" y="122">insert, then remove</text>
 <text class="sublabel" x="20" y="137">a row among 100000, two sorted indexes</text>
-<path class="bar primary" d="M372,118H418.1308580928776A4,4 0 0 1 422.1308580928776,122V128A4,4 0 0 1 418.1308580928776,132H372Z"/>
-<text class="value" x="428.1308580928776" y="131">312k</text>
+<path class="bar primary" d="M372,118H416.7089948769766A4,4 0 0 1 420.7089948769766,122V128A4,4 0 0 1 416.7089948769766,132H372Z"/>
+<text class="value" x="426.7089948769766" y="131">302k</text>
 </g>
 <g><title>put · a field changed, 100000 rows (the index that reads it re-keyed, the other kept)
-1,229,929 ops/s
-813 ns per operation</title>
+1,260,531 ops/s
+793 ns per operation</title>
 <text class="label primary" x="20" y="162">put</text>
 <text class="sublabel" x="20" y="177">a field changed, 100000 rows (the index that reads it re…</text>
-<path class="bar primary" d="M372,158H478.44117755738944A4,4 0 0 1 482.44117755738944,162V168A4,4 0 0 1 478.44117755738944,172H372Z"/>
-<text class="value" x="488.44117755738944" y="171">1.23M</text>
+<path class="bar primary" d="M372,158H479.52275777412314A4,4 0 0 1 483.52275777412314,162V168A4,4 0 0 1 479.52275777412314,172H372Z"/>
+<text class="value" x="489.52275777412314" y="171">1.26M</text>
 </g>
 <g><title>load · 100000 rows, two sorted indexes built once
-545,200 ops/s
-1.83 µs per operation</title>
+540,027 ops/s
+1.85 µs per operation</title>
 <text class="label primary" x="20" y="202">load</text>
 <text class="sublabel" x="20" y="217">100000 rows, two sorted indexes built once</text>
-<path class="bar primary" d="M372,198H442.63765917914714A4,4 0 0 1 446.63765917914714,202V208A4,4 0 0 1 442.63765917914714,212H372Z"/>
-<text class="value" x="452.63765917914714" y="211">545k</text>
+<path class="bar primary" d="M372,198H442.2181013657603A4,4 0 0 1 446.2181013657603,202V208A4,4 0 0 1 442.2181013657603,212H372Z"/>
+<text class="value" x="452.2181013657603" y="211">540k</text>
 </g>
 <g><title>define · 100000 rows under another key (the rows bare, the indexes built once)
-962,340 ops/s
-1.04 µs per operation</title>
+949,736 ops/s
+1.05 µs per operation</title>
 <text class="label primary" x="20" y="242">define</text>
 <text class="sublabel" x="20" y="257">100000 rows under another key (the rows bare, the indexe…</text>
-<path class="bar primary" d="M372,238H467.643958494221A4,4 0 0 1 471.643958494221,242V248A4,4 0 0 1 467.643958494221,252H372Z"/>
-<text class="value" x="477.643958494221" y="251">962k</text>
+<path class="bar primary" d="M372,238H467.0637605703888A4,4 0 0 1 471.0637605703888,242V248A4,4 0 0 1 467.0637605703888,252H372Z"/>
+<text class="value" x="477.0637605703888" y="251">950k</text>
 </g>
 <g><title>scan · 20 rows by prefix, of 100000 (two seeks, the entries pulled)
-11,236,242 ops/s
-89 ns per operation</title>
+11,044,442 ops/s
+90.5 ns per operation</title>
 <text class="label primary" x="20" y="282">scan</text>
 <text class="sublabel" x="20" y="297">20 rows by prefix, of 100000 (two seeks, the entries pul…</text>
-<path class="bar primary" d="M372,278H575.7962698682293A4,4 0 0 1 579.7962698682293,282V288A4,4 0 0 1 575.7962698682293,292H372Z"/>
-<text class="value" x="585.7962698682293" y="291">11.2M</text>
+<path class="bar primary" d="M372,278H575.0385695887616A4,4 0 0 1 579.0385695887616,282V288A4,4 0 0 1 575.0385695887616,292H372Z"/>
+<text class="value" x="585.0385695887616" y="291">11M</text>
 </g>
 <g><title>page · 100 rows after the edge of page 100, of 20000 (sought, not filtered)
-2,020,589 ops/s
-495 ns per operation</title>
+2,006,585 ops/s
+498 ns per operation</title>
 <text class="label primary" x="20" y="322">page</text>
 <text class="sublabel" x="20" y="337">100 rows after the edge of page 100, of 20000 (sought, n…</text>
-<path class="bar primary" d="M372,318H500.2884357504131A4,4 0 0 1 504.2884357504131,322V328A4,4 0 0 1 500.2884357504131,332H372Z"/>
-<text class="value" x="510.2884357504131" y="331">2.02M</text>
+<path class="bar primary" d="M372,318H499.98236622217723A4,4 0 0 1 503.98236622217723,322V328A4,4 0 0 1 499.98236622217723,332H372Z"/>
+<text class="value" x="509.98236622217723" y="331">2.01M</text>
 </g>
 <g><title>count · by a prefix and a range, of 20000 (the index's, no record read)
-362,088 ops/s
-2.76 µs per operation</title>
+363,226 ops/s
+2.75 µs per operation</title>
 <text class="label primary" x="20" y="362">count</text>
 <text class="sublabel" x="20" y="377">by a prefix and a range, of 20000 (the index's, no recor…</text>
-<path class="bar primary" d="M372,358H424.6264987146225A4,4 0 0 1 428.6264987146225,362V368A4,4 0 0 1 424.6264987146225,372H372Z"/>
-<text class="value" x="434.6264987146225" y="371">362k</text>
+<path class="bar primary" d="M372,358H424.7645953806999A4,4 0 0 1 428.7645953806999,362V368A4,4 0 0 1 424.7645953806999,372H372Z"/>
+<text class="value" x="434.7645953806999" y="371">363k</text>
 </g>
 <text class="caption" x="20" y="426">pnpm bench --save · Apple M3 Max · 16 cores · Node v24.14.1 · 1 s per row · 2026-11-02</text>
 </svg>

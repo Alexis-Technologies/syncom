@@ -87,35 +87,42 @@ with every plugin registered (see
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 415.5 KB | 164.4 KB | 56.7 KB | 57.0 KB |
-| main entry — node (@alexify/syncom) | 396.0 KB | 164.0 KB | 56.3 KB | — |
+| main entry — browser (@alexify/syncom) | 568.7 KB | 220.3 KB | 75.4 KB | 75.5 KB |
+| main entry — node (@alexify/syncom) | 543.1 KB | 220.1 KB | 75.0 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 3.8 KB | 1.6 KB | 0.7 KB | 2.0 KB |
 | contracts — browser (@alexify/syncom/contracts) | 4.2 KB | 1.9 KB | 1.0 KB | 1.0 KB |
-| idb backend — browser (@alexify/syncom/idb) | 3.6 KB | 1.6 KB | 0.8 KB | 2.0 KB |
-| search — browser (@alexify/syncom/search) | 4.4 KB | 1.8 KB | 0.9 KB | 2.0 KB |
+| idb backend — browser (@alexify/syncom/idb) | 29.1 KB | 13.1 KB | 4.9 KB | 6.0 KB |
+| sqlite engine — node (@alexify/syncom/sqlite) | 26.2 KB | 13.9 KB | 4.9 KB | — |
+| mongodb engine — node (@alexify/syncom/mongodb) | 33.6 KB | 15.8 KB | 6.3 KB | — |
+| engines — browser (@alexify/syncom/engines) | 58.5 KB | 26.5 KB | 9.9 KB | 10.0 KB |
+| search — browser (@alexify/syncom/search) | 5.9 KB | 2.5 KB | 1.1 KB | 2.0 KB |
 | order — browser (@alexify/syncom/order) | 5.0 KB | 2.4 KB | 1.0 KB | 1.5 KB |
-| undo — browser (@alexify/syncom/undo) | 52.7 KB | 24.1 KB | 8.7 KB | 9.0 KB |
-| branch — browser (@alexify/syncom/branch) | 22.6 KB | 11.0 KB | 4.7 KB | 5.0 KB |
-| presence — browser (@alexify/syncom/presence) | 25.8 KB | 10.8 KB | 4.4 KB | 4.5 KB |
+| undo — browser (@alexify/syncom/undo) | 52.9 KB | 24.2 KB | 8.8 KB | 9.0 KB |
+| branch — browser (@alexify/syncom/branch) | 22.5 KB | 10.9 KB | 4.7 KB | 5.0 KB |
+| presence — browser (@alexify/syncom/presence) | 26.0 KB | 10.9 KB | 4.5 KB | 4.8 KB |
 | editor — browser (@alexify/syncom/editor) | 27.4 KB | 12.3 KB | 4.6 KB | 6.5 KB |
 | codemirror — browser (@alexify/syncom/codemirror) | 38.3 KB | 17.1 KB | 6.4 KB | 8.0 KB |
 | prosemirror — browser (@alexify/syncom/prosemirror) | 47.1 KB | 20.6 KB | 7.8 KB | 9.5 KB |
-| store — browser (@alexify/syncom/store) | 5.6 KB | 2.3 KB | 1.0 KB | 1.5 KB |
-| inspect — browser (@alexify/syncom/inspect) | 25.5 KB | 11.8 KB | 5.1 KB | 5.5 KB |
-| all — browser (@alexify/syncom/all) | 890.5 KB | 375.1 KB | 130.5 KB | 130.5 KB |
-| text — browser (@alexify/syncom/text) | 270.8 KB | 121.8 KB | 42.8 KB | 43.0 KB |
+| store — browser (@alexify/syncom/store) | 6.3 KB | 2.6 KB | 1.1 KB | 1.5 KB |
+| inspect — browser (@alexify/syncom/inspect) | 27.2 KB | 12.7 KB | 5.4 KB | 5.5 KB |
+| all — browser (@alexify/syncom/all) | 1147.4 KB | 471.4 KB | 162.4 KB | 162.5 KB |
+| text — browser (@alexify/syncom/text) | 279.2 KB | 125.6 KB | 44.0 KB | 44.0 KB |
 | tree — browser (@alexify/syncom/tree) | 46.8 KB | 22.5 KB | 8.6 KB | 9.0 KB |
-| signing — browser (@alexify/syncom/signing) | 28.3 KB | 13.6 KB | 5.7 KB | 6.0 KB |
-| chain — browser (@alexify/syncom/chain) | 13.8 KB | 6.2 KB | 2.9 KB | 3.0 KB |
-| encryption — browser (@alexify/syncom/encryption) | 18.5 KB | 8.8 KB | 3.6 KB | 4.0 KB |
-| memory — browser (@alexify/syncom/memory) | 2.4 KB | 0.9 KB | 0.5 KB | 0.8 KB |
+| signing — browser (@alexify/syncom/signing) | 33.7 KB | 16.0 KB | 6.6 KB | 6.8 KB |
+| chain — browser (@alexify/syncom/chain) | 20.0 KB | 8.7 KB | 3.8 KB | 4.0 KB |
+| encryption — browser (@alexify/syncom/encryption) | 36.2 KB | 16.5 KB | 6.4 KB | 6.5 KB |
+| memory — browser (@alexify/syncom/memory) | 20.2 KB | 8.3 KB | 3.3 KB | 3.5 KB |
 | layered — browser (@alexify/syncom/layered) | 8.3 KB | 3.5 KB | 1.5 KB | 1.5 KB |
-| sync — browser (@alexify/syncom/sync) | 109.3 KB | 45.3 KB | 16.6 KB | 23.5 KB |
-| schema — browser (@alexify/syncom/schema) | 32.6 KB | 16.2 KB | 6.0 KB | 6.5 KB |
-| telemetry — browser (@alexify/syncom/telemetry) | 20.7 KB | 8.9 KB | 3.4 KB | 4.0 KB |
-| query — browser (@alexify/syncom/query) | 43.1 KB | 17.4 KB | 6.4 KB | 6.5 KB |
-| versions — browser (@alexify/syncom/versions) | 256.1 KB | 107.3 KB | 38.5 KB | 38.5 KB |
-| core + every block, in one bundle (= /all) | — | — | 130.5 KB | 130.5 KB ± 0.3 |
+| sync — browser (@alexify/syncom/sync) | 110.2 KB | 45.8 KB | 16.9 KB | 23.5 KB |
+| schema — browser (@alexify/syncom/schema) | 39.2 KB | 19.4 KB | 7.0 KB | 7.0 KB |
+| telemetry — browser (@alexify/syncom/telemetry) | 24.8 KB | 11.2 KB | 4.1 KB | 4.5 KB |
+| query — browser (@alexify/syncom/query) | 136.1 KB | 50.9 KB | 17.3 KB | 17.5 KB |
+| versions — browser (@alexify/syncom/versions) | 268.6 KB | 112.4 KB | 40.6 KB | 41.0 KB |
+| local — browser (@alexify/syncom/local) | 15.8 KB | 6.6 KB | 2.8 KB | 3.0 KB |
+| state — browser (@alexify/syncom/state) | 14.8 KB | 7.2 KB | 2.9 KB | 3.0 KB |
+| dump — browser (@alexify/syncom/dump) | 34.2 KB | 16.6 KB | 6.6 KB | 7.0 KB |
+| pipeline — browser (@alexify/syncom/pipeline) | 17.0 KB | 7.3 KB | 3.1 KB | 3.3 KB |
+| cleanup — browser (@alexify/syncom/cleanup) | 15.5 KB | 6.7 KB | 3.0 KB | 3.3 KB |
 
 ## Quick Start
 
@@ -352,7 +359,7 @@ _Apple M3 Max · 16 cores · Node v24.14.1 · median of 5 × 1 s samples (5 roun
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 194.8 KB | 67.3 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 254.2 KB | 87.2 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |

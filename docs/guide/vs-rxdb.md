@@ -186,9 +186,9 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Language and module format</td><td>JavaScript, CommonJS, no build step; <code>src/</code> ships as is</td><td>TypeScript, built by Babel into CommonJS and ESM; <code>sideEffects: false</code></td></tr>
 <tr><td>Entry points</td><td>the core plus 26 subpaths: <code>/text</code>, <code>/tree</code>, <code>/signing</code>, <code>/chain</code>, <code>/encryption</code>, <code>/sync</code>, <code>/schema</code>, <code>/query</code>, <code>/versions</code>, <code>/telemetry</code>, <code>/memory</code>, <code>/layered</code>, <code>/idb</code>, <code>/wrpc</code>, <code>/search</code>, <code>/order</code>, <code>/undo</code>, <code>/branch</code>, <code>/presence</code>, <code>/inspect</code>, <code>/editor</code>, <code>/store</code>, <code>/prosemirror</code>, <code>/codemirror</code>, <code>/contracts</code>, <code>/all</code></td><td>54 subpath exports, one per plugin (<code>rxdb/plugins/*</code>)</td></tr>
 <tr><td>TypeScript types</td><td>✅ hand-written <code>.d.ts</code>, tsd-tested; a collection's records typed from its Standard Schema or <code>Schema&lt;Shapes&gt;</code></td><td>✅ generated from the source; document type inferred from the schema</td></tr>
-<tr><td>Browser bundle, minimal store</td><td>43.5 KB min+gzip the core (browser); 97.4 KB <code>@alexify/syncom/all</code>, everything</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
-<tr><td>Browser bundle with sync</td><td>53.6 KB min+gzip: the core, the sync plugin and the wrpc link adapter</td><td>90.1 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
-<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 52 KB, <code>/all</code> 98 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
+<tr><td>Browser bundle, minimal store</td><td>75.4 KB min+gzip the core (browser); 162.4 KB <code>@alexify/syncom/all</code>, everything</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
+<tr><td>Browser bundle with sync</td><td>89.3 KB min+gzip: the core, the sync plugin and the wrpc link adapter</td><td>92.3 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
+<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 75.5 KB, <code>/all</code> 162.5 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Runtimes</strong></td></tr>
 <tr><td>Node.js</td><td>✅ ≥24; persists with <code>node:fs</code>; CI on Node 24 and 26</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
 <tr><td>Deno</td><td>❌ not tested; <code>engines</code> names Node.js only</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>
@@ -746,7 +746,7 @@ fast; syncom signs every op and verifies each one it receives (`sync.signatures:
 that away). syncom reads a record by id about three times as fast, from its cache.
 RxDB's `bulkInsert()` is two orders of magnitude ahead, because syncom has no bulk write: each
 record is its own signed, logged op. On disk there is nothing to compare in Node.js, and a browser
-app that keeps records and syncs them ships about 67 KB of syncom against 90 KB of RxDB with
+app that keeps records and syncs them ships about 89 KB of syncom against 92 KB of RxDB with
 Dexie, min+gzip.
 
 ## Which to choose
@@ -759,7 +759,7 @@ Dexie, min+gzip.
 - **syncom** when the nodes replicate among themselves, with no backend of record: servers,
   browser tabs and peers in a mesh, any of which can host. When concurrent edits must merge field
   by field and counters must add up, when you need to prove which node wrote what, verify what is
-  stored and erase it everywhere, and when zero dependencies, a 56 KB core with blocks you add
+  stored and erase it everywhere, and when zero dependencies, a 75 KB core with blocks you add
   one by one and an MIT license for everything, Node.js disk persistence included, are
   requirements.
 - **Neither** for a very long document that many people type into at once. syncom's text fields

@@ -61,8 +61,8 @@ engine also covers what an application keeps next to replication:
 - **Zero dependencies, one API for Node.js and the browser.** Nothing is installed with it.
   `node:fs` and `node:crypto` on the server, OPFS (or IndexedDB) and Web Crypto in the browser,
   picked by the `browser` export condition. CommonJS without a build step, hand-written typings
-  that type the records from their schema, and a core of about 56 KB min+gzip, every block a
-  subpath of its own (everything together, `/all`, about 129 KB), each held to a budget in CI.
+  that type the records from their schema, and a core of about 75 KB min+gzip, every block a
+  subpath of its own (everything together, `/all`, about 162 KB), each held to a budget in CI.
 
 The [benchmarks](/guide/benchmarks) put a number on all of this. syncom opens a store and reads
 a record in about 57 ms, the fastest cold start of the ten libraries measured, and serves a read

@@ -116,9 +116,9 @@ for the `signing` plugin (it signs every op), RSA-OAEP and AES-GCM for the
 ## Bundle size
 
 The browser entry — the core — is measured on every CI run with a budget
-that fails the build when exceeded — 52 KB min+gzip — and so is every
-subpath, on its own row with its own budget (`/text` 34.0 KB, `/tree` 9.0 KB,
-`/all`, everything registered, 117.5 KB), so what an app imports is what it
+that fails the build when exceeded — 75.5 KB min+gzip — and so is every
+subpath, on its own row with its own budget (`/text` 44.0 KB, `/tree` 9.0 KB,
+`/all`, everything registered, 162.5 KB), so what an app imports is what it
 ships (see [Entry points](/guide/entry-points)):
 
 ```bash

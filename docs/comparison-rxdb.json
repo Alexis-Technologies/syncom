@@ -1556,17 +1556,17 @@
         },
         "size": {
           "mark": "",
-          "text": "43.5 KB min+gzip the core (browser); 97.4 KB `@alexify/syncom/all`, everything",
+          "text": "75.4 KB min+gzip the core (browser); 162.4 KB `@alexify/syncom/all`, everything",
           "source": "scripts/size.js; pnpm size"
         },
         "sizeSync": {
           "mark": "",
-          "text": "53.6 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
+          "text": "89.3 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
           "source": "bench/compare/size.js; bench/results/size.json"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when any entry passes its budget (the core 52 KB, `/all` 98 KB, each subpath its own)",
+          "text": "`pnpm size` fails CI when any entry passes its budget (the core 75.5 KB, `/all` 162.5 KB, each subpath its own)",
           "source": "scripts/size.js"
         },
         "node": {
@@ -3189,7 +3189,7 @@
         },
         "sizeSync": {
           "mark": "",
-          "text": "90.1 KB min+gzip with Dexie and `replicateRxCollection`",
+          "text": "92.3 KB min+gzip with Dexie and `replicateRxCollection`",
           "source": "bench/results/size.json (92,303 B); bench/compare/size.js:91-101",
           "detail": "With localStorage instead of Dexie: 57.9 KB (scratch size2.js). size.json labels the bundle dexie@4.4.6, but esbuild resolved rxdb's own pinned dexie@4.4.2 (size.js:137-139 reads the version from the top-level node_modules)."
         },

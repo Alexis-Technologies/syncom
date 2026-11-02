@@ -251,7 +251,7 @@ loads is counted with the JavaScript, gzipped too.
 | TinyBase<br><sub>tinybase@10.0.1</sub> | MergeableStore + IndexedDB persister + custom synchronizer | 56.4 KB | 23.8 KB |  |
 | Yjs<br><sub>yjs@13.6.33, y-indexeddb@9.0.12, y-protocols@1.0.7</sub> | yjs + y-indexeddb + y-protocols/sync | 80.2 KB | 24.5 KB |  |
 | PouchDB<br><sub>pouchdb-browser@9.0.0</sub> | pouchdb-browser | 117.8 KB | 40.4 KB | pouchdb-browser carries its HTTP adapter (the CouchDB client) with it |
-| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 194.8 KB | 67.3 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
+| **syncom**<br><sub>@alexify/syncom@0.0.1</sub> | the core over OPFS + the sync plugin + the wrpc link adapter | 254.2 KB | 87.2 KB | records, counters and sets, the op log and the sync protocol; texts and schemas are plugins of their own |
 | RxDB<br><sub>rxdb@17.6.0, dexie@4.4.6, rxjs@7.8.2</sub> | rxdb + Dexie storage + replication | 282.3 KB | 90.1 KB |  |
 | Fireproof<br><sub>@fireproof/core@0.24.19</sub> | @fireproof/core | 784.2 KB | 204.0 KB |  |
 | OrbitDB<br><sub>@orbitdb/core@4.0.0, helia@6.1.4, libp2p@3.5.1, @libp2p/gossipsub@15.0.23, blockstore-idb@4.0.1</sub> | @orbitdb/core + helia + libp2p, IndexedDB blockstore | 1185.6 KB | 353.7 KB | createHelia brings Helia's default libp2p configuration with it |
@@ -283,27 +283,27 @@ records them.
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| insert — small record | 4,636 | 216 µs |
-| insert — small record, layered([memory(), node:fs], write: back) | 4,423 | 226 µs |
-| get — cached | 52,167 | 19.2 µs |
-| get — cold (re-verifies the block) | 51 | 19.6 ms |
-| update — one field | 8,162 | 123 µs |
-| history — 50 versions | 11,476 | 87.1 µs |
-| tag | 438 | 2.28 ms |
-| get — at a tag (a copy) | 6,681 | 150 µs |
-| get — at an event id (25 ops back) | 12,262 | 81.6 µs |
-| set — whole record | 9,945 | 101 µs |
-| swap — match (writes) | 9,586 | 104 µs |
-| swap — mismatch (reads only) | 53,956 | 18.5 µs |
-| has — existing id | 48,726 | 20.5 µs |
-| record — cached Record instance | 8,837,568 | 113 ns |
-| list — 2000 ids (catalog) | 10,130,859 | 98.7 ns |
-| hasRecord — 2000 ids (catalog) | 6,443,327 | 155 ns |
-| select — covered eq over 2000 | 21,223 | 47.1 µs |
-| select — eq + order + limit over 2000 | 11,819 | 84.6 µs |
-| select — uncovered filter over 2000 | 1,075 | 930 µs |
-| open — catalog caught up from the log (2000 records) | 25 | 40 ms |
-| open — catalog rebuilt from a scan (2000 records, integrity lazy) | 24 | 41.7 ms |
+| insert — small record | 5,787 | 173 µs |
+| insert — small record, layered([memory(), node:fs], write: back) | 4,170 | 240 µs |
+| get — cached | 51,579 | 19.4 µs |
+| get — cold (re-verifies the block) | 43 | 23.3 ms |
+| update — one field | 7,987 | 125 µs |
+| history — 50 versions | 10,738 | 93.1 µs |
+| tag | 383 | 2.61 ms |
+| get — at a tag (a copy) | 14,641 | 68.3 µs |
+| get — at an event id (25 ops back) | 13,287 | 75.3 µs |
+| set — whole record | 9,605 | 104 µs |
+| swap — match (writes) | 9,387 | 107 µs |
+| swap — mismatch (reads only) | 51,423 | 19.4 µs |
+| has — existing id | 52,906 | 18.9 µs |
+| record — cached Record instance | 8,302,835 | 120 ns |
+| list — 2000 ids (catalog) | 11,428,040 | 87.5 ns |
+| hasRecord — 2000 ids (catalog) | 6,448,813 | 155 ns |
+| select — covered eq over 2000 | 26,062 | 38.4 µs |
+| select — eq + order + limit over 2000 | 71,663 | 14 µs |
+| select — uncovered filter over 2000 | 16,074 | 62.2 µs |
+| open — catalog caught up from the log (2000 records) | 26 | 38.5 ms |
+| open — catalog rebuilt from a scan (2000 records, integrity lazy) | 26 | 38.5 ms |
 
 </details>
 
@@ -358,13 +358,13 @@ records them.
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| insert, then remove — a row among 100000, two sorted indexes | 312,401 | 3.2 µs |
-| put — a field changed, 100000 rows (the index that reads it re-keyed, the other kept) | 1,229,929 | 813 ns |
-| load — 100000 rows, two sorted indexes built once | 545,200 | 1.83 µs |
-| define — 100000 rows under another key (the rows bare, the indexes built once) | 962,340 | 1.04 µs |
-| scan — 20 rows by prefix, of 100000 (two seeks, the entries pulled) | 11,236,242 | 89 ns |
-| page — 100 rows after the edge of page 100, of 20000 (sought, not filtered) | 2,020,589 | 495 ns |
-| count — by a prefix and a range, of 20000 (the index's, no record read) | 362,088 | 2.76 µs |
+| insert, then remove — a row among 100000, two sorted indexes | 302,469 | 3.31 µs |
+| put — a field changed, 100000 rows (the index that reads it re-keyed, the other kept) | 1,260,531 | 793 ns |
+| load — 100000 rows, two sorted indexes built once | 540,027 | 1.85 µs |
+| define — 100000 rows under another key (the rows bare, the indexes built once) | 949,736 | 1.05 µs |
+| scan — 20 rows by prefix, of 100000 (two seeks, the entries pulled) | 11,044,442 | 90.5 ns |
+| page — 100 rows after the edge of page 100, of 20000 (sought, not filtered) | 2,006,585 | 498 ns |
+| count — by a prefix and a range, of 20000 (the index's, no record read) | 363,226 | 2.75 µs |
 
 </details>
 
@@ -531,17 +531,18 @@ records them.
 </details>
 
 <details>
-<summary>Op log — 7 rows</summary>
+<summary>Op log — 8 rows</summary>
 
 | Benchmark | ops/s | per operation |
 | --- | ---: | ---: |
-| append — one op | 39,483 | 25.3 µs |
-| append — batch of 100 | 731,306 | 1.37 µs |
-| since — last 500 entries | 611,433 | 1.64 µs |
-| since — everything (no cursor) | 349 | 2.87 ms |
-| since — 20 from the middle, scoped | 3,340,879 | 299 ns |
-| append with a roll every 8 batches | 15,361 | 65.1 µs |
-| reopen — index + segments + tail | 2 | 500 ms |
+| append — one op | 41,954 | 23.8 µs |
+| append — batch of 100 | 777,182 | 1.29 µs |
+| since — last 500 entries | 570,566 | 1.75 µs |
+| since — everything (no cursor) | 359 | 2.79 ms |
+| readSegment — 64 lines of 16 ops, checksums before the parse | 1,542 | 649 µs |
+| since — 20 from the middle, scoped | 3,381,790 | 296 ns |
+| append with a roll every 8 batches | 15,652 | 63.9 µs |
+| reopen — index + segments + tail | 3 | 333 ms |
 
 </details>
 
