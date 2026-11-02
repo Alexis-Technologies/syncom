@@ -417,7 +417,8 @@ const ENTRIES = [
   // 159.2 with the planner's cost model (review №6, E4.5). 159.5, raised by name.
   // 159.8 with the unique keys of the records in flight and of a transaction's own kept in maps (review №6, E5.1;
   // 2026-11-02). 160, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 160 },
+  // 160.2 with the query cache per collection and the live delivery (review №6, E5.2–E5.3). 160.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 160.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -572,7 +573,9 @@ const ENTRIES = [
   // stream() running once where no index sorts (review №6, E4.4). 15.5 — at the measure; 16, raised by name.
   // 16.5 with the planner's cost model — estimate, cardinality, narrow, a $in scanned value by value (review №6, E4.5;
   // the design estimated 14.5 for all of E4). 17, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 17 },
+  // 17.0 with a live run delivering a row that stayed as the copy it was, nearest() streamed into its sink, the
+  // cache bounded by rows and the key built once (review №6, E5.2–E5.3; 2026-11-02). 17.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 17.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

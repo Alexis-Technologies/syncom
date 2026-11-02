@@ -10,10 +10,12 @@
 // leaves a full window, or moves past it, calls for a run of the cursor —
 // the successor beyond the window is not known — as does a `$text` query,
 // whose order is the index's ranking. Emits only when the rows changed: an
-// id came, went or moved, or a row reads as another object. `count` mode
-// keeps the matching ids alone and emits the number when it moves. One
-// listener of the catalog, however many subscribers. Requires shape.js
-// only: it ships to the browser.
+// id came, went or moved, or a row reads as another object — and delivers a
+// row that stayed as the very copy it delivered before (`#delivered`), so a
+// change costs one copy, not one per row, and a subscriber may tell a row
+// that moved by its identity. `count` mode keeps the matching ids alone and
+// emits the number when it moves. One listener of the catalog, however many
+// subscribers. Requires shape.js only: it ships to the browser.
 
 const { deepEqual } = require('../shape.js');
 
@@ -44,6 +46,9 @@ class Live {
   #identity = new Map();
   // Count mode: the matching ids.
   #ids = new Set();
+  // What was delivered of each row, by id: handed out again while the row reads the same (`#placed` drops the copy
+  // of one that reads as another, `#load` the copies of what a run read anew, `#out` those of the rows that left).
+  #delivered = new Map();
   #count = -1;
   #unsubscribe = null;
   #pending = new Set();
@@ -57,8 +62,8 @@ class Live {
    * `spec`: `{ entity, wanted (offset + limit), offset, compare, covered,
    * textual, rowOf(id) → row | null (async where the record is read),
    * matches(row), project(row) → what is delivered of a row, top() → rows
-   * (a run of the cursor), deliver(rows) → what the subscribers get,
-   * onRows(rows) (the cache's) }`.
+   * (a run of the cursor), deliver(rows) → what the subscribers get (populated rows: read whole, every
+   * time), deliverOne(row) → the copy of one row (where nothing is populated), onRows(rows) (the cache's) }`.
    */
   constructor(source, spec, mode = 'rows', onStop = noop) {
     this.#source = source;
@@ -145,14 +150,18 @@ class Live {
   // The cursor run whole: what is kept replaced by it.
   async #load() {
     const rows = await this.#spec.top();
+    const was = this.#identity;
     this.#rows = rows;
     this.#index.clear();
-    this.#identity.clear();
+    this.#identity = new Map();
     this.#ids.clear();
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
+      const identity = this.#spec.identityOf(row);
+      // Read anew: the copy of a row whose view is another goes.
+      if (was.get(row.id) !== identity) this.#delivered.delete(row.id);
       this.#index.set(row.id, row);
-      this.#identity.set(row.id, this.#spec.identityOf(row));
+      this.#identity.set(row.id, identity);
       this.#ids.add(row.id);
     }
     this.#ran = true;
@@ -195,6 +204,7 @@ class Live {
       rows.splice(from, 1);
       this.#index.delete(id);
       this.#identity.delete(id);
+      this.#delivered.delete(id);
       // A full window lost a row: its successor beyond is not known here.
       if (full && wanted !== Infinity) this.#rerun = true;
       return true;
@@ -203,6 +213,7 @@ class Live {
     // change of a field the projection drops too — what is delivered of it.
     const { project } = this.#spec;
     const same = this.#identity.get(id) === this.#spec.identityOf(row) || deepEqual(project(was), project(row));
+    if (!same) this.#delivered.delete(id);
     rows.splice(from, 1);
     const at = placeOf(rows, row, compare);
     if (at >= wanted || (full && at === rows.length)) {
@@ -210,6 +221,7 @@ class Live {
       // out, and the cursor runs again for what belongs there.
       this.#index.delete(id);
       this.#identity.delete(id);
+      this.#delivered.delete(id);
       if (full) this.#rerun = true;
       return true;
     }
@@ -227,8 +239,27 @@ class Live {
       return;
     }
     this.#spec.onRows(this.#rows);
-    const out = await this.#spec.deliver(this.#rows.slice(this.#spec.offset));
+    const out = await this.#out();
     for (const entry of this.#subscribers.keys()) this.#call(entry, out);
+  }
+
+  // What the subscribers get: the rows from the offset, each the copy it was delivered as while it reads the same —
+  // only a row that came, or reads as another, is copied again; populated rows are read whole.
+  async #out() {
+    const rows = this.#rows.slice(this.#spec.offset);
+    if (this.#spec.deliverOne === null) return this.#spec.deliver(rows);
+    const kept = this.#delivered;
+    const fresh = new Map();
+    const out = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      let copy = kept.get(row.id);
+      if (copy === undefined) copy = this.#spec.deliverOne(row);
+      fresh.set(row.id, copy);
+      out.push(copy);
+    }
+    this.#delivered = fresh;
+    return out;
   }
 
   // A subscriber that came after the first run hears the rows as they are.
@@ -236,7 +267,7 @@ class Live {
     if (this.#stopped || !this.#subscribers.has(entry)) return;
     try {
       if (this.#mode === 'count') this.#call(entry, this.#ids.size);
-      else this.#call(entry, await this.#spec.deliver(this.#rows.slice(this.#spec.offset)));
+      else this.#call(entry, await this.#out());
     } catch (error) {
       this.#fail(error, entry);
     }

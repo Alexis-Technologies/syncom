@@ -253,6 +253,56 @@ const runQueryTests = async (t, assert, createStorage) => {
     });
   });
 
+  await t.test(
+    'a live run delivers a row that stayed as the copy it delivered before, and only the changed row anew',
+    async (t2) => {
+      const storage = await createStorage(t2, 'I', { schema });
+      const made = [];
+      for (let i = 0; i < 3; i++) {
+        made.push(await storage.Project.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i }));
+      }
+      const calls = [];
+      const stop = storage.Project.select({ orgId: 'o' })
+        .order('n')
+        .projection(['name', 'n'])
+        .watch((rows) => calls.push(rows));
+      await tick();
+      assert.strictEqual(calls.length, 1);
+      await storage.Project.update(made[1].id, { name: 'changed' });
+      await tick();
+      assert.strictEqual(calls.length, 2);
+      const [before, after] = calls;
+      assert.notStrictEqual(before, after, 'a new array');
+      assert.strictEqual(after[0], before[0], 'a row that stayed: the very object');
+      assert.strictEqual(after[2], before[2]);
+      assert.notStrictEqual(after[1], before[1], 'the row that changed: a new copy');
+      assert.deepStrictEqual(after[1], { id: made[1].id, name: 'changed', n: 1 });
+      // A write that leaves a projected row as it was: no emit; one that moves a row: the same copies, placed again.
+      await storage.Project.update(made[0].id, { note: 'dropped by the projection' });
+      await tick();
+      assert.strictEqual(calls.length, 2);
+      await storage.Project.update(made[2].id, { n: -1 });
+      await tick();
+      const moved = calls[2];
+      assert.deepStrictEqual(
+        moved.map((row) => row.name),
+        ['n2', 'n0', 'changed'],
+      );
+      assert.strictEqual(moved[1], after[0]);
+      assert.strictEqual(moved[2], after[1]);
+      // A late subscriber hears the same copies.
+      const late = [];
+      const stopLate = storage.Project.select({ orgId: 'o' })
+        .order('n')
+        .projection(['name', 'n'])
+        .watch((rows) => late.push(rows));
+      await tick();
+      assert.strictEqual(late[0][0], moved[0]);
+      stop();
+      stopLate();
+    },
+  );
+
   await t.test('watch(): the rows now, again after each change of the collection, coalesced', async (t2) => {
     const storage = await createStorage(t2, 'A', { schema });
     const first = await storage.Project.insert({ orgId: 'o', name: 'a', slug: 'a', n: 1 });
@@ -718,6 +768,8 @@ const runQueryTests = async (t, assert, createStorage) => {
       assert.strictEqual((await storage.Project.distinct('v')).length, 13, 'twelve arrays, and null');
       await assert.rejects(storage.Project.select().distinct(''), TypeError);
       // Nearest by cosine, by euclidean, by a function; k best, nearest first; a row without a vector is skipped.
+      await assert.rejects(storage.Project.select().nearest('v', [1, 11], 1001), /k of at most 1000/);
+      await assert.rejects(storage.Project.select().nearest('v', new Array(4097).fill(1), 1), /1 to 4096/);
       const nearest = await storage.Project.select().nearest('v', [1, 11], 3);
       assert.deepStrictEqual(
         nearest.map(({ row }) => row.name),

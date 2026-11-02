@@ -278,6 +278,43 @@ const count = (name, value) => {
   return value;
 };
 
+// What `nearest()` takes at most: the `k` best kept, the length of a vector it measures.
+const MAX_NEAREST = 1000;
+const MAX_VECTOR = 4096;
+
+// The `k` rows nearest to a vector, measured as they come: a TopK of `{ distance, row }`, a row without a vector
+// of the length skipped, one farther than the k-th kept never allocated for.
+class Nearest {
+  #field;
+  #vector;
+  #metric;
+  #top;
+
+  constructor(field, vector, metric, k) {
+    this.#field = field;
+    this.#vector = vector;
+    this.#metric = metric;
+    this.#top = new TopK((a, b) => a.distance - b.distance, k);
+  }
+
+  get size() {
+    return 0;
+  }
+
+  get rows() {
+    return this.#top.rows;
+  }
+
+  push(row) {
+    const value = valueOf(row, this.#field);
+    if (!isVector(value) || value.length !== this.#vector.length) return;
+    const distance = this.#metric(this.#vector, value);
+    const { rows } = this.#top;
+    if (rows.length > 0 && rows.length === this.#top.k && distance >= rows[rows.length - 1].distance) return;
+    this.#top.push({ distance, row });
+  }
+}
+
 // Every matching row, in the order it came.
 class Every {
   rows = [];
@@ -307,6 +344,10 @@ class TopK {
 
   get size() {
     return this.rows.length;
+  }
+
+  get k() {
+    return this.#k;
   }
 
   push(row) {
@@ -470,11 +511,15 @@ class Cursor {
    * the vector's length): `[{ distance, row }]`, nearest first, by
    * `distance` — `'cosine'` (the default), `'euclidean'`, `'manhattan'`,
    * `'dot'`, or a function of two vectors. Every match is read and
-   * measured: a scan, with the `k` best kept.
+   * measured as it comes, the `k` best kept (`k` at most 1000, a vector of
+   * at most 4096 numbers): a scan that holds `k` rows, never every match.
    */
   async nearest(field, vector, k, { distance = 'cosine' } = {}) {
     if (typeof field !== 'string' || field.length === 0) throw new TypeError('nearest() takes a field name');
-    if (!isVector(vector)) throw new TypeError('nearest() takes a vector: a non-empty array of finite numbers');
+    if (!isVector(vector) || vector.length > MAX_VECTOR) {
+      throw new TypeError(`nearest() takes a vector: an array of 1 to ${MAX_VECTOR} finite numbers`);
+    }
+    if (count('nearest', k) > MAX_NEAREST) throw new TypeError(`nearest() takes k of at most ${MAX_NEAREST}`);
     const metric = typeof distance === 'function' ? distance : DISTANCES[distance];
     if (typeof metric !== 'function') {
       throw new TypeError("nearest(): distance is 'cosine', 'euclidean', 'manhattan', 'dot' or a function");
@@ -482,13 +527,8 @@ class Cursor {
     // The records themselves: a catalog row (a covered projection) holds no vector.
     const whole = this.#clone();
     whole.#projection = null;
-    const { rows } = await whole.#matching(true, Infinity);
-    const best = new TopK((a, b) => a.distance - b.distance, count('nearest', k));
-    for (let i = 0; i < rows.length; i++) {
-      const value = valueOf(rows[i], field);
-      if (!isVector(value) || value.length !== vector.length) continue;
-      best.push({ distance: metric(vector, value), row: rows[i] });
-    }
+    const best = new Nearest(field, vector, metric, k);
+    await whole.#matching(true, Infinity, best);
     const out = [];
     for (let i = 0; i < best.rows.length; i++) {
       const { distance: d, row } = best.rows[i];
@@ -704,7 +744,7 @@ class Cursor {
   // rows come in that order whatever the backend — and for `$text` the
   // candidate order is the index's ranking, which an unordered cursor hands
   // out as it is.
-  async #matching(needsRows, limit = this.#limit) {
+  async #matching(needsRows, limit = this.#limit, into = null) {
     // A source that reads its catalog at first use (a tag's) hands `ready`.
     if (this.#source.ready !== undefined) await this.#source.ready();
     const { candidates, ids, row, load, scan } = this.#source;
@@ -749,7 +789,10 @@ class Cursor {
       for (let i = 0; i < narrowed.length; i++) if (!narrowed[i].has(id)) return false;
       return true;
     };
-    const sink = ordered && !byIndex && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
+    // The rows go into the sink given (`nearest()`'s), else a TopK where one page of an order no index serves is
+    // wanted, else every row.
+    const sink =
+      into ?? (ordered && !byIndex && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every());
     // From after the edge of the page before, where there is one (the scan or the id seek took it already where
     // the rows come in the result's order; the check stays for a TopK).
     const edge = this.#after === null ? null : this.#edge();
@@ -937,6 +980,8 @@ class Cursor {
       // A count is of every match: the window does not apply to it.
       top: () => this.#top(needsRows ? this.#limit : Infinity),
       deliver: (rows) => this.#deliver(rows),
+      // One row's copy, where nothing is populated: what a live run hands out again while the row stays.
+      deliverOne: this.#populate === null ? (candidate) => JSON.parse(JSON.stringify(this.#project(candidate))) : null,
       onRows,
     };
   }

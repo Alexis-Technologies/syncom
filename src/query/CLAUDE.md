@@ -52,7 +52,10 @@ plan)` reads the entries between two binary searches, forward or backward; where
   `subscribe(type, fn(changed, id, action))`: the record that changed is read once (`rowOf`), matched
   and placed; a full window that lost a row, a row moved to the end of a full window, or a `$text`
   query runs the cursor again (`top()`); it emits only when an id came, went or moved, or a row's view
-  (`row[VIEW]`, the object it was built from) is another. The plugin keeps one `QueryCache`
+  (`row[VIEW]`, the object it was built from) is another — and delivers a row that stayed as the copy it delivered
+  before (`#delivered`, by id and the row object; `deliverOne` of the spec, none where something is populated), so a
+  change is one copy. `nearest()` streams the rows into a `Nearest` sink (`#matching(…, into)`): `k` rows held,
+  `MAX_NEAREST`/`MAX_VECTOR` bound what it takes. The plugin keeps one `QueryCache`
   (src/query/cache.js) per database: every `watch()` of a key (`keyOf([entity, query, order, window,
 projection, populate])`, built once per cursor) shares one Live, whose rows are the key's result while it runs; a
   `fetch()` of a key whose collection's `generation(entity)` (`Catalog.generationOf`: moved by a put of a record of the

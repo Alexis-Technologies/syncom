@@ -2698,8 +2698,9 @@ export interface Cursor<T = QueryRow> {
   countBy(field: string): Promise<{ value: unknown; count: number }[]>;
   /**
    * The `k` matches nearest to `vector` by `field` (an array of numbers of the vector's length):
-   * `[{ distance, row }]` nearest first — a scan over the matches, the `k` best kept. `distance`:
-   * `'cosine'` (the default), `'euclidean'`, `'manhattan'`, `'dot'` (the negated product), or a function.
+   * `[{ distance, row }]` nearest first — a scan over the matches, the `k` best kept as they are read
+   * (`k` at most 1000, a vector of at most 4096 numbers). `distance`: `'cosine'` (the default),
+   * `'euclidean'`, `'manhattan'`, `'dot'` (the negated product), or a function.
    */
   nearest(
     field: string,
