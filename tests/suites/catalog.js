@@ -6,6 +6,7 @@
 // memory backend is wrapped to count reads, so "no I/O" is a number.
 
 const { memory } = require('../../src/memory/memory.js');
+const { SOURCE } = require('../../src/symbols.js');
 
 const counting = (fsi) => {
   const reads = [];
@@ -146,6 +147,34 @@ const runCatalogTests = async (t, assert, createStorage) => {
       assert.strictEqual(await fsi.exists(`${path}/index`, 'catalog.json'), true, 'rebuilt and saved');
     },
   );
+
+  await t.test('a tombstone’s row keeps its collection and its stamp, across a reopen and a rebuild', async (t2) => {
+    const fsi = memory();
+    let storage = await createStorage(t2, 'A', { fsi, schema });
+    const id = (await storage.Post.insert({ orgId: 'o1', slug: 'gone' })).id;
+    await storage.delete(id);
+    const row = storage[SOURCE].row(id);
+    assert.strictEqual(row.type, 'Post', 'the collection the record was of');
+    assert.strictEqual(row.gone, true);
+    assert.strictEqual(typeof row.deleted[0], 'number');
+    assert.strictEqual(row.deleted[1], storage.nodeId, 'the stamp of the delete: its ms and its origin');
+    const { path } = storage;
+    await storage.close();
+    // The catalog reused.
+    storage = await createStorage(t2, 'A', { fsi, schema });
+    assert.deepStrictEqual(storage[SOURCE].row(id), row);
+    await storage.close();
+    // Rebuilt from the records (other indexes): the stored record of a tombstone carries its type.
+    storage = await createStorage(t2, 'A', { fsi, schema: { entities: { Post: { index: ['slug'] } } } });
+    assert.deepStrictEqual(storage[SOURCE].row(id), row, 'rebuilt under other indexes');
+    await storage.close();
+    // Rebuilt with no catalog file at all.
+    await fsi.remove(`${path}/index`, 'catalog.json');
+    storage = await createStorage(t2, 'A', { fsi, schema });
+    assert.deepStrictEqual(storage[SOURCE].row(id), row, 'rebuilt from nothing');
+    assert.strictEqual(storage.hasRecord(id), false);
+    await storage.close();
+  });
 
   await t.test('the catalog follows a peer’s ops, a lens, and a tombstone', async (t2) => {
     const storage = await createStorage(t2, 'A', {

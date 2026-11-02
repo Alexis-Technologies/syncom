@@ -522,7 +522,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   first await, one save in flight at a time, `close()` awaits it — so a write
   never waits for the catalog file. Do not `await` a save inside a write path.
   `list()`/`hasRecord()` read it, and so does `snapshot()`: a tombstone is a
-  row flagged `gone` (there, not listed), so a page is a slice of
+  row flagged `gone` (there, not listed; it keeps the record's `type` and its `deleted` stamp), so a page is a slice of
   `catalog.all()` and never a directory listing. A new way of changing a
   record's file must put too, or the catalog lies until the next rebuild.
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens

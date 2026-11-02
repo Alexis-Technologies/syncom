@@ -120,4 +120,27 @@ test('pipelines', async (t) => {
     assert.throws(() => createPipeline(db, { name: 'x', source: 'Order' }), TypeError);
     assert.throws(() => createPipeline(db, { name: 'bad name', source: 'Order', handler }), TypeError);
   });
+
+  await t.test('a pipeline hears a plain delete of its source', async () => {
+    const db = await syncom.createDatabase({ path: '/d', fsi: memory(), defer: 0, logger: false, schema });
+    const heard = [];
+    const pipeline = createPipeline(db, {
+      name: 'deletes',
+      source: 'Order',
+      handler: ({ ids, changes }) => {
+        for (const id of ids) heard.push([id, changes.some((change) => change.action === 'delete')]);
+      },
+    });
+    await pipeline.start();
+    const id = (await db.Order.insert({ customer: 'ann', amount: 1 })).id;
+    await db.delete(id);
+    await pipeline.awaitIdle();
+    // The insert, then the delete: a tombstone's row keeps the collection the record was of.
+    assert.deepStrictEqual(heard, [
+      [id, false],
+      [id, true],
+    ]);
+    pipeline.stop();
+    await db.close();
+  });
 });

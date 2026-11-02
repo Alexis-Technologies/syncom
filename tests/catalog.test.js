@@ -211,14 +211,18 @@ test('Catalog', async (t) => {
       assert.deepStrictEqual(calls, [], 'a field the catalog does not hold changed: the row stayed');
       assert.strictEqual(catalog.dirty, dirty, 'nothing to save either');
       catalog.put('p4', null);
-      // The file: a sixth cell `false` and the text as the seventh; a tombstone's is `true`.
+      // The file: a sixth cell `false` and the text as the seventh; a tombstone's is `true`, then the stamp of
+      // its delete where the row holds one — and a tombstone's view without a type keeps the row's.
       catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o1', title: 'Again' } });
+      catalog.put('p5', { type: 'Post', v: 1, data: { orgId: 'o2' } });
+      catalog.put('p5', { v: 1, gone: true, deleted: [1_700_000_000_000, 'A'] });
       await catalog.save('e.9');
       const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-      assert.strictEqual(file.format, 4);
+      assert.strictEqual(file.format, 5);
       const rowsById = Object.fromEntries(file.rows.map((row) => [row[0], row]));
       assert.deepStrictEqual(rowsById.p1, ['p1', 'Post', 2, false, { orgId: 'o1' }, false, 'Again']);
       assert.deepStrictEqual(rowsById.p2, ['p2', 'Post', 1, false, {}, true]);
+      assert.deepStrictEqual(rowsById.p5, ['p5', 'Post', 1, false, {}, true, [1_700_000_000_000, 'A']]);
       assert.deepStrictEqual(rowsById.p3, ['p3', 'Post', null, true, {}]);
       assert.deepStrictEqual(rowsById.t1, ['t1', 'Tag', null, false, {}]);
       // A load replays the text into a fresh index, in row order.
@@ -233,6 +237,14 @@ test('Catalog', async (t) => {
       again.candidates('Post', { $text: 'a' });
       assert.deepStrictEqual(replayed, [['p1', 'Again']]);
       assert.strictEqual(again.row('p1').text, 'Again');
+      assert.deepStrictEqual(again.row('p5'), {
+        type: 'Post',
+        v: 1,
+        encrypted: false,
+        fields: {},
+        gone: true,
+        deleted: [1_700_000_000_000, 'A'],
+      });
       // Other search fields make the file unusable: a rebuild.
       const other = { entities: { Post: { index: ['orgId'], search: ['title'] }, Tag: {} } };
       assert.strictEqual(await new Catalog({ fsi, path: 'store', entities: entitiesOf(other) }).load(), null);
@@ -299,7 +311,7 @@ test('Catalog', async (t) => {
     await catalog.save('epoch.7');
     assert.strictEqual(catalog.dirty, 0);
     const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-    assert.strictEqual(file.format, 4);
+    assert.strictEqual(file.format, 5);
     assert.strictEqual(file.stamp, 'epoch.7');
     assert.deepStrictEqual(file.rows, [
       ['a', 'Post', 1, false, { orgId: 'o1', slug: 'a' }],
@@ -316,6 +328,10 @@ test('Catalog', async (t) => {
     const other = catalogOf({ entities: { Post: { index: ['title'] } } }, fsi);
     assert.strictEqual(await other.load(), null);
     assert.strictEqual(other.size, 0);
+    // Format 4 — before a tombstone's row kept its stamp — reads only where the indexes are not asked for (a tag's).
+    await fsi.write('store/index', 'catalog.json', JSON.stringify({ ...file, format: 4 }));
+    assert.strictEqual(await catalogOf(schema, fsi).load(), null, 'format 4 under strict');
+    assert.deepStrictEqual(await catalogOf(schema, fsi).load({ strict: false }), { stamp: 'epoch.7' });
     // Absent, unreadable, or of another shape.
     assert.strictEqual(await catalogOf(schema, memory()).load(), null);
     for (const text of [

@@ -305,7 +305,10 @@ class EntryStore {
       if (!isValid) throw new SyncomError('INTEGRITY', `Record ${id} is invalid`, { id });
     }
     if (encrypted) return { data: await this.#decrypt(data), meta: null, encrypted: true, block };
-    return { data, meta: await this.#assemble(id, meta, stored.gen, true), encrypted: false, block };
+    const entry = { data, meta: await this.#assemble(id, meta, stored.gen, true), encrypted: false, block };
+    // A tombstone's collection rides on its stored record (`type`): its data is empty.
+    if (typeof stored.type === 'string') entry.type = stored.type;
+    return entry;
   }
 
   // A block in pieces made whole: each named piece read and its runs laid
@@ -457,7 +460,18 @@ class EntryStore {
   row(id, entry) {
     if (entry === null) return null;
     if (entry.encrypted) return { type: entry.data?.$type, v: null, encrypted: true };
-    if (!isAlive(entry)) return { type: entry.data?.$type, v: entry.meta.v ?? null, gone: true };
+    if (!isAlive(entry)) {
+      // A tombstone's row keeps the collection the record was of (its data is empty: the stored record's `type`,
+      // else the row's own) and the stamp of its delete, for a reader that never opens the file (cleanup, a pipeline).
+      // A purge erases the collection with the record: its row names none.
+      const purged = Boolean(entry.meta.purged);
+      const type = purged ? null : typeof entry.data?.$type === 'string' ? entry.data.$type : entry.type;
+      const row = { type, v: entry.meta.v ?? null, gone: true };
+      if (purged) row.purged = true;
+      const { deleted } = entry.meta;
+      if (Array.isArray(deleted)) row.deleted = [deleted[0], deleted[1]];
+      return row;
+    }
     let data;
     try {
       data = this.#view(id, entry);
@@ -520,6 +534,11 @@ class EntryStore {
       const { meta, writes, dropped, kept, gen } = this.#split(id, entry.meta);
       const stored = { data: entry.data, meta, encrypted: false, timestamp: Date.now(), block: blockHash };
       if (gen > 0) stored.gen = gen;
+      if (!isAlive(entry) && !entry.meta.purged) {
+        // A tombstone's data is empty: its collection rides on the stored record, so a rebuild keeps it (a purge erases it).
+        const type = typeof entry.data?.$type === 'string' ? entry.data.$type : (this.#catalog.row(id)?.type ?? null);
+        if (type !== null) stored.type = type;
+      }
       const row = { id, stored };
       if (writes.length > 0 || dropped.length > 0) {
         row.pieces = {};

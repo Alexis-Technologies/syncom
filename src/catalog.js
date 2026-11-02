@@ -27,7 +27,8 @@ const FILE = 'catalog.json';
 // The key `ids()` caches the whole live list under.
 const ALL = Symbol('syncom.catalog.all');
 // 4: a folded tombstone's stamps ride on its row (`folded`, the eighth cell; @alexify/syncom/cleanup).
-const FORMAT = 4;
+// 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell).
+const FORMAT = 5;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
@@ -116,12 +117,16 @@ const keyOf = (value) => JSON.stringify(canonical(value));
 
 // Whether two catalog rows say the same: type, version, flags, text and every
 // indexed value.
+// Two stamps `[ts, origin]`, or none each.
+const sameStamp = (a, b) => (a === undefined ? b === undefined : b !== undefined && a[0] === b[0] && a[1] === b[1]);
+
 const sameRow = (a, b) => {
   if (a.type !== b.type || a.v !== b.v || a.encrypted !== b.encrypted || a.gone !== b.gone || a.text !== b.text) {
     return false;
   }
   if ((a.folded === undefined) !== (b.folded === undefined)) return false;
   if (a.folded !== undefined && keyOf(a.folded) !== keyOf(b.folded)) return false;
+  if (!sameStamp(a.deleted, b.deleted)) return false;
   const keys = Object.keys(a.fields);
   if (keys.length !== Object.keys(b.fields).length) return false;
   for (let i = 0; i < keys.length; i++) {
@@ -233,7 +238,10 @@ const sameKeys = (a, b) => {
 // its definition changes (the caller indexes it again).
 const bare = (row) => {
   const out = { type: row.type, v: row.v, encrypted: row.encrypted, fields: {} };
-  if (row.gone) out.gone = true;
+  if (row.gone) {
+    out.gone = true;
+    if (row.deleted !== undefined) out.deleted = row.deleted;
+  }
   return out;
 };
 
@@ -282,7 +290,8 @@ class Catalog {
   #rekey() {
     const shape = [];
     for (const [name, def] of this.#defs) shape.push([name, def.index, def.indexes, def.unique, def.search]);
-    this.#indexKey = keyOf(shape);
+    // The format rides in the key: rows saved in another shape are not reused, by a file or a row store.
+    this.#indexKey = keyOf([FORMAT, shape]);
   }
 
   /** The declared indexes of a collection — the keys as field lists, the sorted indexes kept. Shared: read it, do not edit it. */
@@ -527,11 +536,17 @@ class Catalog {
     const was = this.#rows.get(id);
     const before = was && !was.gone ? was.type : null;
     const gone = view !== null && view.gone === true;
-    const type = view === null ? null : typeof view.type === 'string' ? view.type : null;
+    // A tombstone's view may name no collection (its data is empty): the row keeps the one it had — unless the
+    // record was purged, which erases the collection with it.
+    const kept = gone && view.purged !== true && was !== undefined ? was.type : null;
+    const type = view === null ? null : typeof view.type === 'string' ? view.type : kept;
     let row = null;
     if (view !== null) {
       row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
-      if (gone) row.gone = true;
+      if (gone) {
+        row.gone = true;
+        if (Array.isArray(view.deleted)) row.deleted = view.deleted;
+      }
       const def = type === null || gone ? undefined : this.#defs.get(type);
       if (def && !row.encrypted) {
         for (const field of def.fields) {
@@ -775,14 +790,15 @@ class Catalog {
     }
     const usable =
       isObject(parsed) &&
-      parsed.format === FORMAT &&
+      // A tag's catalog (`strict: false`) saved as format 4 still reads; the live one asks for today's format.
+      (parsed.format === FORMAT || (!strict && parsed.format === 4)) &&
       (!strict || parsed.indexes === this.#indexKey) &&
       typeof parsed.stamp === 'string' &&
       Array.isArray(parsed.rows);
     if (!usable) return null;
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
-      const [id, type, v, encrypted, fields, gone, text, folded] = row;
+      const [id, type, v, encrypted, fields, gone, seventh, folded] = row;
       this.#remove(id);
       const loaded = {
         type: typeof type === 'string' ? type : null,
@@ -792,8 +808,9 @@ class Catalog {
       };
       if (gone === true) {
         loaded.gone = true;
+        if (Array.isArray(seventh) && typeof seventh[0] === 'number') loaded.deleted = seventh;
         if (isObject(folded) && Array.isArray(folded.deleted)) loaded.folded = folded;
-      } else if (typeof text === 'string') loaded.text = text;
+      } else if (typeof seventh === 'string') loaded.text = seventh;
       // Replayed through #insert: the text index is rebuilt here, under the
       // file's stamp, from the rows alone.
       this.#insert(id, loaded);
@@ -844,7 +861,8 @@ class Catalog {
       const cells = [id, row.type, row.v, row.encrypted, row.fields];
       if (row.gone) {
         cells.push(true);
-        if (row.folded !== undefined) cells.push(null, row.folded);
+        if (row.deleted !== undefined || row.folded !== undefined) cells.push(row.deleted ?? null);
+        if (row.folded !== undefined) cells.push(row.folded);
       } else if (row.text !== undefined) cells.push(false, row.text);
       rows.push(cells);
     }
