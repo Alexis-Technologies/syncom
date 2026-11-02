@@ -66,6 +66,12 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **Queries: immutable cursors, `$type`/`$size`/`$mod`/`$all`/`$elemMatch`/`$nor`, `matches()`.** Every
+  builder of a cursor — `order`, `desc`, `limit`, `offset`, `filter`, `projection`, `populate` — hands back
+  a new cursor and leaves the one it was called on as it was, so two may be built on one. The predicate
+  takes `$type` (`null`, `boolean`, `number`, `string`, `array`, `object`), `$size`, `$mod`, `$all`,
+  `$elemMatch` (an object element by a query of its fields, a scalar one by the operators) and `$nor`.
+  `cursor.matches(doc)` and `matches(query)` from `@alexify/syncom/query` test a document in hand.
 - **`collection.remove({ purge })`, `db.drop()`, `dropDatabase(path, { engine, fsi })`.** A collection's
   records deleted as ops that replicate — tombstones, or purges scrubbed from every log — in pages of
   500, each page one transaction; the definition stays (`removeCollection()` forgets it). A database

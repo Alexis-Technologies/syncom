@@ -105,9 +105,8 @@ const runQueryTests = async (t, assert, createStorage) => {
         .slice(offset, offset + limit)
         .map((row) => row.id);
       const cursor = storage.Project.select({});
-      if (desc) cursor.desc('kind');
-      else cursor.order('kind');
-      const got = (await cursor.limit(limit).offset(offset).fetch()).map((row) => row.id);
+      const sorted = desc ? cursor.desc('kind') : cursor.order('kind');
+      const got = (await sorted.limit(limit).offset(offset).fetch()).map((row) => row.id);
       assert.deepStrictEqual(got, expected, `limit ${limit} offset ${offset} ${desc ? 'desc' : 'asc'}`);
     }
     // $and narrows to the posting lists of every branch: the candidates
@@ -325,6 +324,119 @@ const runQueryTests = async (t, assert, createStorage) => {
     await tick();
     assert.deepStrictEqual(errors, ['boom', 'listener']);
     stopThrowing();
+  });
+
+  await t.test('a builder hands back a new cursor and leaves the one it was called on as it was', async (t2) => {
+    const storage = await createStorage(t2, 'I', { schema });
+    for (let i = 0; i < 6; i++) await storage.Project.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i });
+    const base = storage.Project.select({ orgId: 'o' });
+    const ordered = base.desc('n');
+    const limited = ordered.limit(2).offset(1);
+    const projected = limited.projection(['n']);
+    const filtered = base.filter((row) => row.n % 2 === 0);
+    assert.notStrictEqual(ordered, base);
+    assert.notStrictEqual(limited, ordered);
+    assert.strictEqual((await base.fetch()).length, 6, 'base: no order, no limit');
+    assert.deepStrictEqual(
+      (await ordered.fetch()).map((row) => row.n),
+      [5, 4, 3, 2, 1, 0],
+    );
+    assert.deepStrictEqual(
+      (await limited.fetch()).map((row) => row.n),
+      [4, 3],
+    );
+    assert.deepStrictEqual(await projected.fetch(), [
+      { id: (await limited.fetch())[0].id, n: 4 },
+      { id: (await limited.fetch())[1].id, n: 3 },
+    ]);
+    assert.deepStrictEqual(
+      (await limited.fetch()).map((row) => Object.keys(row).length),
+      [6, 6],
+      'no projection on the one before',
+    );
+    assert.deepStrictEqual((await filtered.fetch()).map((row) => row.n).sort(), [0, 2, 4]);
+    assert.strictEqual(await base.count(), 6);
+    // Two branches off one cursor are two cursors.
+    const asc = ordered.order('name');
+    assert.deepStrictEqual(
+      (await ordered.limit(1).fetch()).map((row) => row.n),
+      [5],
+    );
+    assert.deepStrictEqual(
+      (await asc.fetch()).map((row) => row.n),
+      [5, 4, 3, 2, 1, 0],
+      'desc n first, then name',
+    );
+    assert.strictEqual(base.matches({ orgId: 'o', n: 99 }), true);
+    assert.strictEqual(base.matches({ orgId: 'x' }), false);
+    assert.throws(() => base.matches('x'), TypeError);
+  });
+
+  await t.test('$type, $size, $mod, $all, $elemMatch and $nor match what a reference filter does', async (t2) => {
+    const storage = await createStorage(t2, 'OP', { schema });
+    const all = [];
+    for (let i = 0; i < 40; i++) {
+      const data = {
+        orgId: 'o',
+        name: `n${i}`,
+        slug: `s${i}`,
+        n: i,
+        v: i % 4 === 0 ? null : i % 4 === 1 ? 's' : i % 4 === 2 ? [i] : { k: i },
+        tags: i % 3 === 0 ? ['a'] : i % 3 === 1 ? ['a', 'b'] : ['b', 'c', 'd'],
+        items: [
+          { k: i, s: 'x' },
+          { k: i + 1, s: 'y' },
+        ],
+      };
+      const { id } = await storage.Project.insert(data);
+      all.push({ id, ...data, $type: 'Project' });
+    }
+    const typeOf = (value) => (value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value);
+    const cases = [
+      [{ v: { $type: 'null' } }, (row) => row.v === null],
+      [{ v: { $type: 'string' } }, (row) => typeof row.v === 'string'],
+      [{ v: { $type: 'array' } }, (row) => Array.isArray(row.v)],
+      [{ v: { $type: 'object' } }, (row) => typeOf(row.v) === 'object'],
+      [{ missing: { $type: 'null' } }, () => false],
+      [{ tags: { $size: 2 } }, (row) => row.tags.length === 2],
+      [{ n: { $size: 1 } }, () => false],
+      [{ n: { $mod: [3, 1] } }, (row) => row.n % 3 === 1],
+      [{ tags: { $all: ['a', 'b'] } }, (row) => row.tags.includes('a') && row.tags.includes('b')],
+      [{ tags: { $all: [] } }, () => true],
+      [
+        { items: { $elemMatch: { k: { $gte: 10 }, s: 'y' } } },
+        (row) => row.items.some((it) => it.k >= 10 && it.s === 'y'),
+      ],
+      [{ tags: { $elemMatch: { $in: ['c', 'z'] } } }, (row) => row.tags.includes('c')],
+      [{ items: { $elemMatch: { k: { $mod: [2, 0] } } } }, (row) => row.items.some((it) => it.k % 2 === 0)],
+      [{ $nor: [{ n: { $lt: 10 } }, { tags: 'b' }] }, (row) => !(row.n < 10 || row.tags.includes('b'))],
+      [{ $and: [{ $nor: [{ v: null }] }, { n: { $mod: [2, 0] } }] }, (row) => row.v !== null && row.n % 2 === 0],
+    ];
+    for (const [query, reference] of cases) {
+      const expected = all
+        .filter(reference)
+        .map((row) => row.id)
+        .sort();
+      const rows = await storage.Project.select(query).fetch();
+      assert.deepStrictEqual(rows.map((row) => row.id).sort(), expected, JSON.stringify(query));
+      assert.strictEqual(await storage.Project.count(query), expected.length, JSON.stringify(query));
+      const predicate = storage.Project.select(query);
+      for (const row of all) {
+        assert.strictEqual(predicate.matches(row), reference(row), `${JSON.stringify(query)} on ${row.n}`);
+      }
+    }
+    // Malformed: a TypeError at select().
+    for (const bad of [
+      { v: { $type: 'date' } },
+      { tags: { $size: -1 } },
+      { n: { $mod: [0, 1] } },
+      { n: { $mod: 3 } },
+      { tags: { $all: 'a' } },
+      { items: { $elemMatch: 5 } },
+      { $nor: {} },
+    ]) {
+      assert.throws(() => storage.Project.select(bad), TypeError, JSON.stringify(bad));
+    }
   });
 
   await t.test('one() leaves the cursor as it was', async (t2) => {

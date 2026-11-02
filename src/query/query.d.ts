@@ -10,3 +10,6 @@ export type { Plugin, Cursor, QueryRow, MangoQuery, MangoMatch, MangoOperators, 
 
 /** The plugin: the cursor behind every collection's `select()`. */
 export declare const query: Plugin;
+
+/** A Mango query as a predicate over a record's data (`{ id, ...data }`, or the data alone); a malformed query is a TypeError. */
+export declare function matches<R = Record<string, unknown>>(query: MangoQuery<R>): (doc: object) => boolean;

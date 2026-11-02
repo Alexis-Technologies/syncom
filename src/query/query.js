@@ -26,4 +26,17 @@ const query = Object.freeze({
   },
 });
 
-module.exports = { query };
+/**
+ * A Mango query as a predicate over a record's data (`{ id, ...data }`, or
+ * the data alone): what a cursor matches by, for a document in hand. A
+ * malformed query is a TypeError here.
+ */
+const matches = (criteria) => {
+  const test = compileQuery(criteria);
+  return (doc) => {
+    if (typeof doc !== 'object' || doc === null) throw new TypeError('matches() takes an object');
+    return test(doc);
+  };
+};
+
+module.exports = { query, matches };

@@ -89,6 +89,29 @@ const regexOf = (expected, options) => {
   }
 };
 
+// `$type`: what a value is, in JSON's terms — `null` its own, an array its own.
+const TYPES = new Set(['null', 'boolean', 'number', 'string', 'array', 'object']);
+const typeOf = (value) => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'array';
+  return typeof value;
+};
+
+// `$elemMatch`: a query over an element — an object element matched by a
+// query of its fields, a scalar one by the operators as a field's value.
+const elemMatch = (condition) => {
+  if (!isObject(condition)) throw new TypeError('select(): $elemMatch takes a query');
+  let operators = 0;
+  for (const key of Object.keys(condition)) if (key.startsWith('$')) operators++;
+  const sub = operators > 0 ? compileField('', condition) : compileQuery(condition, true);
+  const test = operators > 0 ? (element) => sub({ '': element }) : sub;
+  return (value) => {
+    if (!Array.isArray(value)) return false;
+    for (let i = 0; i < value.length; i++) if (test(value[i])) return true;
+    return false;
+  };
+};
+
 const compileField = (path, condition) => {
   if (!isObject(condition)) return (row) => matches(valueOf(row, path), condition);
   const tests = [];
@@ -119,7 +142,30 @@ const compileField = (path, condition) => {
         for (let i = 0; i < value.length; i++) if (hit(value[i])) return true;
         return false;
       });
-    } else if (op !== '$options') throw new TypeError(`select(): unknown operator ${op}`);
+    } else if (op === '$type') {
+      if (!TYPES.has(expected)) {
+        throw new TypeError('select(): $type takes null, boolean, number, string, array or object');
+      }
+      tests.push((value) => value !== undefined && typeOf(value) === expected);
+    } else if (op === '$size') {
+      if (!Number.isInteger(expected) || expected < 0) {
+        throw new TypeError('select(): $size takes a non-negative integer');
+      }
+      tests.push((value) => Array.isArray(value) && value.length === expected);
+    } else if (op === '$mod') {
+      const ok = Array.isArray(expected) && expected.length === 2 && Number.isFinite(expected[0]) && expected[0] !== 0;
+      if (!ok || !Number.isFinite(expected[1])) throw new TypeError('select(): $mod takes [divisor, remainder]');
+      const [divisor, remainder] = expected;
+      tests.push((value) => typeof value === 'number' && value % divisor === remainder);
+    } else if (op === '$all') {
+      if (!Array.isArray(expected)) throw new TypeError('select(): $all takes an array');
+      tests.push((value) => {
+        if (!Array.isArray(value)) return false;
+        for (let i = 0; i < expected.length; i++) if (!matches(value, expected[i])) return false;
+        return true;
+      });
+    } else if (op === '$elemMatch') tests.push(elemMatch(expected));
+    else if (op !== '$options') throw new TypeError(`select(): unknown operator ${op}`);
   }
   if (operators === 0) return (row) => matches(valueOf(row, path), condition);
   const test = allOf(tests);
@@ -136,20 +182,25 @@ const checkText = (value) => {
 /**
  * A query as a predicate over `{ id, ...data }`: `{ field: value }` is
  * equality (dotted paths reach into the record), `{ field: { $op } }` the
- * operators, `$and` / `$or` take arrays of queries, `$not` one, `$text` (at
- * the top level only) a full-text search the catalog answers. A malformed
- * query is a TypeError here, at `select()`, not at `fetch()`.
+ * operators, `$and` / `$or` / `$nor` take arrays of queries, `$not` one,
+ * `$text` (at the top level only) a full-text search the catalog answers.
+ * A malformed query is a TypeError here, at `select()`, not at `fetch()`.
  */
 const compileQuery = (query = {}, nested = false) => {
   if (!isObject(query)) throw new TypeError('select() takes a query object');
   const tests = [];
   for (const key of Object.keys(query)) {
     const value = query[key];
-    if (key === '$and' || key === '$or') {
+    if (key === '$and' || key === '$or' || key === '$nor') {
       if (!Array.isArray(value)) throw new TypeError(`select(): ${key} takes an array of queries`);
       const subs = [];
       for (let i = 0; i < value.length; i++) subs.push(compileQuery(value[i], true));
-      tests.push(key === '$and' ? allOf(subs) : anyOf(subs));
+      if (key === '$and') tests.push(allOf(subs));
+      else if (key === '$or') tests.push(anyOf(subs));
+      else {
+        const any = anyOf(subs);
+        tests.push((row) => !any(row));
+      }
     } else if (key === '$not') {
       const sub = compileQuery(value, true);
       tests.push((row) => !sub(row));
@@ -167,7 +218,7 @@ const compileQuery = (query = {}, nested = false) => {
 // the catalog alone can answer it. `$text` reads no field.
 const fieldsOf = (query, into = new Set()) => {
   for (const key of Object.keys(query)) {
-    if (key === '$and' || key === '$or') for (const sub of query[key]) fieldsOf(sub, into);
+    if (key === '$and' || key === '$or' || key === '$nor') for (const sub of query[key]) fieldsOf(sub, into);
     else if (key === '$not') fieldsOf(query[key], into);
     else if (key !== '$text') into.add(key);
   }
@@ -234,9 +285,12 @@ class TopK {
 }
 
 /**
- * The cursor of `collection.select(query)`: builders return it, `fetch()`,
- * `count()`, `one()` and `watch()` run it. `source` is the storage's seam —
- * `candidates`, `ids`, `row`, `indexed`, `load`, `subscribe`, `logger`.
+ * The cursor of `collection.select(query)`: a builder — `order`, `desc`,
+ * `limit`, `offset`, `filter`, `projection`, `populate` — hands back a NEW
+ * cursor and leaves this one as it was, so one may be built on twice;
+ * `fetch()`, `count()`, `one()` and `watch()` run it. `source` is the
+ * storage's seam — `candidates`, `ids`, `row`, `indexed`, `load`,
+ * `subscribe`, `logger`.
  */
 class Cursor {
   #source;
@@ -250,20 +304,33 @@ class Cursor {
   #projection = null;
   #populate = null;
 
-  constructor(source, entity, query = {}) {
+  constructor(source, entity, query = {}, predicate = null) {
     this.#source = source;
     this.#entity = entity;
     this.#query = query;
-    this.#predicate = compileQuery(query);
-    if (query.$text !== undefined && !source.searches(entity)) {
+    this.#predicate = predicate ?? compileQuery(query);
+    if (predicate === null && query.$text !== undefined && !source.searches(entity)) {
       throw new TypeError(`select(): $text needs search fields on ${entity} (schema.entities.${entity}.search)`);
     }
   }
 
+  // A cursor like this one, to build on: the predicate is shared (compiled once), the rest copied.
+  #clone() {
+    const copy = new Cursor(this.#source, this.#entity, this.#query, this.#predicate);
+    copy.#order = this.#order.slice();
+    copy.#limit = this.#limit;
+    copy.#offset = this.#offset;
+    copy.#filter = this.#filter;
+    copy.#projection = this.#projection;
+    copy.#populate = this.#populate;
+    return copy;
+  }
+
   #key(field, desc) {
     if (typeof field !== 'string' || field.length === 0) throw new TypeError('order() takes a field name');
-    this.#order.push({ field, desc });
-    return this;
+    const copy = this.#clone();
+    copy.#order.push({ field, desc });
+    return copy;
   }
 
   order(field) {
@@ -275,20 +342,23 @@ class Cursor {
   }
 
   limit(n) {
-    this.#limit = count('limit', n);
-    return this;
+    const copy = this.#clone();
+    copy.#limit = count('limit', n);
+    return copy;
   }
 
   offset(n) {
-    this.#offset = count('offset', n);
-    return this;
+    const copy = this.#clone();
+    copy.#offset = count('offset', n);
+    return copy;
   }
 
   /** A predicate over the loaded row — the query reaches the record, this reaches the code. */
   filter(fn) {
     if (typeof fn !== 'function') throw new TypeError('filter() takes a function');
-    this.#filter = fn;
-    return this;
+    const copy = this.#clone();
+    copy.#filter = fn;
+    return copy;
   }
 
   /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
@@ -296,8 +366,15 @@ class Cursor {
     let valid = Array.isArray(fields);
     for (let i = 0; valid && i < fields.length; i++) valid = typeof fields[i] === 'string' && fields[i] !== '__proto__';
     if (!valid) throw new TypeError('projection() takes an array of field names');
-    this.#projection = fields;
-    return this;
+    const copy = this.#clone();
+    copy.#projection = fields;
+    return copy;
+  }
+
+  /** Whether `doc` — a record's data, with or without `id` — matches the cursor's query (the filter aside). */
+  matches(doc) {
+    if (!isObject(doc)) throw new TypeError('matches() takes an object');
+    return this.#predicate(doc);
   }
 
   /**
@@ -316,8 +393,9 @@ class Cursor {
         throw new TypeError(`populate(): ${fields[i]} is not a declared reference of ${this.#entity} (refs)`);
       }
     }
-    this.#populate = fields;
-    return this;
+    const copy = this.#clone();
+    copy.#populate = fields;
+    return copy;
   }
 
   // The rows' references laid in: the ids every populated field names on the

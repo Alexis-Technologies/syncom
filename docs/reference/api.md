@@ -223,7 +223,8 @@ query searches the entity's `search` fields, best first unless ordered.
 
 | Member | Notes |
 | --- | --- |
-| `order(field)`, `desc(field)` | Sort keys, in order; nothing first, then booleans, numbers, strings; stable |
+| `matches(doc)` | Whether a document (its data, with or without `id`) matches the cursor's query, the filter aside — `matches(query)` of `@alexify/syncom/query` is the same predicate without a cursor |
+| `order(field)`, `desc(field)` | Sort keys, in order; nothing first, then booleans, numbers, strings; stable. Every builder hands back a NEW cursor and leaves the one it was called on as it was |
 | `limit(n)`, `offset(n)` | Applied after the sort |
 | `filter(fn)` | A predicate over the loaded row |
 | `projection(fields)` | The fields each row carries, plus `id` |

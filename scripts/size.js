@@ -386,7 +386,9 @@ const ENTRIES = [
   // 145.7 with the update operators and `ifMatch` (collections plan, C1.5). 146, raised by name.
   // 146.0 with `delete(id, { data })`, the writes by query, declared references (collections plan, C1.6–C1.8). 147, raised by name.
   // 147.4 with methods, statics and the collection events (collections plan, C1.9–C1.10). 148, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 148 },
+  // 148.4 with collection.remove/drop, immutable cursors and the six query operators (collections plan, C1.11–C2.1).
+  // 149, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 149 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -526,7 +528,8 @@ const ENTRIES = [
   // 7.6 with `Catalog.define` and the action stream (collections plan, C1.1). 7.8, raised by name.
   // 7.9 with the write terminals (update/modify/delete by query) and `matches` (collections plan, C1.5–C1.6). 8.2, raised by name.
   // 8.3 with a page's references populated (`populate`; collections plan, C1.8). 8.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 8.5 },
+  // 8.7 with immutable builders, `$type`/`$size`/`$mod`/`$all`/`$elemMatch`/`$nor` and `matches` (collections plan, C2.1). 9, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 9 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

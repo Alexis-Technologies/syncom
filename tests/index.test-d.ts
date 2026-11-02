@@ -992,6 +992,13 @@ storage.record<Post>('id').then((record) => {
     doc.populate('author'),
   );
   expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().populate(['author']));
+  expectType<boolean>(db.Tag.select({ n: { $mod: [2, 1] }, tags: { $all: ['a'], $size: 1 } }).matches({ n: 1 }));
+  expectAssignable<syncom.MangoQuery>({
+    $nor: [{ a: 1 }],
+    v: { $type: 'null' },
+    items: { $elemMatch: { k: { $gt: 1 } } },
+  });
+  expectNotAssignable<syncom.MangoOperators>({ $type: 'date' });
   const reference = null as unknown as Reference;
   expectType<string>(reference.id);
   expectType<Promise<syncom.SyncomDocument<RecordData> | null>>(reference.document());

@@ -2602,6 +2602,16 @@ export interface MangoOperators {
   $exists?: boolean;
   $regex?: RegExp | string;
   $options?: string;
+  /** What the value is, in JSON's terms. */
+  $type?: 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
+  /** An array of exactly this many elements. */
+  $size?: number;
+  /** `[divisor, remainder]` over a number. */
+  $mod?: readonly [number, number];
+  /** An array holding every one of these. */
+  $all?: readonly unknown[];
+  /** An array with an element matching the query — an object element by its fields, a scalar one by the operators. */
+  $elemMatch?: MangoQuery<any> | MangoOperators;
 }
 
 /** What a field of type `V` is matched against: a value, an element (an array field holds a scalar value), or the operators. */
@@ -2621,6 +2631,8 @@ export type MangoQuery<R = RecordData> = {
   readonly id?: string | MangoOperators;
   readonly $and?: readonly MangoQuery<R>[];
   readonly $or?: readonly MangoQuery<R>[];
+  /** None of these. */
+  readonly $nor?: readonly MangoQuery<R>[];
   readonly $not?: MangoQuery<R>;
   /** Full-text search over the entity's `search` fields, top level only; rows come back best first unless ordered. */
   readonly $text?: string;
@@ -2629,7 +2641,13 @@ export type MangoQuery<R = RecordData> = {
 /** A row a cursor yields: the record as it reads, under its `id`. */
 export type QueryRow<R = RecordData> = R & { id: string };
 
+/**
+ * The cursor of `collection.select(query)`: immutable — every builder hands back a new cursor and
+ * leaves this one as it was — run by `fetch()`, `count()`, `one()`, `watch()`.
+ */
 export interface Cursor<T = QueryRow> {
+  /** Whether a document (its data, with or without `id`) matches the cursor's query; the filter aside. */
+  matches(doc: object): boolean;
   order(field: string): this;
   desc(field: string): this;
   limit(n: number): this;
