@@ -31,6 +31,8 @@ const { SyncomError, typed } = require('./errors.js');
 // `undefined` for an encrypted record (saved locally, no op), and MISMATCH
 // for a swap whose expectation no longer held.
 const MISMATCH = Symbol('syncom.mismatch');
+// `expect: ABSENT` — a named insert: a live record there already is EXISTS, decided inside the queue.
+const ABSENT = Symbol('syncom.absent');
 const commitResult = (op) => (op === undefined ? 'encrypted' : op === null || op === MISMATCH ? 'noop' : 'applied');
 
 // `$type` names the collection a record belongs to and never changes: a
@@ -74,6 +76,35 @@ const refuse = (core, id, rejected) => {
   const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
   const where = fields.prefix === undefined ? `Field ${field}` : `Field ${field} lies under ${fields.prefix}, which`;
   throw new SyncomError('FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
+};
+
+// `$type` and the fields a composite id is derived from are the record's for
+// good: an unset of them, or a set of an id field to another value (as text —
+// the id was derived as text), is refused before anything is stamped;
+// `sameType` holds `$type` on a write and a set.
+const immutables = (core, type, id, payload, data) => {
+  const fields = core.idFields(data);
+  if (type === 'unset') {
+    const named = fields === null ? null : new Set(fields);
+    const names = payload.value;
+    for (let i = 0; i < names.length; i++) {
+      if (names[i] === '$type' && typeof data.$type === 'string') {
+        throw typed('TYPE_IMMUTABLE', `Record ${id} is a ${data.$type}; $type is immutable`);
+      }
+      if (named !== null && named.has(names[i])) {
+        throw typed('ID_IMMUTABLE', `Record ${id}: ${names[i]} is part of its id and cannot be unset`);
+      }
+    }
+    return;
+  }
+  if (fields === null || !isPlainObject(payload.data)) return;
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (!Object.hasOwn(payload.data, field)) continue;
+    if (String(payload.data[field]) !== String(data[field])) {
+      throw typed('ID_IMMUTABLE', `Record ${id}: ${field} is part of its id and cannot change`);
+    }
+  }
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -635,10 +666,16 @@ const prepare = async (core, type, id, payload, options) => {
   const { source = null, via = null, from = null, encrypted = false, actor, expect = null, message } = options;
   const msg = messageArg(message);
   const current = await core.current(id);
+  if (expect === ABSENT && current && (current.encrypted || isAlive(current))) {
+    throw new SyncomError('EXISTS', `Record ${id} exists already`, { id, entity: current.data?.$type ?? null });
+  }
   if (encrypted && current && !current.encrypted) {
     throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
-  if (expect !== null && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
+  if (expect !== null && expect !== ABSENT && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
+  if ((type === 'set' || type === 'unset') && current && !current.encrypted && isAlive(current)) {
+    immutables(core, type, id, payload, current.data);
+  }
   payload = copyPayload(payload);
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
@@ -1211,4 +1248,4 @@ const commit = (core, type, id, payload, options = {}) => {
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, commitAtOnce, transact, rehearse, link, prepareOp, applyLocal, MISMATCH };
+module.exports = { commit, commitAtOnce, transact, rehearse, link, prepareOp, applyLocal, MISMATCH, ABSENT };

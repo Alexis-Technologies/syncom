@@ -13,6 +13,7 @@ const { notify } = require('./hooks.js');
 const { isPlainObject } = require('./shape.js');
 const { SOURCE, CURSOR } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
+const { namedId, idReason } = require('./schema/entity.js');
 
 // How many rows a bulk write takes at once.
 const list = (method, rows) => {
@@ -22,6 +23,9 @@ const list = (method, rows) => {
 
 // How many records `remove()` takes in one transaction.
 const PAGE = 500;
+
+// A collection with no definition names its records by an `id` field.
+const LOOSE = Object.freeze({ id: null, idField: 'id' });
 
 // A row's own verdict — on its data, its id, its collection — as against a failure of the batch
 // (the disk, the log, the database closed), which fails the whole write.
@@ -127,29 +131,16 @@ class Collection extends Emitter {
 
   // The id a record's data names under this collection's definition — a
   // composite id (its fields stay in the data), or the id field's value (the
-  // field leaves it) — with the data to write: `{ id, data }`; a TypeError
-  // (INVALID_ID) when it names none.
+  // field leaves it) — with the data to write: `{ id, data }`, as `namedId`
+  // derives it for every writer; a TypeError (INVALID_ID) when it names none.
   #named(method, data) {
-    const def = this.#storage[SOURCE].definition(this.#name);
-    const composite = def?.id ?? null;
-    if (composite !== null) {
-      const parts = [];
-      for (let i = 0; i < composite.fields.length; i++) {
-        const value = data[composite.fields[i]];
-        if (value === undefined || value === null) {
-          throw typed('INVALID_ID', `${method}(): a ${this.#name} needs ${composite.fields[i]} for its id (id.fields)`);
-        }
-        parts.push(typeof value === 'string' ? value : String(value));
-      }
-      return { id: parts.join(composite.separator), data };
+    const def = this.#storage[SOURCE].definition(this.#name) ?? LOOSE;
+    const named = namedId(def, data);
+    if (named === null) {
+      throw typed('INVALID_ID', `${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`);
     }
-    const idField = def?.idField ?? 'id';
-    if (idField === false || typeof data[idField] !== 'string') {
-      throw typed('INVALID_ID', `${method}(): a ${this.#name} needs its id under ${idField || 'an id field'}`);
-    }
-    const rest = {};
-    for (const key of Object.keys(data)) if (key !== idField) rest[key] = data[key];
-    return { id: data[idField], data: rest };
+    if (named.id === null) throw typed('INVALID_ID', `${method}(): a ${this.#name} ${idReason(named)}`);
+    return named;
   }
 
   /**

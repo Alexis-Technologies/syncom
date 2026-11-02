@@ -15,7 +15,7 @@ const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Document } = require('./document.js');
 const { Collection } = require('./collection.js');
-const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH } = require('./commit.js');
+const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH, ABSENT } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
@@ -24,7 +24,7 @@ const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { project, namedId } = require('./schema/entity.js');
+const { project, namedId, idReason } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { checkEngine, checkEngineDb, kvNamespace } = require('./engine.js');
@@ -105,13 +105,6 @@ const tombstone = (data) => {
   return { data };
 };
 
-// A record written under the id its data names, inside a transaction: a
-// live record there already is EXISTS — decided where nothing interleaves.
-const insertNamed = async (tx, id, data, options) => {
-  if (await tx.has(id)) throw new SyncomError('EXISTS', `Record ${id} exists already`, { id });
-  await tx.set(id, data, { actor: options.actor });
-};
-
 // An operator delta (src/operators.js) inside a transaction: the calls it
 // expands to, decided over the record as it reads and the kind of each
 // field — both current, the queue being held — run over the transaction's
@@ -161,7 +154,8 @@ const modifyIn = async (tx, id, fn, options) => {
     delta[key] = after[key];
     changed++;
   }
-  for (const key of Object.keys(before)) if (!Object.hasOwn(after, key)) gone.push(key);
+  // The collection is not the function's to change: a `$type` left out stays.
+  for (const key of Object.keys(before)) if (!Object.hasOwn(after, key) && key !== '$type') gone.push(key);
   if (gone.length > 0) await tx.unset(id, gone, options);
   if (changed > 0) await tx.update(id, delta, options);
   return changed > 0 || gone.length > 0 ? tx.get(id) : before;
@@ -728,6 +722,8 @@ class Database extends Emitter {
       actorOf: (given) => this.#actorOf(given),
       observe: (stamp, id) => this.#observeHeld(stamp, id),
       definitionOf: (data) => this.#definitionOf(data),
+      // The fields a record's composite id is derived from (its entity's `id.fields`), or null: immutable.
+      idFields: (data) => this.#definitionOf(data)?.id?.fields ?? null,
       conflicts: (id, entry) => this.#conflicts(id, entry),
       invalid: (op, entry) => this.#invalid(op, entry),
       persist: (touched, from, to) => this.#landing(() => this.#land(touched, from, to)),
@@ -1875,8 +1871,8 @@ class Database extends Emitter {
   // Public API
 
   async saveData(id, data, options = {}) {
-    const { encrypted = this.#encrypted, actor } = options;
-    await this[COMMIT]('write', id, { data }, { encrypted, actor });
+    const { encrypted = this.#encrypted, actor, expect = null } = options;
+    await this[COMMIT]('write', id, { data }, { encrypted, actor, expect });
   }
 
   async loadData(id) {
@@ -1924,9 +1920,7 @@ class Database extends Emitter {
     if (def === undefined) return null;
     const named = namedId(def, data);
     if (named === null) return null;
-    if (named.id === null) {
-      throw typed('INVALID_ID', `A ${def.name} needs ${named.field} for its id (id.fields)`);
-    }
+    if (named.id === null) throw typed('INVALID_ID', `A ${def.name} ${idReason(named)}`);
     if (!isRecordId(named.id)) throw invalidId(named.id);
     return named;
   }
@@ -1957,12 +1951,8 @@ class Database extends Emitter {
       return id;
     }
     const { id } = named;
-    // An encrypted record has no op and no transaction: written as it is.
-    if (options.encrypted === true) {
-      await this.saveData(id, named.data, options);
-      return id;
-    }
-    await this.transact((tx) => insertNamed(tx, id, named.data, options), { actor: options.actor });
+    // A live record there already is EXISTS, decided inside the queue (`expect: ABSENT`) — an encrypted write too.
+    await this.saveData(id, named.data, { ...options, expect: ABSENT });
     return id;
   }
 
@@ -2582,7 +2572,7 @@ class Database extends Emitter {
         await tx.commit('write', id, { data }, { actor: options.actor });
         return id;
       }
-      await insertNamed(api, named.id, named.data, options);
+      await tx.commit('write', named.id, { data: named.data }, { actor: options.actor, expect: ABSENT });
       return named.id;
     };
     api.set = async (id, data, options = {}) => {

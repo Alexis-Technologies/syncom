@@ -36,6 +36,7 @@ const MEMBERS = [
   'hash',
   'hook',
   'hooks',
+  'idFields',
   'inflight',
   'invalid',
   'kindOf',

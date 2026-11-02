@@ -182,7 +182,10 @@ const ENTRIES = [
   // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (catalog FORMAT 5; review №6, E1.1;
   // 2026-11-02). 70.5, raised by name. 70.5 with the folded tombstones in the `tombstones` kv namespace (EntryStore.foldMany,
   // the fallback read, the rebuild over both stores; review №6, E1.2–E1.3). 71, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 71 },
+  // 71.0 with a row's id laid last, writes by query matched again inside the queue, drop() under the lock, dropDatabase()
+  // refusing a stray directory, composite ids refused on the separator and immutable (ID_IMMUTABLE), EXISTS by
+  // `expect: ABSENT` (review №6, E2). 71.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 71.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -401,7 +404,8 @@ const ENTRIES = [
   // 153.8 with the local plugin registered (collections plan, C4.1). 154.5, raised by name.
   // 154.6 with a tombstone's row typed and stamped (review №6, E1.1; 2026-11-02). 155, raised by name.
   // 155.1 with the folded tombstones in the `tombstones` kv namespace (review №6, E1.2–E1.3). 155.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 155.5 },
+  // 155.5 with the writes made safe (review №6, E2). 156, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 156 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -573,7 +577,8 @@ const ENTRIES = [
     // 38.5 (over by bytes) with the log's failed line taken out, the index's counter kept, the evidence copies
     // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
     // 39.5 with the log's store seam the versions plugin bundles with the log (engines plan, E1.2). 40, raised by name.
-    budget: 40,
+    // 40.1 with the write path's `expect: ABSENT` and the immutables it bundles (review №6, E2). 40.5, raised by name.
+    budget: 40.5,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.

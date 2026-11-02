@@ -349,6 +349,63 @@ const runCollectionTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
+    'a composite id refuses a value that holds the separator or is of another kind, and its fields are immutable',
+    async (t2) => {
+      const schema = { entities: { Cell: { id: { fields: ['x', 'y'] } } } };
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema });
+      const code = (promise) =>
+        promise.then(
+          () => null,
+          (error) => error.code,
+        );
+      // `a.b` + `c` and `a` + `b.c` would be one id: a value that holds the separator is refused.
+      assert.strictEqual(await code(db.Cell.insert({ x: 'a.b', y: 'c' })), 'INVALID_ID');
+      assert.strictEqual(await code(db.Cell.insert({ x: 'a', y: 'b.c' })), 'INVALID_ID');
+      assert.strictEqual(await code(db.Cell.upsert({ x: 'a.b', y: 'c' })), 'INVALID_ID');
+      assert.strictEqual(await code(db.insert({ $type: 'Cell', x: 'a', y: 'b.c' })), 'INVALID_ID');
+      assert.strictEqual(await code(db.Cell.insert({ x: { nested: 1 }, y: 'c' })), 'INVALID_ID', 'an object');
+      assert.strictEqual(await code(db.Cell.insert({ x: true, y: 'c' })), null, 'a boolean reads as text');
+      const cell = await db.Cell.insert({ x: 'a', y: 1, v: 0 });
+      assert.strictEqual(cell.id, 'a.1');
+      // The fields the id is derived from never change: not by a set, an operator, a function or an unset.
+      assert.strictEqual(await code(db.Cell.update(cell.id, { x: 'b' })), 'ID_IMMUTABLE');
+      assert.strictEqual(await code(db.Cell.update(cell.id, { $set: { y: 2 } })), 'ID_IMMUTABLE');
+      assert.strictEqual(await code(db.Cell.update(cell.id, { $rename: { x: 'z' } })), 'ID_IMMUTABLE');
+      assert.strictEqual(await code(db.Cell.modify(cell.id, (doc) => void (doc.y = 3))), 'ID_IMMUTABLE');
+      assert.strictEqual(await code(db.unset(cell.id, ['x'])), 'ID_IMMUTABLE');
+      assert.strictEqual(await code(db.transact((tx) => tx.update(cell.id, { x: 'q' }))), 'ID_IMMUTABLE');
+      // The same values, as text, pass; the other fields change freely.
+      await db.Cell.update(cell.id, { x: 'a', y: '1', v: 1 });
+      await db.Cell.update(cell.id, { $set: { v: 2 } });
+      assert.deepStrictEqual(await db.get(cell.id), { x: 'a', y: '1', v: 2, $type: 'Cell' });
+      // A live record under the named id is EXISTS whichever way it is written — an encrypted write too.
+      assert.strictEqual(await code(db.Cell.insert({ x: 'a', y: 1 })), 'EXISTS');
+      assert.strictEqual(await code(db.Cell.insert({ x: 'a', y: 1 }, { encrypted: true })), 'EXISTS');
+      assert.deepStrictEqual(await db.get(cell.id), { x: 'a', y: '1', v: 2, $type: 'Cell' }, 'untouched');
+    },
+  );
+
+  await t.test('$type is immutable through unset, $unset, $rename and modify', async (t2) => {
+    const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {}, Other: {} } } });
+    const code = (promise) =>
+      promise.then(
+        () => null,
+        (error) => error.code,
+      );
+    const id = (await db.Post.insert({ title: 'x' })).id;
+    assert.strictEqual(await code(db.unset(id, ['$type'])), 'TYPE_IMMUTABLE');
+    assert.strictEqual(await code(db.update(id, { $unset: ['$type'] })), 'TYPE_IMMUTABLE');
+    assert.strictEqual(await code(db.update(id, { $rename: { $type: 'kind' } })), 'TYPE_IMMUTABLE');
+    assert.strictEqual(await code(db.update(id, { $set: { $type: 'Other' } })), 'TYPE_IMMUTABLE');
+    assert.strictEqual(await code(db.modify(id, () => ({ title: 'y', $type: 'Other' }))), 'TYPE_IMMUTABLE');
+    // A function that leaves $type out keeps it: the collection is not the function's to change.
+    assert.deepStrictEqual(await db.modify(id, () => ({ title: 'z' })), { title: 'z', $type: 'Post' });
+    assert.deepStrictEqual(await db.get(id), { title: 'z', $type: 'Post' });
+    assert.strictEqual(await db.Post.count(), 1);
+    assert.strictEqual(await db.Other.count(), 0);
+  });
+
+  await t.test(
     'a data field named id never names another record: writes by query and ifMatch go by the record’s id',
     async (t2) => {
       const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });

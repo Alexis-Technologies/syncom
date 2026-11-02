@@ -652,6 +652,7 @@ export type SyncomErrorCode =
 export type TypedErrorCode =
   | 'INVALID_ID'
   | 'TYPE_IMMUTABLE'
+  | 'ID_IMMUTABLE'
   | 'INVALID_VERSION'
   | 'NO_CHAIN'
   | 'PLUGIN_MISSING'
@@ -660,7 +661,7 @@ export type TypedErrorCode =
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`,
+ * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`,
  * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
  * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
