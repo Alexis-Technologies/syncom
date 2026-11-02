@@ -259,6 +259,8 @@ class Catalog {
   #logger;
   // Moved by every put, a definition, an adoption, a load: what a query result is current as of.
   #generation = 0;
+  // Moved by every definition (`define`): what a cursor's plan, and a cached result's key, are made under.
+  #defGeneration = 0;
 
   constructor({ store = null, rows = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
     // A text store given (a kv namespace), a rows store (a native engine's:
@@ -519,6 +521,7 @@ class Catalog {
     this.#endBulk();
     this.#rekey();
     this.#generation++;
+    this.#defGeneration++;
   }
 
   // The row's text into the entity's text index, or out of it. Derived
@@ -553,6 +556,11 @@ class Catalog {
   /** A number that moves with every change of a record the catalog heard of: what a result is current as of. */
   get generation() {
     return this.#generation;
+  }
+
+  /** A number that moves with every definition (`define`): what a plan, and a cached result's key, were made under. */
+  get definitions() {
+    return this.#defGeneration;
   }
 
   /** Puts since the last save. */

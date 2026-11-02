@@ -102,7 +102,8 @@ The entity's `index` — fields, and compound keys of fields: `index: ['boardId'
 explicit or read off a [metaschema schema](./schema#a-metaschema-model) — and its `unique` keys are
 what the [catalog](./database#the-catalog-and-the-cache) keeps per record, in memory on every engine:
 a posting list per indexed field for equality, and a **sorted index** per declared key (the rows in key
-order, then id). A cursor is planned over them once, and `explain()` shows the plan:
+order, then id). A cursor is planned over them once — and again where the collection is defined anew
+(`addCollections()`, `removeCollection()`) — and `explain()` shows the plan:
 
 ```js
 db.Task.select({ boardId: 'b1', rank: { $gte: 10 } }).order('rank').limit(4).explain();

@@ -863,6 +863,43 @@ const runCollectionTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'a cursor made before addCollections() plans again under the new indexes, and its cached result goes with the old ones',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: { index: ['kind'] } } } });
+      for (let i = 0; i < 6; i++) await db.Post.insert({ kind: i % 2 ? 'a' : 'b', n: i });
+      const cursor = db.Post.select({ kind: 'a' }).order('n');
+      assert.deepStrictEqual(cursor.explain().index, ['kind']);
+      assert.strictEqual(cursor.explain().sortedByIndex, false);
+      const before = await cursor.fetch();
+      assert.strictEqual(before.length, 3);
+      // Defined anew, with another key: the retained cursor plans again, and reads the rows — never an empty
+      // result cached under the old definitions, nor one the old plan would scan a dropped index for.
+      db.removeCollection('Post');
+      assert.strictEqual(cursor.explain().scan, 'collection', 'no definition: every record');
+      assert.deepStrictEqual(await cursor.fetch(), before);
+      await db.addCollections({ Post: { index: [['kind', 'n']] } });
+      assert.deepStrictEqual(cursor.explain().index, ['kind', 'n'], 'planned again under the new index');
+      assert.strictEqual(cursor.explain().sortedByIndex, true);
+      assert.deepStrictEqual(await cursor.fetch(), before);
+    },
+  );
+
+  await t.test(
+    'addCollections() indexes a large collection in pages inside the queue, with writes landing between them',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+      for (let i = 0; i < 1100; i++) await db.insert({ $type: 'Tag', n: i % 10 });
+      // A write made while the collection is being defined lands between two pages, indexed like the rest.
+      const adding = db.addCollections({ Tag: { index: ['n'] } });
+      const written = db.insert({ $type: 'Tag', n: 3 });
+      await Promise.all([adding, written]);
+      assert.strictEqual(db.Tag.select({ n: 3 }).explain().scan, 'index');
+      assert.strictEqual(await db.Tag.count({ n: 3 }), 111);
+      assert.strictEqual(await db.Tag.count(), 1101);
+    },
+  );
+
   await t.test('removeCollection() forgets the definition and keeps the records', async (t2) => {
     const fsi = memory();
     const db = await createStorage(t2, 'A', { fsi, schema: { entities: { Post: { index: ['kind'] } } } });

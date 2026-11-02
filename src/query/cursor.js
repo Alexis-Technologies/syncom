@@ -345,8 +345,10 @@ class Cursor {
   #populate = null;
   // Keyset paging: the row the page starts after — its order keys and its id — or null.
   #after = null;
-  // The plan (./plan.js), made once per cursor at its first run.
+  // The plan (./plan.js), made once per cursor at its first run — and again where the collection's definitions
+  // moved since (`addCollections()`, `removeCollection()`: another index to scan, or none).
   #planned = null;
+  #plannedAt = 0;
   // The query cache (./cache.js) of the database, null at a tag's source.
   #cache;
 
@@ -603,7 +605,9 @@ class Cursor {
 
   // How the cursor is answered (./plan.js): over the collection's declared indexes, once.
   #plan() {
-    if (this.#planned === null) {
+    const definitions = this.#source.definitions?.() ?? 0;
+    if (this.#planned === null || this.#plannedAt !== definitions) {
+      this.#plannedAt = definitions;
       const indexes = this.#source.indexes?.(this.#entity) ?? [];
       const source = this.#source;
       const entity = this.#entity;
@@ -647,7 +651,9 @@ class Cursor {
   #cacheKey() {
     if (this.#cache === null || this.#filter !== null) return null;
     const window = [this.#limit === Infinity ? null : this.#limit, this.#offset, this.#after];
-    return keyOf([this.#entity, this.#query, this.#order, window, this.#projection, this.#populate]);
+    // The definitions ride in the key: a result read under other indexes is another result.
+    const definitions = this.#source.definitions?.() ?? 0;
+    return keyOf([this.#entity, this.#query, this.#order, window, this.#projection, this.#populate, definitions]);
   }
 
   // Whether the rows come in the text index's order: a `$text` query without an order of its own.

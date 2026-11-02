@@ -82,6 +82,9 @@ const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
 
+// How many records a collection defined after the open indexes at a time, inside the queue.
+const REINDEX_PAGE = 500;
+
 // An entity's `methods` go on its Documents and its `statics` on its Collection: a name a
 // Document or a Collection answers to already would shadow it, so it is refused where the
 // definition is taken.
@@ -1184,9 +1187,14 @@ class Database extends Emitter {
       this.#entities.set(def.name, def);
       this.#catalog.define(def.name, def, index);
       this[def.name] = new Collection(this, def.name);
-      // The records of the type the catalog holds, indexed under the definition: a read each.
+      // The records of the type the catalog holds, indexed under the definition: pages of 500, each read in one
+      // call of the engine, inside the queue behind the landings — a record in flight lands first, so no stale row
+      // is laid over it; the queue is free between the pages.
       const ids = this.#catalog.ids(def.name).slice();
-      for (let k = 0; k < ids.length; k++) await this.#entries.index(ids[k]);
+      for (let k = 0; k < ids.length; k += REINDEX_PAGE) {
+        const page = ids.slice(k, k + REINDEX_PAGE);
+        await this.#run(() => this.#landing(() => this.#entries.indexMany(page)));
+      }
     }
     this.#collected();
     this.#flushCatalog();
@@ -1271,6 +1279,8 @@ class Database extends Emitter {
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
       // What a query result is current as of: moves with every change of a record the catalog heard of.
       generation: () => catalog.generation,
+      // What the definitions are as of: moves with addCollections()/removeCollection(); a plan made under another is made again.
+      definitions: () => catalog.definitions,
       // The entity definition of a collection (null for none): its id rule, its references, its methods.
       definition: (entity) => this.#entities.get(entity) ?? null,
       // A transaction over this database's write API: what a cursor's write terminals run (a view at a

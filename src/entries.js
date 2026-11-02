@@ -598,6 +598,26 @@ class EntryStore {
     this.#catalog.put(id, await this.row(id, entry));
   }
 
+  /**
+   * Puts what the records `ids` are now, read in ONE call of the engine
+   * (`loadMany`) — a collection defined after the open indexes its records
+   * a page at a time; a page that does not read whole falls back to a record
+   * at a time, which logs what it skips.
+   */
+  async indexMany(ids) {
+    let found;
+    try {
+      found = await this.loadMany(ids);
+    } catch {
+      for (let i = 0; i < ids.length; i++) await this.index(ids[i]);
+      return;
+    }
+    for (const [id, entry] of found) {
+      if (entry === null) continue;
+      this.#catalog.put(id, await this.row(id, entry));
+    }
+  }
+
   // A replicated entry: the file, the cache, the catalog row — unless the
   // row is right already (the entry held by `hold` landing on its file: the
   // catalog read it then, and a watcher must not hear of it twice).
