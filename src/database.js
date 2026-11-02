@@ -1284,8 +1284,9 @@ class Database extends Emitter {
       },
       searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
-      // What a query result is current as of: moves with every change of a record the catalog heard of.
-      generation: () => catalog.generation,
+      // What a query result of `entity` is current as of: moves with every change of a record of the collection
+      // the catalog heard of (its row, or the one it left), with its redefinition, and with a load or an adopt.
+      generation: (entity) => catalog.generationOf(entity),
       // What the definitions are as of: moves with addCollections()/removeCollection(); a plan made under another is made again.
       definitions: () => catalog.definitions,
       // The entity definition of a collection (null for none): its id rule, its references, its methods.

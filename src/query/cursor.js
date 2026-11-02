@@ -347,6 +347,9 @@ class Cursor {
   #after = null;
   // The fields the query reads (`fieldsOf`), once per cursor: what `#covered` asks of every run.
   #fields = null;
+  // The cache key, once built, and the definitions it was built under.
+  #cacheKeyText = null;
+  #cacheKeyAt = 0;
   // The plan (./plan.js), made once per cursor at its first run — and again where the collection's definitions
   // moved since (`addCollections()`, `removeCollection()`: another index to scan, or none).
   #planned = null;
@@ -653,10 +656,22 @@ class Cursor {
   // no name) or without a cache (a tag's source).
   #cacheKey() {
     if (this.#cache === null || this.#filter !== null) return null;
-    const window = [this.#limit === Infinity ? null : this.#limit, this.#offset, this.#after];
-    // The definitions ride in the key: a result read under other indexes is another result.
+    // The definitions ride in the key: a result read under other indexes is another result. The cursor never
+    // changes, so the key is built once — again only under other definitions.
     const definitions = this.#source.definitions?.() ?? 0;
-    return keyOf([this.#entity, this.#query, this.#order, window, this.#projection, this.#populate, definitions]);
+    if (this.#cacheKeyText !== null && this.#cacheKeyAt === definitions) return this.#cacheKeyText;
+    const window = [this.#limit === Infinity ? null : this.#limit, this.#offset, this.#after];
+    this.#cacheKeyAt = definitions;
+    this.#cacheKeyText = keyOf([
+      this.#entity,
+      this.#query,
+      this.#order,
+      window,
+      this.#projection,
+      this.#populate,
+      definitions,
+    ]);
+    return this.#cacheKeyText;
   }
 
   // Whether the rows come in the text index's order: a `$text` query without an order of its own.
@@ -810,10 +825,10 @@ class Cursor {
   async #fetch(limit) {
     const key = limit === this.#limit ? this.#cacheKey() : null;
     if (key !== null) {
-      const kept = this.#cache.rows(key, this.#source.generation());
+      const kept = this.#cache.rows(key, this.#source.generation(this.#entity));
       if (kept !== null) return this.#deliver(kept.slice(this.#offset));
     }
-    const generation = key === null ? 0 : this.#source.generation();
+    const generation = key === null ? 0 : this.#source.generation(this.#entity);
     const top = await this.#top(limit);
     if (key !== null) this.#cache.keep(key, generation, top);
     return this.#deliver(top.slice(this.#offset));
@@ -946,7 +961,7 @@ class Cursor {
       // The run's rows are the key's result for as long as it runs, as of now.
       const onRows = (rows) => {
         entry.rows = rows;
-        entry.generation = this.#source.generation();
+        entry.generation = this.#source.generation(this.#entity);
       };
       return new Live(this.#source, this.#spec(mode === 'rows', mode === 'rows' ? onRows : () => {}), mode, () =>
         this.#cache.release(cacheKey),

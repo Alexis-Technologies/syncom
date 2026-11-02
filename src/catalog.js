@@ -273,6 +273,10 @@ class Catalog {
   #logger;
   // Moved by every put, a definition, an adoption, a load: what a query result is current as of.
   #generation = 0;
+  // The generation per collection — the last `#generation` a put, a definition moved it to — and the floor every
+  // collection stands at since the last load or adopt: what a query result of a collection is current as of.
+  #typeGen = new Map();
+  #floor = 0;
   // Moved by every definition (`define`): what a cursor's plan, and a cached result's key, are made under.
   #defGeneration = 0;
 
@@ -534,7 +538,7 @@ class Catalog {
     }
     this.#endBulk();
     this.#rekey();
-    this.#generation++;
+    this.#bump(name);
     this.#defGeneration++;
   }
 
@@ -570,6 +574,16 @@ class Catalog {
   /** A number that moves with every change of a record the catalog heard of: what a result is current as of. */
   get generation() {
     return this.#generation;
+  }
+
+  /** What a query result of `type` is current as of: moved by a put of a record of the collection, its definition, a load or an adopt. */
+  generationOf(type) {
+    const own = this.#typeGen.get(type);
+    return own === undefined || own < this.#floor ? this.#floor : own;
+  }
+
+  #bump(type) {
+    this.#typeGen.set(type, ++this.#generation);
   }
 
   /** A number that moves with every definition (`define`): what a plan, and a cached result's key, were made under. */
@@ -663,7 +677,6 @@ class Catalog {
    * data }` for a live one — `data` as it reads (the lens applied).
    */
   put(id, view) {
-    this.#generation++;
     const was = this.#rows.get(id);
     const before = was && !was.gone ? was.type : null;
     const gone = view !== null && view.gone === true;
@@ -671,6 +684,10 @@ class Catalog {
     // record was purged, which erases the collection with it.
     const kept = gone && view.purged !== true && was !== undefined ? was.type : null;
     const type = view === null ? null : typeof view.type === 'string' ? view.type : kept;
+    // A result of the collection the record was of, or joins, is of before this put — a no-op put too: the record
+    // may read as another where the row does not say.
+    if (before !== null) this.#bump(before);
+    if (type !== null && type !== before) this.#bump(type);
     let row = null;
     if (view !== null) {
       row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
@@ -930,7 +947,7 @@ class Catalog {
   /** Takes rows as `rows()` hands them out — a copy of another catalog, under the same definitions. */
   adopt(rows) {
     this.#loaded = false;
-    this.#generation++;
+    this.#floor = ++this.#generation;
     this.#beginBulk();
     for (const [id, row] of rows) {
       this.#remove(id);
@@ -944,7 +961,7 @@ class Catalog {
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
   // where the rows say what existed and the indexes are those of its day.
   async load({ strict = true } = {}) {
-    this.#generation++;
+    this.#floor = ++this.#generation;
     if (this.#rowStore !== null) return this.#loadRows(strict);
     const text = await this.#store.get(FILE);
     if (text === null) return null;

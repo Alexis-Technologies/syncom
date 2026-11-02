@@ -54,6 +54,9 @@ plan)` reads the entries between two binary searches, forward or backward; where
   query runs the cursor again (`top()`); it emits only when an id came, went or moved, or a row's view
   (`row[VIEW]`, the object it was built from) is another. The plugin keeps one `QueryCache`
   (src/query/cache.js) per database: every `watch()` of a key (`keyOf([entity, query, order, window,
-projection, populate])`) shares one Live, whose rows are the key's result while it runs; a `fetch()`
-  of a key the catalog's `generation` has not moved since reads nothing. A `filter(fn)` has no key. A
-  tag's source has no `generation`: nothing of it is cached, and `watch()` throws there.
+projection, populate])`, built once per cursor) shares one Live, whose rows are the key's result while it runs; a
+  `fetch()` of a key whose collection's `generation(entity)` (`Catalog.generationOf`: moved by a put of a record of the
+  collection — a no-op put too — by its definition, by a load or an adopt; never by another collection) has not moved
+  since reads nothing; the idle results hold `MAX_ROWS` (10 000) rows between them at most, a larger one alone is not
+  kept. A `filter(fn)` has no key. A tag's source has no `generation`: nothing of it is cached, and `watch()` throws
+  there.

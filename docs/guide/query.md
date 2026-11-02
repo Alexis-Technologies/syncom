@@ -151,9 +151,12 @@ watches the plans and suggests the keys the queries asked for and no index serve
 Every `watch()` of one query — the same entity, query, order, window, projection and populated fields,
 whatever the key order — shares one [live run](#live-queries), and a `fetch()` of it reads nothing
 while the run lasts: the run's rows are the result. After the run stops the last result stays, as do up
-to a hundred unobserved results, the least recently used let go of first, each with the catalog's
-generation it was read at: a `fetch()` of a query the catalog has not moved since reads nothing. A
-cursor with a `filter(fn)` has no key and runs every time; a cursor at a tag is never cached.
+to a hundred unobserved results holding ten thousand rows between them (a larger result alone is not
+kept), the least recently used let go of first, each as current as its collection was when it was read:
+a `fetch()` of a query whose collection has not changed since — no record of it written, folded or
+purged, the collection not defined again, the catalog not loaded again — reads nothing, whatever the
+other collections did meanwhile. A cursor with a `filter(fn)` has no key and runs every time; a cursor at
+a tag is never cached.
 
 ## Full-text search
 

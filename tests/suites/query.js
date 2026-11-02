@@ -557,6 +557,44 @@ const runQueryTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'a cached result stands past a write to another collection, and goes past one of its own that no index saw',
+    async (t2) => {
+      const fsi = counting(memory());
+      const storage = await createStorage(t2, 'G', { fsi, schema, cache: { max: 2 } });
+      for (let i = 0; i < 6; i++) {
+        await storage.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i, $type: 'Project' });
+      }
+      const cursor = storage.Project.select({ orgId: 'o' }).order('n');
+      const first = await cursor.fetch();
+      assert.strictEqual(first.length, 6);
+      // Another collection moved: the result is as current as it was.
+      await storage.insert({ label: 't1', $type: 'Tag' });
+      await storage.Tag.update((await storage.Tag.select().one()).id, { label: 't2' });
+      fsi.reset();
+      const again = await cursor.fetch();
+      assert.deepStrictEqual(
+        again.map((row) => row.n),
+        first.map((row) => row.n),
+      );
+      assert.strictEqual(fsi.dataReads(), 0, 'another collection moved: the result stands');
+      // Its own moved — in a field no index holds, so the row stayed as it was: read again all the same.
+      await storage.Project.update(first[0].id, { note: 'x' });
+      fsi.reset();
+      const moved = await cursor.fetch();
+      assert.strictEqual(moved[0].note, 'x');
+      assert.ok(fsi.dataReads() > 0, 'its own collection moved: read again');
+      // Redefined: current as of the definition.
+      fsi.reset();
+      await cursor.fetch();
+      assert.strictEqual(fsi.dataReads(), 0);
+      storage.removeCollection('Project');
+      await storage.addCollections({ Project: { index: ['n'] } });
+      fsi.reset();
+      assert.strictEqual((await cursor.fetch()).length, 6);
+      assert.ok(fsi.dataReads() > 0, 'defined again: read again');
+    },
+  );
   await t.test('page() and after() visit every row once under inserts that land between the pages', async (t2) => {
     const storage = await createStorage(t2, 'P', { schema });
     const ids = [];

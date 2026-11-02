@@ -6,11 +6,13 @@
 // it was read at, so a `fetch()` of a key the catalog has not moved since
 // reads nothing; and the ONE live run (./live.js) every `watch()` of a key
 // shares, whose rows keep the key's result current for as long as it runs.
-// At most `max` results no live run keeps are held, the least recently
-// used let go of first. A cursor with a `filter(fn)` has no key: a
+// At most `max` results no live run keeps are held, and at most `maxRows`
+// rows between them (a result past that alone is not kept), the least
+// recently used let go of first. A cursor with a `filter(fn)` has no key: a
 // function cannot be named. No requires: it ships to the browser.
 
 const MAX = 100;
+const MAX_ROWS = 10_000;
 
 // A RegExp has no JSON of its own: keyed by its source and flags. An `undefined` value has none either, and
 // `{ f: undefined }` asks for a field missing where `{}` asks nothing: keyed as what it is, never dropped.
@@ -38,11 +40,19 @@ const keyOf = (parts) => JSON.stringify(canonical(parts), replacer);
 class QueryCache {
   #entries = new Map();
   #max;
-  // How many entries hold a result no live run keeps.
+  #maxRows;
+  // How many entries hold a result no live run keeps, and how many rows they hold between them.
   #idle = 0;
+  #held = 0;
 
-  constructor({ max = MAX } = {}) {
+  constructor({ max = MAX, maxRows = MAX_ROWS } = {}) {
     this.#max = max;
+    this.#maxRows = maxRows;
+  }
+
+  /** How many rows the idle results hold between them. */
+  get held() {
+    return this.#held;
   }
 
   get size() {
@@ -70,22 +80,35 @@ class QueryCache {
     return entry.rows;
   }
 
-  /** Keeps `rows` as the result of `key` read at `generation`; the least recently used idle result goes past `max`. */
+  /**
+   * Keeps `rows` as the result of `key` read at `generation`; the least recently used idle results go past `max`
+   * entries or `maxRows` rows — one past `maxRows` by itself is not kept.
+   */
   keep(key, generation, rows) {
+    if (rows.length > this.#maxRows) return;
     const entry = this.#entry(key);
-    if (entry.rows === null && entry.live === null) this.#idle++;
+    if (entry.live === null) {
+      if (entry.rows === null) this.#idle++;
+      else this.#held -= entry.rows.length;
+      this.#held += rows.length;
+    }
     entry.rows = rows;
     entry.generation = generation;
     this.#trim();
   }
 
+  #over() {
+    return this.#idle > this.#max || this.#held > this.#maxRows;
+  }
+
   #trim() {
-    if (this.#idle <= this.#max) return;
+    if (!this.#over()) return;
     for (const [key, entry] of this.#entries) {
       if (entry.live !== null) continue;
       this.#entries.delete(key);
       this.#idle--;
-      if (this.#idle <= this.#max) break;
+      this.#held -= entry.rows.length;
+      if (!this.#over()) break;
     }
   }
 
@@ -93,7 +116,10 @@ class QueryCache {
   live(key, make) {
     const entry = this.#entry(key);
     if (entry.live === null) {
-      if (entry.rows !== null) this.#idle--;
+      if (entry.rows !== null) {
+        this.#idle--;
+        this.#held -= entry.rows.length;
+      }
       entry.live = make(entry);
     }
     return entry.live;
@@ -107,6 +133,7 @@ class QueryCache {
     if (entry.rows === null) this.#entries.delete(key);
     else {
       this.#idle++;
+      this.#held += entry.rows.length;
       this.#trim();
     }
   }
