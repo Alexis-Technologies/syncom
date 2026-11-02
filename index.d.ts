@@ -2708,7 +2708,7 @@ export interface Cursor<T = QueryRow> {
     k: number,
     options?: { distance?: 'cosine' | 'euclidean' | 'manhattan' | 'dot' | ((a: readonly number[], b: readonly number[]) => number) },
   ): Promise<{ distance: number; row: T }[]>;
-  /** Every match updated — fields or operators — as ONE transaction over the matches when it starts: `{ matched, written }`. */
+  /** Every match updated — fields or operators — as ONE transaction over the matches when it starts (10 000 at most, else a TypeError): `{ matched, written }`. */
   update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
   /** Every match changed by a function (see `modify()`), as ONE transaction: `{ matched, written }`. */
   modify(fn: ModifyFn<T>, options?: TransactOptions): Promise<WriteByQuery>;
@@ -2989,7 +2989,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
   upsert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
   /** Writes the record its data names unless a live one is there, inside the queue; the Document either way. */
   insertIfAbsent(data: I, options?: WriteOptions): Promise<SyncomDocument<R>>;
-  /** Every row as `insert()` would write it, as ONE transaction with a verdict per row. */
+  /** Every row as `insert()` would write it, as ONE transaction with a verdict per row; more than 10 000 rows is a TypeError. */
   bulkInsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
   /** Every row as `upsert()` would write it, as ONE transaction with a verdict per row. */
   bulkUpsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;

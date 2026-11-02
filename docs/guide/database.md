@@ -381,10 +381,10 @@ rows, a `Document`'s data — and what comes in (`set()`, `update()`) is copied 
 same way, so editing an object on either side of the call changes nothing in
 the cache, the log or the next write's base. `getCachedData()` and `snapshot()`
 hand out the raw objects, for callers that know not to touch them. A cold read re-verifies the record against the chain block
-that committed it; `integrity: 'lazy'` trusts the file instead — the choice
-for a browser rebuilding a large catalog, where that verification is one
-hash and two reads per record. `storage.validate(id, data, block)` is still
-there for a check on demand.
+that committed it — the block read, parsed and hashed once for the records of its batch (the last eight
+blocks verified are kept), one hash of the record's data each; `integrity: 'lazy'` trusts the file instead
+— the choice for a browser rebuilding a large catalog. `storage.validate(id, data, block)` is still there
+for a check on demand.
 
 ### When a record file lags the log
 
@@ -681,7 +681,8 @@ await storage.Post.bulkRemove(ids);
 
 A bulk write is one [transaction](#transactions): every record that could be written is, as one
 group of ops, and the ones refused — an id taken, a validator, a unique key, a record of another
-collection — are listed with their index, each with the error the single write would have thrown.
+collection — are listed with their index, each with the error the single write would have thrown. One
+transaction takes 10 000 rows at most: a larger batch is a `TypeError` before anything lands — page it.
 A collection's `remove({ purge })` deletes (or, purged, scrubs from the log — every file holding a page's
 ids rewritten once) every record of the collection as it was when the call began, 500 at a time; it takes
 `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`): the matches of a query

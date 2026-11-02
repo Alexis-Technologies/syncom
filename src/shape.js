@@ -91,6 +91,9 @@ const VALIDATED = new Set([
 // bytes base64url too (src/header.js). A transaction's message rides on each of its ops, in
 // the signed header.
 const MAX_MESSAGE = 1024;
+// How many rows one transaction takes from a bulk write or a write by query: past it a TypeError before anything
+// lands — a batch is paged by the application, a cursor narrowed or limited.
+const MAX_BATCH = 10_000;
 const SIGNATURE = /^[A-Za-z0-9_-]{86}$/;
 // SHA-256 as base64url: 43 characters, the last carrying four bits (one spelling per digest).
 const DIGEST = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -225,6 +228,7 @@ const VERDICT = Object.freeze({ OK: 'ok', UNSIGNED: 'unsigned', FORGED: 'forged'
 module.exports = {
   VERDICT,
   MAX_MESSAGE,
+  MAX_BATCH,
   MAX_ACTOR,
   MAX_JSON_DEPTH,
   MAX_WIRE_DEPTH,

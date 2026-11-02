@@ -602,7 +602,9 @@ const ENTRIES = [
     // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
     // 39.5 with the log's store seam the versions plugin bundles with the log (engines plan, E1.2). 40, raised by name.
     // 40.1 with the write path's `expect: ABSENT` and the immutables it bundles (review №6, E2). 40.5, raised by name.
-    budget: 40.5,
+    // 40.5 (over by bytes) with the cursor and the catalog it bundles grown through E5 (review №6, E5.6; 2026-11-02). 41,
+    // raised by name.
+    budget: 41,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.

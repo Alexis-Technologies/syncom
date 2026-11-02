@@ -84,6 +84,8 @@ const NOOP = () => {};
 
 // How many records a collection defined after the open indexes at a time, inside the queue.
 const REINDEX_PAGE = 500;
+// How many chain blocks a cold read verified are kept parsed: the records of a batch are read close together.
+const VERIFIED_BLOCKS = 8;
 
 // An entity's `methods` go on its Documents and its `statics` on its Collection: a name a
 // Document or a Collection answers to already would shadow it, so it is refused where the
@@ -114,9 +116,8 @@ const tombstone = (data) => {
 // write API; a plugin's method the database was not opened with is
 // PLUGIN_MISSING. `$set` and the rewrites go as one `set` op, never through
 // `update()` again (a field named like an operator is a field here).
-const operate = async (api, tx, id, delta, options) => {
+const operate = async (api, tx, id, delta, options, view) => {
   const entry = await tx.current(id);
-  const view = await api.get(id);
   const calls = expand(delta, view, (field) => tx.kindOf(entry, field));
   for (let i = 0; i < calls.length; i++) {
     const call = calls[i];
@@ -191,6 +192,9 @@ class Database extends Emitter {
   #sync = null;
   #cacheMax;
   #verify;
+  // The chain blocks cold reads verified lately, by hash — each parsed and hashed ONCE: a batch of N records is one
+  // block N long, and N reads of its records parsed and hashed it N times (10 000 records read in 19 s).
+  #blocks = new Map();
   #catalog = null;
   #catalogSave = null;
   #flushEvery;
@@ -1987,12 +1991,9 @@ class Database extends Emitter {
     }
     const id = idOrOptions;
     try {
-      const block = await this.#chain.readBlock(blockHash);
+      const block = await this.#blockOf(blockHash);
+      if (block === null) return false;
       const expectedHash = await sha256(data);
-      if (!block) return false;
-      // The block must be the one it is filed under: a file planted beside
-      // the chain with the right `records` map is not a commit.
-      if ((await sha256(block)) !== blockHash) return false;
       // A local write commits `{ id, hash }`; a replicated batch commits
       // `{ records: { [id]: hash } }` for every record it touched.
       if (block.data.records) return block.data.records[id] === expectedHash;
@@ -2000,6 +2001,19 @@ class Database extends Emitter {
     } catch {
       return false;
     }
+  }
+
+  // The block filed under `blockHash`, verified — it must hash to the name it is filed under: a file planted beside
+  // the chain with the right `records` map is not a commit — and kept, the last VERIFIED_BLOCKS of them; null for
+  // one that is not there or is not what it claims.
+  async #blockOf(blockHash) {
+    const kept = this.#blocks.get(blockHash);
+    if (kept !== undefined) return kept;
+    const block = await this.#chain.readBlock(blockHash);
+    if (!block || (await sha256(block)) !== blockHash) return null;
+    if (this.#blocks.size >= VERIFIED_BLOCKS) this.#blocks.delete(this.#blocks.keys().next().value);
+    this.#blocks.set(blockHash, block);
+    return block;
   }
 
   // The id a record's data names under its entity's definition — a composite
@@ -2675,11 +2689,18 @@ class Database extends Emitter {
       const ifMatch = options.ifMatch ?? null;
       // The condition compiled first: a malformed query is a TypeError before anything is read.
       const test = ifMatch === null ? null : this.#predicate(ifMatch);
+      // Fields without a condition: the record's presence alone is read, never its view composed.
+      if (test === null && !operators) {
+        if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+        await tx.commit('set', id, { data: delta }, { actor: options.actor });
+        return undefined;
+      }
       const view = await api.get(id);
       if (view === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
       // The record's id laid last: a data field named `id` is not the record's.
       if (test !== null && !test({ ...view, id })) return false;
-      if (operators) await operate(api, tx, id, delta, options);
+      // The operators decided over the view read once here.
+      if (operators) await operate(api, tx, id, delta, options, view);
       else await tx.commit('set', id, { data: delta }, { actor: options.actor });
       return test === null ? undefined : true;
     };

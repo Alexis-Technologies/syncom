@@ -157,7 +157,9 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   `createDatabase({ chain: false })` with it, `core.chain` is null: `persistLocal`/`seal` in
   `src/commit.js` and `#persistBatch` write `block: null`, `verify` is forced off,
   `validate()` throws `NO_CHAIN` (the message says which of the two). A new place that reads
-  the chain must take null.
+  the chain must take null. A cold read is verified against its block (`validate(id, data, block)` through
+  `EntryStore`'s `verify`): the block read, parsed and hashed once and kept (`#blockOf`, `VERIFIED_BLOCKS`), so the
+  N records of a batch cost one hash each, never N parses of a block N long.
 - **Live Records are weak.** `#records` holds `WeakRef`s (a
   `FinalizationRegistry` clears the slot); go through `#live(id)`, never
   `#records.get`. A Record the application still holds pins its cache entry;

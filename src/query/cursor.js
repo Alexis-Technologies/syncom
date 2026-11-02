@@ -6,7 +6,7 @@
 // otherwise. No requires beyond the engine's own: this file ships to the
 // browser.
 
-const { deepEqual } = require('../shape.js');
+const { deepEqual, MAX_BATCH } = require('../shape.js');
 const { valueOf, rankOf, compare } = require('../catalog.js');
 const { Live } = require('./live.js');
 const { keyOf } = require('./cache.js');
@@ -896,7 +896,12 @@ class Cursor {
   // The ids the cursor matches now, in its order and window — what a write
   // by query runs over: the rows read once, offset and limit applied.
   async #ids() {
-    const top = await this.#top();
+    // The ids alone: each record is read again inside the transaction, so where the query and the order are the
+    // catalog's the run is covered and reads no record.
+    const bare = this.#clone();
+    bare.#projection = [];
+    bare.#populate = null;
+    const top = await bare.#top();
     const ids = [];
     for (let i = this.#offset; i < top.length; i++) ids.push(top[i].id);
     return ids;
@@ -911,6 +916,11 @@ class Cursor {
     const { transact } = this.#source;
     if (typeof transact !== 'function') throw new TypeError(`${method}(): a cursor at a tag is read-only`);
     const ids = await this.#ids();
+    if (ids.length > MAX_BATCH) {
+      throw new TypeError(
+        `${method}(): ${ids.length} matches, at most ${MAX_BATCH} in one transaction — narrow the query or limit() the cursor`,
+      );
+    }
     let written = 0;
     await transact(
       async (tx) => {

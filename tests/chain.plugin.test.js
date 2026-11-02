@@ -40,6 +40,50 @@ test('chain as a plugin', async (t) => {
     },
   );
 
+  await t.test('the records of one batch are verified against their block parsed and hashed once', async (t2) => {
+    const fsi = memory();
+    const blockReads = [];
+    const counted = {
+      read: (dir, name) => {
+        if (dir.endsWith('blockchain')) blockReads.push(name);
+        return fsi.read(dir, name);
+      },
+      write: (dir, name, content, options) => fsi.write(dir, name, content, options),
+      append: (dir, name, content) => fsi.append(dir, name, content),
+      exists: (dir, name) => fsi.exists(dir, name),
+      remove: (dir, name) => fsi.remove(dir, name),
+      list: (dir) => fsi.list(dir),
+    };
+    const options = {
+      defer: 0,
+      path: 'batch',
+      fsi: counted,
+      logger: false,
+      schema: { entities: { Post: {} } },
+    };
+    const storage = await all.createDatabase(options);
+    const rows = [];
+    for (let i = 0; i < 300; i++) rows.push({ i });
+    const { success: ids } = await storage.Post.bulkInsert(rows);
+    assert.strictEqual(ids.length, 300);
+    await storage.close();
+    // Cold: every record of the batch read and verified — the one block they share read once, not 300 times.
+    const reopened = await all.createDatabase(options);
+    t2.after(() => reopened.close().catch(() => {}));
+    blockReads.length = 0;
+    for (let i = 0; i < ids.length; i++) assert.strictEqual((await reopened.get(ids[i])).i, i);
+    assert.strictEqual(blockReads.length, 1, `the block read ${blockReads.length} times`);
+    // A record edited under the block is still INTEGRITY, however many of its batch read well.
+    await reopened.close();
+    const file = JSON.parse(await fsi.read('batch/data', `${ids[7]}.json`));
+    file.data.i = -1;
+    await fsi.write('batch/data', `${ids[7]}.json`, JSON.stringify(file));
+    const again = await all.createDatabase(options);
+    t2.after(() => again.close().catch(() => {}));
+    assert.strictEqual((await again.get(ids[0])).i, 0);
+    await assert.rejects(() => again.get(ids[7]), { code: 'INTEGRITY' });
+  });
+
   await t.test(
     'with the plugin every write has its block and validate() walks them; chain: false keeps it off',
     async (t2) => {

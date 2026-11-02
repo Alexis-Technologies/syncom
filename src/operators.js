@@ -15,7 +15,7 @@
 // current. Requires args.js, shape.js and paths.js only: it ships to the browser.
 
 const { fieldName, fieldNames, jsonValue } = require('./args.js');
-const { isPlainObject, deepEqual } = require('./shape.js');
+const { isPlainObject, canonical } = require('./shape.js');
 const { valueAt } = require('./paths.js');
 
 const OPERATORS = new Set(['$set', '$unset', '$inc', '$addToSet', '$pull', '$push', '$pop', '$min', '$max', '$rename']);
@@ -49,9 +49,13 @@ const elementsOf = (op, value, many) => {
   return [jsonValue('update', value)];
 };
 
-const holds = (array, value) => {
-  for (let i = 0; i < array.length; i++) if (deepEqual(array[i], value)) return true;
-  return false;
+// The elements of an array as a set of their canonical texts (object keys sorted at every depth): what `deepEqual`
+// would hold equal, tested in O(1) each.
+const textOf = (value) => JSON.stringify(canonical(value));
+const setOf = (array) => {
+  const out = new Set();
+  for (let i = 0; i < array.length; i++) out.add(textOf(array[i]));
+  return out;
 };
 
 // The kinds `$min`/`$max` compare: a number, a string, a boolean — each with its own.
@@ -120,10 +124,17 @@ const expand = (delta, view, kindAt) => {
           // A register's array: rewritten whole, last writer wins.
           const next = [];
           if (op === '$pull') {
-            for (let i = 0; i < array.length; i++) if (!holds(elements, array[i])) next.push(array[i]);
+            const pulled = setOf(elements);
+            for (let i = 0; i < array.length; i++) if (!pulled.has(textOf(array[i]))) next.push(array[i]);
           } else {
+            const held = setOf(array);
             for (let i = 0; i < array.length; i++) next.push(array[i]);
-            for (let i = 0; i < elements.length; i++) if (!holds(next, elements[i])) next.push(elements[i]);
+            for (let i = 0; i < elements.length; i++) {
+              const text = textOf(elements[i]);
+              if (held.has(text)) continue;
+              held.add(text);
+              next.push(elements[i]);
+            }
           }
           if (next.length !== array.length) set(field, next);
         } else calls.push([op === '$pull' ? 'remove' : 'add', field, elements]);

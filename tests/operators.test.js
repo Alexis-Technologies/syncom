@@ -47,6 +47,15 @@ test('update operators', async (t) => {
       ['update', { arr: [2] }],
     ]);
     assert.deepStrictEqual(expand({ $addToSet: { arr: 1 }, $pull: { arr: 9 } }, view, kindAt), [], 'nothing to change');
+    // Object elements are held equal whatever their key order, as deepEqual holds them.
+    assert.deepStrictEqual(
+      expand({ $addToSet: { arr: { $each: [{ b: 2, a: 1 }] } } }, { ...view, arr: [{ a: 1, b: 2 }] }, kindAt),
+      [],
+      'held already',
+    );
+    assert.deepStrictEqual(expand({ $pull: { arr: { b: 2, a: 1 } } }, { ...view, arr: [{ a: 1, b: 2 }, 3] }, kindAt), [
+      ['update', { arr: [3] }],
+    ]);
     // A list and a text take push(); a register's array or an absent field is written as an array.
     assert.deepStrictEqual(expand({ $push: { list: 9, body: 'c', arr: { $each: [3, 4] }, fresh: 5 } }, view, kindAt), [
       ['push', 'list', [9]],

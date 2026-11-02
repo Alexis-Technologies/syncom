@@ -826,6 +826,32 @@ const runCollectionTests = async (t, assert, createStorage) => {
   );
 
   await t.test(
+    'a bulk write or a write by query of more than 10 000 rows is a TypeError before anything lands',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: { index: ['i'] } } } });
+      const rows = (n) => {
+        const out = [];
+        for (let i = 0; i < n; i++) out.push({ i });
+        return out;
+      };
+      await assert.rejects(db.Post.bulkInsert(rows(10_001)), /at most 10000 rows in one transaction/);
+      await assert.rejects(db.Post.bulkUpsert(rows(10_001)), TypeError);
+      await assert.rejects(db.Post.bulkRemove(new Array(10_001).fill('x')), TypeError);
+      assert.strictEqual(await db.Post.count(), 0, 'nothing landed');
+      // Two batches within the bound: 10 002 records; a write by query over them all is refused, a limited one is not.
+      await db.Post.bulkInsert(rows(5001));
+      await db.Post.bulkInsert(rows(5001));
+      assert.strictEqual(await db.Post.count(), 10_002);
+      await assert.rejects(db.Post.select().update({ seen: true }), /10002 matches, at most 10000/);
+      await assert.rejects(db.Post.select().delete(), TypeError);
+      assert.strictEqual(await db.Post.select({ seen: true }).count(), 0, 'nothing landed');
+      assert.deepStrictEqual(await db.Post.select({ i: 7 }).update({ seen: true }), { matched: 2, written: 2 });
+      assert.deepStrictEqual(await db.Post.select().limit(10_000).delete(), { matched: 10_000, written: 10_000 });
+      assert.strictEqual(await db.Post.count(), 2);
+    },
+  );
+
+  await t.test(
     'drop() and dropDatabase() take every store away; an open database is LOCKED, not emptied',
     async (t2) => {
       const fsi = memory();

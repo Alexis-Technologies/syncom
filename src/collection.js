@@ -10,7 +10,7 @@
 
 const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
-const { isPlainObject } = require('./shape.js');
+const { isPlainObject, MAX_BATCH } = require('./shape.js');
 const { SOURCE, CURSOR } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
 const { namedId, idReason } = require('./schema/entity.js');
@@ -18,6 +18,11 @@ const { namedId, idReason } = require('./schema/entity.js');
 // How many rows a bulk write takes at once.
 const list = (method, rows) => {
   if (!Array.isArray(rows)) throw new TypeError(`${method}() takes an array`);
+  if (rows.length > MAX_BATCH) {
+    throw new TypeError(
+      `${method}() takes at most ${MAX_BATCH} rows in one transaction (${rows.length} given): page the batch`,
+    );
+  }
   return rows;
 };
 

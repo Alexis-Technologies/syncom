@@ -294,9 +294,10 @@ await db.Task.select({ boardId: 'b9' }).delete({ data: { reason: 'board closed' 
 A cursor's `update(delta)`, `modify(fn)` and `delete(options)` are one transaction over the records the
 cursor matched when it started (its order, offset and limit applied), each matched again inside the queue
 over the record as it reads there: it is written as the [database's method](./database#update-operators)
-would, and a record gone or no longer a match meanwhile is skipped and counted out of `written`. A cursor at
-a tag is read-only. In a row the `id` is the record's: a data field named `id` is not it, in a query, a write
-by query or an `ifMatch`.
+would, and a record gone or no longer a match meanwhile is skipped and counted out of `written`. One
+transaction takes 10 000 matches at most: past that the write is a `TypeError` before anything lands — narrow
+the query or `limit()` the cursor and go page by page. A cursor at a tag is read-only. In a row the `id` is
+the record's: a data field named `id` is not it, in a query, a write by query or an `ifMatch`.
 
 ## Unique keys
 

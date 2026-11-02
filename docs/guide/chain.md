@@ -106,8 +106,9 @@ This is exactly what `loadData` does on every read from the file (a cached
 record is not read again) — a record whose bytes no longer hash to what its
 block recorded rejects with `code: 'INTEGRITY'` and
 `Database record <id> is invalid` rather than returning the modified data;
-`repair(id)` rebuilds it from the log. `createDatabase({ integrity: 'lazy' })` skips the
-check on a cold read.
+`repair(id)` rebuilds it from the log. The block is read, parsed and hashed once for every record of its
+batch (the last eight blocks verified are kept in memory), so reading a batch back costs one hash per
+record, not one of the block. `createDatabase({ integrity: 'lazy' })` skips the check on a cold read.
 
 ## Retention
 
