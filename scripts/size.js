@@ -192,7 +192,9 @@ const ENTRIES = [
   // E4.4). 73.5, raised by name.
   // 73.5 with the planner's cost model, a plan that follows the definitions, a path split once (review №6, E4.5–E4.8).
   // 74, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 74 },
+  // 74.2 with the unique keys in flight kept in a map, a purge's ids scrubbed together, remove() over the ids as the
+  // call began (review №6, E5.1, E5.5; 2026-11-02). 74.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 74.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -418,7 +420,8 @@ const ENTRIES = [
   // 159.8 with the unique keys of the records in flight and of a transaction's own kept in maps (review №6, E5.1;
   // 2026-11-02). 160, raised by name.
   // 160.2 with the query cache per collection and the live delivery (review №6, E5.2–E5.3). 160.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 160.5 },
+  // 160.5 with a purge's ids scrubbed together through the log and the tags (review №6, E5.5). 161, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 161 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

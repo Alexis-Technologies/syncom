@@ -785,6 +785,47 @@ const runCollectionTests = async (t, assert, createStorage) => {
   });
 
   await t.test(
+    'a purge of a page scrubs every log file holding it once; remove() takes { purge, actor } and nothing else',
+    async (t2) => {
+      const fsi = memory();
+      const logWrites = [];
+      const counted = {
+        read: (dir, name) => fsi.read(dir, name),
+        write: (dir, name, content, options) => {
+          if (dir.includes('log')) logWrites.push(name);
+          return fsi.write(dir, name, content, options);
+        },
+        append: (dir, name, content) => {
+          if (dir.includes('log')) logWrites.push(name);
+          return fsi.append(dir, name, content);
+        },
+        exists: (dir, name) => fsi.exists(dir, name),
+        remove: (dir, name) => fsi.remove(dir, name),
+        list: (dir) => fsi.list(dir),
+      };
+      const db = await createStorage(t2, 'A', { fsi: counted, schema: { entities: { Post: {} } } });
+      const rows = [];
+      for (let i = 0; i < 600; i++) rows.push({ i });
+      const inserted = await db.Post.bulkInsert(rows);
+      await db.log.flush();
+      await assert.rejects(db.Post.remove({ status: 'old' }), /takes \{ purge, actor \} and nothing else/);
+      await assert.rejects(db.Post.remove(5), TypeError);
+      assert.strictEqual(await db.Post.count(), 600, 'nothing removed by a refused call');
+      logWrites.length = 0;
+      assert.deepStrictEqual(await db.Post.remove({ purge: true }), { removed: 600 });
+      // Two pages: each a purge transaction appended and the files holding its ids rewritten once — not once per id.
+      assert.ok(logWrites.length < 40, `${logWrites.length} log writes for 600 purged records`);
+      assert.strictEqual(await db.Post.count(), 0);
+      for (let i = 0; i < inserted.success.length; i += 97) {
+        assert.ok(
+          db.log.entriesOf(inserted.success[i]).every((entry) => entry.scrubbed),
+          'every op of a purged record scrubbed',
+        );
+      }
+    },
+  );
+
+  await t.test(
     'drop() and dropDatabase() take every store away; an open database is LOCKED, not emptied',
     async (t2) => {
       const fsi = memory();

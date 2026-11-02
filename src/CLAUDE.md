@@ -167,8 +167,8 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   order) — never await a read hook inside the queue.
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
-  returns early). The payload leaves the log through `OpLog.scrub(id)`,
-  which rewrites the files holding what it takes (every file of the id only after a failed
+  returns early). The payload leaves the log through `OpLog.scrub(ids)` — one id or the ids of a batch together —
+  which rewrites the files holding what it takes, each once (every file of an id only after a failed
   rewrite); `persist` in `src/apply.js` and `mergeBatch` in `src/bootstrap.js` scrub every id
   of the batch whose entry the batch purged, after the batch is durable and before the relay,
   and an op that lands on a record purged BEFORE it is stripped (`scrubOp`, src/header.js) and

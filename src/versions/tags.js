@@ -389,13 +389,14 @@ class Tags {
   }
 
   /**
-   * A purge reaches the tags: every copy of `id` goes — one kept aside too —
-   * and every tag's catalog forgets the row; a purge reads every tag.
+   * A purge reaches the tags: every copy of each of `ids` goes — one kept aside too —
+   * and every tag's catalog forgets the rows, saved once per tag; a purge reads every tag.
    */
-  async scrub(id) {
-    if (this.#pending.has(id)) {
-      await this.#db.copies.remove(PENDING, id);
-      this.#pending.delete(id);
+  async scrub(ids) {
+    for (let i = 0; i < ids.length; i++) {
+      if (!this.#pending.has(ids[i])) continue;
+      await this.#db.copies.remove(PENDING, ids[i]);
+      this.#pending.delete(ids[i]);
     }
     for (const tag of [...this.#tags]) {
       let copied;
@@ -407,14 +408,19 @@ class Tags {
         if (error.code !== 'TAG_NOT_FOUND') throw error;
         continue;
       }
-      if (copied.has(id)) {
-        await this.#db.copies.remove(tag.name, id);
-        copied.delete(id);
+      let forgot = false;
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        if (copied.has(id)) {
+          await this.#db.copies.remove(tag.name, id);
+          copied.delete(id);
+        }
+        if (catalog.row(id) !== null) {
+          catalog.put(id, null);
+          forgot = true;
+        }
       }
-      if (catalog.row(id) !== null) {
-        catalog.put(id, null);
-        await catalog.save(tag.eventId);
-      }
+      if (forgot) await catalog.save(tag.eventId);
     }
   }
 

@@ -240,22 +240,35 @@ class Collection extends Emitter {
   }
 
   /**
-   * Deletes every record of the collection — tombstones that replicate, or
-   * with `purge: true` purges scrubbed from the log — in pages of 500, each
-   * page one turn of the queue (an encrypted record, which has no op, is
-   * removed on its own); resolves to how many. The definition stays: `removeCollection()` forgets it.
+   * Deletes every record of the collection as it is when the call begins — tombstones that replicate, or with
+   * `purge: true` purges scrubbed from the log, every file holding them rewritten once per page — in pages of 500,
+   * each page one turn of the queue (an encrypted record, which has no op, is removed on its own); a record written
+   * meanwhile stays, one a peer revived is not deleted again. Resolves to how many. The definition stays:
+   * `removeCollection()` forgets it. Takes `{ purge, actor }` and nothing else: `remove({ status: 'old' })` is a
+   * TypeError, not the collection gone — the matches of a query go through `select(query).delete()`.
    */
-  async remove({ purge = false, actor } = {}) {
+  async remove(options = {}) {
+    if (!isPlainObject(options)) throw new TypeError('remove() takes an options object: { purge, actor }');
+    for (const key of Object.keys(options)) {
+      if (key === 'purge' || key === 'actor') continue;
+      throw new TypeError(
+        `remove() takes { purge, actor } and nothing else (${key} given): the matches of a query go through select(query).delete()`,
+      );
+    }
+    const { purge = false, actor } = options;
     const source = this.#storage[SOURCE];
+    // The ids as the call begins (the catalog's list, never edited): the pages come from it.
+    const live = source.ids(this.#name);
     let removed = 0;
-    for (;;) {
-      const live = source.ids(this.#name);
-      if (live.length === 0) break;
+    let at = 0;
+    while (at < live.length) {
       const ids = [];
       const sealed = [];
-      for (let i = 0; i < live.length && ids.length < PAGE; i++) {
-        if (source.row(live[i])?.encrypted) sealed.push(live[i]);
-        else ids.push(live[i]);
+      for (; at < live.length && ids.length < PAGE; at++) {
+        const row = source.row(live[at]);
+        if (row === null || row.gone) continue;
+        if (row.encrypted) sealed.push(live[at]);
+        else ids.push(live[at]);
       }
       for (let i = 0; i < sealed.length; i++) await this.#storage.delete(sealed[i], { actor });
       if (ids.length > 0) {

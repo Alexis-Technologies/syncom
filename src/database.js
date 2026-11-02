@@ -769,10 +769,10 @@ class Database extends Emitter {
       kindOf: (entry, field) => kindOf(entry, field, this.#plugins),
       forget: (id) => this.#records.delete(id),
       flushDeferred: () => this.#flushDeferred(),
-      // A purge reaches the log and the tags alike.
-      scrub: async (id) => {
-        await this.#log.scrub(id);
-        if (this.#tags !== null) await this.#tags.scrub(id);
+      // A purge reaches the log and the tags alike; the ids of a batch together, every file holding them rewritten once.
+      scrub: async (ids) => {
+        await this.#log.scrub(ids);
+        if (this.#tags !== null) await this.#tags.scrub(ids);
       },
     });
   }
@@ -2269,10 +2269,8 @@ class Database extends Emitter {
       );
     const { done } = await this.#run(run);
     if (done !== null) await done;
-    for (let i = 0; i < ids.length; i++) {
-      await this.#core.scrub(ids[i]);
-      this.#records.delete(ids[i]);
-    }
+    await this.#core.scrub(ids);
+    for (let i = 0; i < ids.length; i++) this.#records.delete(ids[i]);
   }
 
   /**
@@ -2302,7 +2300,7 @@ class Database extends Emitter {
    */
   async purge(id, { actor } = {}) {
     await this[COMMIT]('purge', id, {}, { actor });
-    await this.#core.scrub(id);
+    await this.#core.scrub([id]);
     this.#records.delete(id);
   }
 

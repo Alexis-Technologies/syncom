@@ -221,6 +221,7 @@ expectAssignable<syncom.SyncomErrorCode>('CYCLE');
 expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
 expectType<Promise<void>>(storage.purge('id', { actor: 'u2' }));
 expectType<Promise<number>>(log.scrub('id'));
+expectType<Promise<number>>(log.scrub(['id', 'other']));
 expectType<true | undefined>(log.held()[0].scrubbed);
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'purge', id: 'r' });
 expectType<syncom.ClockStamp | null | undefined>(entry.meta.purged);

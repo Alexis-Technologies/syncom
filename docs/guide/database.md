@@ -682,7 +682,10 @@ await storage.Post.bulkRemove(ids);
 A bulk write is one [transaction](#transactions): every record that could be written is, as one
 group of ops, and the ones refused — an id taken, a validator, a unique key, a record of another
 collection — are listed with their index, each with the error the single write would have thrown.
-A collection's `remove(query, { purge })` deletes (or purges) every match, 500 at a time;
+A collection's `remove({ purge })` deletes (or, purged, scrubs from the log — every file holding a page's
+ids rewritten once) every record of the collection as it was when the call began, 500 at a time; it takes
+`{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`): the matches of a query
+go through `select(query).delete()`.
 `findByIds(ids)` reads a set of records as a `Map`, one read each from the cache or the engine.
 
 ### Change and delete

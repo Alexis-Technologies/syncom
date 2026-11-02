@@ -252,6 +252,12 @@ test('OpLog', async (t) => {
         written.length = 0;
         assert.strictEqual(await log.scrub('x'), 0);
         assert.deepStrictEqual(written, [], 'nothing fresh: nothing written');
+        // Several ids at once: the entries of each taken, counted together, the files rewritten once.
+        await log.append([op('A', 8, { id: 'x' }), op('A', 9, { id: 'r9' })]);
+        written.length = 0;
+        assert.strictEqual(await log.scrub(['x', 'r9', 'nope']), 2);
+        assert.strictEqual(new Set(written).size, written.length, 'each file once');
+        assert.strictEqual(await log.scrub(['x', 'r9']), 0);
         await log.close();
       } finally {
         await fs.rm(dir, { recursive: true, force: true });

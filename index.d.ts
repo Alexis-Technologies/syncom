@@ -754,7 +754,7 @@ export interface OpLog {
   readonly droppedHeld: number;
   resetDroppedHeld(): Promise<void>;
   /** Strips the payload of every entry of `id`, in memory and on disk; resolves to how many. */
-  scrub(id: string): Promise<number>;
+  scrub(ids: string | readonly string[]): Promise<number>;
   /**
    * The entries after `eventId` in `scopes` (all, or the first `limit`), and
    * `last`: the seq of the last entry examined, in scope or not — where a

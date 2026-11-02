@@ -443,7 +443,7 @@ event).
 | `droppedTs` | The newest stamp among the ops the log no longer holds — compacted, or unreadable at open; `0` while nothing was ever dropped. A record's past is whole from a reset (`write`, `delete`, `purge`) stamped above it |
 | `retain(keep)` | Entries `keep(entry)` answers true for stay, with their segment and everything after it, whatever the retention; `null` clears it. One slot — the sync manager's, which keeps a dialing node's own ops until every node it syncs with has them |
 | `pin(keep)` → `unpin()` | Like `retain`, for a reader of the past: the entries `keep(entry)` answers true for stay, with their segment and everything after it, until `unpin()`; pins add up, `retain` stays the sync manager's |
-| `scrub(id)` | `Promise<number>` — strips the payload of every entry of `id` and the nonce that salted its digest (`scrubbed: true`), in memory and on disk; the signature and the digest stay, so the header still verifies |
+| `scrub(ids)` | `Promise<number>` — strips the payload of every entry of an id, or of each of an array of ids, and the nonce that salted its digest (`scrubbed: true`), in memory and on disk — a file holding entries of several of them rewritten once; the signature and the digest stay, so the header still verifies |
 | `read(eventId, { scopes, limit }?)` | `{ entries, last }` — the entries in `scopes` after the id, and the seq of the last entry examined (in scope or not; where a feed's cursor may move), or `null` when it cannot be resumed |
 | `since(eventId, { scopes, limit }?)` | `read(...).entries`, or `null` when it cannot be resumed |
 | `entriesOf(id)` | Every retained entry of the record, oldest first — what `repair()` replays and `history()` folds |

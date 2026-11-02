@@ -671,7 +671,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
      * journal is removed after it), and the evidence copies under corrupt/
      * that name `id` removed whole — a purge outranks evidence.
      */
-    async scrub(seqs, { id, sealedTo: sealed, entriesBetween }) {
+    async scrub(seqs, { id, ids = id === null || id === undefined ? [] : [id], sealedTo: sealed, entriesBetween }) {
       const replacements = replacementsOf(seqs, entriesBetween);
       for (let i = 0; i < segments.length; i++) {
         const segment = segments[i];
@@ -719,14 +719,18 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
       } catch {
         kept = null;
       }
-      if (kept !== null) {
-        const needle = `"${id}"`;
+      if (kept !== null && ids.length > 0) {
+        const needles = [];
+        for (let i = 0; i < ids.length; i++) needles.push(`"${ids[i]}"`);
         for (let i = 0; i < kept.length; i++) {
           const name = kept[i];
           const text = await readOrNull(fsi, corruptPath, name);
-          if (typeof text !== 'string' || !text.includes(needle)) continue;
+          if (typeof text !== 'string') continue;
+          let named = null;
+          for (let k = 0; named === null && k < needles.length; k++) if (text.includes(needles[k])) named = ids[k];
+          if (named === null) continue;
           await fsi.remove(corruptPath, name);
-          logger?.info?.({ event: 'log.corrupt.scrubbed', file: name, id });
+          logger?.info?.({ event: 'log.corrupt.scrubbed', file: name, id: named });
         }
       }
     },

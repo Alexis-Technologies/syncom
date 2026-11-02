@@ -626,13 +626,13 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       drop: (segment) => logCall('drop', [{ from: segment.from, to: segment.to }]),
       saveIndex: (index) => logCall('saveIndex', [index]),
       // The scrubbed entries as they are now, sent along: the served store swaps them into what it holds.
-      scrub(seqs, { id, sealedTo, entriesBetween }) {
+      scrub(seqs, { id, ids, sealedTo, entriesBetween }) {
         const entries = [];
         for (let i = 0; i < seqs.length; i++) {
           const held = entriesBetween(seqs[i], seqs[i]);
           if (held.length === 1) entries.push(held[0]);
         }
-        return logCall('scrub', [seqs, { id, sealedTo }, entries]);
+        return logCall('scrub', [seqs, { id, ids, sealedTo }, entries]);
       },
     };
     const db = {
