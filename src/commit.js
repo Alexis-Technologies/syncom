@@ -939,30 +939,27 @@ const commitLocal = async (core, type, id, payload, options) => {
 };
 
 // The unique keys a transaction's own writes would share: the records it
-// touched are not in the catalog nor in flight yet, so they are checked by
-// hand, after the storage's own check.
-const conflictsIn = async (core, touched, id, entry) => {
+// touched are not in the catalog nor in flight yet, so they are checked
+// against the keys the transaction holds for them (`uniques`), after the
+// storage's own check.
+const conflictsIn = async (core, uniques, id, entry) => {
   const found = await core.conflicts(id, entry);
   const def = core.definitionOf(entry.data);
-  if (!def || def.unique.length === 0) return found;
+  if (!def || def.unique.length === 0 || uniques.size === 0) return found;
   const view = await core.view(id, entry);
   // Each (holder, key) once: the storage's own finds first.
   const seen = new Set();
   for (let i = 0; i < found.length; i++) seen.add(`${found[i].other}\0${found[i].fields.join(',')}`);
-  // This record's keys, read once for every record the transaction touched.
-  const mine = [];
-  for (const key of def.unique) mine.push(core.catalog.uniqueKey(view, key));
-  for (const [other, held] of touched) {
-    if (other === id || !isAlive(held) || held.data.$type !== entry.data.$type) continue;
-    const theirs = await core.view(other, held);
-    for (let k = 0; k < def.unique.length; k++) {
-      const key = def.unique[k];
-      if (mine[k] === null || mine[k] !== core.catalog.uniqueKey(theirs, key)) continue;
-      const pair = `${other}\0${key.join(',')}`;
-      if (seen.has(pair)) continue;
-      seen.add(pair);
-      found.push({ fields: [...key], other });
-    }
+  for (let k = 0; k < def.unique.length; k++) {
+    const key = def.unique[k];
+    const text = core.catalog.uniqueKey(view, key);
+    if (text === null) continue;
+    const other = uniques.get(`${def.name}\0${key.join(',')}\0${text}`);
+    if (other === undefined || other === id) continue;
+    const pair = `${other}\0${key.join(',')}`;
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    found.push({ fields: [...key], other });
   }
   return found;
 };
@@ -1010,6 +1007,12 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const items = [];
   const touched = new Map();
   const reserved = new Map();
+  // The unique keys the records touched here hold — `entity\0fields\0key` →
+  // id, and per record the pairs it holds — kept as each op joins, so an op
+  // is checked against them at once (`conflictsIn`): a scan of every touched
+  // record's view per op was N² views, 4 000 rows in 1.8 s.
+  const uniques = new Map();
+  const uniquesOf = new Map();
   // Per record: the index of its newest op here, and its ops' deltas laid
   // one over the other — what the live Record is refreshed by, once.
   const newestOf = new Map();
@@ -1027,13 +1030,37 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       made.previous = null;
     }
   };
+  // A record as its newest op here left it: what `current` reads, its unique
+  // keys standing for it in `uniques` (none once it is dead).
+  const hold = async (id, entry) => {
+    touched.set(id, entry);
+    const held = uniquesOf.get(id);
+    if (held !== undefined) {
+      for (let i = 0; i < held.length; i++) if (uniques.get(held[i]) === id) uniques.delete(held[i]);
+      uniquesOf.delete(id);
+    }
+    if (!isAlive(entry)) return;
+    const def = core.definitionOf(entry.data);
+    if (!def || def.unique.length === 0) return;
+    const view = await core.view(id, entry);
+    const pairs = [];
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      const text = core.catalog.uniqueKey(view, key);
+      if (text === null) continue;
+      const pair = `${def.name}\0${key.join(',')}\0${text}`;
+      uniques.set(pair, id);
+      pairs.push(pair);
+    }
+    if (pairs.length > 0) uniquesOf.set(id, pairs);
+  };
   const tx = {
     ...core,
     current: (id) => (touched.has(id) ? touched.get(id) : core.current(id)),
     // A stream's seq counts the ops made here and not yet appended.
     seqOf: (key) => Math.max(core.seqOf(key), reserved.get(key) ?? 0),
     run: (task) => task(),
-    conflicts: (id, entry) => conflictsIn(core, touched, id, entry),
+    conflicts: (id, entry) => conflictsIn(core, uniques, id, entry),
   };
   // An op made here that continues the one made just before it — of its
   // record, the record's newest, its stream, field, actor and message — is
@@ -1050,21 +1077,23 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const before = items[i];
     if (!grown(before, op, made, coalesce)) return null;
     deltas.set(op.id, assignData(deltas.get(op.id) ?? {}, made.delta));
-    touched.set(op.id, made.entry);
     return before.op;
   };
   // An op made here joins the transaction: grown into the one before it, or an item of its own.
-  const join = (made) => {
+  const join = async (made) => {
     const grown = grows(made);
-    if (grown !== null) return grown;
     const { op } = made;
     const { id } = op;
+    if (grown !== null) {
+      await hold(id, made.entry);
+      return grown;
+    }
     const was = newestOf.get(id);
     if (was !== undefined) release(items[was]);
     newestOf.set(id, items.length);
     deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
     items.push(made);
-    touched.set(id, made.entry);
+    await hold(id, made.entry);
     reserved.set(opKey(op), op.seq);
     return op;
   };

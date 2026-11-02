@@ -36,6 +36,64 @@ const failing = (fsi) => {
 };
 
 const runCollectionTests = async (t, assert, createStorage) => {
+  await t.test('a bulk insert into an entity with a unique key is linear in the batch', async (t2) => {
+    const schema = { entities: { Post: { unique: ['slug'] }, Note: {} } };
+    const db = await createStorage(t2, 'A', { fsi: memory(), schema });
+    const rows = (prefix, n) => {
+      const out = [];
+      for (let i = 0; i < n; i++) out.push({ slug: `${prefix}${i}` });
+      return out;
+    };
+    const timed = async (run) => {
+      const t0 = performance.now();
+      await run();
+      return performance.now() - t0;
+    };
+    // The same batch twice, once into a collection with a unique key: a scan
+    // of every row of the transaction per row made the second one quadratic
+    // (4 000 rows in 1.8 s against 0.16 s without the key).
+    const N = 3000;
+    await db.Note.bulkInsert(rows('w', 50));
+    await db.Post.bulkInsert(rows('w', 50));
+    const plain = await timed(() => db.Note.bulkInsert(rows('n', N)));
+    const unique = await timed(() => db.Post.bulkInsert(rows('p', N)));
+    t2.diagnostic(`with a unique key ${unique.toFixed(0)} ms, without ${plain.toFixed(0)} ms`);
+    assert.ok(unique < plain * 2 + 150, `with a unique key ${unique.toFixed(0)} ms, without ${plain.toFixed(0)} ms`);
+    // Two batches in flight together: the second is checked against the first's
+    // rows while they land — by their keys, not a scan of every one per row.
+    const twin = await timed(() => Promise.all([db.Post.bulkInsert(rows('q', N)), db.Post.bulkInsert(rows('r', N))]));
+    t2.diagnostic(`two batches in flight together ${twin.toFixed(0)} ms`);
+    assert.ok(
+      twin < plain * 4 + 300,
+      `two batches in flight together ${twin.toFixed(0)} ms, one without a key ${plain.toFixed(0)} ms`,
+    );
+    // And the key is still checked inside the batch and against the catalog.
+    const dup = await db.Post.bulkInsert([{ slug: 'd1' }, { slug: 'd1' }, { slug: 'p7' }]);
+    assert.strictEqual(dup.success.length, 1);
+    assert.deepStrictEqual(
+      dup.error.map(({ index, error }) => [index, error.code, error.issues[0].conflict === null]),
+      [
+        [1, 'VALIDATION_FAILED', false],
+        [2, 'VALIDATION_FAILED', false],
+      ],
+    );
+    // Inside one transaction a key follows the record's newest op: taken by
+    // the first row, refused to the second, free again once the first moved on.
+    await db.transact(async (tx) => {
+      await tx.insert({ $type: 'Post', id: 'b1', slug: 'fresh' });
+      const refused = await tx.insert({ $type: 'Post', id: 'b2', slug: 'fresh' }).then(
+        () => null,
+        (error) => error,
+      );
+      assert.strictEqual(refused.code, 'VALIDATION_FAILED');
+      assert.strictEqual(refused.issues[0].conflict, 'b1');
+      await tx.update('b1', { slug: 'moved' });
+      await tx.insert({ $type: 'Post', id: 'b3', slug: 'fresh' });
+    });
+    assert.strictEqual((await db.Post.get('b1')).slug, 'moved');
+    assert.strictEqual((await db.Post.get('b3')).slug, 'fresh');
+    assert.strictEqual(await db.Post.get('b2'), null);
+  });
   await t.test(
     'bulkInsert(), bulkUpsert() and bulkRemove() are one transaction with a verdict per row: a refused row stays out, the rest land, a failed batch lands nothing',
     async (t2) => {

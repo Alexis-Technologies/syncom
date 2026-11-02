@@ -415,7 +415,9 @@ const ENTRIES = [
   // 157.5 with the sorted indexes on SortedIndex (review №6, E4.2). 158, raised by name.
   // 158.1 with the lazy, seeking scan (review №6, E4.4). 158.5, raised by name.
   // 159.2 with the planner's cost model (review №6, E4.5). 159.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 159.5 },
+  // 159.8 with the unique keys of the records in flight and of a transaction's own kept in maps (review №6, E5.1;
+  // 2026-11-02). 160, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 160 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

@@ -461,7 +461,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   reach the storage's state from a path module except through `core`. A
   transaction (`transact` in src/commit.js, what `storage.transact()`,
   `applyPatches`/`restore`/`compact` run) is the first path over a core
-  whose `current` and `seqOf` see the ops made before — `prepare` per op,
+  whose `current` and `seqOf` see the ops made before — `prepare` per op (a unique key checked against a map of the
+  keys its own records hold, `conflictsIn`, as `#conflicts` keeps one of the records' in flight — never a scan of them per op),
   ONE `log.append` of them all, one `core.land` (a chain block, the files),
   the announces after; a throw from `fn` leaves nothing appended. An op that continues the one made
   just before it — of its record, stream, field, actor and message — is that op, grown, where the

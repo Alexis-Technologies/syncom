@@ -257,6 +257,13 @@ class Database extends Emitter {
   // run one after another, in log order.
   #inflight = new Map();
   #inflightCount = 0;
+  // The unique keys the records in flight hold — `entity\0fields\0key` → the ids, and per record its pairs — kept
+  // as a record takes off and settles, so `#conflicts` checks an op against them at once: a scan of every record in
+  // flight per op was N² views while a batch of N landed behind another (two batches of 4 000 rows, 7 s).
+  #inflightKeys = new Map();
+  #inflightPairs = new Map();
+  // The ids in flight whose view the lens has not composed yet: checked by hand.
+  #inflightUnkeyed = new Set();
   #landings = Promise.resolve();
   // Landing steps queued and not yet done: while there is one, a write
   // lands behind it, through the chain — never at once, ahead of it.
@@ -1331,29 +1338,87 @@ class Database extends Emitter {
     if (!def || def.unique.length === 0) return [];
     const view = await this.#view(id, entry);
     const conflicts = this.#catalog.uniqueConflicts(def.name, id, view);
+    if (this.#inflight.size === 0) return conflicts;
     // Each (holder, key) once.
     const seen = new Set();
     for (let i = 0; i < conflicts.length; i++) seen.add(`${conflicts[i].other}\0${conflicts[i].fields.join(',')}`);
+    const collide = (other, key) => {
+      const pair = `${other}\0${key.join(',')}`;
+      if (seen.has(pair)) return;
+      seen.add(pair);
+      conflicts.push({ fields: [...key], other });
+    };
     // The records in flight are not in the catalog yet: their newest entries
-    // are checked by hand — against this record's keys, read once.
-    if (this.#inflight.size === 0) return conflicts;
+    // hold their keys in `#inflightKeys`, read once each.
     const mine = [];
-    for (const key of def.unique) mine.push(this.#catalog.uniqueKey(view, key));
-    for (const [other, stack] of this.#inflight) {
-      if (other === id || stack.items.length === stack.head) continue;
-      const held = stack.items[stack.items.length - 1].entry;
-      if (held.data.$type !== entry.data.$type || !isAlive(held)) continue;
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      const text = this.#catalog.uniqueKey(view, key);
+      mine.push(text);
+      if (text === null) continue;
+      const ids = this.#inflightKeys.get(`${def.name}\0${key.join(',')}\0${text}`);
+      if (ids === undefined) continue;
+      for (const other of ids) if (other !== id) collide(other, key);
+    }
+    // The few a lens has not composed yet: by hand, as the catalog would.
+    for (const other of this.#inflightUnkeyed) {
+      if (other === id) continue;
+      const held = this.#inflightTop(other);
+      if (held === undefined || held.data.$type !== entry.data.$type) continue;
       const theirs = await this.#view(other, held);
       for (let k = 0; k < def.unique.length; k++) {
         const key = def.unique[k];
-        if (mine[k] === null || mine[k] !== this.#catalog.uniqueKey(theirs, key)) continue;
-        const pair = `${other}\0${key.join(',')}`;
-        if (seen.has(pair)) continue;
-        seen.add(pair);
-        conflicts.push({ fields: [...key], other });
+        if (mine[k] !== null && mine[k] === this.#catalog.uniqueKey(theirs, key)) collide(other, key);
       }
     }
     return conflicts;
+  }
+
+  // A record's view as `#view` composes it, where it needs no await: at once without a lens or for a record of
+  // this version, the lens's once it ran (`entry.view`); undefined before that.
+  #viewNow(entry) {
+    if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) {
+      return (entry.composed ??= compose(entry, this.#plugins));
+    }
+    return entry.view;
+  }
+
+  // The unique keys the entry a record is in flight as holds, standing for it until it settles or takes off again.
+  #keyInflight(id, entry) {
+    this.#unkeyInflight(id);
+    if (!isAlive(entry)) return;
+    const def = this.#definitionOf(entry.data);
+    if (!def || def.unique.length === 0) return;
+    const view = this.#viewNow(entry);
+    if (view === undefined) {
+      this.#inflightUnkeyed.add(id);
+      return;
+    }
+    const pairs = [];
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      const text = this.#catalog.uniqueKey(view, key);
+      if (text === null) continue;
+      const pair = `${def.name}\0${key.join(',')}\0${text}`;
+      let ids = this.#inflightKeys.get(pair);
+      if (ids === undefined) this.#inflightKeys.set(pair, (ids = new Set()));
+      ids.add(id);
+      pairs.push(pair);
+    }
+    if (pairs.length > 0) this.#inflightPairs.set(id, pairs);
+  }
+
+  #unkeyInflight(id) {
+    this.#inflightUnkeyed.delete(id);
+    const pairs = this.#inflightPairs.get(id);
+    if (pairs === undefined) return;
+    this.#inflightPairs.delete(id);
+    for (let i = 0; i < pairs.length; i++) {
+      const ids = this.#inflightKeys.get(pairs[i]);
+      if (ids === undefined) continue;
+      ids.delete(id);
+      if (ids.size === 0) this.#inflightKeys.delete(pairs[i]);
+    }
   }
 
   // The entity definition a record belongs to, by its `$type`.
@@ -1573,12 +1638,12 @@ class Database extends Emitter {
     if (stack === undefined) this.#inflight.set(id, (stack = { items: [], head: 0 }));
     const { items } = stack;
     const top = items.length > stack.head ? items[items.length - 1] : null;
-    if (top !== null && top.position === position) {
-      top.entry = entry;
-      return;
+    if (top !== null && top.position === position) top.entry = entry;
+    else {
+      items.push({ entry, position });
+      this.#inflightCount++;
     }
-    items.push({ entry, position });
-    this.#inflightCount++;
+    this.#keyInflight(id, entry);
   }
 
   // The op at `position` landed (or failed): its entry is no longer in flight.
@@ -1597,7 +1662,10 @@ class Database extends Emitter {
       }
     } else items.splice(i, 1);
     this.#inflightCount--;
-    if (stack.items.length === stack.head) this.#inflight.delete(id);
+    if (stack.items.length === stack.head) {
+      this.#inflight.delete(id);
+      this.#unkeyInflight(id);
+    }
   }
 
   // A group of appends failed: every in-flight entry at or past `from` was
@@ -1605,11 +1673,16 @@ class Database extends Emitter {
   #takenBack(from) {
     for (const [id, stack] of this.#inflight) {
       const { items } = stack;
+      let taken = 0;
       while (items.length > stack.head && items[items.length - 1].position >= from) {
         items.pop();
         this.#inflightCount--;
+        taken++;
       }
-      if (items.length === stack.head) this.#inflight.delete(id);
+      if (items.length === stack.head) {
+        this.#inflight.delete(id);
+        this.#unkeyInflight(id);
+      } else if (taken > 0) this.#keyInflight(id, items[items.length - 1].entry);
     }
   }
 
