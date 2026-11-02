@@ -78,27 +78,38 @@ test('pipelines', async (t) => {
     await again.awaitIdle();
     assert.strictEqual((await db.get('total.ann')).sum, 127);
     assert.strictEqual(seen.length, 8);
-    // A handler that throws: the error kept, the checkpoint not moved past the turn, the rest goes on.
+    // A handler that throws stops the pipeline before the turn: the error kept, the checkpoint not moved, nothing
+    // handed over meanwhile; `start()` hands the failed turn over again.
     const errors = [];
-    db.on('error', (error) => errors.push(error.message));
+    db.on('error', (error) => errors.push([error.code, error.name, error.cause.message]));
+    let arm = true;
     const broken = createPipeline(db, {
       name: 'broken',
       source: 'Order',
       handler: async ({ ids }) => {
-        if (ids.includes(c)) throw new Error('boom');
+        if (arm && ids.includes(c)) throw new Error('boom');
       },
     });
+    assert.strictEqual(broken.stopped, true, 'not started');
     await broken.start();
     await broken.awaitIdle();
+    assert.strictEqual(broken.stopped, true, 'stopped by the failure');
+    assert.strictEqual(broken.checkpoint, null, 'nothing past the failed turn');
     await db.Order.update(c, { amount: 102 });
     await broken.awaitIdle();
     assert.deepStrictEqual(
-      // The rebuild at start handed the record over once (a throw), the update once more.
       broken.errors.map((error) => error.message),
-      ['boom', 'boom'],
+      ['boom'],
+      'once: nothing is handed over while stopped',
     );
-    assert.deepStrictEqual(errors, ['boom', 'boom']);
+    assert.deepStrictEqual(errors, [['PIPELINE_FAILED', 'broken', 'boom']]);
+    arm = false;
+    await broken.start();
+    await broken.awaitIdle();
+    assert.strictEqual(broken.stopped, false);
+    assert.ok(broken.checkpoint !== null, 'the turn handed over again, and handled');
     broken.stop();
+    assert.strictEqual(broken.stopped, true);
     again.stop();
     await db.close();
     // A checkpoint the log cannot resume from: every record of the source, once.
@@ -121,25 +132,37 @@ test('pipelines', async (t) => {
     assert.throws(() => createPipeline(db, { name: 'bad name', source: 'Order', handler }), TypeError);
   });
 
-  await t.test('a pipeline hears a plain delete of its source', async () => {
+  await t.test('a pipeline hears a plain delete and a purge of its source', async () => {
     const db = await syncom.createDatabase({ path: '/d', fsi: memory(), defer: 0, logger: false, schema });
     const heard = [];
     const pipeline = createPipeline(db, {
       name: 'deletes',
       source: 'Order',
       handler: ({ ids, changes }) => {
-        for (const id of ids) heard.push([id, changes.some((change) => change.action === 'delete')]);
+        for (const id of ids) {
+          const actions = changes.filter((change) => change.id === id).map((change) => change.action);
+          heard.push([id, actions]);
+        }
       },
     });
     await pipeline.start();
     const id = (await db.Order.insert({ customer: 'ann', amount: 1 })).id;
     await db.delete(id);
+    const other = (await db.Order.insert({ customer: 'bob', amount: 2 })).id;
+    await db.purge(other);
+    await db.Total.insert({ customer: 'nobody', sum: 0 });
     await pipeline.awaitIdle();
-    // The insert, then the delete: a tombstone's row keeps the collection the record was of.
-    assert.deepStrictEqual(heard, [
-      [id, false],
-      [id, true],
-    ]);
+    // The insert, then the delete (a tombstone's row keeps the collection), then a purge (the change names it); a
+    // record of another collection is not heard of.
+    assert.deepStrictEqual(
+      heard.map(([one, actions]) => [one, actions.includes('delete'), actions.includes('purge')]),
+      [
+        [id, false, false],
+        [id, true, false],
+        [other, false, false],
+        [other, false, true],
+      ],
+    );
     pipeline.stop();
     await db.close();
   });

@@ -1,6 +1,6 @@
 # Pipelines
 
-`@alexify/syncom/pipeline` runs a handler over every change of a collection, once, in order — a derived
+`@alexify/syncom/pipeline` runs a handler over every change of a collection, in order, at least once — a derived
 collection, a running total, an index kept somewhere else.
 
 ```js
@@ -33,10 +33,12 @@ Where the log cannot resume from the checkpoint — compacted past it, another e
 yet — every record of the source is handed over once (`rebuilt: true`). A crash between the
 transaction and the checkpoint hands the turn over again; nothing is skipped.
 
-A handler that throws keeps the error (`pipeline.errors`, the database's `error` event, the log line
-`pipeline.failed`) and the checkpoint moves nothing past the turn. `idle()` says whether anything is
-queued or running; `awaitIdle()` resolves once nothing is; `stop()` stops following (what is queued
-waits for the next start).
+A handler that throws stops the pipeline before the turn: the error is kept (`pipeline.errors`, the newest twenty),
+the database's `error` event carries `PIPELINE_FAILED` (`name`, `eventId`, `cause`), the log line `pipeline.failed`
+says so, the checkpoint stays, and nothing is handed over until `start()` — which hands the failed turn over again.
+A turn is handled at least once and never skipped; a handler is written to be idempotent for that reason. `stopped`
+says whether the pipeline follows nothing now; `idle()` whether anything is queued or running; `awaitIdle()` resolves
+once nothing is; `stop()` stops following (what is queued waits for the next start).
 
 ## What to derive into
 

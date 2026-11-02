@@ -345,6 +345,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `READ_ONLY` | any write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()`, `repair()` on a database opened with `readOnly: true`, or on a writer whose lease was lost (`lease: true`); `sync.unit()` on either (`reason: 'hosting'`): a follower's log and vector are as of its open, so it hosts no feed until the shared log lands | `path`, `lease`; `reason` from `sync.unit()` |
 | `TARGET_NOT_EMPTY` | `copyEngine()` (`@alexify/syncom/engines`) when the target engine already holds a database at `path` (`node.json`, or a record) | `path` |
 | `SCHEMA_MISMATCH` | `importJSON()` (`@alexify/syncom/dump`) of a dump made under another schema hash than this database runs, without `force` | `expected`, `given` |
+| `PIPELINE_FAILED` | the database's `error` event when a pipeline's handler threw (`@alexify/syncom/pipeline`): the pipeline stopped before the turn, its checkpoint stays, `start()` hands the turn over again | `name`, `eventId`, `cause` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on and writes nothing more; what was logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Also what an engine's write set, log group, seal, index, kv or copies put answers when a newer lease's document sits where it would write (MongoDB's fence) | `path`, `cause` |
 | `FOLLOW_LOST` | the storage's `error` event, on a follower (`readOnly: true`): the engine's change stream ended — an error, a close — so what the writer landed meanwhile was not heard; the follower subscribes again first and then reads every record again (a record removed meanwhile loses its row) | `path`, `cause` |
@@ -703,7 +704,11 @@ change of the `source` collection, once, in order — a derived collection, a co
 | `handler(batch, tx)` | Per turn of the database that changed a record of the source: `batch` is `{ ids, changes, replay, rebuilt, eventId }` — the records that changed (each once), their changes (null on a replay), the turn's log position — and `tx` the one transaction the handler writes through (the derived writes land whole, or not at all); a throw keeps the error (`errors`, the `error` event) and moves the checkpoint nothing past the turn |
 | `start()` | Reads the checkpoint from the `pipeline` kv namespace, replays the turns the log holds since it (their ids, `replay: true`), or — where the log cannot resume from it, or there is none — hands every record of the source over once (`rebuilt: true`), then follows the `transaction` events |
 | `stop()`, `idle()`, `awaitIdle()` | Stops following (what is queued waits for the next start); whether nothing is queued or running; a promise of that |
-| `checkpoint`, `rebuilt`, `errors`, `leader` | The log position handled last; whether the last start rebuilt; the handler's errors; kept for a shared database (the leader runs it) |
+| `checkpoint`, `rebuilt`, `stopped`, `errors`, `leader` | The log position handled last; whether the last start rebuilt; whether the pipeline follows nothing now (not started, stopped, or a handler that threw); the handler's errors, the newest twenty; kept for a shared database (the leader runs it) |
+
+A handler that throws stops the pipeline before the turn: the checkpoint stays, the database's `error` event carries
+`PIPELINE_FAILED` (`name`, `eventId`, `cause`), nothing is handed over meanwhile, and `start()` hands the turn over
+again — a turn is handled at least once, never skipped.
 
 The `transaction` event carries `eventId`, the log position of the turn's last op, which is what a pipeline keeps.
 A handler's write to the source is another turn, handed over again: derive into another collection.

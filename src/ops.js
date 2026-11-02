@@ -1007,7 +1007,12 @@ const applyOp = (previous, op, limits = null) => {
     erase(entry, stamp, delta);
     const before = previous ? previous.meta.purged : undefined;
     const changed = before === undefined || compareClock(meta.purged, before) > 0;
-    if (changed) changes.push({ action: 'purge' });
+    if (changed) {
+      // The collection the record was of rides with the purge (its catalog row goes with it): a reader that
+      // follows a collection's turns hears of the purge.
+      const type = previous && typeof previous.data?.$type === 'string' ? previous.data.$type : null;
+      changes.push(type === null ? { action: 'purge' } : { action: 'purge', type });
+    }
     return outcome(changed, true);
   }
 

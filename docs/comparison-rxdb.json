@@ -2111,7 +2111,7 @@
         },
         "pipeline": {
           "mark": "✅",
-          "text": "`createPipeline(db, { name, source, handler })`: every turn of the source handled once in one transaction, checkpointed, replayed from the log on reopen; reads are never held up (`awaitBeforeReads` refused by design)",
+          "text": "`createPipeline(db, { name, source, handler })`: every turn of the source handled in one transaction, at least once and never skipped — checkpointed after the transaction, replayed from the log on reopen; a failing handler stops the pipeline before the turn (`PIPELINE_FAILED`); reads are never held up (`awaitBeforeReads` refused by design)",
           "source": "src/pipeline/pipeline.js; docs/guide/pipeline.md"
         },
         "contracts": {

@@ -1,8 +1,8 @@
 'use strict';
 
 // Pipelines (@alexify/syncom/pipeline): a handler run over every change of
-// a collection, once, in order — a derived collection, a counter, an index
-// kept in another place. `createPipeline(db, { name, source, handler })`
+// a collection, in order, at least once — a derived collection, a counter,
+// an index kept in another place. `createPipeline(db, { name, source, handler })`
 // follows the `transaction` events of the database: of each turn, the
 // records of `source` that changed are handed to `handler(batch, tx)` inside
 // ONE transaction (the derived writes land whole, or not at all), and the
@@ -11,23 +11,29 @@
 // log holds since the checkpoint are replayed first (their ids, no changes
 // — a replay reads the records), and where the log cannot resume from it
 // (compacted past, another epoch, no checkpoint), every record of the
-// source is handed over once (`rebuilt`). A handler's write to the source
-// is another turn and is handed over again: derive into another
-// collection. Reads of the target are never held up. Requires symbols.js,
-// engine.js, errors.js and hooks.js only.
+// source is handed over once (`rebuilt`). A handler that throws stops the
+// pipeline BEFORE the turn: the checkpoint stays, the database's `error`
+// event carries PIPELINE_FAILED, and `start()` hands the turn over again —
+// a turn is never skipped. A handler's write to the source is another turn
+// and is handed over again: derive into another collection. Reads of the
+// target are never held up. Requires symbols.js, engine.js, errors.js and
+// hooks.js only.
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
+const { SyncomError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 
 const NAMESPACE = 'pipeline';
+// How many of the handler's errors are kept (the newest).
+const MAX_ERRORS = 20;
 
 const isDatabase = (value) =>
   value !== null && typeof value === 'object' && typeof value.transact === 'function' && typeof value.on === 'function';
 
 /**
  * A pipeline over `db`: `{ name, source, start(), stop(), idle(), awaitIdle(),
- * checkpoint, rebuilt, errors }`. `handler(batch, tx)` gets `{ ids, changes,
+ * checkpoint, rebuilt, stopped, errors }`. `handler(batch, tx)` gets `{ ids, changes,
  * replay, rebuilt, eventId }` — the records of the source collection the
  * turn changed, their changes (null on a replay), and `tx`, the
  * transaction the handler writes through. `leader` is kept for a database
@@ -65,17 +71,36 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     await store.put(name, JSON.stringify({ eventId: checkpoint }), { atomic: true });
   };
 
+  // Following stopped: the listener off, what is queued left for the next start (the checkpoint stands).
+  const halt = () => {
+    stopped = true;
+    if (listener !== null) db.off('transaction', listener);
+    listener = null;
+    queue.length = 0;
+  };
+
   const drain = async () => {
     for (;;) {
-      // `stopped` moves under `stop()`, between two batches.
+      // `stopped` moves under `stop()` and a failure, between two batches.
       if (queue.length === 0 || stopped) break;
       const batch = queue.shift();
       try {
         await handle(batch);
-      } catch (error) {
-        errors.push(error);
-        notify(db, logger, 'error', error);
-        logger.warn({ event: 'pipeline.failed', name, eventId: batch.eventId, err: error });
+      } catch (cause) {
+        // A failed turn stops the pipeline BEFORE it: the checkpoint stays, and `start()` hands the turn over
+        // again — never skipped, never moved past.
+        if (errors.length >= MAX_ERRORS) errors.shift();
+        errors.push(cause);
+        halt();
+        logger.warn({ event: 'pipeline.failed', name, eventId: batch.eventId, err: cause });
+        const message = `Pipeline ${name} failed at ${batch.eventId} and stopped before the turn`;
+        notify(
+          db,
+          logger,
+          'error',
+          new SyncomError('PIPELINE_FAILED', message, { name, eventId: batch.eventId, cause }),
+        );
+        break;
       }
     }
     running = null;
@@ -94,7 +119,9 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     const own = [];
     for (let i = 0; i < changes.length; i++) {
       const { id } = changes[i];
-      if (seam.row(id)?.type !== source) continue;
+      // The collection: the row's — a tombstone's row keeps it — or, of a purge (its row is gone), the change's.
+      const type = seam.row(id)?.type ?? changes[i].type ?? null;
+      if (type !== source) continue;
       own.push(changes[i]);
       if (seen.has(id)) continue;
       seen.add(id);
@@ -141,7 +168,11 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     get rebuilt() {
       return rebuilt;
     },
-    /** What the handler threw, in order. */
+    /** Whether the pipeline follows nothing now: not started, `stop()`, or a handler that threw. */
+    get stopped() {
+      return stopped;
+    },
+    /** What the handler threw, in order — the newest twenty. */
     errors,
     /** Reads the checkpoint, replays the turns since it (or rebuilds), then follows the turns. */
     async start() {
@@ -165,11 +196,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     },
     /** Stops following; what is queued is left for the next start (the checkpoint stands). */
     stop() {
-      if (stopped) return;
-      stopped = true;
-      db.off('transaction', listener);
-      listener = null;
-      queue.length = 0;
+      if (!stopped) halt();
     },
     /** Whether nothing is queued or running. */
     idle() {

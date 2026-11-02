@@ -82,7 +82,8 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   only once every enabled registered node acknowledged its delete (one the log no longer retains folds but is
   never dropped); `run({ drop: true })` takes the entry and the row too.
 - **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
-  over every change of a collection, once, in order, inside one transaction per turn, and keeps the turn's
+  over every change of a collection, in order, inside one transaction per turn — at least once: a handler
+  that throws stops the pipeline before the turn (`PIPELINE_FAILED`), and `start()` hands it over again — and keeps the turn's
   log position as its checkpoint after the transaction landed — a reopen resumes from it (the turns since
   replayed from the log), or hands every record of the source over once where the log cannot resume. The
   `transaction` event carries `eventId`, the log position of the turn's last op.

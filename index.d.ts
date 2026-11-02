@@ -539,7 +539,8 @@ export type Change =
   | { action: 'treeMove'; field: string; node: string; parent: string | null; after: string | null }
   | { action: 'treeRemove'; field: string; node: string }
   | { action: 'delete'; data?: RecordData }
-  | { action: 'purge' };
+  /** `type`: the collection the record was of, where it was alive — its row goes with the purge. */
+  | { action: 'purge'; type?: string };
 
 /** A change tagged with the record it is of. */
 export type RecordChange = Change & { id: string };
@@ -591,6 +592,7 @@ export type SyncomErrorCode =
   | 'CLOSED'
   | 'IN_HOOK'
   | 'IN_TRANSACTION'
+  | 'PIPELINE_FAILED'
   | 'NOT_FOUND'
   | 'EXISTS'
   | 'FIELD_KIND'
