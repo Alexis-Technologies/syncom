@@ -18,7 +18,176 @@ const code = async (promise) => {
   return null;
 };
 
+// An fsi whose next writes fail on demand (`failing.fail = true`): what a batch that cannot reach the disk meets.
+const failing = (fsi) => {
+  const wrapped = {
+    read: (dir, name) => fsi.read(dir, name),
+    write: (dir, name, content, options) =>
+      wrapped.fail ? Promise.reject(new Error('disk full')) : fsi.write(dir, name, content, options),
+    append: (dir, name, content) =>
+      wrapped.fail ? Promise.reject(new Error('disk full')) : fsi.append(dir, name, content),
+    exists: (dir, name) => fsi.exists(dir, name),
+    remove: (dir, name) => fsi.remove(dir, name),
+    list: (dir) => fsi.list(dir),
+    fail: false,
+  };
+  return wrapped;
+};
+
 const runCollectionTests = async (t, assert, createStorage) => {
+  await t.test(
+    'bulkInsert(), bulkUpsert() and bulkRemove() are one transaction with a verdict per row: a refused row stays out, the rest land, a failed batch lands nothing',
+    async (t2) => {
+      const fsi = failing(memory());
+      const schema = { entities: { Post: { unique: ['slug'], schema: (data) => typeof data.slug === 'string' } } };
+      const db = await createStorage(t2, 'A', { fsi, schema });
+      const turns = [];
+      db.on('transaction', (event) => turns.push(event));
+      await db.Post.insert({ id: 'p1', slug: 'a' });
+      const rows = [{ slug: 'c' }, { slug: 'a' }, { id: 'p1', slug: 'z' }, 5, { slug: 7 }, { id: 'p2', slug: 'd' }];
+      const inserted = await db.Post.bulkInsert(rows);
+      assert.strictEqual(inserted.success.length, 2);
+      assert.strictEqual(inserted.success[1], 'p2');
+      assert.deepStrictEqual(
+        inserted.error.map(({ index, id, error }) => [index, id, error.code ?? error.name]),
+        [
+          [1, null, 'VALIDATION_FAILED'],
+          [2, 'p1', 'EXISTS'],
+          [3, null, 'TypeError'],
+          [4, null, 'VALIDATION_FAILED'],
+        ],
+      );
+      assert.strictEqual(inserted.error[1].data, rows[2], 'the row as given');
+      // One turn for the batch, an op per row that landed; nothing of a refused row.
+      assert.strictEqual(turns.length, 2);
+      assert.strictEqual(turns[1].ops.length, 2);
+      assert.deepStrictEqual(await db.Post.get('p1'), { slug: 'a', $type: 'Post' });
+      assert.strictEqual(await db.Post.count(), 3);
+      const upserted = await db.Post.bulkUpsert([{ id: 'p2', slug: 'dd', n: 1 }, { slug: 'nope' }]);
+      assert.deepStrictEqual(upserted.success, ['p2']);
+      assert.strictEqual(upserted.error[0].error.code, 'INVALID_ID');
+      assert.deepStrictEqual(await db.Post.get('p2'), { slug: 'dd', n: 1, $type: 'Post' });
+      const other = await db.insert({ $type: 'Other' });
+      const removed = await db.Post.bulkRemove(['p2', 'nope', other, 'p1']);
+      assert.deepStrictEqual(removed.success, ['p2', 'p1']);
+      assert.deepStrictEqual(
+        removed.error.map(({ index, error }) => [index, error.code]),
+        [
+          [1, 'NOT_FOUND'],
+          [2, 'NOT_FOUND'],
+        ],
+      );
+      assert.strictEqual(await db.Post.count(), 1);
+      // The disk fails the batch: nothing of it lands, the rows that were right included.
+      await db.log.flush();
+      fsi.fail = true;
+      const failed = await db.Post.bulkInsert([{ slug: 'x' }, { slug: 'y' }]).then(
+        () => null,
+        (error) => error,
+      );
+      fsi.fail = false;
+      assert.ok(failed !== null, 'the batch failed');
+      assert.strictEqual(await db.Post.count(), 1);
+      assert.strictEqual(await db.Post.count({ slug: 'x' }), 0);
+      // Not an array, not plain objects: the caller's mistake.
+      await assert.rejects(db.Post.bulkInsert({}), TypeError);
+      await assert.rejects(db.Post.bulkRemove('p1'), TypeError);
+    },
+  );
+
+  await t.test(
+    'a record named by its data: insert() takes the id field as the id, EXISTS for a live one, upsert() and insertIfAbsent() write by it',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', {
+        fsi: memory(),
+        schema: { entities: { Post: {}, Note: { idField: 'noteId' } } },
+      });
+      const post = await db.Post.insert({ id: 'p1', title: 'a' });
+      assert.strictEqual(post.id, 'p1');
+      assert.deepStrictEqual(await db.get('p1'), { title: 'a', $type: 'Post' }, 'the id field leaves the data');
+      assert.strictEqual(await code(db.Post.insert({ id: 'p1', title: 'b' })), 'EXISTS');
+      assert.strictEqual(await code(db.insert({ $type: 'Post', id: 'p1' })), 'EXISTS');
+      assert.strictEqual(await code(db.transact((tx) => tx.insert({ $type: 'Post', id: 'p1' }))), 'EXISTS');
+      assert.strictEqual(await code(db.Post.insert({ id: 'bad id' })), 'INVALID_ID');
+      // Under the entity's own id field; a bare `id` is a field then.
+      const note = await db.Note.insert({ noteId: 'n1', id: 'kept' });
+      assert.strictEqual(note.id, 'n1');
+      assert.deepStrictEqual(await db.Note.get('n1'), { id: 'kept', $type: 'Note' });
+      // Without one: minted, as before.
+      const minted = await db.Post.insert({ title: 'c' });
+      assert.notStrictEqual(minted.id, 'p1');
+      // upsert() writes whole by the named id, new or not; insertIfAbsent() leaves a live one as it is.
+      const up = await db.Post.upsert({ id: 'p1', title: 'b', n: 1 });
+      assert.strictEqual(up.title, 'b');
+      assert.deepStrictEqual(await db.Post.get('p1'), { title: 'b', n: 1, $type: 'Post' });
+      await db.Post.upsert({ id: 'p9', title: 'new' });
+      assert.deepStrictEqual(await db.Post.get('p9'), { title: 'new', $type: 'Post' });
+      assert.strictEqual(await code(db.Post.upsert({ title: 'no id' })), 'INVALID_ID');
+      const kept = await db.Post.insertIfAbsent({ id: 'p1', title: 'z' });
+      assert.strictEqual(kept.title, 'b');
+      const made = await db.Post.insertIfAbsent({ id: 'p10', title: 'z' });
+      assert.strictEqual(made.title, 'z');
+      // A deleted record is not there: insert() and insertIfAbsent() write it again.
+      await db.Post.delete('p9');
+      await db.Post.insert({ id: 'p9', title: 'again' });
+      assert.deepStrictEqual(await db.Post.get('p9'), { title: 'again', $type: 'Post' });
+      assert.strictEqual(await code(db.Note.insertIfAbsent({ noteId: 'n1' })), null);
+    },
+  );
+
+  await t.test(
+    'a composite id is derived from the declared fields once, and a value outside the id class is INVALID_ID',
+    async (t2) => {
+      const schema = {
+        entities: { Line: { id: { fields: ['orgId', 'n'], separator: '-' } }, Cell: { id: { fields: ['x', 'y'] } } },
+      };
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema });
+      const line = await db.Line.insert({ orgId: 'o1', n: 3, text: 'x' });
+      assert.strictEqual(line.id, 'o1-3');
+      assert.deepStrictEqual(
+        await db.Line.get('o1-3'),
+        { orgId: 'o1', n: 3, text: 'x', $type: 'Line' },
+        'the fields stay',
+      );
+      assert.strictEqual((await db.Cell.insert({ x: 1, y: 2 })).id, '1.2', "'.' unless given");
+      assert.strictEqual(await code(db.Line.insert({ orgId: 'o1', n: 3 })), 'EXISTS');
+      assert.strictEqual(await code(db.Line.insert({ orgId: 'o1' })), 'INVALID_ID', 'a field missing');
+      assert.strictEqual(await code(db.Line.insert({ orgId: 'o 1', n: 1 })), 'INVALID_ID', 'outside the class');
+      assert.strictEqual(await code(db.insert({ $type: 'Line', orgId: 'o/1', n: 1 })), 'INVALID_ID');
+      // upsert, insertIfAbsent and the bulk writes derive it the same way.
+      await db.Line.upsert({ orgId: 'o1', n: 3, text: 'y' });
+      assert.strictEqual((await db.Line.get('o1-3')).text, 'y');
+      assert.strictEqual((await db.Line.insertIfAbsent({ orgId: 'o1', n: 3, text: 'z' })).text, 'y');
+      const bulk = await db.Line.bulkInsert([{ orgId: 'o2', n: 1 }, { orgId: 'o2' }, { orgId: 'o1', n: 3 }]);
+      assert.deepStrictEqual(bulk.success, ['o2-1']);
+      assert.deepStrictEqual(
+        bulk.error.map(({ error }) => error.code),
+        ['INVALID_ID', 'EXISTS'],
+      );
+      // The definition is checked: a separator outside the class, no fields.
+      await assert.rejects(db.addCollections({ Bad: { id: { fields: ['a'], separator: '|' } } }), TypeError);
+      await assert.rejects(db.addCollections({ Bad: { id: { fields: [] } } }), TypeError);
+    },
+  );
+
+  await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
+    const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+    const id = (await db.Post.insert({ n: 1 })).id;
+    const seen = await db.transact(async (tx) => {
+      await tx.update(id, { n: 2 });
+      return [
+        await code(db.update(id, { n: 3 })),
+        await code(db.Post.insert({ n: 9 })),
+        await code(db.transact(() => {})),
+      ];
+    });
+    assert.deepStrictEqual(seen, ['IN_TRANSACTION', 'IN_TRANSACTION', 'IN_TRANSACTION']);
+    assert.deepStrictEqual(await db.Post.get(id), { n: 2, $type: 'Post' });
+    // After the transaction the queue is free again.
+    await db.update(id, { n: 3 });
+    assert.strictEqual((await db.Post.get(id)).n, 3);
+  });
+
   await t.test(
     'addCollections() defines a collection after the open and indexes the records of its type',
     async (t2) => {

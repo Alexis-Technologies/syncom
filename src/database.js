@@ -24,7 +24,7 @@ const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { project } = require('./schema/entity.js');
+const { project, namedId } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { checkEngine, checkEngineDb, kvNamespace } = require('./engine.js');
@@ -79,6 +79,13 @@ const actorName = (actor) => {
 const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
+
+// A record written under the id its data names, inside a transaction: a
+// live record there already is EXISTS — decided where nothing interleaves.
+const insertNamed = async (tx, id, data, options) => {
+  if (await tx.has(id)) throw new SyncomError('EXISTS', `Record ${id} exists already`, { id });
+  await tx.set(id, data, { actor: options.actor });
+};
 
 class Database extends Emitter {
   #path;
@@ -194,6 +201,9 @@ class Database extends Emitter {
   #encrypted;
   #hooks;
   #inHook = 0;
+  // A transaction's or a `modify()`'s function running inside the queue: a write made through the
+  // database from inside it would wait for the queue it holds (IN_TRANSACTION).
+  #inTask = 0;
   #queued = 0;
   #queue = Promise.resolve();
   #closed = false;
@@ -1124,6 +1134,8 @@ class Database extends Emitter {
       indexed: (entity) => catalog.indexed(entity),
       searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
+      // The entity definition of a collection (null for none): its id rule, its references, its methods.
+      definition: (entity) => this.#entities.get(entity) ?? null,
       load: async (id) => {
         const entry = await this.#entries.load(id);
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;
@@ -1461,6 +1473,14 @@ class Database extends Emitter {
         ),
       );
     }
+    if (this.#inTask > 0) {
+      return Promise.reject(
+        new SyncomError(
+          'IN_TRANSACTION',
+          'Cannot write to the database from inside a transaction or modify(): write through tx, or return the record',
+        ),
+      );
+    }
     this.#queued++;
     const result = this.#queue.then(task, task);
     const settled = result.finally(() => {
@@ -1730,15 +1750,55 @@ class Database extends Emitter {
     }
   }
 
-  async insert(data, options = {}) {
-    // `getId` may be sync or async — both call sites already await this.
+  // The id a record's data names under its entity's definition — a composite
+  // id from the declared fields, the id field's value — with the data the
+  // record is written as (the id field leaves it); null when the data names
+  // none, and the id is minted. A derived id outside the id class, or a
+  // composite with a field missing, is INVALID_ID.
+  #named(data) {
+    const def = this.#definitionOf(data);
+    if (def === undefined) return null;
+    const named = namedId(def, data);
+    if (named === null) return null;
+    if (named.id === null) {
+      throw typed('INVALID_ID', `A ${def.name} needs ${named.field} for its id (id.fields)`);
+    }
+    if (!isRecordId(named.id)) throw invalidId(named.id);
+    return named;
+  }
+
+  // A minted id: `getId` may be sync or async — every call site awaits this.
+  async #mint() {
     const id = await this.#getId();
     if (!isRecordId(id)) {
       const error = invalidId(id);
       error.message = `createDatabase({ getId }): ${error.message}`;
       throw error;
     }
-    await this.saveData(id, data, options);
+    return id;
+  }
+
+  /**
+   * Writes a new record: under the id its data names — its entity's
+   * composite id, or the id field's value — when it names one (a live record
+   * there already is `EXISTS`, decided inside the queue), else under a
+   * minted one. Resolves to the id.
+   */
+  async insert(data, options = {}) {
+    if (!isPlainObject(data)) throw new TypeError('insert() takes a plain object');
+    const named = this.#named(data);
+    if (named === null) {
+      const id = await this.#mint();
+      await this.saveData(id, data, options);
+      return id;
+    }
+    const { id } = named;
+    // An encrypted record has no op and no transaction: written as it is.
+    if (options.encrypted === true) {
+      await this.saveData(id, named.data, options);
+      return id;
+    }
+    await this.transact((tx) => insertNamed(tx, id, named.data, options), { actor: options.actor });
     return id;
   }
 
@@ -2222,7 +2282,17 @@ class Database extends Emitter {
    */
   async transact(fn, options = {}) {
     if (typeof fn !== 'function') throw new TypeError('transact() takes a function');
-    const run = () => transact(this.#core, (tx) => fn(this.#transaction(tx)), options);
+    // While `fn` runs the queue is this transaction's: a write made through the database meanwhile is
+    // refused (IN_TRANSACTION) where it would otherwise wait for itself.
+    const guarded = async (tx) => {
+      this.#inTask++;
+      try {
+        return await fn(this.#transaction(tx));
+      } finally {
+        this.#inTask--;
+      }
+    };
+    const run = () => transact(this.#core, guarded, options);
     const otel = this.#otel;
     const { result, done } = await this.#run(
       otel.enabled ? () => traced(otel, 'syncom.transact', {}, run, ({ ops }) => ({ 'syncom.ops.count': ops })) : run,
@@ -2271,14 +2341,15 @@ class Database extends Emitter {
       return entry !== null && (entry.encrypted || isAlive(entry));
     };
     api.insert = async (data, options = {}) => {
-      const id = await this.#getId();
-      if (!isRecordId(id)) {
-        const error = invalidId(id);
-        error.message = `createDatabase({ getId }): ${error.message}`;
-        throw error;
+      if (!isPlainObject(data)) throw new TypeError('insert() takes a plain object');
+      const named = this.#named(data);
+      if (named === null) {
+        const id = await this.#mint();
+        await tx.commit('write', id, { data }, { actor: options.actor });
+        return id;
       }
-      await tx.commit('write', id, { data }, { actor: options.actor });
-      return id;
+      await insertNamed(api, named.id, named.data, options);
+      return named.id;
     };
     api.set = async (id, data, options = {}) => {
       if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');

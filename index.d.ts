@@ -588,7 +588,9 @@ export interface Refusal {
 export type SyncomErrorCode =
   | 'CLOSED'
   | 'IN_HOOK'
+  | 'IN_TRANSACTION'
   | 'NOT_FOUND'
+  | 'EXISTS'
   | 'FIELD_KIND'
   | 'OUT_OF_RANGE'
   | 'CYCLE'
@@ -1057,6 +1059,13 @@ export interface EntityDefinition {
   index?: readonly string[];
   /** Unique keys, single or composite; read off the schema when absent. */
   unique?: ReadonlyArray<string | readonly string[]>;
+  /**
+   * A composite id: the record id is the values of `fields` (every one present, as text) joined by
+   * `separator` (`'.'` unless given; of the id class) — derived on `insert()`, `upsert()`,
+   * `insertIfAbsent()` and the bulk writes; the fields stay in the record. Without it, the id field's
+   * value names the record when the data carries one (and leaves the data), else the id is minted.
+   */
+  id?: { readonly fields: readonly string[]; readonly separator?: string };
   /** Free-form field notes, kept as given. */
   fields?: { readonly [name: string]: unknown };
   /**
@@ -1754,6 +1763,7 @@ export interface TransactOptions extends WriteOptions {
 export interface Transaction extends TextMethods, TreeMethods {
   get<R = RecordData>(id: string): Promise<R | null>;
   has(id: string): Promise<boolean>;
+  /** A new record under the id its data names (`EXISTS` for a live one there), else a minted one. */
   insert(data: object, options?: WriteOptions): Promise<string>;
   set(id: string, data: object, options?: WriteOptions): Promise<void>;
   update(id: string, delta: object, options?: WriteOptions): Promise<void>;
@@ -2325,6 +2335,10 @@ export interface Database {
   loadData(id: string): Promise<unknown | null>;
   validate(options?: { last?: number; from?: string }): Promise<boolean>;
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
+  /**
+   * Writes a new record: under the id its data names — its entity's composite id, or the id field's
+   * value (a live record there is `EXISTS`, decided inside the queue) — else under a minted one.
+   */
   insert(data: object, options?: StorageDataOptions): Promise<string>;
   has(id: string): Promise<boolean>;
   /**
@@ -2718,9 +2732,29 @@ export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
  * a write takes — a Standard Schema's input, defaults and aliases not yet
  * applied; both `RecordData` unless the schema says more (see `Collections`).
  */
+/** What a bulk write resolves to: the ids written, and a verdict per refused row — the row stays out, the rest go on. */
+export interface BulkResult<I = RecordData> {
+  success: string[];
+  error: { index: number; id: string | null; data: I; error: Error }[];
+}
+
 export interface SyncomCollection<R = RecordData, I = R> {
   readonly name: string;
+  /**
+   * Writes a new record: under the id its data names (the entity's composite id, or its id
+   * field — a live record there is `EXISTS`, decided inside the queue), else under a minted one.
+   */
   insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
+  /** Writes the record its data names whole, new or not (`set()` by the named id; a TypeError without one). */
+  upsert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
+  /** Writes the record its data names unless a live one is there, inside the queue; the Document either way. */
+  insertIfAbsent(data: I, options?: WriteOptions): Promise<SyncomDocument<R>>;
+  /** Every row as `insert()` would write it, as ONE transaction with a verdict per row. */
+  bulkInsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
+  /** Every row as `upsert()` would write it, as ONE transaction with a verdict per row. */
+  bulkUpsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
+  /** Every id deleted, as ONE transaction with a verdict per row: an absent or foreign one is `NOT_FOUND`. */
+  bulkRemove(ids: readonly string[], options?: TransactOptions): Promise<BulkResult<string>>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
   /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
   select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;

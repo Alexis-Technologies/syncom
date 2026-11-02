@@ -916,6 +916,29 @@ storage.record<Post>('id').then((record) => {
   expectError((db.collections.Tag = db.collections.Post));
 }
 
+// Named ids, upserts and the bulk writes.
+{
+  const db = await syncom.createDatabase({
+    schema: { entities: { Post: { id: { fields: ['orgId', 'n'], separator: '-' } }, Tag: {} } },
+  });
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(db.Post.upsert({ orgId: 'o', n: 1 }));
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(db.Post.insertIfAbsent({ orgId: 'o', n: 1 }));
+  const bulk = await db.Post.bulkInsert([{ orgId: 'o', n: 1 }], { message: 'import' });
+  expectType<string[]>(bulk.success);
+  expectType<number>(bulk.error[0].index);
+  expectType<string | null>(bulk.error[0].id);
+  expectType<Error>(bulk.error[0].error);
+  expectType<Promise<syncom.BulkResult<RecordData>>>(db.Tag.bulkUpsert([{ id: 't1' }]));
+  expectType<Promise<syncom.BulkResult<string>>>(db.Tag.bulkRemove(['t1']));
+  expectError(db.Tag.bulkRemove([1]));
+  expectAssignable<syncom.EntityDefinition>({ id: { fields: ['a'] } });
+  expectError<syncom.EntityDefinition>({ id: { fields: 'a' } });
+  const code: syncom.SyncomErrorCode = 'EXISTS';
+  const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
+  expectType<'EXISTS'>(code);
+  expectType<'IN_TRANSACTION'>(inTx);
+}
+
 // The engine contract: an fsi becomes the files engine.
 {
   const engine: syncom.Engine = syncom.filesEngine(memory());

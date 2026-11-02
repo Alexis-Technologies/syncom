@@ -14,6 +14,29 @@ const { valueAt, ancestorsOf } = require('../paths.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
+// The id `data` names under its entity's definition, and the data without it:
+// a composite id (`id: { fields, separator }`) derived from the fields it
+// names — every one present, as text — else the value of the id field when
+// the data carries a string there; null when the data names none (the id
+// is minted). A derived id outside the id class is the caller's INVALID_ID.
+const namedId = (def, data) => {
+  const composite = def.id ?? null;
+  if (composite !== null) {
+    const parts = [];
+    for (let i = 0; i < composite.fields.length; i++) {
+      const value = data[composite.fields[i]];
+      if (value === undefined || value === null) return { id: null, data, field: composite.fields[i] };
+      parts.push(typeof value === 'string' ? value : String(value));
+    }
+    return { id: parts.join(composite.separator), data, field: null };
+  }
+  const field = def.idField;
+  if (field === false || typeof data[field] !== 'string') return null;
+  const rest = {};
+  for (const key of Object.keys(data)) if (key !== field) rest[key] = data[key];
+  return { id: data[field], data: rest, field: null };
+};
+
 // Under its id field, without `$type` — the collection is the engine's, not
 // the schema's. `id` null (check() on a value without one) passes no id.
 const project = (def, id, data) => {
@@ -65,4 +88,9 @@ const foldSet = (delta, validated, before) => {
   return next;
 };
 
-module.exports = { project, unproject, foldSet };
+module.exports = {
+  namedId,
+  project,
+  unproject,
+  foldSet,
+};

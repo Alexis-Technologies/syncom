@@ -169,7 +169,9 @@ const ENTRIES = [
   // review №5 P-3/P-4/O-4). 64, raised by name.
   // 64.1 with collections defined after the open (`collections`, `addCollections()`, `removeCollection()`,
   // `Catalog.define`) and the catalog's action stream (collections plan, C1.1). 64.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64.5 },
+  // 65.2 with records named by their data (composite ids, the id field as the id, EXISTS), the bulk writes,
+  // `upsert()`/`insertIfAbsent()` and IN_TRANSACTION (collections plan, C1.2–C1.3). 65.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 65.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -375,7 +377,8 @@ const ENTRIES = [
   // 140.6 with the catalog's delta, the at-rest place and base64 in chunks (review №5 E4); both branches together
   // 141.4. 142, raised by name. 142.0 with a follower's counts (stats().follow; review №5 O-6). 142.5, raised by name.
   // 142.7 with collections defined after the open (collections plan, C1.1). 143, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 143 },
+  // 143.9 with named ids, the bulk writes and upserts (collections plan, C1.2–C1.3). 144.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 144.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

@@ -21,7 +21,7 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 const SCHEMA_KEYS = new Set(['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens']);
 const AHEAD = new Set(['apply', 'hold']);
 const LENS = new Set(['migrations', 'validate', 'both']);
-const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search'];
+const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search', 'id'];
 const ENTITY_KEY = new Set(ENTITY_KEYS);
 
 const fail = (entity, text) => new TypeError(`createDatabase({ schema }): entity ${entity}: ${text}`);
@@ -242,12 +242,28 @@ const dedupe = (keys) => {
   return out;
 };
 
+// A composite id: `{ fields, separator? }` — the record id is the fields' values joined by the
+// separator ('.' unless given), every character of which must be of the id class.
+const SEPARATOR = /^[A-Za-z0-9._@-]+$/;
+const compositeId = (value, entity) => {
+  if (value === undefined) return null;
+  if (!isObject(value)) throw fail(entity, 'id must be { fields, separator? }');
+  const fields = fieldList(value.fields);
+  if (fields === null) throw fail(entity, 'id.fields must be a non-empty array of field names');
+  const separator = value.separator === undefined ? '.' : value.separator;
+  if (typeof separator !== 'string' || !SEPARATOR.test(separator)) {
+    throw fail(entity, 'id.separator must be of the id class ([A-Za-z0-9._@-])');
+  }
+  return { fields, separator };
+};
+
 const normalizeEntity = (name, def, validator) => {
   if (!isObject(def)) throw fail(name, 'must be an object');
   for (const key of Object.keys(def)) {
     if (!ENTITY_KEY.has(key)) throw fail(name, `unknown key '${key}' (expected ${ENTITY_KEYS.join(', ')})`);
   }
   const { schema, validate, fields } = def;
+  const id = compositeId(def.id, name);
   if (validate !== undefined && validate !== false) throw fail(name, 'validate may only be false');
   if (fields !== undefined && !isObject(fields)) throw fail(name, 'fields must be an object');
   const idField = def.idField === undefined ? deriveIdField(schema, name) : def.idField;
@@ -262,6 +278,7 @@ const normalizeEntity = (name, def, validator) => {
     standard: isStandard(schema),
     validator: validates ? normalizeValidator(schema, name, validator) : null,
     idField,
+    id,
     index,
     unique,
     fields: fields ?? null,

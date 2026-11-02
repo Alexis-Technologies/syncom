@@ -47,6 +47,17 @@ and one `commit` event, not one per call.
   and the schema's hash in hello does not move; a reopen under fewer definitions rebuilds the catalog.
   The schema plugin's. The catalog's watchers hear what a change was to the collection (`insert`,
   `update`, `remove`) beside whether the row moved.
+- **Records named by their data; bulk writes; `upsert()`, `insertIfAbsent()`.** `insert()` (the
+  database's, a collection's, `tx.insert()`) writes under the id the data names — an entity's composite
+  id (`id: { fields, separator }`, derived from the fields, which stay in the record) or the id field's
+  value (which leaves the data) — and mints one only when the data names none; a live record under a
+  named id is `EXISTS`, decided inside the queue. `collection.upsert(data)` writes the named record whole,
+  `insertIfAbsent(data)` only when none is live (the Document either way). `bulkInsert(rows)`,
+  `bulkUpsert(rows)`, `bulkRemove(ids)` are ONE transaction with a verdict per row — `{ success, error:
+  [{ index, id, data, error }] }`: a row refused on its own account (its validator, a unique key, its
+  id, its collection) stays out and the rest land; a batch that cannot reach the disk lands nothing.
+- **`IN_TRANSACTION`.** A write made through the database from inside `transact()`'s function — which
+  holds the mutation queue the write would wait for — is refused at once, where it used to deadlock.
 - **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
   its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
   `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),
