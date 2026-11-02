@@ -29,6 +29,38 @@ const rowOf = (id, view) => {
   return row;
 };
 
+// A pull over a list or a set of ids, from `start`: an id, or null past the last.
+const pullOf = (found, start) => {
+  if (Array.isArray(found)) {
+    let i = start;
+    return () => (i < found.length ? found[i++] : null);
+  }
+  const iterator = found[Symbol.iterator]();
+  return () => {
+    const step = iterator.next();
+    return step.done ? null : step.value;
+  };
+};
+
+// Every id a pull has left, as an array.
+const drained = (next) => {
+  const out = [];
+  for (let id = next(); id !== null; id = next()) out.push(id);
+  return out;
+};
+
+// The first index of a sorted id list whose id lies above `id`: a binary search.
+const aboveId = (sorted, id) => {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >>> 1;
+    if (sorted[mid] <= id) low = mid + 1;
+    else high = mid;
+  }
+  return low;
+};
+
 // The order of values — nothing, then booleans, numbers, strings, then the rest — is the catalog's
 // (`compare`, `rankOf`): the sorted indexes keep it, so a scan comes in the order a sort would give.
 
@@ -632,33 +664,47 @@ class Cursor {
   // The matching rows. Without an order, a limit is reached as soon as
   // enough rows matched — `one()` on a loaded cursor reads up to the first
   // match, not the table; with one, only the best `offset + limit` are kept
-  // (`sorted` says so). The records are read CONCURRENCY at a time, in
-  // candidate order, so the rows come in that order whatever the backend —
-  // and for `$text` the candidate order is the index's ranking, which an
-  // unordered cursor hands out as it is.
+  // (`sorted` says so). The candidates are pulled one at a time: a scan's
+  // lazy source (entered after a page's edge where the rows come in the
+  // index's order), a posting set, or the collection's list — in id order,
+  // from after the edge by id, where an unordered cursor stops at a window.
+  // The records are read CONCURRENCY at a time, in candidate order, so the
+  // rows come in that order whatever the backend — and for `$text` the
+  // candidate order is the index's ranking, which an unordered cursor hands
+  // out as it is.
   async #matching(needsRows, limit = this.#limit) {
     // A source that reads its catalog at first use (a tag's) hands `ready`.
     if (this.#source.ready !== undefined) await this.#source.ready();
     const { candidates, ids, row, load, scan } = this.#source;
     const made = this.#plan();
-    // By the plan: an index scanned in its order, the posting lists, or every record of the collection.
-    const scanned = made.scan === 'index' ? scan(this.#entity, made) : null;
-    let found = scanned !== null ? scanned.ids : (candidates(this.#entity, this.#query) ?? ids(this.#entity));
     const ordered = needsRows && this.#order.length > 0;
     const wanted = this.#offset + limit;
+    // By the plan: an index scanned in its order, the posting lists, or every record of the collection.
+    const scanned = made.scan === 'index' ? scan(this.#entity, made, made.sortedByIndex ? this.#after : null) : null;
     // Sorted by the index already (a key that holds arrays is not): enough rows is the window, read as
     // far as it and no further.
     const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex;
     const enough = needsRows && (!ordered || byIndex) ? wanted : Infinity;
-    // An unordered cursor that stops at enough rows reads its candidates in id order — the result's
-    // order without keys — so what it stops at is the window a run of every candidate would give: a
-    // scan's ids come in key order and a posting set in none, both are sorted by id first; the
-    // collection's list is in id order already.
-    if (enough !== Infinity && !byIndex && !this.#ranked() && (scanned !== null || !Array.isArray(found))) {
-      found = [...found].sort();
+    const windowed = enough !== Infinity && !byIndex && !this.#ranked();
+    let next;
+    let byId = false;
+    if (scanned !== null && !windowed) next = scanned.next;
+    else {
+      let found =
+        scanned !== null ? drained(scanned.next) : (candidates(this.#entity, this.#query) ?? ids(this.#entity));
+      // An unordered cursor that stops at enough rows reads its candidates in id order — the result's
+      // order without keys — so what it stops at is the window a run of every candidate would give: a
+      // scan's ids come in key order and a posting set in none, both are sorted by id first; the
+      // collection's list is in id order already.
+      if (windowed && (scanned !== null || !Array.isArray(found))) found = [...found].sort();
+      byId = windowed && !ordered;
+      // After a page's edge, by id: the first id above it.
+      const start = byId && this.#after !== null ? aboveId(found, this.#after.id) : 0;
+      next = pullOf(found, start);
     }
     const sink = ordered && !byIndex && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
-    // From after the edge of the page before, where there is one.
+    // From after the edge of the page before, where there is one (the scan or the id seek took it already where
+    // the rows come in the result's order; the check stays for a TopK).
     const edge = this.#after === null ? null : this.#edge();
     const byOrder = edge === null ? null : compareFully(this.#order);
     const take = (candidate) => {
@@ -666,14 +712,14 @@ class Cursor {
       if (edge !== null && byOrder(candidate, edge) <= 0) return;
       sink.push(candidate);
     };
+    const inOrder = sink instanceof TopK || byIndex || byId;
     if (this.#covered(needsRows)) {
-      for (const id of found) {
-        if (sink.size >= enough) break;
+      for (let id = next(); id !== null && sink.size < enough; id = next()) {
         const indexed = row(id);
         if (indexed === null || indexed.encrypted) continue;
         take(rowOf(id, indexed.fields));
       }
-      return { rows: sink.rows, sorted: sink instanceof TopK || byIndex };
+      return { rows: sink.rows, sorted: inOrder };
     }
     // A batch is as wide as what is still wanted, CONCURRENCY at most: a
     // `one()` reads one record at a time and stops at the first match, a
@@ -686,13 +732,12 @@ class Cursor {
       for (let i = 0; i < batch.length; i++) if (records[i] !== null) take(rowOf(batch[i], records[i]));
       batch.length = 0;
     };
-    for (const id of found) {
-      if (sink.size >= enough) break;
+    for (let id = next(); id !== null && sink.size < enough; id = next()) {
       batch.push(id);
       if (batch.length >= Math.min(CONCURRENCY, Math.max(1, enough - sink.size))) await read();
     }
     if (batch.length > 0 && sink.size < enough) await read();
-    return { rows: sink.rows, sorted: sink instanceof TopK || byIndex };
+    return { rows: sink.rows, sorted: inOrder };
   }
 
   #project(row) {
@@ -740,7 +785,19 @@ class Cursor {
     return this.#deliver(top.slice(this.#offset));
   }
 
+  /**
+   * How many records match. A sorted index entered by a prefix or a range,
+   * with every conjunct decided by it and no filter, answers from its
+   * entries alone — no record is read.
+   */
   async count() {
+    if (this.#source.ready !== undefined) await this.#source.ready();
+    const made = this.#plan();
+    const decided = made.scan === 'index' && !made.residual && this.#filter === null;
+    if (decided && (made.prefix.length > 0 || made.range !== null)) {
+      const scanned = this.#source.scan(this.#entity, made, null);
+      if (scanned.sorted) return scanned.estimate;
+    }
     return (await this.#matching(false)).rows.length;
   }
 
@@ -888,15 +945,20 @@ class Cursor {
 
   /**
    * The rows `fetch()` would give — the window applied — read lazily, `batch`
-   * at a time by keyset (each page after the last row of the one before), so
-   * a result of any size is walked in bounded memory. A `$text` query without
-   * an order has no edge: one page. `for await (const row of cursor)` is this.
+   * at a time by keyset (each page after the last row of the one before,
+   * sought in the index or by id), so a result of any size is walked in
+   * bounded memory where the order is the index's or there is none; an order
+   * no index sorts, or a `$text` query without one, is one run handed out in
+   * batches. `for await (const row of cursor)` is this.
    */
   async *stream({ batch = 100 } = {}) {
     const size = count('stream', batch);
     if (size === 0) throw new TypeError('stream() takes a batch of one or more');
-    if (this.#ranked()) {
-      for (const row of await this.fetch()) yield row;
+    // A `$text` query without an order has no edge; an order no index sorts would cost a run of the result a page:
+    // one run, handed out `batch` at a time (an unordered cursor pages by id; `indexAdvisor` names the key).
+    if (this.#ranked() || (this.#order.length > 0 && !this.#plan().sortedByIndex)) {
+      const rows = await this.fetch();
+      for (let i = 0; i < rows.length; i++) yield rows[i];
       return;
     }
     let remaining = this.#limit;

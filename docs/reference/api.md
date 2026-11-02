@@ -232,7 +232,7 @@ query searches the entity's `search` fields, best first unless ordered.
 | `projection(fields)` | The fields each row carries, plus `id` |
 | `populate(fields)` | The declared [references](../guide/database#references) of `fields` resolved on every row of the page: the record as `{ …data, id }` (`null` where it is not there, or not of the declared collection), an array of them where the reference is to many — one read of the targets per field per page; a field that is no declared reference is a `TypeError` |
 | `fetch()` | `Promise<QueryRow<R>[]>` — `{ id, ...data }` as the record reads |
-| `count()` | `Promise<number>` |
+| `count()` | `Promise<number>`; over a sorted index entered by a prefix or a range, with every conjunct decided by it and no filter, the count is the index's and no record is read |
 | `one()` | `Promise<QueryRow<R> \| null>` |
 | `watch(listener, { onError }?)` | `listener(rows)` now and whenever the rows change — the result is kept as the collection changes without running the cursor again (the record that changed is read once, matched and placed; a full window that lost a row, or a `$text` query, runs the cursor again) and emitted only when an id came, went or moved or a row reads as another; every `watch()` of one query (the same entity, query, order, window, projection, populated fields) shares one run, and a `fetch()` of it reads nothing while the run lasts. Returns the stop function |
 | `watchCount(listener, { onError }?)` | `listener(count)` now and whenever the number of matches moves — the matching ids kept, one in or out per change, never counted again; the window (`limit`, `offset`) does not apply to a count. Returns the stop function |
@@ -244,7 +244,7 @@ query searches the entity's `search` fields, best first unless ordered.
 | `update(delta, { actor, message, source }?)` | Every match updated — fields, or the [operators](../guide/database#update-operators) — as ONE transaction over the matches when it started, each matched again inside the queue: `Promise<{ matched, written }>` (a record gone or no longer a match meanwhile is skipped). A cursor at a tag is read-only (a `TypeError`) |
 | `modify(fn, options?)` | Every match changed by `fn`, as `modify()` does, as ONE transaction: `{ matched, written }` |
 | `delete({ actor, data }?)` | Every match deleted as ONE transaction, `data` on each tombstone: `{ matched, written }` |
-| `stream({ batch }?)` | The rows `fetch()` would give — the window applied — read lazily, `batch` (100) at a time by keyset, so a result of any size is walked in bounded memory; `for await (const row of cursor)` is `stream()` |
+| `stream({ batch }?)` | The rows `fetch()` would give — the window applied — read lazily, `batch` (100) at a time by keyset (each page sought in the index, or by id), so a result of any size is walked in bounded memory where the order is the index's or there is none; an order no index sorts (or a `$text` query without one) is one run handed out in batches — `indexAdvisor` names the key; `for await (const row of cursor)` is `stream()` |
 | `[Symbol.asyncIterator]` | `for await (const row of cursor)` — `stream()` |
 
 The shapes on the wire and on disk — the op's slots, the payloads, the

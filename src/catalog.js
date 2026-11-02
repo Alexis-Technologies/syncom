@@ -1,7 +1,7 @@
 'use strict';
 
 const { fsiNamespace } = require('./engine.js');
-const { SortedIndex, rankOf, compare } = require('./sorted.js');
+const { SortedIndex, rankOf, compare, beforePosition } = require('./sorted.js');
 
 // The record catalog: every live record's id, collection and indexed field
 // values, in memory, so `list()`, `hasRecord()` and a query by an indexed
@@ -204,6 +204,21 @@ const touches = (fields, changed) => {
   return false;
 };
 
+// A range with one side open, closed at the edge of its kind: the floor of the given value's rank below, the first
+// value of the next rank above — so nothing (undefined), and no value of another kind, lies within a scan of it.
+// The planner admits a number, a string or a boolean as an edge (`ordered`).
+const FLOORS = { boolean: false, number: -Infinity, string: '' };
+const CEILINGS = { boolean: -Infinity, number: '', string: {} };
+const closed = (range) => {
+  if (range === null || (range.lower !== null && range.upper !== null)) return range ?? { lower: null, upper: null };
+  if (range.lower === null) {
+    const floor = FLOORS[typeof range.upper.value];
+    return { lower: floor === undefined ? null : { value: floor, inclusive: true }, upper: range.upper };
+  }
+  const ceiling = CEILINGS[typeof range.lower.value];
+  return { lower: range.lower, upper: ceiling === undefined ? null : { value: ceiling, inclusive: false } };
+};
+
 // A row with nothing indexed: what a record of a collection keeps while
 // its definition changes (the caller indexes it again).
 const bare = (row) => {
@@ -274,42 +289,70 @@ class Catalog {
   }
 
   /**
-   * The ids a plan (src/query/plan.js) reads from a sorted index, in its
+   * The rows a plan (src/query/plan.js) reads from a sorted index, in its
    * order — the rows whose first keys are `prefix`, within `range` on the
    * key after it (`{ lower: { value, inclusive }, upper }`, either side
-   * open), forward or backward (`desc`): two seeks, the entries between —
-   * then the rows whose array passed the cap (keyed whole), which every
-   * scan yields and the predicate decides.
+   * open: closed at the rank's floor or ceiling, so nothing of another kind
+   * lies within), forward or backward (`desc`) — as a pull: `next()` an id,
+   * or null past the last; `sorted` whether the ids come in the index's
+   * order (no key holds an array); `estimate` how many entries lie between
+   * the edges (the rows, where sorted). `after` (a page's edge: the order's
+   * keys, which are the index's from the prefix on, and the id) begins the
+   * scan after it where it is sorted. The rows whose array passed the cap
+   * (keyed whole) come last, every scan: the predicate decides.
    */
-  scan(type, { index, prefix, range, desc }) {
+  scan(type, { index, prefix, range, desc }, after = null) {
     const held = this.#keyed.get(type)?.get(index.join(','));
-    if (held === undefined) return { ids: [], sorted: true };
+    if (held === undefined) return { next: () => null, sorted: true, estimate: 0 };
     const { sorted } = held;
     const k = prefix.length;
-    const from =
-      range === null || range.lower === null
+    const edges = closed(range);
+    let from =
+      edges.lower === null
         ? sorted.seek(prefix, k, null, true)
-        : sorted.seek(prefix.concat([range.lower.value]), k + 1, null, range.lower.inclusive);
-    const to =
-      range === null || range.upper === null
+        : sorted.seek(prefix.concat([edges.lower.value]), k + 1, null, edges.lower.inclusive);
+    let to =
+      edges.upper === null
         ? sorted.seek(prefix, k, null, false)
-        : sorted.seek(prefix.concat([range.upper.value]), k + 1, null, !range.upper.inclusive);
-    const ids = [];
+        : sorted.seek(prefix.concat([edges.upper.value]), k + 1, null, !edges.upper.inclusive);
+    const exact = held.multi === 0 && held.overflow.size === 0;
+    let startAt = null;
+    if (after !== null && exact) {
+      // The first entry past the edge. Forward, the scan begins there; backward, the rest of the edge's group
+      // (the ids above the edge's) comes first, then the groups below it — or, the edge last of its group, the
+      // groups below alone.
+      const probe = prefix.concat(after.keys);
+      const past = sorted.seek(probe, probe.length, after.id, false);
+      if (!desc) {
+        if (beforePosition(from, past)) from = past;
+      } else if (beforePosition(past, to) && sorted.holds(past, probe, probe.length)) startAt = past;
+      else {
+        const group = sorted.seek(probe, probe.length, null, true);
+        if (beforePosition(group, to)) to = group;
+      }
+    }
+    const estimate = Math.max(0, sorted.ordinal(to) - sorted.ordinal(from));
+    const iterator = sorted.iterate(from, to, desc, startAt);
     // An array keyed per element lists a row once per element in range, and a row keyed whole may lie in the
     // range as well: each id once.
-    const seen = held.multi > 0 || held.overflow.size > 0 ? new Set() : null;
-    const push = (id) => {
-      if (seen !== null) {
-        if (seen.has(id)) return;
-        seen.add(id);
+    const seen = exact ? null : new Set();
+    const overflow = exact ? null : [...held.overflow];
+    let o = 0;
+    const next = () => {
+      for (;;) {
+        let id = iterator.next();
+        if (id === null) {
+          if (overflow === null || o >= overflow.length) return null;
+          id = overflow[o++];
+        }
+        if (seen !== null) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        return id;
       }
-      ids.push(id);
     };
-    const iterator = sorted.iterate(from, to, desc);
-    for (let id = iterator.next(); id !== null; id = iterator.next()) push(id);
-    for (const id of held.overflow) push(id);
-    // Sorted by the index only where no key holds an array (an element's place is not the row's).
-    return { ids, sorted: held.multi === 0 && held.overflow.size === 0 };
+    return { next, sorted: exact, estimate };
   }
 
   // A row's entries into the type's sorted indexes, or out of them.

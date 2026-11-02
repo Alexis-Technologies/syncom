@@ -817,6 +817,111 @@ const runQueryTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test('a page after an edge seeks the index: the page’s rows are read and no more', async (t2) => {
+    const fsi = counting(memory());
+    const compound = { entities: { Task: { index: [['boardId', 'rank'], 'title'] } } };
+    const storage = await createStorage(t2, 'K', { fsi, schema: compound, cache: { max: 2 } });
+    const all = [];
+    for (let i = 0; i < 60; i++) {
+      const data = { boardId: 'b', rank: (i * 7) % 20, title: `t${String(i).padStart(2, '0')}`, $type: 'Task' };
+      all.push({ ...data, id: await storage.insert(data) });
+    }
+    const byRank = (a, b) => a.rank - b.rank || (a.id < b.id ? -1 : 1);
+    // Forward: each page reads its rows, no more — the whole stream reads every row once.
+    fsi.reset();
+    const walked = [];
+    for await (const row of storage.Task.select({ boardId: 'b' }).order('rank').stream({ batch: 7 })) walked.push(row);
+    assert.deepStrictEqual(walked, all.slice().sort(byRank));
+    // Each row read once over the stream (two of them from the cache, which holds two): never once a page.
+    const once = (reads, n) => reads <= n && reads >= n - 2;
+    assert.ok(once(fsi.dataReads(), 60), `each row read once over the stream (${fsi.dataReads()})`);
+    // Backward too: the rest of the edge's group first, then the groups below.
+    fsi.reset();
+    const back = [];
+    for await (const row of storage.Task.select({ boardId: 'b' }).desc('rank').stream({ batch: 4 })) back.push(row);
+    const descending = all.slice().sort((a, b) => b.rank - a.rank || (a.id < b.id ? -1 : 1));
+    assert.deepStrictEqual(back, descending);
+    assert.ok(once(fsi.dataReads(), 60), `backwards too (${fsi.dataReads()})`);
+    // One page after an edge: `limit` records read, not the rows before the edge.
+    const first = await storage.Task.select({ boardId: 'b' }).order('rank').limit(5).page();
+    fsi.reset();
+    const second = await storage.Task.select({ boardId: 'b' }).order('rank').limit(5).after(first.next).page();
+    assert.deepStrictEqual(second.rows, all.slice().sort(byRank).slice(5, 10));
+    assert.ok(once(fsi.dataReads(), 5), `the page's rows, not the rows before the edge (${fsi.dataReads()})`);
+    // Unordered: by id, sought the same way over the index's ids.
+    const byId = all.map((row) => row.id).sort();
+    const page = await storage.Task.select({ boardId: 'b', rank: { $gte: 5 } })
+      .limit(10)
+      .page();
+    fsi.reset();
+    const rest = await storage.Task.select({ boardId: 'b', rank: { $gte: 5 } })
+      .limit(10)
+      .after(page.next)
+      .page();
+    const matching = byId.filter((id) => all.find((row) => row.id === id).rank >= 5);
+    assert.deepStrictEqual(
+      rest.rows.map((row) => row.id),
+      matching.slice(10, 20),
+    );
+    assert.ok(once(fsi.dataReads(), 10), `sought by id (${fsi.dataReads()})`);
+    // An order no index sorts: one run, handed out in batches — every row read once, not once a page.
+    fsi.reset();
+    const titles = [];
+    for await (const row of storage.Task.select({ boardId: 'b' }).order('rank').order('title').stream({ batch: 5 })) {
+      titles.push(row.id);
+    }
+    assert.deepStrictEqual(
+      titles,
+      (await storage.Task.select({ boardId: 'b' }).order('rank').order('title').fetch()).map((row) => row.id),
+    );
+    // One run for the stream; the fetch of the same key comes from the query cache.
+    assert.ok(once(fsi.dataReads(), 60), `one run for the stream (${fsi.dataReads()})`);
+  });
+
+  await t.test('count() over a sorted index reads no record; a one-sided range holds its kind alone', async (t2) => {
+    const fsi = counting(memory());
+    const compound = { entities: { Task: { index: [['boardId', 'rank']] } } };
+    const storage = await createStorage(t2, 'N', { fsi, schema: compound, cache: { max: 2 } });
+    for (let i = 0; i < 40; i++) await storage.insert({ boardId: `b${i % 2}`, rank: i, $type: 'Task' });
+    // Rows of another kind, and of none, under the same prefix: outside every range of numbers.
+    await storage.insert({ boardId: 'b0', rank: 'ten', $type: 'Task' });
+    await storage.insert({ boardId: 'b0', rank: true, $type: 'Task' });
+    await storage.insert({ boardId: 'b0', $type: 'Task' });
+    await storage.insert({ boardId: 'b0', rank: 3, secret: true, $type: 'Task' }, { encrypted: true }).catch(() => {});
+    fsi.reset();
+    assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $gte: 10 } }).count(), 15);
+    assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $lt: 10 } }).count(), 5);
+    assert.strictEqual(await storage.Task.select({ boardId: 'b1' }).count(), 20);
+    assert.strictEqual(fsi.dataReads(), 0, 'the index answered');
+    // The same rows a run gives — the kinds apart — ordered by the index with an open side too.
+    assert.deepStrictEqual(
+      (
+        await storage.Task.select({ boardId: 'b0', rank: { $lt: 10 } })
+          .order('rank')
+          .fetch()
+      ).map((row) => row.rank),
+      [0, 2, 4, 6, 8],
+    );
+    assert.deepStrictEqual(
+      (
+        await storage.Task.select({ boardId: 'b0', rank: { $gte: 30 } })
+          .desc('rank')
+          .limit(3)
+          .fetch()
+      ).map((row) => row.rank),
+      [38, 36, 34],
+    );
+    assert.strictEqual(
+      await storage.Task.select({ boardId: 'b0', rank: { $gte: 'a' } }).count(),
+      1,
+      'the string alone',
+    );
+    // A residual conjunct, or a filter: the records are read.
+    fsi.reset();
+    assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $gte: 10 }, secret: true }).count(), 0);
+    assert.ok(fsi.dataReads() > 0);
+  });
+
   await t.test('an index with fields beyond the order’s keys serves the prefix and sorts after', async (t2) => {
     const compound = { entities: { Task: { index: [['boardId', 'done', 'rank']] } } };
     const storage = await createStorage(t2, 'Y', { fsi: memory(), schema: compound });

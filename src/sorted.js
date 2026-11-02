@@ -52,6 +52,9 @@ const compareEntries = (a, b) => {
 
 const empty = () => ({ ids: [], keys: [] });
 
+/** Whether position `a` lies before position `b`. */
+const beforePosition = (a, b) => a.chunk < b.chunk || (a.chunk === b.chunk && a.offset < b.offset);
+
 class SortedIndex {
   #k;
   #chunks = [empty()];
@@ -151,6 +154,13 @@ class SortedIndex {
     const base = position.offset * this.#k;
     for (let i = 0; i < this.#k; i++) out.push(chunk.keys[base + i]);
     return out;
+  }
+
+  /** Whether the entry at `position` holds `keys` as its first `count` keys (false at the end). */
+  holds(position, keys, count) {
+    const chunk = this.#chunks[position.chunk];
+    if (position.offset >= chunk.ids.length) return false;
+    return this.#compareAt(chunk, position.offset, keys, count, null) === 0;
   }
 
   // Whether the entries at two positions hold the same keys.
@@ -328,4 +338,4 @@ class SortedIndex {
   }
 }
 
-module.exports = { SortedIndex, CHUNK, rankOf, compare, compareEntries };
+module.exports = { SortedIndex, CHUNK, rankOf, compare, compareEntries, beforePosition };

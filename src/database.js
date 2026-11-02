@@ -1252,7 +1252,7 @@ class Database extends Emitter {
       row: (id) => catalog.row(id),
       indexed: (entity) => catalog.indexed(entity),
       indexes: (entity) => catalog.indexes(entity),
-      scan: (entity, plan) => catalog.scan(entity, plan),
+      scan: (entity, plan, after) => catalog.scan(entity, plan, after),
       // Every plan a cursor makes, told to the advisors; `advise(fn)` adds one and answers what takes it off.
       planned: (entity, plan) => {
         for (const fn of this.#advisors) fn(entity, plan);

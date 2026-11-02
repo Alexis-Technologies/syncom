@@ -188,7 +188,9 @@ const ENTRIES = [
   // 72.7 with the catalog's sorted indexes on SortedIndex (src/sorted.js, chunked sorted arrays: 1.2 of it), a put that
   // re-keys only the indexes a changed field belongs to, load/define/adopt built once (review №6, E4.2; the design
   // estimated 0.6 less). 73, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 73 },
+  // 73.0 with a scan that seeks a page's edge and yields lazily, a one-sided range closed at its kind's edge (review №6,
+  // E4.4). 73.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 73.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -409,7 +411,8 @@ const ENTRIES = [
   // 155.1 with the folded tombstones in the `tombstones` kv namespace (review №6, E1.2–E1.3). 155.5, raised by name.
   // 155.5 with the writes made safe (review №6, E2). 156, raised by name.
   // 157.5 with the sorted indexes on SortedIndex (review №6, E4.2). 158, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 158 },
+  // 158.1 with the lazy, seeking scan (review №6, E4.4). 158.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 158.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -560,7 +563,9 @@ const ENTRIES = [
   // C3.1–C3.2). 13.5, raised by name.
   // 14.9 with the catalog it is measured with standing on SortedIndex (src/sorted.js, bundled alone here; in an app the
   // core shares it) (review №6, E4.2). 15, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 15 },
+  // 15.5 with the cursor pulling a lazy scan, keyset by id over the postings and the collection, count() from the index,
+  // stream() running once where no index sorts (review №6, E4.4). 15.5 — at the measure; 16, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 16 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.
