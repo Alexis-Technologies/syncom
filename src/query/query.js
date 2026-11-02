@@ -26,6 +26,8 @@ const query = Object.freeze({
         cursor: (source, entity, criteria) =>
           new Cursor(source, entity, criteria, null, typeof source.generation === 'function' ? cache : null),
         matches: (criteria) => compileQuery(criteria),
+        // What `stats().query` answers: the cache's entries and the rows they hold, the live runs kept.
+        stats: () => ({ cache: { entries: cache.size, rows: cache.held }, live: cache.living }),
       },
     };
   },

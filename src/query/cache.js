@@ -44,6 +44,8 @@ class QueryCache {
   // How many entries hold a result no live run keeps, and how many rows they hold between them.
   #idle = 0;
   #held = 0;
+  // How many entries a live run keeps.
+  #living = 0;
 
   constructor({ max = MAX, maxRows = MAX_ROWS } = {}) {
     this.#max = max;
@@ -53,6 +55,11 @@ class QueryCache {
   /** How many rows the idle results hold between them. */
   get held() {
     return this.#held;
+  }
+
+  /** How many live runs are kept. */
+  get living() {
+    return this.#living;
   }
 
   get size() {
@@ -120,6 +127,7 @@ class QueryCache {
         this.#idle--;
         this.#held -= entry.rows.length;
       }
+      this.#living++;
       entry.live = make(entry);
     }
     return entry.live;
@@ -130,6 +138,7 @@ class QueryCache {
     const entry = this.#entries.get(key);
     if (entry === undefined || entry.live === null) return;
     entry.live = null;
+    this.#living--;
     if (entry.rows === null) this.#entries.delete(key);
     else {
       this.#idle++;

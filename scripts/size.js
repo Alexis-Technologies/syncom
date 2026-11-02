@@ -196,7 +196,8 @@ const ENTRIES = [
   // call began (review №6, E5.1, E5.5; 2026-11-02). 74.5, raised by name.
   // 74.7 with the collection's events on a microtask, the unique keys in maps, one operator per field, a query's depth
   // bound (review №6, E6; 2026-11-02). 75, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 75 },
+  // 75.1 with the writer's record methods, the stats fields, the error fields and the log lines of E7 (review №6, E7; 2026-11-02). 75.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 75.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -259,12 +260,13 @@ const ENTRIES = [
     budget: 5,
   },
   // Presence: the emitter, the bounds, the signed entries; the identity comes from the storage.
+  // 4.5 (over by bytes) with the writer's new record methods it bundles (review №6, E7; 2026-11-02). 4.75, raised by name.
   {
     label: 'presence — browser (@alexify/syncom/presence)',
     entry: 'src/presence/presence.js',
     platform: 'browser',
     // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
-    budget: 4.5,
+    budget: 4.75,
   },
   // The editor binding: deltas composed and transformed, the diff between two readings (the text plugin's Myers
   // comes along, and the vector keys), the binding itself, selections and presence cursors. The plan said 4; the
@@ -424,7 +426,8 @@ const ENTRIES = [
   // 160.2 with the query cache per collection and the live delivery (review №6, E5.2–E5.3). 160.5, raised by name.
   // 160.5 with a purge's ids scrubbed together through the log and the tags (review №6, E5.5). 161, raised by name.
   // 161.3 with the events, the guards and the bounds of E6 (review №6, E6). 161.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 161.5 },
+  // 162.3 with the blocks recording their work (review №6, E7). 162.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 162.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -553,11 +556,12 @@ const ENTRIES = [
     budget: 7,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
+  // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
   {
     label: 'telemetry — browser (@alexify/syncom/telemetry)',
     entry: 'src/telemetry/telemetry.js',
     platform: 'browser',
-    budget: 4,
+    budget: 4.5,
   },
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
@@ -634,11 +638,12 @@ const ENTRIES = [
     budget: 3.25,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
+  // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.
   {
     label: 'cleanup — browser (@alexify/syncom/cleanup)',
     entry: 'src/cleanup/cleanup.js',
     platform: 'browser',
-    budget: 2.5,
+    budget: 3.25,
   },
 ];
 

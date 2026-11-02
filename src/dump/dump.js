@@ -61,6 +61,7 @@ async function* exportPages(db, { collections, scopes = null, meta = true, limit
   let cursor = null;
   for (;;) {
     const page = await db.snapshot({ cursor, limit, scopes });
+    if (source.otel?.enabled) source.otel.recordDump('export');
     const records = [];
     for (let i = 0; i < page.records.length; i++) {
       const record = page.records[i];
@@ -157,6 +158,7 @@ const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAG
   }
   for (let i = 0; i < records.length; i += batch) {
     const page = records.slice(i, i + batch);
+    if (source.otel?.enabled) source.otel.recordDump('import');
     await db.transact(async (tx) => {
       for (let k = 0; k < page.length; k++) {
         const { id, data, meta } = page[k];

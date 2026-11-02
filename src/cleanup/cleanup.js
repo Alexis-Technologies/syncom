@@ -23,6 +23,7 @@
 
 const { SOURCE } = require('../symbols.js');
 const { opKey } = require('../vector.js');
+const { traced } = require('../telemetry/writer.js');
 
 const DAY = 24 * 60 * 60 * 1000;
 const MINIMUM_DELETED_TIME = 31 * DAY;
@@ -138,12 +139,33 @@ const cleanup = (
     return counts;
   };
 
+  // A sweep as a span (`syncom.cleanup.sweep`) with its counts, the tombstones it took counted, and a debug line.
+  const swept = async (options) => {
+    const { otel } = seam;
+    const started = Date.now();
+    const run = async () => {
+      const counts = await sweep(options);
+      if (otel.enabled) {
+        otel.recordCleanup('folded', counts.folded);
+        otel.recordCleanup('dropped', counts.dropped);
+      }
+      db.logger.debug({ event: 'cleanup.sweep', ...counts, ms: Date.now() - started });
+      return counts;
+    };
+    if (!otel.enabled) return run();
+    return traced(otel, 'syncom.cleanup.sweep', {}, run, (counts) => ({
+      'syncom.cleanup.folded': counts.folded,
+      'syncom.cleanup.dropped': counts.dropped,
+      'syncom.cleanup.skipped': counts.skipped,
+    }));
+  };
+
   const handle = {
     leader,
     stats,
     /** One sweep; `drop: true` takes the folded tombstones away too. Resolves to `{ folded, dropped, skipped }`. */
     run(options = {}) {
-      if (running === null) running = sweep(options).finally(() => void (running = null));
+      if (running === null) running = swept(options).finally(() => void (running = null));
       return running;
     },
     /** Runs a sweep every `runEach` ms until `stop()` or the database closes; a failed sweep is logged. */

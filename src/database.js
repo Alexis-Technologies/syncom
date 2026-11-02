@@ -174,6 +174,8 @@ class Database extends Emitter {
   #cursor = null;
   // A Mango query as a predicate over `{ id, ...record }` — the query plugin's (`ifMatch`).
   #matches = null;
+  // The query plugin's `stats()`, for `stats().query`; null without the plugin.
+  #queryStats = null;
   // The local documents (`db.local`) — the local plugin's.
   #local = null;
   #settings;
@@ -540,6 +542,7 @@ class Database extends Emitter {
       if (hooks.query) {
         this.#cursor = hooks.query.cursor;
         this.#matches = hooks.query.matches ?? null;
+        this.#queryStats = hooks.query.stats ?? null;
       }
       if (hooks.versions) this.#tags = hooks.versions.tags;
       if (hooks.local) this.#local = hooks.local;
@@ -1223,6 +1226,7 @@ class Database extends Emitter {
     delete this[name];
     this.#collected();
     this.#flushCatalog();
+    this.#logger.info({ event: 'collection.removed', entity: name });
   }
 
   get schema() {
@@ -1266,6 +1270,8 @@ class Database extends Emitter {
     const catalog = this.#catalog;
     return {
       logger: this.#logger,
+      // The telemetry writer (the disabled one without the plugin): what a block counts its work through.
+      otel: this.#otel,
       candidates: (entity, query) => catalog.candidates(entity, query),
       ids: (entity) => catalog.ids(entity),
       row: (id) => catalog.row(id),
@@ -1572,6 +1578,12 @@ class Database extends Emitter {
       // took (the next window is at least that), and the positions waiting.
       defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
       observers,
+      // The collections defined, the advisors watching the plans, the tombstones folded into their namespace, and
+      // the query plugin's cache (entries, the rows they hold) and live runs — null without the plugin.
+      collections: this.#entities.size,
+      advisors: this.#advisors.size,
+      tombstones: this.#entries.foldedCount,
+      query: this.#queryStats === null ? null : this.#queryStats(),
       log: {
         length: log.length,
         floor: log.floor,
@@ -2038,7 +2050,9 @@ class Database extends Emitter {
     if (def === undefined) return null;
     const named = namedId(def, data);
     if (named === null) return null;
-    if (named.id === null) throw typed('INVALID_ID', `A ${def.name} ${idReason(named)}`);
+    if (named.id === null) {
+      throw typed('INVALID_ID', `A ${def.name} ${idReason(named)}`, { entity: def.name, field: named.field });
+    }
     if (!isRecordId(named.id)) throw invalidId(named.id);
     return named;
   }
@@ -2070,7 +2084,13 @@ class Database extends Emitter {
     }
     const { id } = named;
     // A live record there already is EXISTS, decided inside the queue (`expect: ABSENT`) — an encrypted write too.
-    await this.saveData(id, named.data, { ...options, expect: ABSENT });
+    try {
+      await this.saveData(id, named.data, { ...options, expect: ABSENT });
+    } catch (error) {
+      if (error?.code === 'EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
+      throw error;
+    }
+    if (this.#otel.enabled) this.#otel.recordInsertNamed('ok');
     return id;
   }
 
@@ -2311,6 +2331,7 @@ class Database extends Emitter {
    */
   async drop() {
     if (this.#readOnly || this.#leaseLost) throw this.#refused('drop()');
+    this.#logger.info({ event: 'database.drop', path: this.#path });
     if (this.#closing !== null) {
       await this.#closing;
       return dropDatabase(this.#path, { engine: this.#engine });
@@ -2688,7 +2709,13 @@ class Database extends Emitter {
         await tx.commit('write', id, { data }, { actor: options.actor });
         return id;
       }
-      await tx.commit('write', named.id, { data: named.data }, { actor: options.actor, expect: ABSENT });
+      try {
+        await tx.commit('write', named.id, { data: named.data }, { actor: options.actor, expect: ABSENT });
+      } catch (error) {
+        if (error?.code === 'EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
+        throw error;
+      }
+      if (this.#otel.enabled) this.#otel.recordInsertNamed('ok');
       return named.id;
     };
     api.set = async (id, data, options = {}) => {

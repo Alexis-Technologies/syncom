@@ -56,6 +56,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
   if (typeof handler !== 'function') throw new TypeError('createPipeline() takes a handler');
   const store = kvNamespace(db[DB].kv, NAMESPACE);
   const seam = db[SOURCE];
+  const { otel } = seam;
   const { logger } = db;
   const queue = [];
   let running = null;
@@ -74,6 +75,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
   // replay or a rebuild before the last: a position reached only once every page is.
   const handle = async ({ batch, final }) => {
     await db.transact((tx) => handler(batch, tx));
+    if (otel.enabled) otel.recordPipeline('handled', batch.ts ?? null);
     if (!final) return;
     checkpoint = batch.eventId;
     await store.put(name, JSON.stringify({ eventId: checkpoint }), { atomic: true });
@@ -100,6 +102,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
         // again — never skipped, never moved past.
         if (errors.length >= MAX_ERRORS) errors.shift();
         errors.push(cause);
+        if (otel.enabled) otel.recordPipeline('failed', null);
         halt();
         logger.warn({ event: 'pipeline.failed', name, eventId: batch.eventId, err: cause });
         const message = `Pipeline ${name} failed at ${batch.eventId} and stopped before the turn`;
@@ -128,6 +131,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
       }
       for (let i = 0; i < batch.changes.length; i++) last.changes.push(batch.changes[i]);
       last.eventId = batch.eventId;
+      last.ts = batch.ts;
       return;
     }
     queue.push({ batch, final });
@@ -163,7 +167,9 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
   // Where the log cannot resume from the checkpoint: every record of the source, once, a page at a time.
   const rebuild = () => {
     rebuilt = true;
-    paged(seam.ids(source), true, db.log.lastEventId);
+    const ids = seam.ids(source);
+    logger.info({ event: 'pipeline.rebuild', name, records: ids.length });
+    paged(ids, true, db.log.lastEventId);
   };
 
   // The turns since the checkpoint, from the log: the ids of the source's records they touched.
@@ -220,7 +226,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
       listener = (event) => {
         const batch = ofSource(event.changes);
         if (batch.ids.length === 0) return;
-        push({ ...batch, replay: false, rebuilt: false, eventId: event.eventId });
+        push({ ...batch, replay: false, rebuilt: false, eventId: event.eventId, ts: event.ts ?? null });
       };
       db.on('transaction', listener);
       replay();

@@ -677,6 +677,8 @@ class Cursor {
       // A filter reads the record and decides for itself: nothing the index decided is final.
       if (this.#filter !== null) made.residual = true;
       this.#planned = made;
+      const { otel } = source;
+      if (otel?.enabled) otel.recordQueryPlan(made.scan);
       // Told to whoever advises on indexes (@alexify/syncom/inspect indexAdvisor).
       this.#source.planned?.(this.#entity, made);
     }
@@ -873,6 +875,8 @@ class Cursor {
     const key = limit === this.#limit ? this.#cacheKey() : null;
     if (key !== null) {
       const kept = this.#cache.rows(key, this.#source.generation(this.#entity));
+      const { otel } = this.#source;
+      if (otel?.enabled) otel.recordQueryCache(kept === null ? 'miss' : 'hit');
       if (kept !== null) return this.#deliver(kept.slice(this.#offset));
     }
     const generation = key === null ? 0 : this.#source.generation(this.#entity);

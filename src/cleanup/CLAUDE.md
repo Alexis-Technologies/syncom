@@ -7,8 +7,7 @@ A tombstone folded whole into the `tombstones` kv namespace. The rules of the co
 ```
 src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, { minimumDeletedTime, runEach, awaitSync }): old, acknowledged
                           tombstones folded through [SOURCE].foldMany (EntryStore.foldMany), dropped through forgetMany
-                          (EntryStore.dropMany), BATCH ids a turn of the queue; a timer stopped with the database — requires symbols.js,
-                          vector.js only
+                          (EntryStore.dropMany), BATCH ids a turn of the queue; a timer stopped with the database — requires symbols.js, vector.js, telemetry/writer.js only
 ```
 
 ## Rules

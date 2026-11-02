@@ -211,6 +211,11 @@ class EntryStore {
   }
 
   /** The folded ids, sorted — a copy. */
+  /** How many tombstones are folded into the namespace. */
+  get foldedCount() {
+    return this.#folded.size;
+  }
+
   foldedIds() {
     const ids = [];
     for (const id of this.#folded) ids.push(id);

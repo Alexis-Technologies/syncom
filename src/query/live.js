@@ -119,9 +119,11 @@ class Live {
       // Before the first run, nothing is kept: the run reads everything.
       if (!this.#ran) this.#rerun = true;
       while (!this.#stopped && (this.#pending.size > 0 || this.#rerun)) {
+        const { otel } = this.#source;
         if (this.#rerun) {
           this.#rerun = false;
           this.#pending.clear();
+          if (otel?.enabled && this.#ran) otel.recordQueryLive('rerun');
           await this.#load();
           moved = true;
           continue;
@@ -129,6 +131,7 @@ class Live {
         const ids = [...this.#pending];
         this.#pending.clear();
         for (let i = 0; i < ids.length && !this.#rerun; i++) {
+          if (otel?.enabled) otel.recordQueryLive('reduce');
           const row = await this.#spec.rowOf(ids[i]);
           if (this.#mode === 'count') moved = this.#counted(ids[i], row) || moved;
           else moved = this.#placed(ids[i], row) || moved;

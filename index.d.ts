@@ -1550,6 +1550,14 @@ export interface StorageStats {
   /** Writes waiting on, or running in, the mutation queue. */
   queue: number;
   cache: { size: number; max: number; pinned: number };
+  /** The collections defined (`schema.entities`, `addCollections()`). */
+  collections: number;
+  /** The advisors watching the plans (`indexAdvisor`). */
+  advisors: number;
+  /** Tombstones folded into the `tombstones` namespace (the cleanup's). */
+  tombstones: number;
+  /** The query plugin's cache — its entries and the rows they hold — and the live runs kept; `null` without the plugin. */
+  query: { cache: { entries: number; rows: number }; live: number } | null;
   /** Rows, tombstones included, and the puts since the last save. */
   catalog: { entries: number; dirty: number };
   log: {

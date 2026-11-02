@@ -157,10 +157,25 @@ class Collection extends Emitter {
     const def = this.#storage[SOURCE].definition(this.#name) ?? LOOSE;
     const named = namedId(def, data);
     if (named === null) {
-      throw typed('INVALID_ID', `${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`);
+      throw typed('INVALID_ID', `${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`, {
+        entity: this.#name,
+        field: def.idField || null,
+      });
     }
-    if (named.id === null) throw typed('INVALID_ID', `${method}(): a ${this.#name} ${idReason(named)}`);
+    if (named.id === null) {
+      throw typed('INVALID_ID', `${method}(): a ${this.#name} ${idReason(named)}`, {
+        entity: this.#name,
+        field: named.field,
+      });
+    }
     return named;
+  }
+
+  // The id a row's data names, where it names one and well — for a refused row's report; null otherwise.
+  #knownId(data) {
+    if (!isPlainObject(data)) return null;
+    const named = namedId(this.#storage[SOURCE].definition(this.#name) ?? LOOSE, data);
+    return named !== null && named.id !== null ? named.id : null;
   }
 
   /**
@@ -207,7 +222,7 @@ class Collection extends Emitter {
   // to `error` and the rest go on; a failure of the batch (the disk, the log)
   // throws and nothing lands. Resolves to `{ success, error }` — the ids
   // written, and `{ index, id, data, error }` per refused row.
-  async #bulk(method, rows, options, write) {
+  async #bulk(method, rows, options, write, idOf) {
     list(method, rows);
     const success = [];
     const error = [];
@@ -220,7 +235,7 @@ class Collection extends Emitter {
               id = await write(tx, rows[i]);
             } catch (cause) {
               if (!ownVerdict(cause)) throw cause;
-              error.push({ index: i, id: cause.code === 'EXISTS' ? cause.id : id, data: rows[i], error: cause });
+              error.push({ index: i, id: cause.id ?? id ?? idOf(rows[i]), data: rows[i], error: cause });
               continue;
             }
             success.push(id);
@@ -236,36 +251,61 @@ class Collection extends Emitter {
       logger.warn({ event: 'hook.failed', hook: 'afterWrite', method, err: cause });
       notify(this.#storage, logger, 'error', cause);
     }
+    const { otel } = this.#storage[SOURCE];
+    if (otel.enabled) {
+      otel.recordBulk('success', success.length);
+      otel.recordBulk('error', error.length);
+    }
     return { success, error };
   }
 
   /** Inserts every row as `insert()` would, as one transaction with a verdict per row. */
   bulkInsert(rows, options = {}) {
-    return this.#bulk('bulkInsert', rows, options, async (tx, data) => {
-      const record = this.#typed('bulkInsert', data);
-      const id = await tx.insert(record, options);
-      return id;
-    });
+    return this.#bulk(
+      'bulkInsert',
+      rows,
+      options,
+      async (tx, data) => {
+        const record = this.#typed('bulkInsert', data);
+        const id = await tx.insert(record, options);
+        return id;
+      },
+      (data) => this.#knownId(data),
+    );
   }
 
   /** Writes every row whole under the id its data names, as one transaction with a verdict per row. */
   bulkUpsert(rows, options = {}) {
-    return this.#bulk('bulkUpsert', rows, options, async (tx, data) => {
-      const named = this.#named('bulkUpsert', this.#typed('bulkUpsert', data));
-      await tx.set(named.id, named.data, options);
-      return named.id;
-    });
+    return this.#bulk(
+      'bulkUpsert',
+      rows,
+      options,
+      async (tx, data) => {
+        const named = this.#named('bulkUpsert', this.#typed('bulkUpsert', data));
+        await tx.set(named.id, named.data, options);
+        return named.id;
+      },
+      (data) => this.#knownId(data),
+    );
   }
 
   /** Deletes every id of this collection, as one transaction with a verdict per row: an absent or foreign one is `NOT_FOUND`. */
   bulkRemove(ids, options = {}) {
-    return this.#bulk('bulkRemove', ids, options, async (tx, id) => {
-      if (typeof id !== 'string') throw new TypeError('bulkRemove() takes ids');
-      this.#mine(id);
-      if (!(await tx.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id, entity: this.#name });
-      await tx.delete(id, options);
-      return id;
-    });
+    return this.#bulk(
+      'bulkRemove',
+      ids,
+      options,
+      async (tx, id) => {
+        if (typeof id !== 'string') throw new TypeError('bulkRemove() takes ids');
+        this.#mine(id);
+        if (!(await tx.has(id))) {
+          throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id, entity: this.#name });
+        }
+        await tx.delete(id, options);
+        return id;
+      },
+      (id) => (typeof id === 'string' ? id : null),
+    );
   }
 
   /**
@@ -313,6 +353,7 @@ class Collection extends Emitter {
       }
       removed += ids.length + sealed.length;
     }
+    this.#storage.logger.info({ event: 'collection.remove', entity: this.#name, purge, removed });
     return { removed };
   }
 

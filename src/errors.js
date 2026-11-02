@@ -29,7 +29,7 @@ class SyncomError extends Error {
 
 // A TypeError about a value that came from data rather than from the code
 // that called — the one kind of TypeError that carries a code.
-const typed = (code, message) => Object.assign(new TypeError(message), { code });
+const typed = (code, message, fields = {}) => Object.assign(new TypeError(message), { code }, fields);
 
 const describe = (entity, issues) => {
   const subject = entity === null ? 'Record' : entity;
