@@ -185,7 +185,10 @@ const ENTRIES = [
   // 71.0 with a row's id laid last, writes by query matched again inside the queue, drop() under the lock, dropDatabase()
   // refusing a stray directory, composite ids refused on the separator and immutable (ID_IMMUTABLE), EXISTS by
   // `expect: ABSENT` (review №6, E2). 71.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 71.5 },
+  // 72.7 with the catalog's sorted indexes on SortedIndex (src/sorted.js, chunked sorted arrays: 1.2 of it), a put that
+  // re-keys only the indexes a changed field belongs to, load/define/adopt built once (review №6, E4.2; the design
+  // estimated 0.6 less). 73, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 73 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -405,7 +408,8 @@ const ENTRIES = [
   // 154.6 with a tombstone's row typed and stamped (review №6, E1.1; 2026-11-02). 155, raised by name.
   // 155.1 with the folded tombstones in the `tombstones` kv namespace (review №6, E1.2–E1.3). 155.5, raised by name.
   // 155.5 with the writes made safe (review №6, E2). 156, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 156 },
+  // 157.5 with the sorted indexes on SortedIndex (review №6, E4.2). 158, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 158 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -554,7 +558,9 @@ const ENTRIES = [
   // (collections plan, C2.3). 11.5, raised by name.
   // 12.8 with the planner (src/query/plan.js), `explain()` and the catalog's sorted indexes it reads (collections plan,
   // C3.1–C3.2). 13.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 13.5 },
+  // 14.9 with the catalog it is measured with standing on SortedIndex (src/sorted.js, bundled alone here; in an app the
+  // core shares it) (review №6, E4.2). 15, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 15 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

@@ -55,7 +55,7 @@ src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams
 src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — createDatabase()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
-src/catalog.js            the record catalog: live ids, collections, indexed values; catalog.json through a kv store — requires engine.js only
+src/catalog.js            the record catalog: live ids, collections, indexed values, the sorted indexes; catalog.json through a kv store — requires engine.js, sorted.js only
 src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — no requires
 src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
                           `createDatabase()` (and the pre-rename aliases `Database`, `open`)

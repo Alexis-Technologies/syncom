@@ -33,8 +33,9 @@ src/query/cache.js        QueryCache, keyOf — a result by its key with the cat
   the fold, before `#log.append` (local: throw) and after `applyOp` on the
   apply path (remote: `conflict` event, never a skip — both records stay).
 - **A cursor is planned over the catalog's sorted indexes.** An entity's `index` is a list of keys — a
-  field, or a compound key of fields — each a sorted index the catalog keeps (`Catalog#keyed`: the
-  entries `{ keys, id }` in `compare` order then id, binary insertion, rebuilt from the rows at load)
+  field, or a compound key of fields — each a sorted index the catalog keeps (`Catalog#keyed`: a `SortedIndex` each — src/sorted.js, chunked sorted arrays in `compare` order then id — built
+  once at load, a put re-keying only the indexes a changed field belongs to; `multi` counts the rows keyed per
+  element of an array, `overflow` the rows whose array passed the cap, keyed whole and yielded by every scan)
   beside the equality postings of every field named. `plan()` (src/query/plan.js, pure) picks the index
   with the longest prefix of equalities, then one field more for a range or the sort; `Catalog.scan(type,
 plan)` reads the entries between two binary searches, forward or backward; where `sortedByIndex` the

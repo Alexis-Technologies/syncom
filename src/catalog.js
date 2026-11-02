@@ -1,6 +1,7 @@
 'use strict';
 
 const { fsiNamespace } = require('./engine.js');
+const { SortedIndex, rankOf, compare } = require('./sorted.js');
 
 // The record catalog: every live record's id, collection and indexed field
 // values, in memory, so `list()`, `hasRecord()` and a query by an indexed
@@ -44,48 +45,6 @@ const valueOf = (data, path) => {
     value = value[part];
   }
   return value;
-};
-
-// A total order for sorting: nothing, then booleans, numbers, strings, then
-// everything else (left where it was) — the order of `order()`, of a sorted
-// index, of `$gt` and the rest, which hold only between values of one of
-// the three ordered kinds.
-const rankOf = (value) => {
-  if (value === undefined || value === null) return 0;
-  const type = typeof value;
-  if (type === 'boolean') return 1;
-  if (type === 'number') return 2;
-  if (type === 'string') return 3;
-  return 4;
-};
-
-const compare = (a, b) => {
-  const rank = rankOf(a);
-  const other = rankOf(b);
-  if (rank !== other) return rank - other;
-  if (rank === 0 || rank === 4) return 0;
-  return a < b ? -1 : a > b ? 1 : 0;
-};
-
-// Two entries of a sorted index: by each key, then by id.
-const compareEntries = (a, b) => {
-  for (let i = 0; i < a.keys.length; i++) {
-    const order = compare(a.keys[i], b.keys[i]);
-    if (order !== 0) return order;
-  }
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-};
-
-// The first position of `entries` at which `test` is no longer below: a binary search.
-const lowerBound = (entries, below) => {
-  let low = 0;
-  let high = entries.length;
-  while (low < high) {
-    const mid = (low + high) >>> 1;
-    if (below(entries[mid])) low = mid + 1;
-    else high = mid;
-  }
-  return low;
 };
 
 // A value with its object keys sorted at every depth: `{ a, b }` and
@@ -205,15 +164,18 @@ const defOf = (def) => {
 // — and, where a field holds an array, one entry per element of it (as the
 // posting lists post an array, and as the predicate matches one: by any of
 // its elements), every combination of them; `multi` says an array was met.
-// Bounded: past 64 entries the array is keyed whole alone.
+// Bounded: past 64 entries the array is keyed whole alone — `overflow` says
+// so, and every scan yields such a row for the predicate to decide.
 const MAX_ENTRIES = 64;
 const keysOf = (fields, index) => {
   let tuples = [[]];
   let multi = false;
+  let overflow = false;
   for (let i = 0; i < index.length; i++) {
     const value = valueOf(fields, index[i]);
-    const elements =
-      Array.isArray(value) && value.length > 0 && tuples.length * value.length <= MAX_ENTRIES ? value : null;
+    const array = Array.isArray(value) && value.length > 0;
+    const elements = array && tuples.length * value.length <= MAX_ENTRIES ? value : null;
+    if (array && elements === null) overflow = true;
     const next = [];
     for (let t = 0; t < tuples.length; t++) {
       if (elements === null) next.push(tuples[t].concat([value]));
@@ -224,13 +186,22 @@ const keysOf = (fields, index) => {
     }
     tuples = next;
   }
-  return { tuples, multi };
+  return { tuples, multi, overflow };
 };
 
-// Whether two entries hold the same keys.
-const sameKeys = (a, b) => {
-  for (let i = 0; i < a.keys.length; i++) if (compare(a.keys[i], b.keys[i]) !== 0) return false;
-  return true;
+// The entries of `id` taken out of a bulk build's queue (a row removed before the build).
+const unqueue = (pending, id) => {
+  for (let i = pending.length - 1; i >= 0; i--) if (pending[i].id === id) pending.splice(i, 1);
+};
+
+// Whether two indexed values are one: the same, or objects with one canonical text.
+const sameValue = (x, y) =>
+  x === y || (typeof x === 'object' && typeof y === 'object' && x !== null && y !== null && keyOf(x) === keyOf(y));
+
+// Whether a key (a field list) names a field among `changed`.
+const touches = (fields, changed) => {
+  for (let i = 0; i < fields.length; i++) if (changed.has(fields[i])) return true;
+  return false;
 };
 
 // A row with nothing indexed: what a record of a collection keeps while
@@ -253,9 +224,13 @@ class Catalog {
   #byType = new Map();
   #eq = new Map();
   #unique = new Map();
-  // Per type, per declared index (by its name): the entries `{ keys, id }` in key order, then id — what
-  // a range, a prefix or a sort reads in order (`scan`).
+  // Per type, per declared index (by its name): `{ fields, sorted, multi, overflow, pending }` — a SortedIndex
+  // (src/sorted.js) of the rows' keys in key order then id, what a range, a prefix or a sort reads in order
+  // (`scan`); `multi` how many rows are keyed per element of an array, `overflow` the ids whose array passed
+  // the cap (keyed whole), `pending` the entries a bulk build sorts once.
   #keyed = new Map();
+  // A bulk build under way (a load, a definition, an adoption): the sorted indexes' entries wait for one sort.
+  #bulk = false;
   #watchers = new Map();
   #dirty = 0;
   // The rows put since the last save, by id (null: removed), and whether the
@@ -302,38 +277,27 @@ class Catalog {
    * The ids a plan (src/query/plan.js) reads from a sorted index, in its
    * order — the rows whose first keys are `prefix`, within `range` on the
    * key after it (`{ lower: { value, inclusive }, upper }`, either side
-   * open), forward or backward (`desc`). A scan is bounded: a binary search
-   * to each edge, the entries between.
+   * open), forward or backward (`desc`): two seeks, the entries between —
+   * then the rows whose array passed the cap (keyed whole), which every
+   * scan yields and the predicate decides.
    */
   scan(type, { index, prefix, range, desc }) {
     const held = this.#keyed.get(type)?.get(index.join(','));
     if (held === undefined) return { ids: [], sorted: true };
-    const { entries } = held;
+    const { sorted } = held;
     const k = prefix.length;
-    // Below the prefix (and the lower edge) / within or below the upper edge.
-    const belowLower = (entry) => {
-      for (let i = 0; i < k; i++) {
-        const order = compare(entry.keys[i], prefix[i]);
-        if (order !== 0) return order < 0;
-      }
-      if (range === null || range.lower === null) return false;
-      const order = compare(entry.keys[k], range.lower.value);
-      return order < 0 || (order === 0 && !range.lower.inclusive);
-    };
-    const withinUpper = (entry) => {
-      for (let i = 0; i < k; i++) {
-        const order = compare(entry.keys[i], prefix[i]);
-        if (order !== 0) return order < 0;
-      }
-      if (range === null || range.upper === null) return true;
-      const order = compare(entry.keys[k], range.upper.value);
-      return order < 0 || (order === 0 && range.upper.inclusive);
-    };
-    const from = lowerBound(entries, belowLower);
-    const to = lowerBound(entries, withinUpper);
+    const from =
+      range === null || range.lower === null
+        ? sorted.seek(prefix, k, null, true)
+        : sorted.seek(prefix.concat([range.lower.value]), k + 1, null, range.lower.inclusive);
+    const to =
+      range === null || range.upper === null
+        ? sorted.seek(prefix, k, null, false)
+        : sorted.seek(prefix.concat([range.upper.value]), k + 1, null, !range.upper.inclusive);
     const ids = [];
-    // An array keyed per element lists a row once per element in range: each id once.
-    const seen = held.multi ? new Set() : null;
+    // An array keyed per element lists a row once per element in range, and a row keyed whole may lie in the
+    // range as well: each id once.
+    const seen = held.multi > 0 || held.overflow.size > 0 ? new Set() : null;
     const push = (id) => {
       if (seen !== null) {
         if (seen.has(id)) return;
@@ -341,19 +305,11 @@ class Catalog {
       }
       ids.push(id);
     };
-    if (!desc) for (let i = from; i < to; i++) push(entries[i].id);
-    else {
-      // Backwards by key, forwards by id within equal keys: the result's one order.
-      let i = to - 1;
-      while (i >= from) {
-        let j = i;
-        while (j > from && sameKeys(entries[j - 1], entries[i])) j--;
-        for (let k = j; k <= i; k++) push(entries[k].id);
-        i = j - 1;
-      }
-    }
+    const iterator = sorted.iterate(from, to, desc);
+    for (let id = iterator.next(); id !== null; id = iterator.next()) push(id);
+    for (const id of held.overflow) push(id);
     // Sorted by the index only where no key holds an array (an element's place is not the row's).
-    return { ids, sorted: !held.multi };
+    return { ids, sorted: held.multi === 0 && held.overflow.size === 0 };
   }
 
   // A row's entries into the type's sorted indexes, or out of them.
@@ -363,19 +319,49 @@ class Catalog {
       if (!into) return;
       byIndex = new Map();
       for (let i = 0; i < def.indexes.length; i++) {
-        byIndex.set(def.indexes[i].join(','), { fields: def.indexes[i], entries: [], multi: false });
+        const key = def.indexes[i];
+        const held = { fields: key, sorted: new SortedIndex(key.length), multi: 0, overflow: new Set(), pending: null };
+        if (this.#bulk) held.pending = [];
+        byIndex.set(key.join(','), held);
       }
       this.#keyed.set(type, byIndex);
     }
-    for (const held of byIndex.values()) {
-      const { tuples, multi } = keysOf(fields, held.fields);
-      if (multi && into) held.multi = true;
-      const { entries } = held;
-      for (let t = 0; t < tuples.length; t++) {
-        const entry = { keys: tuples[t], id };
-        const at = lowerBound(entries, (other) => compareEntries(other, entry) < 0);
-        if (into) entries.splice(at, 0, entry);
-        else if (at < entries.length && entries[at].id === id && sameKeys(entries[at], entry)) entries.splice(at, 1);
+    for (const held of byIndex.values()) this.#keyInto(held, id, fields, into);
+  }
+
+  // One row into one sorted index, or out of it: `multi` counts the rows keyed per element (a scan is sorted again
+  // once the last leaves), `overflow` the ids whose array passed the cap (keyed whole; every scan yields them). Under
+  // a bulk build the entries wait for one sort (`#endBulk`).
+  #keyInto(held, id, fields, into) {
+    const { tuples, multi, overflow } = keysOf(fields, held.fields);
+    if (multi) held.multi += into ? 1 : -1;
+    if (overflow) {
+      if (into) held.overflow.add(id);
+      else held.overflow.delete(id);
+    }
+    for (let t = 0; t < tuples.length; t++) {
+      if (!into) {
+        if (!held.sorted.remove(tuples[t], id) && held.pending !== null) unqueue(held.pending, id);
+      } else if (held.pending !== null) held.pending.push({ keys: tuples[t], id });
+      else held.sorted.insert(tuples[t], id);
+    }
+  }
+
+  // A bulk build begun: every sorted index queues what comes until `#endBulk` sorts it once.
+  #beginBulk() {
+    this.#bulk = true;
+    for (const byIndex of this.#keyed.values()) {
+      for (const held of byIndex.values()) if (held.pending === null) held.pending = [];
+    }
+  }
+
+  #endBulk() {
+    this.#bulk = false;
+    for (const byIndex of this.#keyed.values()) {
+      for (const held of byIndex.values()) {
+        if (held.pending === null) continue;
+        held.sorted.build(held.pending);
+        held.pending = null;
       }
     }
   }
@@ -391,25 +377,29 @@ class Catalog {
   define(name, def, index = null) {
     const ids = [...(this.#byType.get(name) ?? [])];
     const rows = [];
+    // Under the definition the rows were posted under: the postings, the unique keys and the sorted indexes go
+    // whole, first — then each row, bare.
+    this.#eq.delete(name);
+    this.#unique.delete(name);
+    this.#keyed.delete(name);
     for (let i = 0; i < ids.length; i++) {
       const row = bare(this.#rows.get(ids[i]));
-      // Under the definition the row was posted under: the postings go with it.
       this.#remove(ids[i]);
       rows.push(row);
     }
     if (def === null) this.#defs.delete(name);
     else this.#defs.set(name, defOf(def));
-    this.#eq.delete(name);
-    this.#unique.delete(name);
-    this.#keyed.delete(name);
     if (index === null) this.#text.delete(name);
     else this.#text.set(name, index);
     for (const [id, pending] of this.#textPending) if (pending.type === name) this.#textPending.delete(id);
+    // The bare rows back, their sorted indexes built once (the caller indexes the records again).
+    this.#beginBulk();
     for (let i = 0; i < ids.length; i++) {
       this.#insert(ids[i], rows[i]);
       this.#dirty++;
       this.#changed.set(ids[i], rows[i]);
     }
+    this.#endBulk();
     this.#rekey();
     this.#generation++;
   }
@@ -465,12 +455,15 @@ class Catalog {
     this.#index(id, row, false);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
+    // The type's structures may be gone already (`define` takes them whole, then the rows).
     const eq = this.#eq.get(row.type);
-    for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
+    if (eq !== undefined) for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
     const unique = this.#unique.get(row.type);
-    for (const key of def.unique) {
-      const value = this.#uniqueKey(row.fields, key);
-      if (value !== null) drop(unique.get(key.join(',')), value, id);
+    if (unique !== undefined) {
+      for (const key of def.unique) {
+        const value = this.#uniqueKey(row.fields, key);
+        if (value !== null) drop(unique.get(key.join(',')), value, id);
+      }
     }
     this.#key(row.type, id, row.fields, def, false);
   }
@@ -565,6 +558,17 @@ class Catalog {
       if (before !== null) this.#wake(before, false, id, 'update');
       return;
     }
+    // A live row of the collection it was of, changed: only what reads a changed field is kept up — the postings,
+    // the unique keys and the sorted indexes of those fields; the sorted id lists stay (the id set did not move).
+    const live = was !== undefined && row !== null && !was.gone && !row.gone && !was.encrypted && !row.encrypted;
+    const same = live && type !== null && type === was.type ? this.#defs.get(type) : undefined;
+    if (same !== undefined) {
+      this.#update(id, was, row, same);
+      this.#dirty++;
+      this.#changed.set(id, row);
+      this.#wake(type, true, id, 'update');
+      return;
+    }
     this.#remove(id);
     this.#dirty++;
     this.#changed.set(id, row);
@@ -573,6 +577,46 @@ class Catalog {
     if (before !== null) this.#wake(before, true, id, !gone && type === before ? 'update' : 'remove');
     if (!gone && type !== null && type !== before) this.#wake(type, true, id, 'insert');
     if (row !== null) this.#insert(id, row);
+  }
+
+  // A live row changed within its collection: the fields whose values moved, and what reads them — a posting
+  // list, a unique key, a sorted index — taken out under the old value and put under the new; the text, where
+  // it changed. Nothing else is touched.
+  #update(id, was, row, def) {
+    this.#rows.set(id, row);
+    const changed = new Set();
+    for (const field of Object.keys(was.fields)) {
+      if (!sameValue(was.fields[field], row.fields[field])) changed.add(field);
+    }
+    for (const field of Object.keys(row.fields)) if (!Object.hasOwn(was.fields, field)) changed.add(field);
+    const eq = this.#eq.get(row.type);
+    for (const field of changed) {
+      const list = eq.get(field);
+      if (list === undefined) continue;
+      if (was.fields[field] !== undefined) post(list, was.fields[field], id, drop);
+      if (row.fields[field] !== undefined) post(list, row.fields[field], id, add);
+    }
+    const unique = this.#unique.get(row.type);
+    for (const key of def.unique) {
+      if (!touches(key, changed)) continue;
+      const before = this.#uniqueKey(was.fields, key);
+      const after = this.#uniqueKey(row.fields, key);
+      if (before === after) continue;
+      if (before !== null) drop(unique.get(key.join(',')), before, id);
+      if (after !== null) add(unique.get(key.join(',')), after, id);
+    }
+    const byIndex = this.#keyed.get(row.type);
+    if (byIndex !== undefined) {
+      for (const held of byIndex.values()) {
+        if (!touches(held.fields, changed)) continue;
+        this.#keyInto(held, id, was.fields, false);
+        this.#keyInto(held, id, row.fields, true);
+      }
+    }
+    if (was.text !== row.text) {
+      if (row.text === undefined) this.#index(id, was, false);
+      else this.#index(id, row, true);
+    }
   }
 
   /** Whether `$text` can be asked of this collection: it has search fields and an index. */
@@ -748,12 +792,14 @@ class Catalog {
   adopt(rows) {
     this.#loaded = false;
     this.#generation++;
+    this.#beginBulk();
     for (const [id, row] of rows) {
       this.#remove(id);
       this.#insert(id, row);
       this.#dirty++;
       this.#changed.set(id, row);
     }
+    this.#endBulk();
   }
 
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
@@ -777,6 +823,7 @@ class Catalog {
       typeof parsed.stamp === 'string' &&
       Array.isArray(parsed.rows);
     if (!usable) return null;
+    this.#beginBulk();
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
       const [id, type, v, encrypted, fields, gone, seventh] = row;
@@ -795,6 +842,7 @@ class Catalog {
       // file's stamp, from the rows alone.
       this.#insert(id, loaded);
     }
+    this.#endBulk();
     this.#dirty = 0;
     return { stamp: parsed.stamp };
   }
@@ -809,11 +857,13 @@ class Catalog {
     const saved = await this.#rowStore.load();
     if (saved === null || (strict && saved.indexes !== this.#indexKey) || typeof saved.stamp !== 'string') return null;
     const rows = saved.rows;
+    this.#beginBulk();
     for (let i = 0; i < rows.length; i++) {
       const [id, row] = rows[i];
       this.#remove(id);
       this.#insert(id, row);
     }
+    this.#endBulk();
     this.#dirty = 0;
     this.#changed.clear();
     this.#loaded = true;
