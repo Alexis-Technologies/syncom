@@ -217,6 +217,71 @@ const runCollectionTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'an update operator goes by the kind of its field and refuses the rest, as one transaction; ifMatch writes only where the record matches',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
+      const id = (await db.Post.insert({ n: 1, tags: ['a'], arr: [1, 2], title: 't' })).id;
+      await db.add(id, 'set', ['x']);
+      await db.push(id, 'list', [1, 2, 3]);
+      await db.push(id, 'body', 'ab');
+      await db.inc(id, 'hits', 1);
+      const turns = [];
+      db.on('transaction', (event) => turns.push(event.ops.map((op) => op.type)));
+      await db.Post.update(id, {
+        $inc: { hits: 2, fresh: 1 },
+        $addToSet: { set: 'y', arr: { $each: [2, 3] } },
+        $pull: { tags: 'a' },
+        $push: { list: 9, body: 'c', made: 5 },
+        $pop: { arr: -1 },
+        $min: { n: 0 },
+        $max: { n: 0 },
+        $rename: { title: 'name' },
+        $unset: ['gone'],
+        $set: { z: 1 },
+      });
+      assert.deepStrictEqual(await db.get(id), {
+        n: 0,
+        tags: [],
+        arr: [2],
+        $type: 'Post',
+        set: ['x', 'y'],
+        list: [1, 2, 3, 9],
+        body: 'abc',
+        hits: 3,
+        fresh: 1,
+        made: [5],
+        name: 't',
+        z: 1,
+      });
+      // One turn: inc, inc, add, push, push, the rename's unset, then one set of what was rewritten
+      // (`tags` is a register's array: `$pull` rewrote it) and set.
+      assert.deepStrictEqual(turns, [['inc', 'inc', 'add', 'splice', 'splice', 'unset', 'set']]);
+      // A kind refuses what is not its own: the whole update, nothing of it written.
+      assert.strictEqual(await code(db.update(id, { $inc: { name: 1 }, $set: { k: 1 } })), 'FIELD_KIND');
+      assert.strictEqual(await code(db.update(id, { $addToSet: { hits: 1 } })), 'FIELD_KIND');
+      assert.strictEqual(await code(db.update(id, { $push: { hits: 1 } })), 'FIELD_KIND');
+      assert.strictEqual((await db.get(id)).k, undefined);
+      assert.strictEqual(await code(db.update(id, { $set: { a: 1 }, b: 2 })), 'TypeError', 'operators or fields');
+      assert.strictEqual(await code(db.Post.update(id, { $set: { $type: 'X' } })), 'TypeError');
+      assert.strictEqual(await code(db.update('nope', { $set: { a: 1 } })), 'NOT_FOUND');
+      // Inside a transaction, over what it left; and from a Document's collection.
+      await db.transact(async (tx) => {
+        await tx.update(id, { k: 1 });
+        await tx.update(id, { $inc: { k2: 1 }, $max: { k: 5 } });
+      });
+      assert.deepStrictEqual([(await db.get(id)).k, (await db.get(id)).k2], [5, 1]);
+      // ifMatch: decided inside the queue, over the record as it reads; resolves to whether it wrote.
+      assert.strictEqual(await db.update(id, { m: 1 }, { ifMatch: { n: 0 } }), true);
+      assert.strictEqual(await db.update(id, { m: 2 }, { ifMatch: { n: 5 } }), false);
+      assert.strictEqual((await db.get(id)).m, 1);
+      assert.strictEqual(await db.Post.update(id, { $inc: { hits: 1 } }, { ifMatch: { hits: { $gte: 3 } } }), true);
+      assert.strictEqual((await db.get(id)).hits, 4);
+      assert.strictEqual(await code(db.update(id, { m: 3 }, { ifMatch: { $nope: 1 } })), 'TypeError');
+      assert.strictEqual(await db.transact((tx) => tx.update(id, { m: 3 }, { ifMatch: { m: 1 } })), true);
+    },
+  );
+
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
     const id = (await db.Post.insert({ n: 1 })).id;

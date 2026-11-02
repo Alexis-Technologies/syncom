@@ -214,9 +214,8 @@ class Collection {
   }
 
   async update(id, delta, options = {}) {
-    if (isPlainObject(delta) && Object.hasOwn(delta, '$type')) {
-      throw new TypeError('$type is immutable; update() may not name it');
-    }
+    const names = isPlainObject(delta) && (Object.hasOwn(delta, '$type') || Object.hasOwn(delta.$set ?? {}, '$type'));
+    if (names) throw new TypeError('$type is immutable; update() may not name it');
     this.#mine(id);
     return this.#storage.update(id, delta, options);
   }

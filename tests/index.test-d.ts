@@ -940,6 +940,17 @@ storage.record<Post>('id').then((record) => {
     expectType<Promise<{ n: number } | null>>(tx.modify<{ n: number }>('t1', (doc) => void (doc.n += 1)));
   });
   expectError(db.modify('t1', 'nope'));
+  expectType<Promise<void>>(db.update('t1', { $inc: { n: 1 }, $addToSet: { tags: { $each: ['a'] } } }));
+  expectType<Promise<boolean>>(db.update('t1', { $set: { n: 1 } }, { ifMatch: { n: 0 } }));
+  expectType<Promise<boolean>>(db.Tag.update('t1', { n: 1 }, { ifMatch: { n: { $lt: 1 } } }));
+  expectType<Promise<void>>(db.Tag.update('t1', { $pop: { list: -1 }, $rename: { a: 'b' } }));
+  expectAssignable<syncom.UpdateOperators>({ $pop: { list: 1 }, $min: { n: 2 } });
+  expectNotAssignable<syncom.UpdateOperators>({ $pop: { list: 2 } });
+  expectNotAssignable<syncom.UpdateOperators>({ $inc: { n: 'x' } });
+  await db.transact(async (tx) => {
+    expectType<Promise<boolean>>(tx.update('t1', { $max: { n: 3 } }, { ifMatch: {} }));
+    expectType<Promise<void>>(tx.update('t1', { $unset: ['a'] }));
+  });
   const code: syncom.SyncomErrorCode = 'EXISTS';
   const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
   expectType<'EXISTS'>(code);

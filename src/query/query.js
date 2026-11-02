@@ -7,15 +7,22 @@
 // the same cursor. The catalog, its indexes and the text index behind
 // `$text` (`createDatabase({ search })`) are the core's: what a query reads is kept
 // whether or not anything queries it. Without the plugin `select()` and
-// `count()` throw PLUGIN_MISSING. The hook the core takes: `query` —
-// `cursor(source, entity, query)`, the cursor over a source seam.
+// `count()` throw PLUGIN_MISSING, and so does `update(id, delta, { ifMatch })`.
+// The hook the core takes: `query` — `cursor(source, entity, query)`, the
+// cursor over a source seam, and `matches(query)`, the query as a predicate
+// over `{ id, ...record }` (what `ifMatch` is decided by).
 
-const { Cursor } = require('./cursor.js');
+const { Cursor, compileQuery } = require('./cursor.js');
 
 const query = Object.freeze({
   name: 'query',
   setup() {
-    return { query: { cursor: (source, entity, criteria) => new Cursor(source, entity, criteria) } };
+    return {
+      query: {
+        cursor: (source, entity, criteria) => new Cursor(source, entity, criteria),
+        matches: (criteria) => compileQuery(criteria),
+      },
+    };
   },
 });
 

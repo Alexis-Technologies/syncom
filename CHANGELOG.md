@@ -56,6 +56,16 @@ and one `commit` event, not one per call.
   `bulkUpsert(rows)`, `bulkRemove(ids)` are ONE transaction with a verdict per row — `{ success, error:
   [{ index, id, data, error }] }`: a row refused on its own account (its validator, a unique key, its
   id, its collection) stays out and the rest land; a batch that cannot reach the disk lands nothing.
+- **Update operators and `ifMatch`.** `update(id, delta)` — the database's, a collection's, `tx`'s — takes
+  `$set`, `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max` and `$rename` in place of
+  fields (every key one of them, or none), each laid onto the write API by the kind of its field
+  (`src/operators.js`): `$inc` is `inc()` on a counter and `FIELD_KIND` on a register, `$addToSet`/`$pull`
+  are `add()`/`remove()` on a set and a last-writer-wins rewrite of an array a register holds,
+  `$push`/`$pop` a `push()`/`splice()` on a list and a rewrite of a register's array, `$min`/`$max` a set
+  only where the comparison holds, `$rename` an `unset` and a `set` — decided inside the queue over the
+  record as it reads, written as one transaction, refused whole where a kind refuses its part.
+  `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
+  `query` plugin's), inside the queue, and resolves to whether it did.
 - **`modify(id, fn)`** — on the database, a collection and `tx`: `fn(copy)` runs inside the mutation queue
   over a copy of the record as it reads, and what it leaves (what it returns, or the copy when it returns
   nothing) is written as the ops that take the record there — a field changed a `set`, a field gone an

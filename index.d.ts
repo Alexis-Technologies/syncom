@@ -1749,6 +1749,32 @@ export interface WriteOptions {
   actor?: string;
 }
 
+/** `update()` with a condition: the write is made only where the record matches `ifMatch` (the `query` plugin's), inside the queue. */
+export interface UpdateOptions extends WriteOptions {
+  ifMatch?: MangoQuery;
+}
+
+/**
+ * `update()` written in operators — every key one of them, never with fields — each laid onto the
+ * write API by the kind of its field: `$inc` is `inc()` (a register refuses it), `$addToSet`/`$pull`
+ * are `add()`/`remove()` on a set and a last-writer-wins rewrite of an array a register holds,
+ * `$push`/`$pop` a `push()`/`splice()` on a list (a text takes a string) and a rewrite of a
+ * register's array (an absent field becomes one), `$min`/`$max` a set only where the comparison holds,
+ * `$rename` an `unset` and a `set`. Decided inside the queue, written as one transaction.
+ */
+export interface UpdateOperators {
+  readonly $set?: { readonly [field: string]: unknown };
+  readonly $unset?: string | readonly string[] | { readonly [field: string]: unknown };
+  readonly $inc?: { readonly [field: string]: number };
+  readonly $addToSet?: { readonly [field: string]: unknown | { readonly $each: readonly unknown[] } };
+  readonly $pull?: { readonly [field: string]: unknown | { readonly $in: readonly unknown[] } };
+  readonly $push?: { readonly [field: string]: unknown | { readonly $each: readonly unknown[] } };
+  readonly $pop?: { readonly [field: string]: 1 | -1 };
+  readonly $min?: { readonly [field: string]: number | string | boolean };
+  readonly $max?: { readonly [field: string]: number | string | boolean };
+  readonly $rename?: { readonly [field: string]: string };
+}
+
 /** What a transaction (and a patch batch) takes: the actor of its ops, a `source` for their `commit` events, a `message` on every op (at most 1 024 characters, signed). */
 export interface TransactOptions extends WriteOptions {
   source?: unknown;
@@ -1766,7 +1792,9 @@ export interface Transaction extends TextMethods, TreeMethods {
   /** A new record under the id its data names (`EXISTS` for a live one there), else a minted one. */
   insert(data: object, options?: WriteOptions): Promise<string>;
   set(id: string, data: object, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  /** The fields set, or the operators run — over what the transaction left; with `ifMatch`, whether it wrote. */
+  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** The record changed by a function, over what the transaction left it — the database's `modify()` within it. */
@@ -2424,7 +2452,13 @@ export interface Database {
   delete(id: string, options?: WriteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
   purge(id: string, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  /**
+   * Sets the listed fields (a `set` op) — or runs the operators (`UpdateOperators`), each by the kind of
+   * its field, as one transaction; with `ifMatch` (the `query` plugin's) only where the record matches,
+   * decided inside the queue, resolving to whether it wrote.
+   */
+  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
@@ -2781,8 +2815,17 @@ export interface SyncomCollection<R = RecordData, I = R> {
   /** Replaces the record wholesale, stamped as this collection's. */
   set(id: string, data: I, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: WriteOptions): Promise<void>;
-  /** Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be among them. */
-  update(id: string, delta: Partial<I> & PathFields, options?: WriteOptions): Promise<void>;
+  /**
+   * Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be
+   * among them — or runs the operators (`UpdateOperators`); with `ifMatch`, only where the record
+   * matches, resolving to whether it wrote.
+   */
+  update(
+    id: string,
+    delta: (Partial<I> & PathFields) | UpdateOperators,
+    options: UpdateOptions & { ifMatch: MangoQuery<R> },
+  ): Promise<boolean>;
+  update(id: string, delta: (Partial<I> & PathFields) | UpdateOperators, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
   document(id: string): Promise<SyncomDocument<R>>;

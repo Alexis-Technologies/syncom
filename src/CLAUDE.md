@@ -58,8 +58,8 @@ src/database.js           Database — the facade: open sequence, the mutation q
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
 src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
-src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods
-                          come with it; Database keeps a delegate per method
+src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
+src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
 src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on
                           applyPatches); appliedHere lives in log.js
 src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),

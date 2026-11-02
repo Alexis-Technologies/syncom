@@ -37,6 +37,7 @@ const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
 const { asJson, deepEqual } = require('./shape.js');
+const { isOperators, expand } = require('./operators.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
@@ -88,6 +89,29 @@ const insertNamed = async (tx, id, data, options) => {
   await tx.set(id, data, { actor: options.actor });
 };
 
+// An operator delta (src/operators.js) inside a transaction: the calls it
+// expands to, decided over the record as it reads and the kind of each
+// field — both current, the queue being held — run over the transaction's
+// write API; a plugin's method the database was not opened with is
+// PLUGIN_MISSING. `$set` and the rewrites go as one `set` op, never through
+// `update()` again (a field named like an operator is a field here).
+const operate = async (api, tx, id, delta, options) => {
+  const entry = await tx.current(id);
+  const view = await api.get(id);
+  const calls = expand(delta, view, (field) => tx.kindOf(entry, field));
+  for (let i = 0; i < calls.length; i++) {
+    const call = calls[i];
+    const method = call[0];
+    if (method === 'update') await tx.commit('set', id, { data: call[1] }, { actor: options.actor });
+    else if (method === 'unset') await api.unset(id, call[1], options);
+    else if (method === 'inc') await api.inc(id, call[1], call[2], options);
+    else if (method === 'add' || method === 'remove') await api[method](id, call[1], call[2], options);
+    else if (typeof api[method] !== 'function') throw missing(`${method}()`);
+    else if (method === 'push') await api.push(id, call[1], call[2], options);
+    else await api.splice(id, call[1], call[2], call[3], undefined, options);
+  }
+};
+
 // `modify(id, fn)` inside a transaction: `fn` over a copy of the record as it
 // reads, inside the queue — nothing lands between the reading and the ops —
 // and what it leaves (what it returns, or the copy when it returns nothing)
@@ -127,6 +151,8 @@ class Database extends Emitter {
   #chain = null;
   #schemaHook = null;
   #cursor = null;
+  // A Mango query as a predicate over `{ id, ...record }` — the query plugin's (`ifMatch`).
+  #matches = null;
   #settings;
   #log = null;
   #entries = null;
@@ -474,7 +500,10 @@ class Database extends Emitter {
       if (hooks.seal) this.#seal = hooks.seal;
       if (hooks.chain) this.#chain = hooks.chain;
       if (hooks.schema) this.#schemaHook = hooks.schema;
-      if (hooks.query) this.#cursor = hooks.query.cursor;
+      if (hooks.query) {
+        this.#cursor = hooks.query.cursor;
+        this.#matches = hooks.query.matches ?? null;
+      }
       if (hooks.versions) this.#tags = hooks.versions.tags;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = writerOf(hooks.telemetry);
@@ -1144,6 +1173,12 @@ class Database extends Emitter {
   // (the sync registry, a branch) reaches, never the application.
   get [DB]() {
     return this.#db;
+  }
+
+  // A Mango query as a predicate over `{ id, ...record }`: the query plugin's (`ifMatch`).
+  #predicate(query) {
+    if (this.#matches === null) throw missing('update(id, delta, { ifMatch })', 'query');
+    return this.#matches(query);
   }
 
   // The cursor over a source seam (this storage's by default; a tag's for a
@@ -2050,9 +2085,28 @@ class Database extends Emitter {
     this.#records.delete(id);
   }
 
+  /**
+   * Sets the listed fields (a `set` op) — or, written in operators (`$set`,
+   * `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max`,
+   * `$rename`), the ops each one means by the kind of its field, as one
+   * transaction. With `ifMatch` (a Mango query, the query plugin's) the
+   * write is made only where the record matches it, inside the queue, and
+   * resolves to whether it was.
+   */
   update(id, delta, options) {
-    // A record held here and live is there: no file to ask.
+    const ifMatch = options?.ifMatch ?? null;
     if (isRecordId(id) && isPlainObject(delta)) {
+      let operators;
+      try {
+        operators = isOperators(delta);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      // The operators and a condition are decided inside the queue, over the record as it is: a transaction.
+      if (ifMatch !== null || operators) {
+        return this.transact((tx) => tx.update(id, delta, options), { actor: options?.actor });
+      }
+      // A record held here and live is there: no file to ask.
       const current = this.#currentNow(id);
       if (current !== undefined && current !== null && (current.encrypted || isAlive(current))) {
         return this.#write('set', id, { data: delta }, { actor: options?.actor });
@@ -2404,9 +2458,17 @@ class Database extends Emitter {
       await tx.commit('write', id, { data }, { actor: options.actor });
     };
     api.update = async (id, delta, options = {}) => {
-      if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
       if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
-      await tx.commit('set', id, { data: delta }, { actor: options.actor });
+      const operators = isOperators(delta);
+      const ifMatch = options.ifMatch ?? null;
+      // The condition compiled first: a malformed query is a TypeError before anything is read.
+      const test = ifMatch === null ? null : this.#predicate(ifMatch);
+      const view = await api.get(id);
+      if (view === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+      if (test !== null && !test({ id, ...view })) return false;
+      if (operators) await operate(api, tx, id, delta, options);
+      else await tx.commit('set', id, { data: delta }, { actor: options.actor });
+      return test === null ? undefined : true;
     };
     api.swap = async (id, changes, prev, options = {}) => {
       if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
