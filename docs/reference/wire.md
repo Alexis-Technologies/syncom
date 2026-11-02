@@ -412,8 +412,10 @@ The rest of a directory: `node.json` `{ id, plugins }` (the node's id and
 the kind plugins it was opened with), `keys/sign-public.pem` and
 `keys/sign-private.pem` (the Ed25519 pair the id is), `keys/public.pem` and
 `keys/private.pem` (the RSA pair that seals an encrypted record),
-`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 3, indexes,
-stamp, rows }` — derived, rebuilt when stale), `tags/`.
+`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 4, indexes,
+stamp, rows }` — derived, rebuilt when stale; a row is `[id, type, v, encrypted, fields, gone, text,
+folded]`, the eighth cell a folded tombstone's stamps, see [cleanup](../guide/cleanup)), `local/` (the
+local documents), `pipeline/` (the pipelines' checkpoints), `tags/`.
 
 ## The procedures
 

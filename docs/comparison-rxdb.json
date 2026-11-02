@@ -1798,37 +1798,37 @@
           "source": "src/shape.js; docs/guide/database.md"
         },
         "localDocs": {
-          "mark": "⚠️",
-          "text": "only encrypted records stay local; no plain local documents",
-          "source": "docs/guide/database.md#encryption-at-rest"
+          "mark": "✅",
+          "text": "`@alexify/syncom/local`: `db.local` and `collection.local` — `get`, `set`, `delete`, `list`, `observe`; never an op, never replicated, no schema",
+          "source": "src/local/local.js; docs/guide/local.md"
         },
         "tombstoneCleanup": {
-          "mark": "❌",
-          "text": "none: a tombstone keeps its file (data emptied) and catalog row",
-          "source": "src/catalog.js:12-14; docs/guide/database.md#on-disk",
+          "mark": "✅",
+          "text": "`cleanup(db, { minimumDeletedTime, runEach, awaitSync })` (`@alexify/syncom/cleanup`): an old tombstone's file folded into its catalog row once every enabled node acknowledged the delete — the stamps stay, a late op is still moot; `run({ drop: true })` takes the row too",
+          "source": "src/cleanup/cleanup.js; src/catalog.js (fold); docs/guide/cleanup.md",
           "detail": "Checked: a deleted record's file is `{ data: {}, meta: { deleted } }`, a purged one adds `purged`. The op log is bounded by retention; tombstone files and chain blocks are not."
         },
         "deleteDatabase": {
           "mark": "✅",
-          "text": "`engine.remove(path)`: every store of the database at `path`, gone; `engine.destroy()` drops the whole IndexedDB database, SQLite file or MongoDB database",
-          "source": "src/engine.js; src/idb/engine.js; src/sqlite/sqlite.js; src/mongodb/mongodb.js"
+          "text": "`db.drop()`; `dropDatabase(path, { engine })` for a closed one, held by the lock; `engine.remove(path)` and `engine.destroy()` underneath",
+          "source": "src/database.js (drop, dropDatabase); src/engine.js; docs/guide/database.md#on-disk"
         },
         "storageMigration": {
           "mark": "✅",
-          "text": "`copyEngine(from, to, { path })` (`@alexify/syncom/engines`): records with their pieces, a tag's copies, every kv text and the op log with its index — the node opens on the new engine as itself and no peer bootstraps",
-          "source": "src/engines/copy.js; tests/engines.copy.test.js"
+          "text": "`migrateStorage({ from, to, path })` (`@alexify/syncom/dump`): `copyEngine` — the same node on the new engine, its log and identity too — or `mode: 'merge'` into a new node",
+          "source": "src/dump/dump.js (migrateStorage); src/engines/copy.js"
         },
         "backup": {
-          "mark": "❌",
-          "text": "no API; the Node directory is plain JSON, copy it closed",
+          "mark": "⚠️",
+          "text": "a dump written to a file is the backup and `importJSON()` restores it (what RxDB's backup lacks); no live backup writer — follow the `transaction` event and export the changed records",
           "note": "Restoring an older copy of a node's directory is caught at the next hello (`REWOUND`): the node moves past the seqs its host holds and bootstraps the lost state back; writes made between the restore and that hello are lost to the host.",
-          "source": "docs/guide/sync.md#the-log; src/sync/manager.js (#rewound, #rewind); tests/sync.retention.test.js"
+          "source": "src/dump/dump.js (exportPages); docs/guide/dump.md#backup"
         },
         "jsonDump": {
-          "mark": "⚠️",
-          "text": "`snapshot()` pages out records with meta, tombstones too; `mergeSnapshot()` joins them",
-          "source": "docs/reference/api.md (snapshot, mergeSnapshot); src/bootstrap.js",
-          "detail": "This is the bootstrap API: no file format or schema stamp; a join is a CRDT merge recorded as `merge` ops, not an overwrite; encrypted records are left out (checked)."
+          "mark": "✅",
+          "text": "`exportJSON()` / `importJSON()` (`@alexify/syncom/dump`): records with meta, tombstones too, the schema hash checked (`SCHEMA_MISMATCH`, `force`); `merge` or `insert`; no attachments",
+          "source": "src/dump/dump.js; docs/guide/dump.md",
+          "detail": "A dump holds the records, not the log, the chain or the identity: a `merge` import is this node's own `merge` ops, exact to the source, so a restored node is a new node holding the same records; `{ meta: false }` hands the live data alone for any other reader."
         },
         "model": {
           "mark": "",
@@ -1859,9 +1859,9 @@
           "detail": "An `id` passed inside the data is not the record id: with a validator it is dropped from what is written, without one it is stored as a plain field (checked by running). Choose the id with `set(id, data)`."
         },
         "compositeKey": {
-          "mark": "❌",
-          "text": "none; a composite `unique` key instead",
-          "source": "src/schema/define.js (explicitUnique); docs/guide/query.md#unique-keys"
+          "mark": "✅",
+          "text": "`id: { fields, separator }` derives the id on insert, the fields kept; `idField` for one field, left out of the data",
+          "source": "src/schema/define.js (compositeId); src/schema/entity.js (namedId); docs/guide/database.md#composite-ids"
         },
         "idGeneration": {
           "mark": "✅",
@@ -1947,9 +1947,9 @@
           "source": "docs/guide/schema.md#a-newer-peer-ahead; docs/guide/sync.md#schemas"
         },
         "bulk": {
-          "mark": "❌",
-          "text": "none; one op per call (a batch is `Promise.all` of `insert()`)",
-          "source": "index.d.ts:1176-1247; bench/compare/adapters/syncom.js:40"
+          "mark": "✅",
+          "text": "`bulkInsert`, `bulkUpsert`, `bulkRemove` on a collection: one transaction, `{ success, error }` with the index, id and error of every record refused",
+          "source": "src/collection.js (#bulk); tests/suites/collections.js; docs/guide/database.md#bulk-writes"
         },
         "upsert": {
           "mark": "✅",
@@ -1958,9 +1958,9 @@
           "detail": "A whole-record write resets the record's counters and sets (docs/guide/sync.md#whole-record-writes-and-deletes)."
         },
         "insertIfAbsent": {
-          "mark": "❌",
-          "text": "none; `has()` then `set()` is two calls",
-          "source": "index.d.ts:1176-1247"
+          "mark": "✅",
+          "text": "`insertIfAbsent(data)` hands the live record back; `insert()` of a taken id is `EXISTS`, decided inside the queue",
+          "source": "src/collection.js (insertIfAbsent); src/database.js (insertNamed); docs/guide/database.md#composite-ids"
         },
         "patch": {
           "mark": "✅",
@@ -1973,19 +1973,19 @@
           "source": "src/database.js (unset); docs/guide/database.md"
         },
         "modifyFn": {
-          "mark": "❌",
-          "text": "no `modify(fn)`; `get()` then `swap()` in a retry loop",
-          "source": "index.d.ts:1176-1247"
+          "mark": "✅",
+          "text": "`modify(id, fn)` over a copy inside the write queue, written as one transaction; two calls on one record compose",
+          "source": "src/database.js (modifyIn); docs/guide/database.md#update-operators"
         },
         "operators": {
-          "mark": "⚠️",
-          "text": "typed ops only: `update`, `inc`, `add`/`remove`; no `$push`, `$min`, `$rename`",
-          "source": "docs/guide/sync.md#operations"
+          "mark": "✅",
+          "text": "`$set`, `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max`, `$rename` — each expanded into the op of its field's kind (`$inc` a counter, `$addToSet` a set), as one transaction",
+          "source": "src/operators.js; docs/guide/database.md#update-operators"
         },
         "byQuery": {
-          "mark": "❌",
-          "text": "none; `select().fetch()`, then one write per row",
-          "source": "index.d.ts (Cursor); src/query/cursor.js"
+          "mark": "✅",
+          "text": "`select(query).update()`, `.modify()`, `.delete()`: every match as one transaction, `{ matched, written }`",
+          "source": "src/query/cursor.js (#write); docs/guide/query.md#writes-by-query"
         },
         "cas": {
           "mark": "✅",
@@ -2004,9 +2004,9 @@
           "source": "src/commit.js (transact); docs/guide/database.md#transactions"
         },
         "changeAndDelete": {
-          "mark": "❌",
-          "text": "`delete()` carries no data; two ops",
-          "source": "src/database.js:911-914"
+          "mark": "✅",
+          "text": "`delete(id, { data })`: the tombstone carries the fields, one op; a cursor's `delete({ data })` too",
+          "source": "src/commit.js (opOf); src/ops.js (the delete branch); docs/guide/database.md#change-and-delete"
         },
         "counters": {
           "mark": "✅",
@@ -2056,9 +2056,9 @@
           "source": "src/commit.js:39-50; docs/guide/sync.md#registers-counters-sets-lists-and-text"
         },
         "conditionalOps": {
-          "mark": "❌",
-          "text": "none that replicate; `swap()` is a local check",
-          "source": "src/database.js:993-1003"
+          "mark": "⚠️",
+          "text": "`update(id, delta, { ifMatch: query })` is checked inside the write queue on this node; from a peer the op model merges — nothing is re-evaluated on replay",
+          "source": "src/database.js (operate); docs/guide/database.md#update-operators"
         },
         "deltaHelpers": {
           "mark": "✅",
@@ -2080,7 +2080,7 @@
         "documentObjects": {
           "mark": "✅",
           "text": "`document(id)`: one live, editable `Document` per id, refreshed on any change",
-          "source": "src/document.js:28-158; src/database.js:1005-1013; docs/guide/database.md#records"
+          "source": "src/document.js:28-158; src/database.js:1005-1013; docs/guide/database.md#documents"
         },
         "identity": {
           "mark": "✅",
@@ -2094,25 +2094,25 @@
           "detail": "`getCachedData()` and `snapshot()` hand out the raw objects on purpose."
         },
         "orm": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/document.js"
+          "mark": "✅",
+          "text": "`methods` on every `Document` (bound, non-enumerable), `statics` on the collection; attachments are their own row",
+          "source": "src/document.js (#defineMethods); src/collection.js; docs/guide/database.md#orm-methods-and-statics"
         },
         "relations": {
-          "mark": "⚠️",
-          "text": "a `Document` turns any string equal to a known id into a `Reference`",
+          "mark": "✅",
+          "text": "`refs: { author: 'Author', tags: ['Tag'] }`, or a metaschema relation; a `Document` reads a `Reference` (`document()`), a cursor `populate()`s",
           "note": "Nothing declares the relation, so an unrelated string that matches an id becomes a `Reference` too (checked by running).",
-          "source": "src/document.js:14-27,55-70; docs/guide/database.md#references"
+          "source": "src/schema/define.js (deriveRefs); src/document.js; src/query/cursor.js (populate); docs/guide/database.md#references"
         },
         "rxState": {
-          "mark": "❌",
-          "text": "none",
-          "source": "index.d.ts"
+          "mark": "✅",
+          "text": "`createState(db, name)` (`@alexify/syncom/state`): by path, `set(path, value | fn)`, `observe()`, over a record (replicated) or a local document (`{ local: true }`)",
+          "source": "src/state/state.js; docs/reference/api.md (State)"
         },
         "pipeline": {
-          "mark": "❌",
-          "text": "none; `afterWrite`, `change` and `watch()` are not checkpointed",
-          "source": "docs/guide/hooks.md; src/query/cursor.js"
+          "mark": "✅",
+          "text": "`createPipeline(db, { name, source, handler })`: every turn of the source handled once in one transaction, checkpointed, replayed from the log on reopen; reads are never held up (`awaitBeforeReads` refused by design)",
+          "source": "src/pipeline/pipeline.js; docs/guide/pipeline.md"
         },
         "contracts": {
           "mark": "⚠️",
@@ -2143,13 +2143,13 @@
           "detail": "`{ tags: { $all: [...] } }` is `TypeError: select(): unknown operator $all` (verified)."
         },
         "opExistence": {
-          "mark": "⚠️",
-          "text": "`$exists` only (`null` counts as present); no `$type`",
+          "mark": "✅",
+          "text": "`$exists` (`null` counts as present); `$type` (`null`, `boolean`, `number`, `string`, `array`, `object`)",
           "source": "src/query/cursor.js; docs/guide/query.md#the-query"
         },
         "opArray": {
-          "mark": "⚠️",
-          "text": "a scalar matches any element; no `$elemMatch`, no `$size` (`filter()` instead)",
+          "mark": "✅",
+          "text": "element match, `$elemMatch` (objects or scalars), `$size`, `$all`",
           "source": "src/query/cursor.js; docs/guide/query.md#the-query"
         },
         "opRegex": {
@@ -2164,9 +2164,9 @@
           "detail": "`$nor: [a, b]` is written `$not: { $or: [a, b] }`; `{ f: { $not: { $gt: 5 } } }` is `$not: { f: { $gt: 5 } }`. A field-level `$not` is `unknown operator` (verified)."
         },
         "opMod": {
-          "mark": "❌",
-          "text": "not supported (`filter()` instead)",
-          "source": "src/query/cursor.js"
+          "mark": "✅",
+          "text": "`$mod: [divisor, remainder]`",
+          "source": "src/query/cursor.js; docs/guide/query.md#the-query"
         },
         "jsPredicate": {
           "mark": "✅",
@@ -2190,14 +2190,14 @@
           "source": "index.d.ts (MangoQuery, QueryRow); docs/guide/typescript.md"
         },
         "immutableQueries": {
-          "mark": "❌",
-          "text": "builders change the cursor in place (`one()` leaves it as it was)",
-          "source": "src/query/cursor.js"
+          "mark": "✅",
+          "text": "every builder hands back a new cursor",
+          "source": "src/query/cursor.js (#clone); docs/guide/query.md#the-cursor"
         },
         "docMatch": {
-          "mark": "❌",
-          "text": "the compiled predicate is internal (`compileQuery` is not exported)",
-          "source": "src/query/cursor.js; src/index.js"
+          "mark": "✅",
+          "text": "`cursor.matches(doc)`; `matches(query)` of `@alexify/syncom/query` is the predicate alone",
+          "source": "src/query/cursor.js (matches); src/query/query.js"
         },
         "sort": {
           "mark": "✅",
@@ -2206,9 +2206,9 @@
           "detail": "Order: absent/null, booleans, numbers, strings; arrays and objects keep their place. With no `order()`, rows come in id order, or `$text` rank."
         },
         "sortIndex": {
-          "mark": "❌",
-          "text": "no sorted index: every candidate is read, then ordered",
-          "source": "src/query/cursor.js; docs/guide/query.md#the-plan",
+          "mark": "✅",
+          "text": "a sort on a declared index's fields walks it, forward or backward, and stops at `offset + limit`",
+          "source": "src/query/plan.js (fit); src/catalog.js (scan); docs/guide/query.md#the-plan",
           "detail": "Except a covered cursor (order and projection on indexed fields), ordered from the catalog with no record read. Verified: `order('a').limit(2)` read 40 of 40 records; with `projection(['a'])`, 0."
         },
         "topK": {
@@ -2223,9 +2223,9 @@
           "detail": "Verified: an unordered `limit(2)` over 50 records read 2."
         },
         "streaming": {
-          "mark": "❌",
-          "text": "`for await` yields an already fetched array; keyset paging by hand",
-          "source": "src/query/cursor.js"
+          "mark": "✅",
+          "text": "`stream({ batch })` / `for await` read a batch at a time by keyset; `page()` → `{ rows, next }` and `after(next)` page the same way",
+          "source": "src/query/cursor.js (stream, page, after); docs/guide/query.md#paging"
         },
         "count": {
           "mark": "✅",
@@ -2239,9 +2239,9 @@
           "source": "src/database.js:879-899; src/document.js:179-181,210-212"
         },
         "findByIds": {
-          "mark": "❌",
-          "text": "no batch get; `select({ id: { $in } })` reads the whole collection",
-          "source": "src/catalog.js:294-362",
+          "mark": "✅",
+          "text": "`findByIds(ids)` → `Map` of the live records of the collection among `ids`, one read each; not live",
+          "source": "src/collection.js (findByIds); src/entries.js (loadMany)",
           "detail": "`id` is not posted in the catalog; verified 39 of 40 records read for three ids."
         },
         "findOne": {
@@ -2261,14 +2261,14 @@
           "detail": "A cursor does not run `beforeRead`/`afterRead`; `get(id)` does."
         },
         "aggregation": {
-          "mark": "❌",
-          "text": "none; compute over `fetch()` rows",
-          "source": "docs/guide/query.md"
+          "mark": "⚠️",
+          "text": "`distinct(field)`, `countBy(field)` (from the catalog alone where covered), `count()`; no sums, averages or group pipelines — compute over `stream()`",
+          "source": "src/query/cursor.js (#groups); docs/guide/query.md#aggregates"
         },
         "joins": {
-          "mark": "❌",
-          "text": "a cursor reads one collection; `Reference.document()` follows one id",
-          "source": "src/document.js:184-186; index.d.ts:1314-1316"
+          "mark": "⚠️",
+          "text": "a cursor reads one collection; `populate(fields)` resolves its declared references on every row, one read per field per page",
+          "source": "src/query/cursor.js (#populated); docs/guide/query.md#the-cursor"
         },
         "encryptedFields": {
           "mark": "❌",
@@ -2281,15 +2281,15 @@
           "source": "index.d.ts:484-485; docs/guide/query.md#the-plan"
         },
         "indexKind": {
-          "mark": "⚠️",
-          "text": "equality posting lists; ranges, prefixes and sorts do not use them",
-          "source": "src/catalog.js:82-91,321-362; docs/guide/query.md#the-plan",
+          "mark": "✅",
+          "text": "a sorted key per declared `index` entry: a prefix of equalities, then `$gt`…`$lte` bound the scan; `$in` narrows through the postings",
+          "source": "src/catalog.js (#keyed, scan); src/query/plan.js; docs/guide/query.md#the-plan",
           "note": "A range or an `order()` on an indexed field is evaluated over every candidate: the whole collection unless an indexed equality or `$in` narrows it. Checked on 200 records: `$gt` read 200, with an indexed equality 20, a covered cursor 0."
         },
         "compoundIndexes": {
-          "mark": "⚠️",
-          "text": "only for `unique` keys; queries intersect single-field postings",
-          "source": "src/catalog.js:115-121,171-178,321-362"
+          "mark": "✅",
+          "text": "`index: ['orgId', ['orgId', 'createdAt']]`: any key is a field list; an array-valued field is entered once per element",
+          "source": "src/schema/define.js (indexSet); src/catalog.js (keysOf); docs/guide/query.md#the-plan"
         },
         "arrayIndexes": {
           "mark": "✅",
@@ -2329,19 +2329,19 @@
           "source": "src/query/cursor.js"
         },
         "explain": {
-          "mark": "❌",
-          "text": "no explain API; the plan is private to the cursor",
-          "source": "src/query/cursor.js"
+          "mark": "✅",
+          "text": "`cursor.explain()`: `scan`, `index`, `prefix`, `range`, `desc`, `sortedByIndex`, `covered`, `residual`, `uses`",
+          "source": "src/query/plan.js; docs/guide/query.md#the-plan"
         },
         "queryOptimizer": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/query.md#the-plan"
+          "mark": "✅",
+          "text": "`indexAdvisor(db)` (`@alexify/syncom/inspect`, MIT): watches the plans at run time and suggests the keys the queries asked for and no index served",
+          "source": "src/inspect/inspect.js (indexAdvisor); src/database.js ([SOURCE].advise)"
         },
         "queryCache": {
-          "mark": "❌",
-          "text": "none; each `fetch()` re-runs, records come from the bounded entry cache",
-          "source": "src/query/cursor.js; docs/guide/database.md#the-catalog-and-the-cache"
+          "mark": "✅",
+          "text": "`QueryCache`: every `watch()` of one query shares a live run, a `fetch()` of it reads nothing; a hundred unobserved results kept by the catalog's generation",
+          "source": "src/query/cache.js; docs/guide/query.md#the-query-cache"
         },
         "unique": {
           "mark": "✅",
@@ -2361,9 +2361,9 @@
           "source": "src/catalog.js:302-319; docs/guide/query.md#full-text-search"
         },
         "vector": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/query/cursor.js"
+          "mark": "⚠️",
+          "text": "`nearest(field, vector, k, { distance })` over the matches: cosine, euclidean, manhattan, dot or a function (`@alexify/syncom/search` exports them); no vector index",
+          "source": "src/search/distance.js; src/query/cursor.js (nearest); docs/guide/query.md#aggregates"
         },
         "liveQueries": {
           "mark": "✅",
@@ -2372,25 +2372,25 @@
           "detail": "Changes that land while a run is in flight coalesce into one more run; a peer's batch is one run. No time-based throttle."
         },
         "liveIncremental": {
-          "mark": "❌",
-          "text": "every wake re-runs the whole cursor",
-          "source": "src/query/cursor.js"
+          "mark": "✅",
+          "text": "event-reduce over the catalog's action stream: the record that changed is read once, matched and placed; the cursor runs again only for a full window that lost a row, or `$text`",
+          "source": "src/query/live.js; docs/guide/query.md#live-queries"
         },
         "liveDistinct": {
-          "mark": "❌",
-          "text": "the listener runs after any change to the collection, same rows or not",
-          "source": "src/query/cursor.js",
+          "mark": "✅",
+          "text": "emitted only when an id came, went or moved, or a row reads as another (the projection applied)",
+          "source": "src/query/live.js (#emit); tests/suites/query.js",
           "detail": "Verified: updating a record outside the result called the listener with the same rows."
         },
         "liveCount": {
-          "mark": "❌",
-          "text": "no; `watch()` hands rows (`rows.length`)",
-          "source": "src/query/cursor.js"
+          "mark": "✅",
+          "text": "`watchCount(listener)`: the count moved by one per change, never counted again",
+          "source": "src/query/live.js (count mode); src/query/cursor.js (watchCount)"
         },
         "collectionStream": {
-          "mark": "⚠️",
-          "text": "storage-wide `change` event `(op, via)`; no per-collection stream",
-          "source": "index.d.ts:1095-1097; docs/guide/hooks.md#storage",
+          "mark": "✅",
+          "text": "`collection.on('change' | 'insert' | 'update' | 'remove')` off the catalog's action stream; the database's `change` and `transaction` events",
+          "source": "src/collection.js (#listen); src/catalog.js (subscribe); index.d.ts (CollectionEvents)",
           "detail": "A `set`, `inc` or `delete` op names the record id, not its collection; the listener looks the record up."
         },
         "documentObservable": {
@@ -3075,9 +3075,9 @@
           "source": "api.github.com/repos/Alexis-Technologies/syncom (2026-10-23)"
         },
         "importFromOtherDbs": {
-          "mark": "❌",
-          "text": "no importer and no JSON import; write records with `insert()`",
-          "source": "index.d.ts:1185; docs/guide/database.md"
+          "mark": "⚠️",
+          "text": "`importJSON(db, { records: [{ id, data }] }, { mode: 'insert' })` takes any JSON of ids and data; no per-database importer or guide",
+          "source": "src/dump/dump.js (importJSON); docs/guide/dump.md#import"
         },
         "benchmarks": {
           "mark": "✅",

@@ -57,6 +57,8 @@ await storage.splice(id, 'body', 0, 0, 'Hello'); // a text field: insert at 0
 await storage.push(id, 'items', [1, 2]);   // a list field: append
 await storage.treeMove(id, 'outline', 'n1'); // a tree field: node n1 at the root
 await storage.set(id, { title: 'Final' }); // replace wholesale — everything but title is gone
+await storage.update(id, { $inc: { views: 1 }, $addToSet: { tags: 'ui' } }); // operators — see below
+await storage.modify(id, (copy) => { copy.status = 'done'; }); // a function over a copy — see below
 await storage.list();                     // every live id
 await storage.compact(id);                // rewrite it as the few ops it reads as — see below
 await storage.delete(id);
@@ -209,6 +211,46 @@ const id = await storage.transact(
   transaction of thousands of ops on one large record holds them all).
 - `applyPatches()`, `restore()` and `compact()` are transactions: a restore
   lands whole or not at all.
+
+### Update operators
+
+`update(id, delta)` takes a delta in operators as well — every key one of them, or none
+(a delta that mixes a field and an operator is a `TypeError`):
+
+```js
+await storage.update(id, {
+  $set: { status: 'done' },     // a register: the `set` op
+  $unset: { draft: '' },        // `unset`
+  $inc: { views: 1 },           // a counter: `inc`
+  $addToSet: { tags: 'ui' },    // a set: `add` (`{ $each: [...] }` for several)
+  $pull: { tags: 'old' },       // `remove` (`{ $in: [...] }` for several)
+  $push: { items: 3 },          // a list: `push`
+  $pop: { items: 1 },           // a list: `splice` at the end (-1 at the start)
+  $min: { low: 2 }, $max: { high: 9 }, // a register written only where the value is lower / higher
+  $rename: { old: 'fresh' },    // `unset` + `set`
+});
+```
+
+Each operator is expanded, inside the mutation queue, into the ops the kind of its field means —
+`$inc` on a register, `$addToSet` on a counter or `$push` on a set is `FIELD_KIND`, as the typed
+method would be — and the ops are written as one [transaction](#transactions). A `$push` or
+`$addToSet` on a field that is still a register holding an array rewrites the register; a field
+that is not there yet is made as the kind the operator means.
+
+`{ ifMatch: query }` makes the write conditional: the record is matched against the
+[query](./query) inside the queue, and `update()` resolves to whether it was written — a check
+and a write no concurrent write can come between, this node's; from a peer the op model merges
+as it always does. The `query` plugin's.
+
+```js
+const won = await storage.update(id, { $set: { owner: 'ada' } }, { ifMatch: { owner: null } });
+```
+
+`modify(id, fn)` is the general form: `fn(copy)` runs inside the queue over a copy of the record as it
+reads, and what it leaves — what it returns, or the copy — is written as the ops that take the record
+there (a field changed is a `set`, a field gone an `unset`, `null` deletes), as one transaction; it
+resolves to the record as it reads after. Two `modify()` calls on one record compose, each reading
+what the one before it left. A write through the storage from inside `fn` is `IN_TRANSACTION`.
 
 ### Purge
 
@@ -492,7 +534,7 @@ the other records stay plain. To encrypt the directory whole, wrap the
 backend instead — `atRest()` from the same subpath, every file under one
 key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
 
-## Records
+## Documents
 
 `storage.document(id)` returns a live `Document`. It is cached per id, so two
 calls for the same record return the same object — and therefore the same
@@ -522,7 +564,9 @@ changes through those: assigning it and saving is a `set` op on it, which
 throws `FIELD_KIND`.
 
 Properties are defined from whatever keys the record had when it was loaded;
-`id` is reserved and never becomes a settable property.
+`id` is reserved and never becomes a settable property. `record.modify(fn)` is
+[`modify()`](#update-operators) on the record, and `record.save()` what the
+staged edits make.
 
 A record also follows changes made **elsewhere** — `storage.update()` in the
 same process, or an op from a peer: its properties are refreshed, `update`
@@ -534,14 +578,43 @@ hook in play, the change reaches it once the write is done, in order.
 
 ### References
 
-When a stored string happens to be the id of another record that storage
-already knows about, reading it back gives you a `Reference` rather than the
-raw string. `reference.document()` resolves it:
+An entity declares which of its fields name other records — `refs: { author: 'Author',
+tags: ['Tag'] }`, or a metaschema relation (`author: 'Author'`, `{ many: 'Tag' }`) — and a
+`Document` reads such a field as a `Reference` (an array of them for many): `id` is the string,
+`document()` resolves it to the target's `Document` (`null` where it is not there), `toJSON()`
+is the id again. A cursor's `populate(fields)` resolves them on every row instead.
 
 ```js
-const post = await storage.document(postId);
-const author = await post.author.document();
+const post = await storage.Post.document(postId);
+const author = await post.author.document();  // a Document of Author, or null
+(await storage.Post.select().populate(['author']).fetch())[0].author; // { id, name, …, $type: 'Author' }
 ```
+
+A string that is not declared a reference is a string, whatever it happens to equal.
+
+### ORM: methods and statics
+
+`methods` are functions on every `Document` of the collection (bound to it, non-enumerable, never
+saved), `statics` functions on the collection:
+
+```js
+const storage = await createDatabase({
+  path: 'data',
+  schema: {
+    entities: {
+      Post: {
+        methods: { summary() { return `${this.title} by ${this.author.id}`; } },
+        statics: { async drafts() { return this.select({ status: 'draft' }).fetch(); } },
+      },
+    },
+  },
+});
+(await storage.Post.document(id)).summary();
+await storage.Post.drafts();
+```
+
+A name a `Document` or a `Collection` answers to already (`save`, `select`, `id`…) is a `TypeError`
+at `createDatabase()`.
 
 ## Collections
 
@@ -569,18 +642,63 @@ Schema or by a `Schema<{ Post: Post }>` annotation — see
 no collections and you address records by id only. An entity named like
 something the storage already answers to (`get`, `close`, `log`, `sync`…)
 would replace it, so `createDatabase()` refuses it with a `TypeError`.
+`storage.collections` lists the names; `addCollections({ Tag: {} })` adds
+collections to an open database — their records, if any, indexed as they are
+found — and `removeCollection('Tag')` takes one away (the records stay).
 
 A collection answers for its own records: `get(id)` of a record of another
 collection is `null`, and `update()`, `delete()` and `document()` reject with
 `code: 'NOT_FOUND'` — the storage's own methods address any record.
 
-An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`;
-`{}` is a bare collection. `schema` validates the records ([below](#validation)),
-`idField` names the key the id is handed to the validator under, `index` and
-`unique` — explicit, or read off a metaschema schema's `indexes` and
-`unique: true` fields — are what [queries](#queries) key on, `search` names
-the fields `$text` searches, and `fields` is free-form notes kept as given. Anything else is a `TypeError` at
-`createDatabase()`: a definition with a typo is a validation that silently never runs.
+An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields?, search?, id?,
+refs?, methods?, statics? }`; `{}` is a bare collection. `schema` validates the records
+([below](#validation)), `idField` names the key the id is handed to the validator under, `index`
+(fields and compound keys) and `unique` — explicit, or read off a metaschema schema's `indexes` and
+`unique: true` fields — are what [queries](#queries) key on, `search` names the fields `$text`
+searches, `id` a [composite id](#composite-ids), `refs` the [references](#references), `methods`
+and `statics` the [ORM](#orm-methods-and-statics), and `fields` is free-form notes kept as given.
+Anything else is a `TypeError` at `createDatabase()`: a definition with a typo is a validation that
+silently never runs.
+
+### Composite ids
+
+A record's id is minted by `getId` unless the entity says otherwise. `idField` names a field whose
+value is the id: `insert({ slug: 'hello' })` under `idField: 'slug'` is the record `hello`, the
+field itself left out of the data. `id: { fields: ['org', 'n'], separator: '-' }` derives it from
+several — `insert({ org: 'c1', n: 7 })` is `c1-7` — and the fields stay. An id a live record holds
+already is `EXISTS` (`id` on the error), decided inside the queue; `insertIfAbsent(data)` hands the
+one that is there back instead, and `upsert(data)` sets it. Every id is checked as one: `[A-Za-z0-9_@-]`
+first, then `[A-Za-z0-9._@-]`, 128 at most.
+
+### Bulk writes
+
+```js
+const { success, error } = await storage.Post.bulkInsert([{ title: 'a' }, { title: 'b' }, { id: taken, title: 'c' }]);
+// success: ['…', '…'], error: [{ index: 2, id: taken, data, error: SyncomError EXISTS }]
+await storage.Post.bulkUpsert(rows);
+await storage.Post.bulkRemove(ids);
+```
+
+A bulk write is one [transaction](#transactions): every record that could be written is, as one
+group of ops, and the ones refused — an id taken, a validator, a unique key, a record of another
+collection — are listed with their index, each with the error the single write would have thrown.
+A collection's `remove(query, { purge })` deletes (or purges) every match, 500 at a time;
+`findByIds(ids)` reads a set of records as a `Map`, one read each from the cache or the engine.
+
+### Change and delete
+
+`delete(id, { data })` writes the fields of `data` into the record as it dies, one op: the tombstone
+carries them — a `reason`, a `deletedBy` — for a peer's hook, a pipeline or a
+[dump](./dump) to read, and a `get()` is `null` all the same. The `change`'s
+`{ action: 'delete', data }` says what rode on it. A cursor's `delete({ data })` does the same for
+every match, and a record revived after it comes back with those fields as its own.
+
+### App state
+
+[`createState(storage, name)`](../reference/api#state-subpath) of `@alexify/syncom/state` is one object a
+node keeps by path — `state.get('panel.width')`, `state.set('theme', 'dark')`, `observe()` — over
+a record `state.<name>` that replicates like any record, or, with `{ local: true }`, over a
+[local document](./local) this node keeps for itself.
 
 `$type` is the record's collection and never changes. `storage.set()` without
 it keeps it, `Collection.set()` stamps its own, a write that would change it
@@ -597,12 +715,14 @@ await storage.Author.set(post.id, { name: 'x' });        // TypeError: $type is 
 ### Queries
 
 The full guide is [Queries](./query); the shape, in short.
-`collection.select(query)` is a cursor: build it, then `fetch()`, `count()`,
-`one()`, iterate it, or `watch()` it. The query is Mango-shaped —
+`collection.select(query)` is a cursor: build it (every builder hands a new
+one back), then `fetch()`, `count()`, `one()`, `page()`, iterate it, or
+`watch()` it. The query is Mango-shaped —
 `{ field: value }` is equality (a dotted path reaches into the record, an
 array field holds a scalar value), `{ field: { $op } }` the operators `$eq`,
-`$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$exists`, `$regex`
-(with `$options`), `$and` / `$or` / `$not` nest, and `$text` searches an
+`$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$exists`, `$type`,
+`$size`, `$mod`, `$all`, `$elemMatch`, `$regex`
+(with `$options`), `$and` / `$or` / `$nor` / `$not` nest, and `$text` searches an
 entity's [search fields](./query#full-text-search). A malformed query is a
 `TypeError` at `select()`.
 
@@ -633,13 +753,16 @@ booleans, numbers, strings — stably, and `offset` / `limit` cut after the
 sort. A cursor does not run the read hooks: like `snapshot()` and `swap()`,
 it reads the records themselves.
 
-The entity's `index` and `unique` fields are what the catalog keeps: a query
-whose fields, order and projection are all indexed — and has no `filter` —
-is answered from the catalog alone, with no record read; an equality on an
-indexed field narrows every other query to its posting list before the
-records are read. `watch(listener)` runs the cursor now and again after
-every change to the collection (one run per batch of changes), until the
-returned function is called; a failing run goes to `onError` or the logger.
+The entity's `index` keys and `unique` fields are what the catalog keeps: a
+sorted index per key — a field, or a compound key — bounds a query's
+equalities, a range and a sort on its fields, and a query whose fields, order
+and projection are all indexed — and has no `filter` — is answered from the
+catalog alone, with no record read; `explain()` shows [the plan](./query#the-plan).
+`watch(listener)` keeps the result as the collection changes — the record that
+changed is read once and placed — and calls the listener only when the rows
+changed, until the returned function is called; a failing run goes to
+`onError` or the logger. A cursor's `update()`, `modify()` and `delete()`
+write every match as one transaction.
 
 A `unique` key — a field, or a composite — is refused on a local write with
 a `ValidationError` whose issue has `code: 'unique'` and `conflict`, the id
@@ -837,6 +960,8 @@ data/
 ├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
 ├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block, gen? }; a list or text of 1 024 runs or more keeps its runs in <id>~<n>.json beside it, 512 runs a piece
 ├── log/           the operation log (see Sync)
+├── local/         <key>.json per local document (see Local documents) — never replicated
+├── pipeline/      <name>.json — a pipeline's checkpoint (see Pipelines)
 ├── tags.json      { format, tags } — the tags taken here (see Versions and history › Tags); tags.corrupt.json beside it once it could not be read
 ├── tags/          <name>/index/catalog.json and <name>/data/<id>.json — a tag's catalog and the record files copied before their first change after it; .pending/data/ while tags.json is unreadable
 ├── branch.json    { format, parent, forkedAt, createdAt } — in a branch only (see Versions and history › Branches)
@@ -847,4 +972,9 @@ Every record names the block that committed it, which is what makes
 [validation](./chain) possible. `meta` is the replication bookkeeping — per
 field clocks, the reset watermark, the tombstone, the counters, the sets, a
 list's or a text's block, a tree's moves — and is what lets two nodes'
-copies merge; a deleted record keeps its file as a tombstone.
+copies merge; a deleted record keeps its file as a tombstone until
+[cleanup](./cleanup) folds an old one into its catalog row.
+
+`drop()` closes the database and removes every store of it from the engine — the
+identity too: a node opened at the path again is a new node. `dropDatabase(path, { engine })`
+does the same for a closed one, held by the lock while it runs (an open instance's is `LOCKED`).

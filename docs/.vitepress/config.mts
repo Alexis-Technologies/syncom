@@ -175,6 +175,8 @@ export default withMermaid({
               { text: 'Editors', link: '/guide/editors' },
               { text: 'Frameworks', link: '/guide/frameworks' },
               { text: 'Versions and history', link: '/guide/versions' },
+              { text: 'Local documents', link: '/guide/local' },
+              { text: 'Pipelines', link: '/guide/pipeline' },
               { text: 'Hooks and events', link: '/guide/hooks' },
               { text: 'CRDT deltas', link: '/guide/crdt' },
               { text: 'Blockchain log', link: '/guide/chain' },
@@ -203,6 +205,8 @@ export default withMermaid({
             items: [
               { text: 'OpenTelemetry', link: '/guide/telemetry' },
               { text: 'Devtools', link: '/guide/devtools' },
+              { text: 'Dumps and backups', link: '/guide/dump' },
+              { text: 'Tombstone cleanup', link: '/guide/cleanup' },
             ],
           },
         ],

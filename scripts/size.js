@@ -645,6 +645,9 @@ const COMPOSITE = [
   'src/telemetry/telemetry.js',
   'src/query/query.js',
   'src/versions/versions.js',
+  // The local plugin is registered by `/all` too (src/all/all.js PLUGINS); the other side stores
+  // (state, dump, pipeline, cleanup) are functions over a database, not plugins, and `/all` ships none.
+  'src/local/local.js',
   'src/memory/memory.js',
   'src/layered/layered.js',
 ];
