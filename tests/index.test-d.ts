@@ -905,6 +905,17 @@ storage.record<Post>('id').then((record) => {
   expectAssignable<syncom.Database>(legacy);
 }
 
+// Collections defined after the open: `collections`, `addCollections()`, `removeCollection()`.
+{
+  const db = await syncom.createDatabase({ schema: { entities: { Post: {} } } });
+  expectAssignable<syncom.Collection>(db.collections.Post);
+  expectType<Promise<void>>(db.addCollections({ Tag: { index: ['n'], unique: ['name'] } }));
+  expectType<Promise<void>>(db.addCollections(new Map<string, EntityDefinition>()));
+  expectError(db.addCollections({ Tag: { index: 'n' } }));
+  expectType<void>(db.removeCollection('Tag'));
+  expectError((db.collections.Tag = db.collections.Post));
+}
+
 // The engine contract: an fsi becomes the files engine.
 {
   const engine: syncom.Engine = syncom.filesEngine(memory());

@@ -39,6 +39,14 @@ and one `commit` event, not one per call.
 
 ### Added
 
+- **Collections at run time: `db.collections`, `addCollections()`, `removeCollection()`.** The collections
+  by name as one frozen object, and definitions added after the open — each as an entity of
+  `createDatabase({ schema })` would be, its validator, indexes, unique keys and search fields in force at
+  once over the records of its type the catalog holds (indexed from the records, `Catalog.define`) — or
+  forgotten (the records stay). Nothing of it is persisted: the application adds them after every open,
+  and the schema's hash in hello does not move; a reopen under fewer definitions rebuilds the catalog.
+  The schema plugin's. The catalog's watchers hear what a change was to the collection (`insert`,
+  `update`, `remove`) beside whether the row moved.
 - **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
   its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
   `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),

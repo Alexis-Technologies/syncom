@@ -137,6 +137,23 @@ const post = (map, value, id, fn) => {
   for (let i = 0; i < value.length; i++) fn(map, keyOf(value[i]), id);
 };
 
+// What the catalog keeps of an entity definition: the indexed fields (the
+// `index` ones and every field of a unique key), the unique keys, the search fields.
+const defOf = (def) => {
+  const fields = new Set(def.index);
+  for (const key of def.unique) for (const field of key) fields.add(field);
+  const search = def.search ?? [];
+  return { index: def.index, unique: def.unique, search, fields: [...fields], indexed: fields };
+};
+
+// A row with nothing indexed: what a record of a collection keeps while
+// its definition changes (the caller indexes it again).
+const bare = (row) => {
+  const out = { type: row.type, v: row.v, encrypted: row.encrypted, fields: {} };
+  if (row.gone) out.gone = true;
+  return out;
+};
+
 class Catalog {
   #store;
   #rowStore;
@@ -168,16 +185,48 @@ class Catalog {
     this.#store = store ?? (rows === null ? fsiNamespace(fsi, `${path}/index`) : null);
     this.#text = text;
     this.#logger = logger;
+    for (const [name, def] of entities) this.#defs.set(name, defOf(def));
+    this.#rekey();
+  }
+
+  // What a persisted catalog must have been built with to be reused: the
+  // collections, their indexes, unique keys and search fields.
+  #rekey() {
     const shape = [];
-    for (const [name, def] of entities) {
-      const fields = new Set(def.index);
-      for (const key of def.unique) for (const field of key) fields.add(field);
-      const search = def.search ?? [];
-      this.#defs.set(name, { index: def.index, unique: def.unique, search, fields: [...fields], indexed: fields });
-      shape.push([name, def.index, def.unique, search]);
-    }
-    // What a persisted catalog must have been built with to be reused.
+    for (const [name, def] of this.#defs) shape.push([name, def.index, def.unique, def.search]);
     this.#indexKey = keyOf(shape);
+  }
+
+  /**
+   * Defines collection `name` after the catalog was built (`addCollections`),
+   * or forgets its definition (`def` null, `removeCollection`): the rows of
+   * the type keep their place and lose what was indexed of them — the caller
+   * indexes the records again — and `$text` reads `index` from then on (null:
+   * no search). A catalog saved before is not reused by a reopen under
+   * other definitions: it is rebuilt from the records.
+   */
+  define(name, def, index = null) {
+    const ids = [...(this.#byType.get(name) ?? [])];
+    const rows = [];
+    for (let i = 0; i < ids.length; i++) {
+      const row = bare(this.#rows.get(ids[i]));
+      // Under the definition the row was posted under: the postings go with it.
+      this.#remove(ids[i]);
+      rows.push(row);
+    }
+    if (def === null) this.#defs.delete(name);
+    else this.#defs.set(name, defOf(def));
+    this.#eq.delete(name);
+    this.#unique.delete(name);
+    if (index === null) this.#text.delete(name);
+    else this.#text.set(name, index);
+    for (const [id, pending] of this.#textPending) if (pending.type === name) this.#textPending.delete(id);
+    for (let i = 0; i < ids.length; i++) {
+      this.#insert(ids[i], rows[i]);
+      this.#dirty++;
+      this.#changed.set(ids[i], rows[i]);
+    }
+    this.#rekey();
   }
 
   // The row's text into the entity's text index, or out of it. Derived
@@ -314,14 +363,16 @@ class Catalog {
     // sort or save — but a watcher reads more than the row, so it hears of
     // the change (`false`: the row stayed; a covered cursor need not run).
     if (was !== undefined && row !== null && sameRow(was, row)) {
-      if (before !== null) this.#wake(before, false);
+      if (before !== null) this.#wake(before, false, id, 'update');
       return;
     }
     this.#remove(id);
     this.#dirty++;
     this.#changed.set(id, row);
-    if (before !== null) this.#wake(before, true);
-    if (!gone && type !== null && type !== before) this.#wake(type, true);
+    // The collection the record was of hears an update, or its leaving (gone,
+    // or of another collection now); the one it joins hears an insert.
+    if (before !== null) this.#wake(before, true, id, !gone && type === before ? 'update' : 'remove');
+    if (!gone && type !== null && type !== before) this.#wake(type, true, id, 'insert');
     if (row !== null) this.#insert(id, row);
   }
 
@@ -348,9 +399,11 @@ class Catalog {
   }
 
   /**
-   * Calls `fn(changed)` after every change to a record of `type` — `changed`
-   * false when the record's catalog row stayed as it was; returns the
-   * unsubscribe.
+   * Calls `fn(changed, id, action)` after every change to a record of
+   * `type` — `changed` false when the record's catalog row stayed as it was,
+   * `action` what the change was to the collection: `insert`, `update` or
+   * `remove` (deleted, purged, encrypted, or of another collection now);
+   * returns the unsubscribe.
    */
   subscribe(type, fn) {
     let fns = this.#watchers.get(type);
@@ -362,9 +415,9 @@ class Catalog {
     };
   }
 
-  #wake(type, changed) {
+  #wake(type, changed, id, action) {
     const fns = this.#watchers.get(type);
-    if (fns) for (const fn of [...fns]) fn(changed);
+    if (fns) for (const fn of [...fns]) fn(changed, id, action);
   }
 
   row(id) {

@@ -167,7 +167,9 @@ const ENTRIES = [
   // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify; both together 63. 63.5, raised by name.
   // 63.5 with one read a record (pieces.getMany, a page of records at a time) and the engine measured (stats().engine;
   // review №5 P-3/P-4/O-4). 64, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64 },
+  // 64.1 with collections defined after the open (`collections`, `addCollections()`, `removeCollection()`,
+  // `Catalog.define`) and the catalog's action stream (collections plan, C1.1). 64.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -372,7 +374,8 @@ const ENTRIES = [
   // 139.9 with the keys of the contract checked in the core (review №5 E1, see the main entry). 140.5, raised by name.
   // 140.6 with the catalog's delta, the at-rest place and base64 in chunks (review №5 E4); both branches together
   // 141.4. 142, raised by name. 142.0 with a follower's counts (stats().follow; review №5 O-6). 142.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 142.5 },
+  // 142.7 with collections defined after the open (collections plan, C1.1). 143, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 143 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -507,7 +510,8 @@ const ENTRIES = [
   // the catalog's value keys it shares with the core.
   // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
   // 7.0 with the catalog persisted through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 7.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 7.5 },
+  // 7.6 with `Catalog.define` and the action stream (collections plan, C1.1). 7.8, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 7.8 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

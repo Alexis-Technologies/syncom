@@ -2440,6 +2440,18 @@ export interface Database {
   repair(id: string): Promise<{ ops: number; alive: boolean }>;
   /** Every live id, sorted — from the catalog, no I/O. */
   list(): Promise<string[]>;
+  /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
+  readonly collections: { readonly [name: string]: SyncomCollection };
+  /**
+   * Defines collections after the open — each as an entity of `createDatabase({ schema })`
+   * would be, in force from here over the records of its type; nothing is persisted
+   * (add them after every open; the schema's hash in hello does not move). A name
+   * defined already or taken by the database, or a malformed definition, is a
+   * TypeError and nothing is taken. The `schema` plugin's (`PLUGIN_MISSING` without it).
+   */
+  addCollections(definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>): Promise<void>;
+  /** Forgets a collection's definition; the records stay. An unknown name is a TypeError. */
+  removeCollection(name: string): void;
   /**
    * Runs `data` through an entity's validator the way a write would and
    * returns what it gives back (defaults filled, aliases resolved); rejects

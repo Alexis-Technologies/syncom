@@ -126,6 +126,10 @@ class Database extends Emitter {
   #heardEarly = [];
   #schema = null;
   #entities = null;
+  // The collections, by name, as one frozen object (`db.collections`); made again when one is added or removed.
+  #collections = Object.freeze({});
+  // The text index factory (`createDatabase({ search })`), kept for a collection defined after the open.
+  #search = null;
   #version = null;
   #schemaHash = null;
   #schemaPrevious = null;
@@ -295,23 +299,14 @@ class Database extends Emitter {
     }
     this.#entities = normalized.entities;
     this.#schema = schema;
+    this.#search = search;
     // One text index per searchable entity, from the injected factory: the
     // core knows the contract, not the index — a node that never searches
     // ships none of it.
     const text = new Map();
     for (const def of normalized.entities.values()) {
-      if (def.search.length === 0) continue;
-      if (search === null) {
-        const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
-        throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
-      }
-      const index = search(def.name);
-      if (!isTextIndex(index)) {
-        throw new TypeError(
-          `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
-        );
-      }
-      text.set(def.name, index);
+      const index = this.#textIndexOf(def);
+      if (index !== null) text.set(def.name, index);
     }
     const { logger } = this;
     // Persisted through the engine's catalog store where it has one (a native
@@ -331,6 +326,22 @@ class Database extends Emitter {
     if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
       throw new TypeError("createDatabase({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
+  }
+
+  // The text index of a searchable entity, from the injected factory; null for one without search fields.
+  #textIndexOf(def) {
+    if (def.search.length === 0) return null;
+    if (this.#search === null) {
+      const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
+      throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
+    }
+    const index = this.#search(def.name);
+    if (!isTextIndex(index)) {
+      throw new TypeError(
+        `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
+      );
+    }
+    return index;
   }
 
   async #init() {
@@ -1007,6 +1018,69 @@ class Database extends Emitter {
 
   #initCollections() {
     for (const name of this.#entities.keys()) this[name] = new Collection(this, name);
+    this.#collected();
+  }
+
+  // `collections` made again: one frozen object of the collections by name.
+  #collected() {
+    const collections = {};
+    for (const name of this.#entities.keys()) collections[name] = this[name];
+    this.#collections = Object.freeze(collections);
+  }
+
+  /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
+  get collections() {
+    return this.#collections;
+  }
+
+  /**
+   * Defines collections after the open: `{ [name]: definition }` (or a Map),
+   * each as an entity of `createDatabase({ schema })` would be — its validator,
+   * indexes, unique keys and search fields in force from here, the records
+   * of the type the catalog holds indexed under them. Nothing is persisted:
+   * the application adds them after every open, and the schema's hash in
+   * hello does not move. Every definition is checked before any is taken —
+   * a name defined already or taken by the database, a malformed definition
+   * — and that is a TypeError. The schema plugin's (`PLUGIN_MISSING` without it).
+   */
+  async addCollections(defs) {
+    if (this.#schemaHook === null) throw missing('addCollections()', 'schema');
+    const given = defs instanceof Map ? defs : isPlainObject(defs) ? new Map(Object.entries(defs)) : null;
+    if (given === null) throw new TypeError('addCollections() takes an object or a Map of definitions');
+    const added = [];
+    for (const [name, def] of given) {
+      if (this.#entities.has(name)) throw new TypeError(`addCollections(): collection '${name}' is defined already`);
+      if (name in this) {
+        throw new TypeError(`addCollections(): collection name '${name}' is taken by the database itself`);
+      }
+      added.push(this.#schemaHook.define(name, def));
+    }
+    for (let i = 0; i < added.length; i++) {
+      const def = added[i];
+      const index = this.#textIndexOf(def);
+      this.#entities.set(def.name, def);
+      this.#catalog.define(def.name, def, index);
+      this[def.name] = new Collection(this, def.name);
+      // The records of the type the catalog holds, indexed under the definition: a read each.
+      const ids = this.#catalog.ids(def.name).slice();
+      for (let k = 0; k < ids.length; k++) await this.#entries.index(ids[k]);
+    }
+    this.#collected();
+    this.#flushCatalog();
+  }
+
+  /**
+   * Forgets a collection's definition: the records stay (a collection's
+   * `remove()` deletes them), untyped by any definition from here. An
+   * unknown name is a TypeError.
+   */
+  removeCollection(name) {
+    if (!this.#entities.has(name)) throw new TypeError(`removeCollection(): no collection '${name}'`);
+    this.#entities.delete(name);
+    this.#catalog.define(name, null);
+    delete this[name];
+    this.#collected();
+    this.#flushCatalog();
   }
 
   get schema() {

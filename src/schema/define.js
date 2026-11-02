@@ -317,6 +317,14 @@ const normalizeMigrations = (migrations, version) => {
   return chain;
 };
 
+// The entity definitions a database adds after it opened (`addCollections`):
+// each normalized as one of the schema's would be. The validator is the one
+// `createDatabase({ validator })` gave, read once at setup.
+const defineEntity = (name, def, validator) => {
+  if (!isField(name)) throw new TypeError('addCollections(): collection names must be non-empty strings');
+  return normalizeEntity(name, def, validator === undefined ? null : validator);
+};
+
 /**
  * `createDatabase({ schema, validator })` normalized: `{ version, entities, snapshot,
  * migrations, ahead, lens }` — the entities a Map of `{ name, schema,
@@ -371,6 +379,7 @@ const normalizeSchema = (schema, { validator } = {}) => {
 
 module.exports = {
   normalizeSchema,
+  defineEntity,
   normalizeValidator,
   deriveIdField,
   derivedIndexes,
