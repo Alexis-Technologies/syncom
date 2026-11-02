@@ -82,6 +82,22 @@ const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
 
+// An entity's `methods` go on its Documents and its `statics` on its Collection: a name a
+// Document or a Collection answers to already would shadow it, so it is refused where the
+// definition is taken.
+const checkOrm = (def, label) => {
+  for (const name of Object.keys(def.methods ?? {})) {
+    if (name in Document.prototype || name === 'id') {
+      throw new TypeError(`${label}: entity ${def.name}: methods.${name} is a member of every Document already`);
+    }
+  }
+  for (const name of Object.keys(def.statics ?? {})) {
+    if (name in Collection.prototype) {
+      throw new TypeError(`${label}: entity ${def.name}: statics.${name} is a member of every Collection already`);
+    }
+  }
+};
+
 // A delete's payload: the data the tombstone carries, when given (a plain object).
 const tombstone = (data) => {
   if (data === undefined) return {};
@@ -367,11 +383,12 @@ class Database extends Emitter {
     // A collection becomes a property of the storage: a name the storage
     // already answers to — a method, a getter, anything up its prototype
     // chain — would replace it or break the open. Refused before anything
-    // is opened.
-    for (const name of normalized.entities.keys()) {
+    // is opened; so is a method or a static named like a member.
+    for (const [name, def] of normalized.entities) {
       if (name in this) {
         throw new TypeError(`createDatabase({ schema }): entity name '${name}' is taken by the storage itself`);
       }
+      checkOrm(def, 'createDatabase({ schema })');
     }
     this.#entities = normalized.entities;
     this.#schema = schema;
@@ -1132,7 +1149,9 @@ class Database extends Emitter {
       if (name in this) {
         throw new TypeError(`addCollections(): collection name '${name}' is taken by the database itself`);
       }
-      added.push(this.#schemaHook.define(name, def, this.#entities.keys()));
+      const defined = this.#schemaHook.define(name, def, this.#entities.keys());
+      checkOrm(defined, 'addCollections()');
+      added.push(defined);
     }
     for (let i = 0; i < added.length; i++) {
       const def = added[i];

@@ -64,6 +64,7 @@ export type {
   ModifyFn,
   UpdateOperators,
   WriteByQuery,
+  CollectionEvents,
   DeleteOptions,
   UpdateOptions,
   RecordData,

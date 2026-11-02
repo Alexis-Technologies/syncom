@@ -66,6 +66,15 @@ and one `commit` event, not one per call.
   record as it reads, written as one transaction, refused whole where a kind refuses its part.
   `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
   `query` plugin's), inside the queue, and resolves to whether it did.
+- **ORM: `methods` and `statics`.** An entity's `methods` go on every `Document` of the collection, bound
+  to it and hidden from enumeration (a field is enumerable, a method is not); its `statics` on the
+  collection. A name a Document or a Collection answers to already is a `TypeError` where the
+  definition is taken.
+- **Collection events.** A collection is an emitter: `change` (`{ id, action }`) and `insert`,
+  `update`, `remove` (`{ id }`) — what the catalog decided of a record of its own, once per landing
+  (a record joining the collection, written or revived, an `insert`; one leaving it, deleted or
+  purged, a `remove`; several ops of one turn one `update`) — with one listener of the catalog per
+  collection, taken at the first `on()` and let go of at the last `off()`.
 - **Declared references: `refs`, `populate()`.** An entity declares the records its fields name —
   `refs: { author: 'Author', tags: ['Tag'] }`, or read off a metaschema schema's relations (`author:
   'Author'`, `{ type }`, `{ many }` naming an entity of the model) — and a `Document` reads such a field

@@ -21,7 +21,19 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 const SCHEMA_KEYS = new Set(['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens']);
 const AHEAD = new Set(['apply', 'hold']);
 const LENS = new Set(['migrations', 'validate', 'both']);
-const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search', 'id', 'refs'];
+const ENTITY_KEYS = [
+  'schema',
+  'idField',
+  'validate',
+  'index',
+  'unique',
+  'fields',
+  'search',
+  'id',
+  'refs',
+  'methods',
+  'statics',
+];
 const ENTITY_KEY = new Set(ENTITY_KEYS);
 
 const fail = (entity, text) => new TypeError(`createDatabase({ schema }): entity ${entity}: ${text}`);
@@ -274,6 +286,20 @@ const explicitRefs = (value, entity) => {
   return fields.length === 0 ? null : refs;
 };
 
+// `methods` (on every Document of the collection) and `statics` (on the collection): an object of
+// functions, or null for none. Whether a name clashes with a member is the database's to refuse.
+const functionsOf = (value, entity, what) => {
+  if (value === undefined) return null;
+  if (!isObject(value)) throw fail(entity, `${what} must be an object of functions`);
+  const names = Object.keys(value);
+  const out = {};
+  for (let i = 0; i < names.length; i++) {
+    if (typeof value[names[i]] !== 'function') throw fail(entity, `${what}.${names[i]} must be a function`);
+    out[names[i]] = value[names[i]];
+  }
+  return names.length === 0 ? null : out;
+};
+
 // What metaschema's own type names are not: a field whose type is another entity of the model is a
 // reference (`company: 'Company'`, `{ type: 'Company' }`, `{ many: 'Address' }`). Decided once the
 // entities are all known (`deriveRefs`), explicit `refs` left as they are.
@@ -336,6 +362,8 @@ const normalizeEntity = (name, def, validator) => {
     fields: fields ?? null,
     search: def.search === undefined ? [] : explicitSearch(def.search, name),
     refs: def.refs === undefined ? null : explicitRefs(def.refs, name),
+    methods: functionsOf(def.methods, name, 'methods'),
+    statics: functionsOf(def.statics, name, 'statics'),
   };
 };
 

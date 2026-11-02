@@ -449,6 +449,118 @@ const runCollectionTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'methods are bound to every Document of the collection and statics to the collection; a clash is refused',
+    async (t2) => {
+      const schema = {
+        entities: {
+          Post: {
+            methods: {
+              shout() {
+                return this.title.toUpperCase();
+              },
+              async bump() {
+                await this.inc('hits', 1);
+                return this.hits;
+              },
+            },
+            statics: {
+              latest() {
+                return this.select().desc('n').one();
+              },
+            },
+          },
+        },
+      };
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema });
+      const post = await db.Post.insert({ title: 'hi', n: 1 });
+      assert.strictEqual(post.shout(), 'HI');
+      assert.strictEqual(await post.bump(), 1);
+      assert.deepStrictEqual(Object.keys(post), ['title', 'n', '$type', 'hits'], 'a method is no field');
+      assert.deepStrictEqual(await post.data(), { title: 'hi', n: 1, $type: 'Post', hits: 1 });
+      const { shout } = post;
+      assert.strictEqual(shout(), 'HI', 'bound');
+      await db.Post.insert({ title: 'yo', n: 2 });
+      assert.strictEqual((await db.Post.latest()).title, 'yo');
+      assert.strictEqual(Object.keys(db.Post).length, 0, 'a static is no field');
+      // The same Document after a refresh keeps its methods; one of another collection has none.
+      await db.Post.update(post.id, { title: 'again' });
+      assert.strictEqual(post.shout(), 'AGAIN');
+      const other = await db.document(await db.insert({ title: 'x' }));
+      assert.strictEqual(other.shout, undefined);
+      // A name a Document or a Collection answers to already is refused where the definition is taken.
+      await assert.rejects(db.addCollections({ Bad: { methods: { save() {} } } }), TypeError);
+      await assert.rejects(db.addCollections({ Bad: { methods: { id() {} } } }), TypeError);
+      await assert.rejects(db.addCollections({ Bad: { statics: { on() {} } } }), TypeError);
+      await assert.rejects(db.addCollections({ Bad: { methods: { x: 1 } } }), TypeError);
+      await assert.rejects(
+        createStorage(t2, 'B', { fsi: memory(), schema: { entities: { P: { statics: { select() {} } } } } }),
+        TypeError,
+      );
+    },
+  );
+
+  await t.test(
+    'a collection hears each change of a record of its own once per landing, with the action the catalog decided',
+    async (t2) => {
+      const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {}, Tag: {} } } });
+      const seen = [];
+      db.Post.on('change', (event) => seen.push(['change', event.id, event.action]));
+      db.Post.on('insert', (event) => seen.push(['insert', event.id]));
+      db.Post.on('update', (event) => seen.push(['update', event.id]));
+      db.Post.on('remove', (event) => seen.push(['remove', event.id]));
+      const tags = [];
+      db.Tag.on('change', (event) => tags.push(event.action));
+      const id = (await db.Post.insert({ n: 1 })).id;
+      await db.Post.update(id, { n: 2 });
+      await db.inc(id, 'hits', 1);
+      // Several ops on one record in one turn: one landing, one change.
+      await db.transact(async (tx) => {
+        await tx.update(id, { a: 1 });
+        await tx.update(id, { b: 2 });
+      });
+      await db.Post.delete(id);
+      const again = await db.insert({ $type: 'Post', x: 1 });
+      await db.purge(again);
+      const tag = (await db.Tag.insert({})).id;
+      assert.deepStrictEqual(seen, [
+        ['change', id, 'insert'],
+        ['insert', id],
+        ['change', id, 'update'],
+        ['update', id],
+        ['change', id, 'update'],
+        ['update', id],
+        ['change', id, 'update'],
+        ['update', id],
+        ['change', id, 'remove'],
+        ['remove', id],
+        ['change', again, 'insert'],
+        ['insert', again],
+        ['change', again, 'remove'],
+        ['remove', again],
+      ]);
+      assert.deepStrictEqual(tags, ['insert']);
+      // A revival is an insert again; a record of no collection is nobody's.
+      await db.set(id, { back: true, $type: 'Post' });
+      assert.deepStrictEqual(seen.at(-1), ['insert', id]);
+      await db.insert({ loose: true });
+      assert.strictEqual(seen.length, 16);
+      // The catalog's listener goes with the last listener.
+      db.Post.clear();
+      await db.Post.update(id, { n: 3 });
+      assert.strictEqual(seen.length, 16);
+      db.Tag.off('change');
+      await db.Tag.delete(tag);
+      assert.deepStrictEqual(tags, ['insert']);
+      // A throwing listener is contained.
+      db.Post.on('update', () => {
+        throw new Error('boom');
+      });
+      await db.Post.update(id, { n: 4 });
+      assert.strictEqual((await db.Post.get(id)).n, 4);
+    },
+  );
+
   await t.test('a write through the database from inside transact() is IN_TRANSACTION, not a deadlock', async (t2) => {
     const db = await createStorage(t2, 'A', { fsi: memory(), schema: { entities: { Post: {} } } });
     const id = (await db.Post.insert({ n: 1 })).id;

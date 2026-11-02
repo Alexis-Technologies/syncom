@@ -174,7 +174,8 @@ const ENTRIES = [
   // 66.9 with the update operators (src/operators.js, `operate`) and `ifMatch` (collections plan, C1.5). 67, raised by name.
   // 67.0 with `delete(id, { data })` and a revival's resets; declared references, `populate()` (collections plan,
   // C1.7–C1.8). 67.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 67.5 },
+  // 67.7 with an entity's methods and statics and the collection events (collections plan, C1.9–C1.10). 68, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 68 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -383,7 +384,8 @@ const ENTRIES = [
   // 143.9 with named ids, the bulk writes and upserts (collections plan, C1.2–C1.3). 144.5, raised by name.
   // 145.7 with the update operators and `ifMatch` (collections plan, C1.5). 146, raised by name.
   // 146.0 with `delete(id, { data })`, the writes by query, declared references (collections plan, C1.6–C1.8). 147, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 147 },
+  // 147.4 with methods, statics and the collection events (collections plan, C1.9–C1.10). 148, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 148 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

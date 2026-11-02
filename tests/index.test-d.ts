@@ -961,6 +961,26 @@ storage.record<Post>('id').then((record) => {
   const change: syncom.Change = { action: 'delete', data: { why: 'x' } };
   expectAssignable<syncom.Change>(change);
   expectAssignable<syncom.EntityDefinition>({ refs: { author: 'Author', tags: ['Tag'] } });
+  expectAssignable<syncom.EntityDefinition>({
+    methods: {
+      shout(this: syncom.SyncomDocument<{ title: string }>) {
+        return this.title.toUpperCase();
+      },
+    },
+    statics: {
+      latest(this: syncom.SyncomCollection) {
+        return this.select().one();
+      },
+    },
+  });
+  expectError<syncom.EntityDefinition>({ methods: { x: 1 } });
+  db.Tag.on('change', (event) => {
+    expectType<string>(event.id);
+    expectType<'insert' | 'update' | 'remove'>(event.action);
+  });
+  db.Tag.once('remove', (event) => expectType<string>(event.id));
+  expectError(db.Tag.on('nope', () => {}));
+  expectType<Promise<{ id: string }>>(db.Tag.toPromise('insert'));
   expectError<syncom.EntityDefinition>({ refs: { tags: ['Tag', 'Other'] } });
   const doc = await db.Tag.document('t1');
   expectType<Promise<syncom.SyncomDocument<RecordData> | null | (syncom.SyncomDocument<RecordData> | null)[]>>(

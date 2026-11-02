@@ -1073,6 +1073,13 @@ export interface EntityDefinition {
    * relations (`author: 'Author'`, `{ type }`, `{ many }` naming an entity of the model) when absent.
    */
   refs?: { readonly [field: string]: string | readonly [string] };
+  /**
+   * Functions every `Document` of the collection carries, bound to it (`this` the Document), hidden
+   * from enumeration; a name a Document answers to already (`save`, `data`, `id`…) is a TypeError.
+   */
+  methods?: { readonly [name: string]: (this: any, ...args: any[]) => unknown };
+  /** Functions the collection carries, bound to it; a name a Collection answers to already is a TypeError. */
+  statics?: { readonly [name: string]: (this: any, ...args: any[]) => unknown };
   /** Free-form field notes, kept as given. */
   fields?: { readonly [name: string]: unknown };
   /**
@@ -2819,8 +2826,24 @@ export interface BulkResult<I = RecordData> {
   error: { index: number; id: string | null; data: I; error: Error }[];
 }
 
+/** What a collection emits: what the catalog decided of a record of its own, once per landing. */
+export interface CollectionEvents {
+  change: (event: { id: string; action: 'insert' | 'update' | 'remove' }) => void;
+  /** A record joined the collection: written, or revived. */
+  insert: (event: { id: string }) => void;
+  update: (event: { id: string }) => void;
+  /** A record left it: deleted, purged, encrypted, or of another collection now. */
+  remove: (event: { id: string }) => void;
+}
+
 export interface SyncomCollection<R = RecordData, I = R> {
   readonly name: string;
+  on<E extends keyof CollectionEvents>(event: E, listener: CollectionEvents[E]): void;
+  once<E extends keyof CollectionEvents>(event: E, listener: CollectionEvents[E]): void;
+  off<E extends keyof CollectionEvents>(event: E, listener?: CollectionEvents[E]): void;
+  listenerCount(event: keyof CollectionEvents): number;
+  toPromise<E extends keyof CollectionEvents>(event: E): Promise<Parameters<CollectionEvents[E]>[0]>;
+  clear(event?: keyof CollectionEvents): void;
   /**
    * Writes a new record: under the id its data names (the entity's composite id, or its id
    * field — a live record there is `EXISTS`, decided inside the queue), else under a minted one.

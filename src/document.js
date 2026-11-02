@@ -78,6 +78,20 @@ class Document extends Emitter {
     this.#data = JSON.parse(JSON.stringify(rawData));
     this.#convertToReferences(this.#data);
     this.#defineProperties();
+    this.#defineMethods();
+  }
+
+  // The collection's `methods`, on this Document: each bound to it, hidden
+  // from enumeration (a field is enumerable, a method is not), defined once.
+  #defineMethods() {
+    const type = this.#data?.$type;
+    if (typeof type !== 'string') return;
+    const methods = this.#storage[SOURCE].definition(type)?.methods ?? null;
+    if (methods === null) return;
+    for (const name of Object.keys(methods)) {
+      if (Object.hasOwn(this, name)) continue;
+      Object.defineProperty(this, name, { value: methods[name].bind(this), enumerable: false, configurable: true });
+    }
   }
 
   // The references the record's collection declares (`refs`), by field; null for none.

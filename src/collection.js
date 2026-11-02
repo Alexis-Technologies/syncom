@@ -4,7 +4,12 @@
 // holds for a collection. It uses the database's public API and two of the
 // module-private symbols (SOURCE, CURSOR) — nothing below them. The Document
 // (a live view of one record) and the Reference live in src/document.js.
+// An emitter: `change` (`{ id, action }`), `insert`, `update` and `remove`
+// (`{ id }`) from the catalog's action stream — one listener of the catalog
+// per collection, taken at the first `on()`, let go of at the last `off()`.
 
+const { Emitter } = require('./emitter.js');
+const { notify } = require('./hooks.js');
 const { isPlainObject } = require('./shape.js');
 const { SOURCE, CURSOR } = require('./symbols.js');
 const { SyncomError, typed } = require('./errors.js');
@@ -31,17 +36,66 @@ const ROW_CODES = new Set([
 ]);
 const ownVerdict = (error) => error instanceof TypeError || ROW_CODES.has(error?.code);
 
-class Collection {
+class Collection extends Emitter {
   #storage;
   #name;
+  // The catalog's subscription while anything listens, and what takes it off.
+  #unsubscribe = null;
 
   constructor(storage, name) {
+    super();
     this.#storage = storage;
     this.#name = name;
+    // The collection's `statics`, bound to it, hidden from enumeration.
+    const statics = storage[SOURCE].definition(name)?.statics ?? null;
+    if (statics !== null) {
+      for (const key of Object.keys(statics)) {
+        Object.defineProperty(this, key, { value: statics[key].bind(this), enumerable: false, configurable: true });
+      }
+    }
   }
 
   get name() {
     return this.#name;
+  }
+
+  // What the catalog says of a record of this collection: `change` with the
+  // action, and the action's own event; contained like every event.
+  #hear(id, action) {
+    const { logger } = this.#storage;
+    notify(this, logger, 'change', { id, action });
+    notify(this, logger, action, { id });
+  }
+
+  #listen() {
+    if (this.#unsubscribe !== null) return;
+    this.#unsubscribe = this.#storage[SOURCE].subscribe(this.#name, (changed, id, action) => this.#hear(id, action));
+  }
+
+  #unlisten() {
+    if (this.#unsubscribe === null || this.eventNames().length > 0) return;
+    this.#unsubscribe();
+    this.#unsubscribe = null;
+  }
+
+  on(event, listener) {
+    super.on(event, listener);
+    this.#listen();
+  }
+
+  once(event, listener) {
+    super.once(event, listener);
+    this.#listen();
+  }
+
+  off(event, listener) {
+    super.off(event, listener);
+    this.#unlisten();
+  }
+
+  clear(event) {
+    super.clear(event);
+    this.#unlisten();
   }
 
   // A live record of another collection (or of none): what the catalog says
