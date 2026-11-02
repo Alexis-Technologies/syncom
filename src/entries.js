@@ -311,9 +311,10 @@ class EntryStore {
   /**
    * Takes folded tombstones away for good (`cleanup({ drop: true })`): the kv
    * entries removed in one write set, the catalog rows with them — a late op
-   * then makes a new record. An id that is not folded is left alone. Answers how many.
+   * then makes a new record. An id that is not folded is left alone. With
+   * `keepRows` the rows stay (an entry beside a file: the file is the record). Answers how many.
    */
-  async dropMany(ids) {
+  async dropMany(ids, { keepRows = false } = {}) {
     const removals = [];
     for (let i = 0; i < ids.length; i++) if (this.#folded.has(ids[i])) removals.push([TOMBSTONES, ids[i]]);
     if (removals.length === 0) return 0;
@@ -322,7 +323,7 @@ class EntryStore {
       const id = removals[i][1];
       this.#folded.delete(id);
       this.#cache.delete(id);
-      this.#catalog.put(id, null);
+      if (!keepRows) this.#catalog.put(id, null);
     }
     return removals.length;
   }

@@ -771,10 +771,11 @@ class Database extends Emitter {
     });
   }
 
-  // The catalog is derived from the records: the persisted one is reused
-  // when the log can say what changed since it was saved (those records are
-  // re-read), rebuilt from a scan of `data/` otherwise — a first open, a
-  // stamp from another epoch or below the floor, other indexes.
+  // The catalog is derived from the records and the folded tombstones: the
+  // persisted one is reused when the log can say what changed since it was
+  // saved (those records are re-read), rebuilt from a scan of the records and
+  // the `tombstones` namespace otherwise — a first open, a stamp from another
+  // epoch or below the floor, other indexes.
   async #loadCatalog() {
     const saved = await this.#catalog.load();
     const tail = saved === null ? null : this.#log.since(saved.stamp);
@@ -797,6 +798,20 @@ class Database extends Emitter {
           if (ids.length < page) break;
           after = ids[ids.length - 1];
         }
+        // The folded tombstones — the ids the `tombstones` namespace listed at open — that no record file
+        // answered for: indexed from the namespace. An id with a file AND an entry (a fold torn between its two
+        // halves on files) keeps the file; the entry is taken away.
+        const folded = this.#entries.foldedIds();
+        const orphans = [];
+        for (let i = 0; i < folded.length; i++) {
+          if (this.#catalog.row(folded[i]) !== null) {
+            orphans.push(folded[i]);
+            continue;
+          }
+          await this.#entries.index(folded[i]);
+          count++;
+        }
+        if (orphans.length > 0 && !this.#readOnly) await this.#entries.dropMany(orphans, { keepRows: true });
         if (!this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
         return count;
       };

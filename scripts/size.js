@@ -180,8 +180,9 @@ const ENTRIES = [
   // 69.8 with folded tombstones (Catalog.fold, EntryStore.fold, the row rebuilt on a read; collections plan,
   // C4.5) and the transaction event's eventId. 70, raised by name.
   // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (catalog FORMAT 5; review №6, E1.1;
-  // 2026-11-02). 70.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 70.5 },
+  // 2026-11-02). 70.5, raised by name. 70.5 with the folded tombstones in the `tombstones` kv namespace (EntryStore.foldMany,
+  // the fallback read, the rebuild over both stores; review №6, E1.2–E1.3). 71, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 71 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -399,7 +400,8 @@ const ENTRIES = [
   // 152.8 with compound indexes, the planner and explain() (collections plan, C3.1–C3.2). 153.5, raised by name.
   // 153.8 with the local plugin registered (collections plan, C4.1). 154.5, raised by name.
   // 154.6 with a tombstone's row typed and stamped (review №6, E1.1; 2026-11-02). 155, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 155 },
+  // 155.1 with the folded tombstones in the `tombstones` kv namespace (review №6, E1.2–E1.3). 155.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 155.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

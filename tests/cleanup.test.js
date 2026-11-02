@@ -99,6 +99,62 @@ test('tombstone cleanup', async (t) => {
     },
   );
 
+  await t.test(
+    'a folded tombstone survives a catalog rebuild: another index, addCollections on reopen, a missing catalog',
+    async (t2) => {
+      const fsi = memory();
+      const openAt = async (options = {}) => {
+        const db = await syncom.createDatabase({ path: '/r', fsi, defer: 0, logger: false, ...options });
+        t2.after(() => db.close().catch(() => {}));
+        return db;
+      };
+      const schema = { entities: { Post: { index: ['title'] } } };
+      let db = await openAt({ schema });
+      const id = (await db.Post.insert({ title: 'old' })).id;
+      const live = (await db.Post.insert({ title: 'live' })).id;
+      await db.delete(id);
+      const row = db[SOURCE].row(id);
+      // The delete's stamp may lead the wall clock by a tick (the clock is monotonic): the sweep's `now` is ahead.
+      const ahead = () => Date.now() + 60_000;
+      const sweeper = cleanup(db, { minimumDeletedTime: 0, awaitSync: false, now: ahead });
+      assert.deepStrictEqual(await sweeper.run(), { folded: 1, dropped: 0, skipped: 0 });
+      const entry = await db[SOURCE].entry(id);
+      const stale = [
+        { origin: 'peer', seq: 1, ts: entry.meta.deleted[0] - 1, type: 'set', id, data: { title: 'stale' } },
+      ];
+      // A fold torn on files leaves a file AND an entry: made by hand for the live record.
+      await db[DB].kv.put('tombstones', live, JSON.stringify({ type: 'Post', data: {}, meta: entry.meta }));
+      await db.close();
+      // Other indexes: the catalog is rebuilt — from the records and the tombstones.
+      db = await openAt({ schema: { entities: { Post: { index: ['author'] } } } });
+      assert.deepStrictEqual(db[SOURCE].row(id), row, 'the row, from the namespace');
+      assert.ok(db[SOURCE].folded(id));
+      assert.deepStrictEqual((await db[SOURCE].entry(id)).meta, entry.meta, 'the whole meta');
+      await db.applyRemote(stale);
+      assert.strictEqual(await db.get(id), null, 'a late op below the tombstone is moot after the rebuild');
+      assert.deepStrictEqual(await db.get(live), { title: 'live', $type: 'Post' }, 'the file wins over a torn entry');
+      assert.strictEqual(await db[DB].kv.get('tombstones', live), null, 'the torn entry is taken away');
+      await db.close();
+      // A collection defined after the open: every such open rebuilds — the tombstone is there each time.
+      db = await openAt({ schema: { entities: {} } });
+      await db.addCollections({ Post: { index: ['title'] } });
+      assert.deepStrictEqual(db[SOURCE].row(id), row);
+      assert.strictEqual(await db.get(id), null);
+      assert.strictEqual(await db.Post.count(), 1);
+      await db.close();
+      // No catalog file at all.
+      await fsi.remove('/r/index', 'catalog.json');
+      db = await openAt({ schema });
+      assert.deepStrictEqual(db[SOURCE].row(id), row, 'rebuilt from nothing');
+      assert.deepStrictEqual(await db.Post.select().fetch(), [{ id: live, title: 'live', $type: 'Post' }]);
+      // Revived above the stamp: a file again, the entry gone.
+      await db.Post.set(id, { title: 'back' });
+      assert.strictEqual(db[SOURCE].folded(id), false);
+      assert.strictEqual(await fsi.exists('/r/tombstones', id), false);
+      assert.deepStrictEqual(await db.get(id), { title: 'back', $type: 'Post' });
+    },
+  );
+
   await t.test('a fold is one write set: a failure leaves the file, never a bare row', async (t2) => {
     const inner = memoryEngine();
     let failing = false;
@@ -125,7 +181,7 @@ test('tombstone cleanup', async (t) => {
     t2.after(() => db.close().catch(() => {}));
     const id = (await db.Post.insert({ title: 'x' })).id;
     await db.delete(id, { data: { why: 'gone' } });
-    const sweeper = cleanup(db, { minimumDeletedTime: 0, awaitSync: false });
+    const sweeper = cleanup(db, { minimumDeletedTime: 0, awaitSync: false, now: () => Date.now() + 60_000 });
     failing = true;
     await assert.rejects(sweeper.run(), { message: 'disk full' });
     const store = db[DB];
