@@ -651,8 +651,12 @@ class Cursor {
     const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex;
     const enough = needsRows && (!ordered || byIndex) ? wanted : Infinity;
     // An unordered cursor that stops at enough rows reads its candidates in id order — the result's
-    // order without keys — so what it stops at is the window a run of every candidate would give.
-    if (enough !== Infinity && !byIndex && !this.#ranked() && !Array.isArray(found)) found = [...found].sort();
+    // order without keys — so what it stops at is the window a run of every candidate would give: a
+    // scan's ids come in key order and a posting set in none, both are sorted by id first; the
+    // collection's list is in id order already.
+    if (enough !== Infinity && !byIndex && !this.#ranked() && (scanned !== null || !Array.isArray(found))) {
+      found = [...found].sort();
+    }
     const sink = ordered && !byIndex && wanted !== Infinity ? new TopK(compareFully(this.#order), wanted) : new Every();
     // From after the edge of the page before, where there is one.
     const edge = this.#after === null ? null : this.#edge();

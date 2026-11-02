@@ -84,8 +84,9 @@ const fit = (index, fields, order) => {
     }
   }
   // The sort is the index's where the order's keys are the index's fields from the prefix on, in one
-  // direction; an order within the prefix alone is no order (every key is equal there). No order:
-  // the index serves a whole-key match in id order, which is the result's.
+  // direction, AND reach the index's end — a key beyond them would order equal keys by itself, not by id,
+  // which is the result's order within equal keys; an order within the prefix alone is no order (every
+  // key is equal there). No order: the index serves a whole-key match in id order, which is the result's.
   let sortedByIndex = false;
   let desc = false;
   if (order.length === 0) sortedByIndex = k === index.length;
@@ -96,7 +97,7 @@ const fit = (index, fields, order) => {
       else if (order[i].desc !== desc) break;
       i++;
     }
-    sortedByIndex = i === order.length;
+    sortedByIndex = i === order.length && k + i === index.length;
     if (!sortedByIndex) desc = false;
   }
   const score = k * 4 + (range !== null ? 2 : 0) + (sortedByIndex ? 1 : 0);

@@ -798,6 +798,50 @@ const runQueryTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'an unordered limit over an index range is the first rows by id, as a run of every candidate gives',
+    async (t2) => {
+      const compound = { entities: { Task: { index: [['boardId', 'rank']] } } };
+      const storage = await createStorage(t2, 'W', { fsi: memory(), schema: compound });
+      for (let i = 0; i < 40; i++) await storage.insert({ boardId: `b${i % 2}`, rank: (i * 7) % 40, $type: 'Task' });
+      const cursor = storage.Task.select({ boardId: 'b1', rank: { $gte: 10 } });
+      assert.strictEqual(cursor.explain().sortedByIndex, false, 'a range: not a whole key, so not in id order');
+      const every = await cursor.fetch();
+      const ids = every.map((row) => row.id);
+      assert.deepStrictEqual(ids, ids.slice().sort(), 'the result without keys: by id');
+      assert.deepStrictEqual(await cursor.limit(3).fetch(), every.slice(0, 3));
+      assert.deepStrictEqual(await cursor.offset(2).limit(3).fetch(), every.slice(2, 5));
+      assert.deepStrictEqual(await cursor.one(), every[0]);
+      // A whole-key match comes in id order already.
+      assert.strictEqual(storage.Task.select({ boardId: 'b0', rank: 7 }).explain().sortedByIndex, true);
+    },
+  );
+
+  await t.test('an index with fields beyond the order’s keys serves the prefix and sorts after', async (t2) => {
+    const compound = { entities: { Task: { index: [['boardId', 'done', 'rank']] } } };
+    const storage = await createStorage(t2, 'Y', { fsi: memory(), schema: compound });
+    const all = [];
+    for (let i = 0; i < 30; i++) {
+      const data = { boardId: 'b', done: i % 3 === 0, rank: (i * 7) % 30, $type: 'Task' };
+      all.push({ ...data, id: await storage.insert(data) });
+    }
+    const cursor = storage.Task.select({ boardId: 'b' }).order('done');
+    const made = cursor.explain();
+    assert.deepStrictEqual(made.index, ['boardId', 'done', 'rank']);
+    assert.strictEqual(
+      made.sortedByIndex,
+      false,
+      'rank lies beyond the order: equal done would come by rank, not by id',
+    );
+    const byDone = (a, b) => (a.done === b.done ? (a.id < b.id ? -1 : 1) : a.done ? 1 : -1);
+    assert.deepStrictEqual(await cursor.fetch(), all.slice().sort(byDone));
+    // With the next key in the order too, the index serves the sort whole.
+    const full = storage.Task.select({ boardId: 'b' }).order('done').order('rank');
+    assert.strictEqual(full.explain().sortedByIndex, true);
+    const byBoth = (a, b) => (a.done !== b.done ? (a.done ? 1 : -1) : a.rank - b.rank || (a.id < b.id ? -1 : 1));
+    assert.deepStrictEqual(await full.fetch(), all.slice().sort(byBoth));
+  });
+
   await t.test('a builder hands back a new cursor and leaves the one it was called on as it was', async (t2) => {
     const storage = await createStorage(t2, 'I', { schema });
     for (let i = 0; i < 6; i++) await storage.Project.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i });
