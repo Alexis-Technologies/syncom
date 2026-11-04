@@ -5,8 +5,10 @@
 // searchable text to. Fuzzy by construction: a word and a typo of it share
 // most of their trigrams. Ranking is TF-IDF over trigrams, normalized by the
 // record's length. Postings live in memory only — the catalog persists the
-// text and replays every row at open. No requires: platform-neutral, and off
-// the main entry, so a node that never searches ships none of it.
+// text and replays every row at open. The distances a vector field is searched
+// by (`cursor.nearest`) are ./distance.js, re-exported here. Requires distance.js
+// only: platform-neutral, and off the main entry, so a node that never searches
+// ships none of it.
 //
 // Normalization: NFD, combining marks stripped (`Crème` → `Creme`), lower
 // case, anything that is not a letter or a digit a word break. Trigrams: per
@@ -143,4 +145,6 @@ const createSearch = ({ minOverlap = 0.3 } = {}) => {
   return () => new TrigramIndex(minOverlap);
 };
 
-module.exports = { createSearch, normalize, trigrams };
+const { cosine, euclidean, manhattan, dot, isVector } = require('./distance.js');
+
+module.exports = { createSearch, normalize, trigrams, cosine, euclidean, manhattan, dot, isVector };

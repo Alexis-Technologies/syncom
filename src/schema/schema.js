@@ -16,7 +16,7 @@
 // open has checked the definitions (./api.js loadVersion). The methods are
 // stubs on the facade.
 
-const { normalizeSchema } = require('./define.js');
+const { normalizeSchema, defineEntity } = require('./define.js');
 const { createLens } = require('./lens.js');
 const { loadVersion, migrate, check } = require('./api.js');
 const { ValidationError } = require('../errors.js');
@@ -29,7 +29,9 @@ const schema = Object.freeze({
     const normalized = normalizeSchema(given, { validator: options.validator });
     const view = given === null ? null : createLens(normalized, logger);
     const load = () => loadVersion(ctx, normalized);
-    return { schema: { ...normalized, given, view, load } };
+    // A collection defined after the open (`addCollections`): normalized as the schema's were.
+    const define = (name, def, names) => defineEntity(name, def, options.validator, names);
+    return { schema: { ...normalized, given, view, load, define } };
   },
   methods: { migrate, check },
 });

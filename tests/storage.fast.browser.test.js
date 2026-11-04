@@ -6,7 +6,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
+// Before the suite and everything it loads: the shared modules resolve to the browser halves.
+prime();
 
 test('a write is made at once over the browser halves too', async (t) => {
   const env = installBrowserGlobals();

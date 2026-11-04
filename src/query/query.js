@@ -7,16 +7,43 @@
 // the same cursor. The catalog, its indexes and the text index behind
 // `$text` (`createDatabase({ search })`) are the core's: what a query reads is kept
 // whether or not anything queries it. Without the plugin `select()` and
-// `count()` throw PLUGIN_MISSING. The hook the core takes: `query` —
-// `cursor(source, entity, query)`, the cursor over a source seam.
+// `count()` throw PLUGIN_MISSING, and so does `update(id, delta, { ifMatch })`.
+// The hook the core takes: `query` — `cursor(source, entity, query)`, the
+// cursor over a source seam, and `matches(query)`, the query as a predicate
+// over `{ id, ...record }` (what `ifMatch` is decided by).
 
-const { Cursor } = require('./cursor.js');
+const { Cursor, compileQuery } = require('./cursor.js');
+const { QueryCache } = require('./cache.js');
 
 const query = Object.freeze({
   name: 'query',
   setup() {
-    return { query: { cursor: (source, entity, criteria) => new Cursor(source, entity, criteria) } };
+    // One cache per database (./cache.js): the results by key, the live run every `watch()` of a
+    // key shares. A source that does not move (a tag's, without `generation`) is read every time.
+    const cache = new QueryCache();
+    return {
+      query: {
+        cursor: (source, entity, criteria) =>
+          new Cursor(source, entity, criteria, null, typeof source.generation === 'function' ? cache : null),
+        matches: (criteria) => compileQuery(criteria),
+        // What `stats().query` answers: the cache's entries and the rows they hold, the live runs kept.
+        stats: () => ({ cache: { entries: cache.size, rows: cache.held }, live: cache.living }),
+      },
+    };
   },
 });
 
-module.exports = { query };
+/**
+ * A Mango query as a predicate over a record's data (`{ id, ...data }`, or
+ * the data alone): what a cursor matches by, for a document in hand. A
+ * malformed query is a TypeError here.
+ */
+const matches = (criteria) => {
+  const test = compileQuery(criteria);
+  return (doc) => {
+    if (typeof doc !== 'object' || doc === null) throw new TypeError('matches() takes an object');
+    return test(doc);
+  };
+};
+
+module.exports = { query, matches };

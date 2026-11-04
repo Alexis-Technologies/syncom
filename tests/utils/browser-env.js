@@ -42,16 +42,27 @@ const installBrowserGlobals = () => {
   return { opfs, uninstall };
 };
 
-// Primes the cache from the package.json#browser map, then returns the
-// browser barrel — the same module graph a browser bundle contains.
-const requireBrowserBarrel = () => {
+// Primes the cache from the package.json#browser map, ONCE, before any shared
+// module is loaded: a twin calls `prime()` right after requiring this helper
+// and before its suite (whatever the suite loads — the mesh, a memory link,
+// src/utils.js among them — then resolves to the browser halves too); a shared
+// module loaded before the priming is a throw, never a browser run that runs
+// on a node half unseen (review №6, M-4). The browser halves touch no global
+// at load (navigator.storage, crypto.subtle are read inside their
+// functions), so `installBrowserGlobals()` may come before or after.
+let primed = false;
+const prime = () => {
+  if (primed) return;
+  primed = true;
   for (const [from, to] of Object.entries(pkg.browser)) {
     // Only the split leaves are primed; the barrel itself is required LAST,
     // once every twin is in place — requiring it first would load the whole
     // graph with the node halves before the loop reached them.
     if (!from.startsWith('./src/') || from === './src/index.js') continue;
     const nodePath = path.join(ROOT, from);
-    if (require.cache[nodePath]) continue;
+    if (require.cache[nodePath]) {
+      throw new Error(`browser-env: ${from} was loaded before the priming — call prime() before requiring the suite`);
+    }
     const twin = new Module(nodePath, module);
     twin.filename = nodePath;
     twin.paths = Module._nodeModulePaths(path.dirname(nodePath));
@@ -59,6 +70,11 @@ const requireBrowserBarrel = () => {
     twin.loaded = true;
     require.cache[nodePath] = twin;
   }
+};
+
+// The browser barrel — the same module graph a browser bundle contains; primed first where no one did.
+const requireBrowserBarrel = () => {
+  prime();
   return require('../../src/index.browser.js');
 };
 
@@ -109,4 +125,4 @@ const installMockLocks = () => {
   };
 };
 
-module.exports = { installBrowserGlobals, requireBrowserBarrel, requireBrowserAll, installMockLocks };
+module.exports = { installBrowserGlobals, requireBrowserBarrel, requireBrowserAll, installMockLocks, prime };

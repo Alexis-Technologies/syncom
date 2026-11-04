@@ -86,6 +86,8 @@ const at = (data, path) => {
 };
 
 const isCursor = (source) => typeof source?.watch === 'function' && typeof source.fetch === 'function';
+const isLocal = (source) => source?.local === true && typeof source.observe === 'function';
+const isState = (source) => source?.state === true && typeof source.observe === 'function';
 const isPresence = (source) => typeof source?.states === 'function' && typeof source.encode === 'function';
 const isRecord = (source) =>
   typeof source?.id === 'string' && typeof source.data === 'function' && typeof source.on === 'function';
@@ -93,6 +95,14 @@ const isStorage = (source) => typeof source?.observe === 'function' && typeof so
 
 const fromCursor = (cursor, options) =>
   createStore((set, fail) => cursor.watch((rows) => set(rows), { onError: fail }), options);
+
+// A local document, or a state at a path: read at the start, told after every change.
+const fromObserved = (source, key, options) =>
+  createStore((set, fail) => {
+    const stop = source.observe(key, (value) => set(value));
+    source.get(key).then(set, fail);
+    return stop;
+  }, options);
 
 const fromPresence = (presence, options) =>
   createStore((set) => {
@@ -143,9 +153,13 @@ const fromGet = (storage, id, { path = null, ...options } = {}) => {
 const toStore = (source, ...args) => {
   if (isCursor(source)) return fromCursor(source, args[0]);
   if (isPresence(source)) return fromPresence(source, args[0]);
+  if (isLocal(source) && typeof args[0] === 'string') return fromObserved(source, args[0], args[1]);
+  if (isState(source)) return fromObserved(source, typeof args[0] === 'string' ? args[0] : null, args[1]);
   if (isRecord(source)) return fromRecord(source, args[0]);
   if (isStorage(source) && typeof args[0] === 'string') return fromGet(source, args[0], args[1]);
-  throw new TypeError('toStore() takes a cursor, a Record, a presence, or a storage and a record id');
+  throw new TypeError(
+    'toStore() takes a cursor, a Record, a presence, a local store and a key, a state, or a storage and a record id',
+  );
 };
 
 /** A store over any emitter: `read()` (a value or a promise of one) at the start and after each of `events`. */

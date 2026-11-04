@@ -211,14 +211,18 @@ test('Catalog', async (t) => {
       assert.deepStrictEqual(calls, [], 'a field the catalog does not hold changed: the row stayed');
       assert.strictEqual(catalog.dirty, dirty, 'nothing to save either');
       catalog.put('p4', null);
-      // The file: a sixth cell `false` and the text as the seventh; a tombstone's is `true`.
+      // The file: a sixth cell `false` and the text as the seventh; a tombstone's is `true`, then the stamp of
+      // its delete where the row holds one — and a tombstone's view without a type keeps the row's.
       catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o1', title: 'Again' } });
+      catalog.put('p5', { type: 'Post', v: 1, data: { orgId: 'o2' } });
+      catalog.put('p5', { v: 1, gone: true, deleted: [1_700_000_000_000, 'A'] });
       await catalog.save('e.9');
       const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-      assert.strictEqual(file.format, 3);
+      assert.strictEqual(file.format, 5);
       const rowsById = Object.fromEntries(file.rows.map((row) => [row[0], row]));
       assert.deepStrictEqual(rowsById.p1, ['p1', 'Post', 2, false, { orgId: 'o1' }, false, 'Again']);
       assert.deepStrictEqual(rowsById.p2, ['p2', 'Post', 1, false, {}, true]);
+      assert.deepStrictEqual(rowsById.p5, ['p5', 'Post', 1, false, {}, true, [1_700_000_000_000, 'A']]);
       assert.deepStrictEqual(rowsById.p3, ['p3', 'Post', null, true, {}]);
       assert.deepStrictEqual(rowsById.t1, ['t1', 'Tag', null, false, {}]);
       // A load replays the text into a fresh index, in row order.
@@ -233,6 +237,14 @@ test('Catalog', async (t) => {
       again.candidates('Post', { $text: 'a' });
       assert.deepStrictEqual(replayed, [['p1', 'Again']]);
       assert.strictEqual(again.row('p1').text, 'Again');
+      assert.deepStrictEqual(again.row('p5'), {
+        type: 'Post',
+        v: 1,
+        encrypted: false,
+        fields: {},
+        gone: true,
+        deleted: [1_700_000_000_000, 'A'],
+      });
       // Other search fields make the file unusable: a rebuild.
       const other = { entities: { Post: { index: ['orgId'], search: ['title'] }, Tag: {} } };
       assert.strictEqual(await new Catalog({ fsi, path: 'store', entities: entitiesOf(other) }).load(), null);
@@ -299,7 +311,7 @@ test('Catalog', async (t) => {
     await catalog.save('epoch.7');
     assert.strictEqual(catalog.dirty, 0);
     const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-    assert.strictEqual(file.format, 3);
+    assert.strictEqual(file.format, 5);
     assert.strictEqual(file.stamp, 'epoch.7');
     assert.deepStrictEqual(file.rows, [
       ['a', 'Post', 1, false, { orgId: 'o1', slug: 'a' }],
@@ -316,6 +328,10 @@ test('Catalog', async (t) => {
     const other = catalogOf({ entities: { Post: { index: ['title'] } } }, fsi);
     assert.strictEqual(await other.load(), null);
     assert.strictEqual(other.size, 0);
+    // Format 4 — before a tombstone's row kept its stamp — reads only where the indexes are not asked for (a tag's).
+    await fsi.write('store/index', 'catalog.json', JSON.stringify({ ...file, format: 4 }));
+    assert.strictEqual(await catalogOf(schema, fsi).load(), null, 'format 4 under strict');
+    assert.deepStrictEqual(await catalogOf(schema, fsi).load({ strict: false }), { stamp: 'epoch.7' });
     // Absent, unreadable, or of another shape.
     assert.strictEqual(await catalogOf(schema, memory()).load(), null);
     for (const text of [
@@ -401,4 +417,116 @@ test('a tombstone is a row that is there but not listed; all() pages over every 
   assert.deepStrictEqual(loaded.ids('Post'), ['a', 'b', 'e']);
   loaded.put('e', null);
   assert.deepStrictEqual(loaded.all(), ['a', 'b'], 'no file, no entry');
+});
+
+// A scan pulled whole: `{ ids, sorted }` as the eager scan once answered.
+const scanOf = (catalog, type, plan) => {
+  const scanned = catalog.scan(type, plan);
+  const ids = [];
+  for (let id = scanned.next(); id !== null; id = scanned.next()) ids.push(id);
+  return { ids, sorted: scanned.sorted };
+};
+const scanIds = (catalog, type, plan) => scanOf(catalog, type, plan).ids;
+
+test('an array past the cap is keyed whole and every scan still yields it', () => {
+  const catalog = catalogOf({ entities: { Post: { index: ['tags'] } } });
+  const many = [];
+  for (let i = 0; i < 71; i++) many.push(`t${i}`);
+  many.push('x');
+  catalog.put('big', { type: 'Post', v: 1, data: { tags: many } });
+  catalog.put('two', { type: 'Post', v: 1, data: { tags: ['x', 'y'] } });
+  catalog.put('one', { type: 'Post', v: 1, data: { tags: ['y'] } });
+  const plan = { index: ['tags'], prefix: ['x'], range: null, desc: false };
+  const { ids, sorted } = scanOf(catalog, 'Post', plan);
+  assert.deepStrictEqual(ids.slice().sort(), ['big', 'two'], 'the row keyed whole comes along, once');
+  assert.strictEqual(sorted, false);
+  // Every scan: a range too, and the whole collection.
+  const whole = scanOf(catalog, 'Post', { index: ['tags'], prefix: [], range: null, desc: false });
+  assert.deepStrictEqual(whole.ids.slice().sort(), ['big', 'one', 'two']);
+  assert.strictEqual(whole.ids.filter((id) => id === 'big').length, 1, 'once');
+  // Under the cap again: out of the overflow, in the index.
+  catalog.put('big', { type: 'Post', v: 2, data: { tags: ['z'] } });
+  assert.deepStrictEqual(scanIds(catalog, 'Post', plan), ['two']);
+  assert.deepStrictEqual(scanIds(catalog, 'Post', { index: ['tags'], prefix: ['z'], range: null, desc: false }), [
+    'big',
+  ]);
+});
+
+test('multi is a count: once the last array-valued row leaves, a scan is sorted again', () => {
+  const catalog = catalogOf({ entities: { Post: { index: ['n'] } } });
+  const plan = { index: ['n'], prefix: [], range: null, desc: false };
+  catalog.put('a', { type: 'Post', v: 1, data: { n: [3, 1] } });
+  catalog.put('b', { type: 'Post', v: 1, data: { n: 2 } });
+  assert.deepStrictEqual(scanOf(catalog, 'Post', plan), { ids: ['a', 'b'], sorted: false });
+  catalog.put('a', { type: 'Post', v: 2, data: { n: 4 } });
+  assert.deepStrictEqual(scanOf(catalog, 'Post', plan), { ids: ['b', 'a'], sorted: true });
+  catalog.put('c', { type: 'Post', v: 1, data: { n: [0] } });
+  assert.strictEqual(scanOf(catalog, 'Post', plan).sorted, false);
+  catalog.put('c', null);
+  assert.deepStrictEqual(scanOf(catalog, 'Post', plan), { ids: ['b', 'a'], sorted: true });
+  assert.deepStrictEqual(scanOf(catalog, 'Post', { ...plan, desc: true }), { ids: ['a', 'b'], sorted: true });
+});
+
+test('a put re-keys only the indexes a changed field belongs to, and the sorted id lists stay', () => {
+  const catalog = catalogOf({ entities: { Post: { index: ['a', 'b'], unique: ['slug'] } } });
+  catalog.put('p', { type: 'Post', v: 1, data: { a: 1, b: 1, slug: 's1' } });
+  catalog.put('q', { type: 'Post', v: 1, data: { a: 2, b: 2, slug: 's2' } });
+  const ids = catalog.ids('Post');
+  const all = catalog.all();
+  const byA = { index: ['a'], prefix: [], range: null, desc: false };
+  const byB = { index: ['b'], prefix: [], range: null, desc: false };
+  catalog.put('p', { type: 'Post', v: 2, data: { a: 5, b: 1, slug: 's1' } });
+  assert.strictEqual(catalog.ids('Post'), ids, 'the id set did not move: the list stays');
+  assert.strictEqual(catalog.all(), all);
+  assert.deepStrictEqual(scanIds(catalog, 'Post', byA), ['q', 'p']);
+  assert.deepStrictEqual(scanIds(catalog, 'Post', byB), ['p', 'q']);
+  assert.deepStrictEqual(catalog.candidates('Post', { a: 5 }), new Set(['p']));
+  assert.deepStrictEqual(catalog.candidates('Post', { a: 1 }), new Set());
+  // The unique key moves with its field.
+  catalog.put('p', { type: 'Post', v: 3, data: { a: 5, b: 1, slug: 's9' } });
+  assert.deepStrictEqual(catalog.uniqueConflicts('Post', 'n', { slug: 's9' }), [{ fields: ['slug'], other: 'p' }]);
+  assert.deepStrictEqual(catalog.uniqueConflicts('Post', 'n', { slug: 's1' }), []);
+  // A field gone, a field new, both indexes right.
+  catalog.put('p', { type: 'Post', v: 4, data: { b: 7, slug: 's9' } });
+  assert.deepStrictEqual(catalog.candidates('Post', { a: 5 }), new Set());
+  assert.deepStrictEqual(scanIds(catalog, 'Post', byA), ['p', 'q'], 'p keyed under nothing sorts first');
+  assert.deepStrictEqual(scanIds(catalog, 'Post', byB), ['q', 'p']);
+  assert.strictEqual(catalog.ids('Post'), ids);
+  // Of another collection now, or gone: the lists move.
+  catalog.put('p', { type: 'Post', v: 5, gone: true });
+  assert.notStrictEqual(catalog.ids('Post'), ids);
+  assert.deepStrictEqual(scanIds(catalog, 'Post', byB), ['q']);
+});
+
+test('load, define and adopt build the sorted indexes once and read the same', async () => {
+  const fsi = memory();
+  const schema = { entities: { Post: { index: ['n'] } } };
+  const catalog = catalogOf(schema, fsi);
+  for (let i = 0; i < 1200; i++) {
+    catalog.put(`p${String(i).padStart(4, '0')}`, { type: 'Post', v: 1, data: { n: (i * 7) % 100 } });
+  }
+  const range = { lower: { value: 10, inclusive: true }, upper: { value: 20, inclusive: false } };
+  const plan = { index: ['n'], prefix: [], range, desc: false };
+  const expected = scanIds(catalog, 'Post', plan);
+  assert.ok(expected.length > 100);
+  await catalog.save('s.1');
+  const loaded = catalogOf(schema, fsi);
+  await loaded.load();
+  assert.deepStrictEqual(scanIds(loaded, 'Post', plan), expected);
+  assert.deepStrictEqual(
+    scanIds(loaded, 'Post', { ...plan, desc: true }),
+    scanIds(catalog, 'Post', { ...plan, desc: true }),
+  );
+  const adopted = catalogOf(schema);
+  adopted.adopt(catalog.rows());
+  assert.deepStrictEqual(scanIds(adopted, 'Post', plan), expected);
+  // Defined again under another key: the rows are bare until indexed again — then the same.
+  const def = entitiesOf({ entities: { Post: { index: [['n', 'm']] } } }).get('Post');
+  loaded.define('Post', def);
+  const compound = { index: ['n', 'm'], prefix: [10], range: null, desc: false };
+  assert.deepStrictEqual(scanIds(loaded, 'Post', compound), [], 'bare until indexed again');
+  for (const id of loaded.ids('Post').slice()) {
+    loaded.put(id, { type: 'Post', v: 1, data: { n: catalog.row(id).fields.n, m: 1 } });
+  }
+  assert.deepStrictEqual(scanIds(loaded, 'Post', { index: ['n', 'm'], prefix: [], range, desc: false }), expected);
 });

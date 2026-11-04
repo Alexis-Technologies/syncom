@@ -17,3 +17,14 @@ export function normalize(text: unknown): string;
 export function trigrams(text: unknown): string[];
 /** A factory for `open({ search })`: one TF-IDF-ranked trigram index per searchable entity. */
 export function createSearch(options?: SearchOptions): (entity: string) => TextIndex & { readonly size: number };
+
+/** A distance over two vectors of one length: smaller is nearer. */
+export type Distance = (a: readonly number[], b: readonly number[]) => number;
+/** Whether `value` is a vector: a non-empty array of finite numbers. */
+export function isVector(value: unknown): value is number[];
+/** 1 − the cosine of the angle (1 for a zero vector). */
+export const cosine: Distance;
+export const euclidean: Distance;
+export const manhattan: Distance;
+/** The negated dot product: a larger product is nearer. */
+export const dot: Distance;

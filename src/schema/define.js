@@ -21,7 +21,19 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 const SCHEMA_KEYS = new Set(['version', 'entities', 'snapshot', 'migrations', 'ahead', 'lens']);
 const AHEAD = new Set(['apply', 'hold']);
 const LENS = new Set(['migrations', 'validate', 'both']);
-const ENTITY_KEYS = ['schema', 'idField', 'validate', 'index', 'unique', 'fields', 'search'];
+const ENTITY_KEYS = [
+  'schema',
+  'idField',
+  'validate',
+  'index',
+  'unique',
+  'fields',
+  'search',
+  'id',
+  'refs',
+  'methods',
+  'statics',
+];
 const ENTITY_KEY = new Set(ENTITY_KEYS);
 
 const fail = (entity, text) => new TypeError(`createDatabase({ schema }): entity ${entity}: ${text}`);
@@ -176,7 +188,27 @@ const fieldNames = (value, entity, what) => {
   return [...names];
 };
 
-const explicitIndex = (value, entity) => fieldNames(value, entity, 'index');
+// `index: ['orgId', ['orgId', 'createdAt']]` — a field, or a compound key
+// of fields, each: `{ index }` every field named (what a catalog row keeps),
+// `{ indexes }` the keys as given, singles as one-field keys, each once.
+const explicitIndex = (value, entity) => {
+  if (!Array.isArray(value)) throw fail(entity, 'index must be an array of field names and compound keys');
+  const keys = [];
+  for (let i = 0; i < value.length; i++) {
+    const key = isField(value[i]) ? [value[i]] : fieldList(value[i]);
+    if (key === null) throw fail(entity, 'index takes field names and arrays of them');
+    keys.push(key);
+  }
+  return indexSet(keys);
+};
+
+// The fields of every key, each once, and the keys each once.
+const indexSet = (keys) => {
+  const index = new Set();
+  const indexes = dedupe(keys);
+  for (let i = 0; i < indexes.length; i++) for (let j = 0; j < indexes[i].length; j++) index.add(indexes[i][j]);
+  return { index: [...index], indexes };
+};
 
 // The fields `$text` searches, joined into the record's catalog row and
 // handed to the injected text index (`createDatabase({ search })`); never derived from
@@ -200,21 +232,22 @@ const explicitUnique = (value, entity) => {
 // true` / `index: true` on a field. A `many` relation, or anything else, is
 // left alone.
 const derivedIndexes = (schema) => {
-  const index = new Set();
+  const keys = [];
   const unique = [];
-  if (!isObject(schema)) return { index, unique };
+  if (!isObject(schema)) return { ...indexSet(keys), unique };
   if (isObject(schema.indexes)) {
     const names = Object.keys(schema.indexes);
     for (let i = 0; i < names.length; i++) {
       const spec = schema.indexes[names[i]];
       if (!isObject(spec)) continue;
-      const keys = fieldList(spec.unique);
-      if (keys !== null) {
-        unique.push(keys);
+      const key = fieldList(spec.unique);
+      if (key !== null) {
+        unique.push(key);
         continue;
       }
+      // A compound index stays a compound key, in the order the schema lays it.
       const fields = fieldList(spec.index) ?? fieldList(spec.primary);
-      if (fields !== null) for (let j = 0; j < fields.length; j++) index.add(fields[j]);
+      if (fields !== null) keys.push(fields);
     }
   }
   if (isObject(schema.fields)) {
@@ -224,10 +257,10 @@ const derivedIndexes = (schema) => {
       const spec = schema.fields[field];
       if (!isObject(spec)) continue;
       if (spec.unique === true) unique.push([field]);
-      else if (spec.index === true) index.add(field);
+      else if (spec.index === true) keys.push([field]);
     }
   }
-  return { index, unique };
+  return { ...indexSet(keys), unique };
 };
 
 const dedupe = (keys) => {
@@ -242,18 +275,100 @@ const dedupe = (keys) => {
   return out;
 };
 
+// A composite id: `{ fields, separator? }` — the record id is the fields' values joined by the
+// separator ('.' unless given), every character of which must be of the id class.
+const SEPARATOR = /^[A-Za-z0-9._@-]+$/;
+const compositeId = (value, entity) => {
+  if (value === undefined) return null;
+  if (!isObject(value)) throw fail(entity, 'id must be { fields, separator? }');
+  const fields = fieldList(value.fields);
+  if (fields === null) throw fail(entity, 'id.fields must be a non-empty array of field names');
+  const separator = value.separator === undefined ? '.' : value.separator;
+  if (typeof separator !== 'string' || !SEPARATOR.test(separator)) {
+    throw fail(entity, 'id.separator must be of the id class ([A-Za-z0-9._@-])');
+  }
+  return { fields, separator };
+};
+
+// The references a definition declares — `refs: { author: 'Author', tags: ['Tag'] }`: a field that
+// names one record of a collection, or many — as `{ [field]: { entity, many } }`; null for none.
+const explicitRefs = (value, entity) => {
+  if (!isObject(value)) throw fail(entity, 'refs must be an object of field: entity | [entity]');
+  const refs = {};
+  const fields = Object.keys(value);
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const spec = value[field];
+    const many = Array.isArray(spec);
+    const target = many ? (spec.length === 1 ? spec[0] : null) : spec;
+    if (!isField(field) || !isField(target)) throw fail(entity, `refs.${field} must name an entity, or [entity]`);
+    refs[field] = { entity: target, many };
+  }
+  return fields.length === 0 ? null : refs;
+};
+
+// `methods` (on every Document of the collection) and `statics` (on the collection): an object of
+// functions, or null for none. Whether a name clashes with a member is the database's to refuse.
+const functionsOf = (value, entity, what) => {
+  if (value === undefined) return null;
+  if (!isObject(value)) throw fail(entity, `${what} must be an object of functions`);
+  const names = Object.keys(value);
+  const out = {};
+  for (let i = 0; i < names.length; i++) {
+    if (typeof value[names[i]] !== 'function') throw fail(entity, `${what}.${names[i]} must be a function`);
+    out[names[i]] = value[names[i]];
+  }
+  return names.length === 0 ? null : out;
+};
+
+// What metaschema's own type names are not: a field whose type is another entity of the model is a
+// reference (`company: 'Company'`, `{ type: 'Company' }`, `{ many: 'Address' }`). Decided once the
+// entities are all known (`deriveRefs`), explicit `refs` left as they are.
+const relationsOf = (schema, names) => {
+  const map = fieldMap(schema);
+  if (map === null) return null;
+  const refs = {};
+  let found = 0;
+  const fields = Object.keys(map);
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    const spec = map[field];
+    let target = null;
+    let many = false;
+    if (typeof spec === 'string') target = spec;
+    else if (isObject(spec)) {
+      if (typeof spec.many === 'string') {
+        target = spec.many;
+        many = true;
+      } else if (typeof spec.type === 'string') target = spec.type;
+    }
+    if (target === null || !names.has(target)) continue;
+    refs[field] = { entity: target, many };
+    found++;
+  }
+  return found === 0 ? null : refs;
+};
+
+/** The entity's references completed from its schema's relations, once every entity name is known. */
+const deriveRefs = (def, names) => {
+  if (def.refs !== null || def.schema === undefined) return def;
+  const derived = relationsOf(def.schema, names);
+  return derived === null ? def : { ...def, refs: derived };
+};
+
 const normalizeEntity = (name, def, validator) => {
   if (!isObject(def)) throw fail(name, 'must be an object');
   for (const key of Object.keys(def)) {
     if (!ENTITY_KEY.has(key)) throw fail(name, `unknown key '${key}' (expected ${ENTITY_KEYS.join(', ')})`);
   }
   const { schema, validate, fields } = def;
+  const id = compositeId(def.id, name);
   if (validate !== undefined && validate !== false) throw fail(name, 'validate may only be false');
   if (fields !== undefined && !isObject(fields)) throw fail(name, 'fields must be an object');
   const idField = def.idField === undefined ? deriveIdField(schema, name) : def.idField;
   if (idField !== false && !isField(idField)) throw fail(name, 'idField must be a field name or false');
   const derived = def.index === undefined || def.unique === undefined ? derivedIndexes(schema) : null;
-  const index = def.index === undefined ? [...derived.index] : explicitIndex(def.index, name);
+  const { index, indexes } = def.index === undefined ? derived : explicitIndex(def.index, name);
   const unique = dedupe(def.unique === undefined ? derived.unique : explicitUnique(def.unique, name));
   const validates = schema !== undefined && validate !== false;
   return {
@@ -262,10 +377,15 @@ const normalizeEntity = (name, def, validator) => {
     standard: isStandard(schema),
     validator: validates ? normalizeValidator(schema, name, validator) : null,
     idField,
+    id,
     index,
+    indexes,
     unique,
     fields: fields ?? null,
     search: def.search === undefined ? [] : explicitSearch(def.search, name),
+    refs: def.refs === undefined ? null : explicitRefs(def.refs, name),
+    methods: functionsOf(def.methods, name, 'methods'),
+    statics: functionsOf(def.statics, name, 'statics'),
   };
 };
 
@@ -317,6 +437,16 @@ const normalizeMigrations = (migrations, version) => {
   return chain;
 };
 
+// The entity definitions a database adds after it opened (`addCollections`):
+// each normalized as one of the schema's would be. The validator is the one
+// `createDatabase({ validator })` gave, read once at setup.
+const defineEntity = (name, def, validator, names = new Set()) => {
+  if (!isField(name)) throw new TypeError('addCollections(): collection names must be non-empty strings');
+  const known = new Set(names);
+  known.add(name);
+  return deriveRefs(normalizeEntity(name, def, validator === undefined ? null : validator), known);
+};
+
 /**
  * `createDatabase({ schema, validator })` normalized: `{ version, entities, snapshot,
  * migrations, ahead, lens }` — the entities a Map of `{ name, schema,
@@ -366,11 +496,15 @@ const normalizeSchema = (schema, { validator } = {}) => {
       throw new TypeError('createDatabase({ schema }): entities must be an object or a Map');
     }
   }
+  // A schema's relations name entities of the model: read once every name is known.
+  const names = new Set(entities.keys());
+  for (const [name, def] of entities) entities.set(name, deriveRefs(def, names));
   return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };
 };
 
 module.exports = {
   normalizeSchema,
+  defineEntity,
   normalizeValidator,
   deriveIdField,
   derivedIndexes,

@@ -121,3 +121,40 @@ test('inspect() lays a record out by field and kind with its log; anonymize() ke
   assert.throws(() => anonymize({ f: () => 1 }), TypeError);
   assert.throws(() => anonymize('x', { salt: 7 }), TypeError);
 });
+
+test('indexAdvisor() suggests the indexes the queries asked for and no index served', async (t) => {
+  const { indexAdvisor } = require('../src/inspect/inspect.js');
+  const schema = { entities: { Task: { index: ['boardId'] } } };
+  const storage = await syncom.createDatabase({ path: '/a', fsi: memory(), logger: false, defer: 0, schema });
+  t.after(() => storage.close().catch(() => {}));
+  for (let i = 0; i < 5; i++) {
+    await storage.Task.insert({ boardId: `b${i % 2}`, rank: i, done: i % 2 === 0, title: `t${i}` });
+  }
+  const advisor = indexAdvisor(storage);
+  // Served by the index: nothing to suggest.
+  await storage.Task.select({ boardId: 'b0' }).fetch();
+  await storage.Task.select({ boardId: 'b0' }).fetch();
+  // Not served: a sort the index has not, an equality on a field with none, a range, twice one of them.
+  await storage.Task.select({ boardId: 'b0' }).order('rank').fetch();
+  await storage.Task.select({ boardId: 'b0' }).order('rank').limit(2).fetch();
+  await storage.Task.select({ done: true }).fetch();
+  await storage.Task.select({ boardId: 'b1', rank: { $gte: 2 } })
+    .desc('rank')
+    .fetch();
+  await storage.Task.select({ title: { $regex: /t/ } }).count();
+  await storage.Task.select({}).fetch();
+  assert.deepStrictEqual(advisor.suggest(), [
+    { entity: 'Task', index: ['boardId', 'rank'], queries: 3 },
+    { entity: 'Task', index: ['done'], queries: 1 },
+  ]);
+  // The suggestion is a copy; stopped, nothing more is heard.
+  advisor.suggest()[0].index.push('x');
+  assert.deepStrictEqual(advisor.suggest()[0].index, ['boardId', 'rank']);
+  advisor.stop();
+  await storage.Task.select({ done: false }).fetch();
+  assert.strictEqual(advisor.suggest().length, 2);
+  assert.throws(() => indexAdvisor({}), TypeError);
+  // Defined as suggested, the plan is served.
+  await storage.addCollections({ Note: { index: [['boardId', 'rank']] } });
+  assert.strictEqual(storage.Note.select({ boardId: 'b0' }).order('rank').explain().sortedByIndex, true);
+});

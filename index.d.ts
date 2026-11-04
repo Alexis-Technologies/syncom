@@ -538,8 +538,9 @@ export type Change =
   | { action: 'unmarkById'; field: string; markId: string; start: number; end: number; name: string }
   | { action: 'treeMove'; field: string; node: string; parent: string | null; after: string | null }
   | { action: 'treeRemove'; field: string; node: string }
-  | { action: 'delete' }
-  | { action: 'purge' };
+  | { action: 'delete'; data?: RecordData }
+  /** `type`: the collection the record was of, where it was alive — its row goes with the purge. */
+  | { action: 'purge'; type?: string };
 
 /** A change tagged with the record it is of. */
 export type RecordChange = Change & { id: string };
@@ -559,6 +560,8 @@ export interface TransactionEvent {
   ops: SyncOp[];
   changes: RecordChange[];
   ts: number;
+  /** The log position of the turn's last op: where a reader that follows the turns resumes from (`log.since`). */
+  eventId: string;
 }
 
 /** What a field is, once written: a register (last writer wins), a counter (`inc`), a set (`add`/`remove`), a list, a text or a tree. */
@@ -588,7 +591,10 @@ export interface Refusal {
 export type SyncomErrorCode =
   | 'CLOSED'
   | 'IN_HOOK'
+  | 'IN_TRANSACTION'
+  | 'PIPELINE_FAILED'
   | 'NOT_FOUND'
+  | 'EXISTS'
   | 'FIELD_KIND'
   | 'OUT_OF_RANGE'
   | 'CYCLE'
@@ -607,6 +613,7 @@ export type SyncomErrorCode =
   | 'LEASE_LOST'
   | 'FOLLOW_LOST'
   | 'TARGET_NOT_EMPTY'
+  | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
   | 'DECRYPT_FAILED'
@@ -647,6 +654,7 @@ export type SyncomErrorCode =
 export type TypedErrorCode =
   | 'INVALID_ID'
   | 'TYPE_IMMUTABLE'
+  | 'ID_IMMUTABLE'
   | 'INVALID_VERSION'
   | 'NO_CHAIN'
   | 'PLUGIN_MISSING'
@@ -655,7 +663,7 @@ export type TypedErrorCode =
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`,
+ * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`,
  * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
  * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
@@ -746,7 +754,7 @@ export interface OpLog {
   readonly droppedHeld: number;
   resetDroppedHeld(): Promise<void>;
   /** Strips the payload of every entry of `id`, in memory and on disk; resolves to how many. */
-  scrub(id: string): Promise<number>;
+  scrub(ids: string | readonly string[]): Promise<number>;
   /**
    * The entries after `eventId` in `scopes` (all, or the first `limit`), and
    * `last`: the seq of the last entry examined, in scope or not — where a
@@ -1053,10 +1061,36 @@ export interface EntityDefinition {
   idField?: string | false;
   /** Read the schema's indexes and fields, validate nothing (`@alexify/metaschema/definition`). */
   validate?: false;
-  /** Fields with an equality index; read off the schema's `indexes`/`fields` when absent. */
-  index?: readonly string[];
+  /**
+   * The indexes: a field, or a compound key of fields (`['orgId', ['orgId', 'createdAt']]`) — each a
+   * sorted key the catalog keeps, which a query enters by its prefix of equalities and one field more
+   * for a range or the sort; every field named is indexed for equality. Read off the schema's
+   * `indexes` (a compound one stays a key) and `index: true` fields when absent.
+   */
+  index?: ReadonlyArray<string | readonly string[]>;
   /** Unique keys, single or composite; read off the schema when absent. */
   unique?: ReadonlyArray<string | readonly string[]>;
+  /**
+   * A composite id: the record id is the values of `fields` (every one present, as text) joined by
+   * `separator` (`'.'` unless given; of the id class) — derived on `insert()`, `upsert()`,
+   * `insertIfAbsent()` and the bulk writes; the fields stay in the record. Without it, the id field's
+   * value names the record when the data carries one (and leaves the data), else the id is minted.
+   */
+  id?: { readonly fields: readonly string[]; readonly separator?: string };
+  /**
+   * The references the records hold: a field naming one record of a collection (`author: 'Author'`)
+   * or many (`tags: ['Tag']`). A `Document` reads such a field as a `Reference` (an array of them),
+   * `populate()` resolves it; nothing else is ever a Reference. Read off a metaschema schema's
+   * relations (`author: 'Author'`, `{ type }`, `{ many }` naming an entity of the model) when absent.
+   */
+  refs?: { readonly [field: string]: string | readonly [string] };
+  /**
+   * Functions every `Document` of the collection carries, bound to it (`this` the Document), hidden
+   * from enumeration; a name a Document answers to already (`save`, `data`, `id`…) is a TypeError.
+   */
+  methods?: { readonly [name: string]: (this: any, ...args: any[]) => unknown };
+  /** Functions the collection carries, bound to it; a name a Collection answers to already is a TypeError. */
+  statics?: { readonly [name: string]: (this: any, ...args: any[]) => unknown };
   /** Free-form field notes, kept as given. */
   fields?: { readonly [name: string]: unknown };
   /**
@@ -1516,6 +1550,14 @@ export interface StorageStats {
   /** Writes waiting on, or running in, the mutation queue. */
   queue: number;
   cache: { size: number; max: number; pinned: number };
+  /** The collections defined (`schema.entities`, `addCollections()`). */
+  collections: number;
+  /** The advisors watching the plans (`indexAdvisor`). */
+  advisors: number;
+  /** Tombstones folded into the `tombstones` namespace (the cleanup's). */
+  tombstones: number;
+  /** The query plugin's cache — its entries and the rows they hold — and the live runs kept; `null` without the plugin. */
+  query: { cache: { entries: number; rows: number }; live: number } | null;
   /** Rows, tombstones included, and the puts since the last save. */
   catalog: { entries: number; dirty: number };
   log: {
@@ -1740,6 +1782,32 @@ export interface WriteOptions {
   actor?: string;
 }
 
+/** `update()` with a condition: the write is made only where the record matches `ifMatch` (the `query` plugin's), inside the queue. */
+export interface UpdateOptions extends WriteOptions {
+  ifMatch?: MangoQuery;
+}
+
+/**
+ * `update()` written in operators — every key one of them, never with fields — each laid onto the
+ * write API by the kind of its field: `$inc` is `inc()` (a register refuses it), `$addToSet`/`$pull`
+ * are `add()`/`remove()` on a set and a last-writer-wins rewrite of an array a register holds,
+ * `$push`/`$pop` a `push()`/`splice()` on a list (a text takes a string) and a rewrite of a
+ * register's array (an absent field becomes one), `$min`/`$max` a set only where the comparison holds,
+ * `$rename` an `unset` and a `set`. Decided inside the queue, written as one transaction.
+ */
+export interface UpdateOperators {
+  readonly $set?: { readonly [field: string]: unknown };
+  readonly $unset?: string | readonly string[] | { readonly [field: string]: unknown };
+  readonly $inc?: { readonly [field: string]: number };
+  readonly $addToSet?: { readonly [field: string]: unknown | { readonly $each: readonly unknown[] } };
+  readonly $pull?: { readonly [field: string]: unknown | { readonly $in: readonly unknown[] } };
+  readonly $push?: { readonly [field: string]: unknown | { readonly $each: readonly unknown[] } };
+  readonly $pop?: { readonly [field: string]: 1 | -1 };
+  readonly $min?: { readonly [field: string]: number | string | boolean };
+  readonly $max?: { readonly [field: string]: number | string | boolean };
+  readonly $rename?: { readonly [field: string]: string };
+}
+
 /** What a transaction (and a patch batch) takes: the actor of its ops, a `source` for their `commit` events, a `message` on every op (at most 1 024 characters, signed). */
 export interface TransactOptions extends WriteOptions {
   source?: unknown;
@@ -1754,11 +1822,16 @@ export interface TransactOptions extends WriteOptions {
 export interface Transaction extends TextMethods, TreeMethods {
   get<R = RecordData>(id: string): Promise<R | null>;
   has(id: string): Promise<boolean>;
+  /** A new record under the id its data names (`EXISTS` for a live one there), else a minted one. */
   insert(data: object, options?: WriteOptions): Promise<string>;
   set(id: string, data: object, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  /** The fields set, or the operators run — over what the transaction left; with `ifMatch`, whether it wrote. */
+  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
+  delete(id: string, options?: DeleteOptions): Promise<void>;
+  /** The record changed by a function, over what the transaction left it — the database's `modify()` within it. */
+  modify<R = RecordData>(id: string, fn: ModifyFn<R>, options?: WriteOptions): Promise<R | null>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
   add(id: string, key: string, elements: readonly unknown[], options?: WriteOptions): Promise<void>;
@@ -1929,6 +2002,8 @@ export interface ApplyRemoteResult {
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
   change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[] }) => void;
+  /** A local document written or removed (`db.local`, a collection's): its full key and the value (null once deleted). */
+  local: (event: { key: string; value: unknown }) => void;
   /** A local op is durable: what it changed, as copies — built only when someone listens. */
   commit: (event: CommitEvent) => void;
   /** One turn's ops durable and announced — a write, a transaction, a peer's page, a joined snapshot — with every change tagged by its record. */
@@ -2325,6 +2400,10 @@ export interface Database {
   loadData(id: string): Promise<unknown | null>;
   validate(options?: { last?: number; from?: string }): Promise<boolean>;
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
+  /**
+   * Writes a new record: under the id its data names — its entity's composite id, or the id field's
+   * value (a live record there is `EXISTS`, decided inside the queue) — else under a minted one.
+   */
   insert(data: object, options?: StorageDataOptions): Promise<string>;
   has(id: string): Promise<boolean>;
   /**
@@ -2405,10 +2484,16 @@ export interface Database {
    */
   compact(id: string, options?: TransactOptions): Promise<number>;
   set(id: string, data: object, options?: StorageDataOptions): Promise<void>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
+  delete(id: string, options?: DeleteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
   purge(id: string, options?: WriteOptions): Promise<void>;
-  update(id: string, delta: object, options?: WriteOptions): Promise<void>;
+  /**
+   * Sets the listed fields (a `set` op) — or runs the operators (`UpdateOperators`), each by the kind of
+   * its field, as one transaction; with `ifMatch` (the `query` plugin's) only where the record matches,
+   * decided inside the queue, resolving to whether it wrote.
+   */
+  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(id: string, key: string, value?: number, options?: WriteOptions): Promise<void>;
@@ -2430,6 +2515,13 @@ export interface Database {
    */
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   /**
+   * Changes record `id` by a function: `fn(copy)` runs inside the mutation queue over a copy of the
+   * record as it reads, and what it leaves — what it returns, or the copy when it returns nothing — is
+   * written as the ops that take the record there (a field changed, a field gone; `null` deletes), as one
+   * transaction. Two calls on one record compose. Resolves to the record as it reads after, or null.
+   */
+  modify<R = RecordData>(id: string, fn: ModifyFn<R>, options?: TransactOptions): Promise<R | null>;
+  /**
    * Rebuilds the record from what the log holds of it — a file that fails
    * its integrity check, or is torn: the retained entries replayed from the
    * first whole-record op (`write`, `merge`, `delete`, `purge`), written with
@@ -2440,6 +2532,25 @@ export interface Database {
   repair(id: string): Promise<{ ops: number; alive: boolean }>;
   /** Every live id, sorted — from the catalog, no I/O. */
   list(): Promise<string[]>;
+  /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
+  readonly collections: { readonly [name: string]: SyncomCollection };
+  /** The local documents of this database — the `local` plugin's (`PLUGIN_MISSING` without it). */
+  readonly local: LocalStore;
+  /**
+   * Defines collections after the open — each as an entity of `createDatabase({ schema })`
+   * would be, in force from here over the records of its type; nothing is persisted
+   * (add them after every open; the schema's hash in hello does not move). A name
+   * defined already or taken by the database, or a malformed definition, is a
+   * TypeError and nothing is taken. The `schema` plugin's (`PLUGIN_MISSING` without it).
+   */
+  addCollections(definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>): Promise<void>;
+  /** Forgets a collection's definition; the records stay. An unknown name is a TypeError. */
+  removeCollection(name: string): void;
+  /**
+   * Drops the database: closed, then every store of it removed from the engine — the identity, the
+   * records, the log, the tags, the chain. A node opened at the path again is a new node.
+   */
+  drop(): Promise<void>;
   /**
    * Runs `data` through an entity's validator the way a write would and
    * returns what it gives back (defaults filled, aliases resolved); rejects
@@ -2514,6 +2625,16 @@ export interface MangoOperators {
   $exists?: boolean;
   $regex?: RegExp | string;
   $options?: string;
+  /** What the value is, in JSON's terms. */
+  $type?: 'null' | 'boolean' | 'number' | 'string' | 'array' | 'object';
+  /** An array of exactly this many elements. */
+  $size?: number;
+  /** `[divisor, remainder]` over a number. */
+  $mod?: readonly [number, number];
+  /** An array holding every one of these. */
+  $all?: readonly unknown[];
+  /** An array with an element matching the query — an object element by its fields, a scalar one by the operators. */
+  $elemMatch?: MangoQuery<any> | MangoOperators;
 }
 
 /** What a field of type `V` is matched against: a value, an element (an array field holds a scalar value), or the operators. */
@@ -2533,6 +2654,8 @@ export type MangoQuery<R = RecordData> = {
   readonly id?: string | MangoOperators;
   readonly $and?: readonly MangoQuery<R>[];
   readonly $or?: readonly MangoQuery<R>[];
+  /** None of these. */
+  readonly $nor?: readonly MangoQuery<R>[];
   readonly $not?: MangoQuery<R>;
   /** Full-text search over the entity's `search` fields, top level only; rows come back best first unless ordered. */
   readonly $text?: string;
@@ -2541,7 +2664,15 @@ export type MangoQuery<R = RecordData> = {
 /** A row a cursor yields: the record as it reads, under its `id`. */
 export type QueryRow<R = RecordData> = R & { id: string };
 
+/**
+ * The cursor of `collection.select(query)`: immutable — every builder hands back a new cursor and
+ * leaves this one as it was — run by `fetch()`, `count()`, `one()`, `watch()`.
+ */
 export interface Cursor<T = QueryRow> {
+  /** Whether a document (its data, with or without `id`) matches the cursor's query; the filter aside. */
+  matches(doc: object): boolean;
+  /** How the cursor is answered — the scan, the index chosen and how it is entered, whether the rows come sorted by it; a copy. */
+  explain(): QueryPlan;
   order(field: string): this;
   desc(field: string): this;
   limit(n: number): this;
@@ -2550,20 +2681,113 @@ export interface Cursor<T = QueryRow> {
   filter(fn: (row: T) => boolean): this;
   /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
   projection(fields: readonly string[]): this;
+  /** The declared references of `fields` resolved on every row — the record as `{ id, …data }`, `null` where gone, an array for many; one read per field per page. */
+  populate(fields: readonly string[]): this;
   fetch(): Promise<T[]>;
   count(): Promise<number>;
   one(): Promise<T | null>;
-  /** Runs now and after every change to the collection (coalesced); returns the stop function. */
+  /**
+   * Calls `listener(rows)` now and whenever the rows change — kept as the collection changes without
+   * running the cursor again, emitted only when an id came, went or moved or a row reads as another;
+   * every `watch()` of one query shares one run. Returns the stop function.
+   */
   watch(listener: (rows: T[]) => void, options?: { onError?: (error: Error) => void }): () => void;
+  /** Calls `listener(count)` now and whenever the number of matches moves — one in or out per change, never counted again. Returns the stop function. */
+  watchCount(listener: (count: number) => void, options?: { onError?: (error: Error) => void }): () => void;
+  /** The rows `fetch()` would give, read lazily `batch` (100) at a time by keyset: a result of any size in bounded memory. `for await` is this. */
+  stream(options?: { batch?: number }): AsyncIterableIterator<T>;
+  /** One page: `limit` rows at most and the token of the page after (null at the last); `after(next).page()` is the next. */
+  page(): Promise<Page<T>>;
+  /** The cursor from after the row a page's `next` names: keyset paging in the result's order (the keys, then the id); `offset` does not apply. */
+  after(next: PageToken): this;
+  /** The distinct values of `field` among the matches, in the sort order, each once. */
+  distinct(field: string): Promise<unknown[]>;
+  /** The distinct values of `field` with how many matches hold each, in the sort order. */
+  countBy(field: string): Promise<{ value: unknown; count: number }[]>;
+  /**
+   * The `k` matches nearest to `vector` by `field` (an array of numbers of the vector's length):
+   * `[{ distance, row }]` nearest first — a scan over the matches, the `k` best kept as they are read
+   * (`k` at most 1000, a vector of at most 4096 numbers). `distance`: `'cosine'` (the default),
+   * `'euclidean'`, `'manhattan'`, `'dot'` (the negated product), or a function.
+   */
+  nearest(
+    field: string,
+    vector: readonly number[],
+    k: number,
+    options?: { distance?: 'cosine' | 'euclidean' | 'manhattan' | 'dot' | ((a: readonly number[], b: readonly number[]) => number) },
+  ): Promise<{ distance: number; row: T }[]>;
+  /** Every match updated — fields or operators — as ONE transaction over the matches when it starts (10 000 at most, else a TypeError): `{ matched, written }`. */
+  update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
+  /** Every match changed by a function (see `modify()`), as ONE transaction: `{ matched, written }`. */
+  modify(fn: ModifyFn<T>, options?: TransactOptions): Promise<WriteByQuery>;
+  /** Every match deleted as ONE transaction; `data` rides on each tombstone: `{ matched, written }`. */
+  delete(options?: TransactOptions & { data?: object }): Promise<WriteByQuery>;
   [Symbol.asyncIterator](): AsyncIterator<T>;
 }
 
-// A string field whose value is a known record id reads back as a Reference.
+/** How a cursor is answered (`explain()`): over the collection's declared indexes, decided once. */
+export interface QueryPlan {
+  /** The text index's ranking, a sorted index, the posting lists of equalities, or every record of the collection. */
+  scan: 'text' | 'index' | 'postings' | 'collection';
+  /** The index chosen: its fields, or null. */
+  index: string[] | null;
+  /** The equality values the index is entered by, one per field of its prefix. */
+  prefix: unknown[];
+  /** A `$in` on the field after the prefix, scanned value by value (a few ordered values), or null. */
+  in: { field: string; values: unknown[] } | null;
+  /** The bounds on the field after the prefix, either side open, or null. */
+  range: {
+    field: string;
+    lower: { value: unknown; inclusive: boolean } | null;
+    upper: { value: unknown; inclusive: boolean } | null;
+  } | null;
+  /** Scanned backwards (a descending sort the index serves). */
+  desc: boolean;
+  /** The rows come in the result's order from the scan: a window is read as far as `offset + limit` and no further. */
+  sortedByIndex: boolean;
+  /** Only the catalog is read: the query's fields, the order's and the projection's are all indexed, and no filter. */
+  covered: boolean;
+  /** Whether the predicate still runs over what the scan yields. */
+  residual: boolean;
+  /** The indexed equalities the index did not decide: their posting lists are tested before a record is read. */
+  narrow: { field: string; values: unknown[] }[];
+  /** How many records the plan expects to read before the predicate: the scan's entries, the narrowest posting list, the window where sorted; null where nothing says. */
+  estimate: number | null;
+  /** What the query asks of its fields: an equality, a range, a sort — what an index advisor reads. */
+  uses: { equalities: string[]; ranges: string[]; order: string[] };
+}
+
+/** Where a page ends: the last row's order keys and its id — what `after()` takes. Opaque; JSON. */
+export interface PageToken {
+  readonly keys: readonly unknown[];
+  readonly id: string;
+}
+
+/** One page of a cursor: the rows, and the token of the page after (`null` at the last). */
+export interface Page<T = QueryRow> {
+  rows: T[];
+  next: PageToken | null;
+}
+
+/** What a write by query resolves to: the matches when it started, and how many were written (a record gone meanwhile is skipped). */
+export interface WriteByQuery {
+  matched: number;
+  written: number;
+}
+
+/** `delete()` with `data`: the fields the tombstone carries — in the `delete` change, never in `get()`. */
+export interface DeleteOptions extends WriteOptions {
+  data?: object;
+}
+
+/** A declared reference (`refs`) as a Document holds it: the id, and the Document it names (its id as JSON). */
 export interface Reference {
-  /** The live Document the reference names. */
-  document<R = RecordData>(): Promise<SyncomDocument<R>>;
+  readonly id: string;
+  /** The live Document the reference names, or `null` when the record is not there. */
+  document<R = RecordData>(): Promise<SyncomDocument<R> | null>;
   /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record<R = RecordData>(): Promise<SyncomDocument<R>>;
+  record<R = RecordData>(): Promise<SyncomDocument<R> | null>;
+  toJSON(): string;
 }
 
 /**
@@ -2583,6 +2807,8 @@ export interface SyncomDocumentApi<R = RecordData> {
   data(): Promise<R | null>;
   delta(): Partial<R>;
   save(options?: WriteOptions): Promise<void>;
+  /** The record(s) a declared reference names, as Documents: one or `null`, or an array of them (`null` where gone). */
+  populate<T = RecordData>(field: string): Promise<SyncomDocument<T> | null | (SyncomDocument<T> | null)[]>;
   /** Removes fields; the storage-level `unset` with this record's id. */
   unset(fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   inc(key: string, value?: number, options?: WriteOptions): Promise<void>;
@@ -2680,7 +2906,7 @@ export interface SyncomDocumentApi<R = RecordData> {
   ): Promise<void>;
   /** Removes a node of a tree field with its subtree — `storage.treeRemove` with this record's id. */
   treeRemove(key: string, node: string, options?: WriteOptions): Promise<void>;
-  delete(options?: WriteOptions): Promise<void>;
+  delete(options?: DeleteOptions): Promise<void>;
 }
 
 /**
@@ -2706,18 +2932,108 @@ export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
  * a write takes — a Standard Schema's input, defaults and aliases not yet
  * applied; both `RecordData` unless the schema says more (see `Collections`).
  */
+/**
+ * What `modify(id, fn)` runs over a copy of the record as it reads, inside the queue: what it returns —
+ * or the copy, when it returns nothing — is the record after; `null` deletes it.
+ */
+export type ModifyFn<R = RecordData> = (
+  record: R,
+) => NoInfer<R> | null | undefined | void | Promise<NoInfer<R> | null | undefined | void>;
+
+/** What a bulk write resolves to: the ids written, and a verdict per refused row — the row stays out, the rest go on. */
+export interface BulkResult<I = RecordData> {
+  success: string[];
+  error: { index: number; id: string | null; data: I; error: Error }[];
+}
+
+/**
+ * Local documents (`db.local`, `collection.local`; the `local` plugin of `@alexify/syncom/local`): JSON
+ * values kept beside the records that never become an op — not logged, not in the catalog or a
+ * snapshot, never at a peer. A key is a kv key (no `/`); a collection's store prefixes `<name>.`.
+ */
+export interface LocalStore {
+  readonly local: true;
+  /** The value under `key`, or null. */
+  get<T = unknown>(key: string): Promise<T | null>;
+  /** Writes a JSON value under `key`; resolves to it as JSON holds it. The changes of one key go one at a time. */
+  set<T>(key: string, value: T): Promise<T>;
+  /** Writes what `fn` answers over the value as it is (null for none); `undefined` back leaves the document as it is. */
+  set<T>(key: string, fn: (current: T | null) => T | undefined): Promise<T | null>;
+  delete(key: string): Promise<void>;
+  /** The keys of this scope, sorted. */
+  list(): Promise<string[]>;
+  /** Calls `listener(value)` after every `set`/`delete` of `key` in this instance (null once deleted); returns the stop. */
+  observe(key: string, listener: (value: unknown) => void): () => void;
+  /** The same store under a prefix: keys `<prefix>.<key>`. */
+  scoped(prefix: string): LocalStore;
+}
+
+/** What a collection emits: what the catalog decided of a record of its own, once per landing. */
+export interface CollectionEvents {
+  change: (event: { id: string; action: 'insert' | 'update' | 'remove' }) => void;
+  /** A record joined the collection: written, or revived. */
+  insert: (event: { id: string }) => void;
+  update: (event: { id: string }) => void;
+  /** A record left it: deleted, purged, encrypted, or of another collection now. */
+  remove: (event: { id: string }) => void;
+}
+
 export interface SyncomCollection<R = RecordData, I = R> {
   readonly name: string;
+  /** The local documents under this collection's prefix — the `local` plugin's. */
+  readonly local: LocalStore;
+  on<E extends keyof CollectionEvents>(event: E, listener: CollectionEvents[E]): void;
+  once<E extends keyof CollectionEvents>(event: E, listener: CollectionEvents[E]): void;
+  off<E extends keyof CollectionEvents>(event: E, listener?: CollectionEvents[E]): void;
+  listenerCount(event: keyof CollectionEvents): number;
+  toPromise<E extends keyof CollectionEvents>(event: E): Promise<Parameters<CollectionEvents[E]>[0]>;
+  clear(event?: keyof CollectionEvents): void;
+  /**
+   * Writes a new record: under the id its data names (the entity's composite id, or its id
+   * field — a live record there is `EXISTS`, decided inside the queue), else under a minted one.
+   */
   insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
+  /** Writes the record its data names whole, new or not (`set()` by the named id; a TypeError without one). */
+  upsert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
+  /** Writes the record its data names unless a live one is there, inside the queue; the Document either way. */
+  insertIfAbsent(data: I, options?: WriteOptions): Promise<SyncomDocument<R>>;
+  /** Every row as `insert()` would write it, as ONE transaction with a verdict per row; more than 10 000 rows is a TypeError. */
+  bulkInsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
+  /** Every row as `upsert()` would write it, as ONE transaction with a verdict per row. */
+  bulkUpsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
+  /** Every id deleted, as ONE transaction with a verdict per row: an absent or foreign one is `NOT_FOUND`. */
+  bulkRemove(ids: readonly string[], options?: TransactOptions): Promise<BulkResult<string>>;
+  /** Changes the record by a function inside the queue — the database's `modify()`; `NOT_FOUND` for a record of another collection. */
+  modify(id: string, fn: ModifyFn<R>, options?: TransactOptions): Promise<R | null>;
+  /**
+   * Deletes every record of the collection — tombstones that replicate, or with `purge` purges
+   * scrubbed from the log — in pages of 500, each one transaction; the definition stays.
+   */
+  remove(options?: WriteOptions & { purge?: boolean }): Promise<{ removed: number }>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
   /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
   select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
   count(query?: MangoQuery<R>): Promise<number>;
+  /** The live records of `ids` that are this collection's, as a Map by id — one read of the engine for the ones not cached; an id absent, gone or foreign is left out. */
+  findByIds(ids: readonly string[]): Promise<Map<string, R>>;
+  /** The distinct values of `field` among the records matching `query`, in the sort order. */
+  distinct(field: string, query?: MangoQuery<R>): Promise<unknown[]>;
+  /** The distinct values of `field` with how many records hold each. */
+  countBy(field: string, query?: MangoQuery<R>): Promise<{ value: unknown; count: number }[]>;
   /** Replaces the record wholesale, stamped as this collection's. */
   set(id: string, data: I, options?: StorageDataOptions): Promise<void>;
-  delete(id: string, options?: WriteOptions): Promise<void>;
-  /** Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be among them. */
-  update(id: string, delta: Partial<I> & PathFields, options?: WriteOptions): Promise<void>;
+  delete(id: string, options?: DeleteOptions): Promise<void>;
+  /**
+   * Sets the listed fields — the record's own, or any by path (`'profile/city'`); `$type` may not be
+   * among them — or runs the operators (`UpdateOperators`); with `ifMatch`, only where the record
+   * matches, resolving to whether it wrote.
+   */
+  update(
+    id: string,
+    delta: (Partial<I> & PathFields) | UpdateOperators,
+    options: UpdateOptions & { ifMatch: MangoQuery<R> },
+  ): Promise<boolean>;
+  update(id: string, delta: (Partial<I> & PathFields) | UpdateOperators, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
   document(id: string): Promise<SyncomDocument<R>>;
@@ -2786,6 +3102,12 @@ export type DatabaseOptions<S extends Schema = Schema> = StorageOptions<S>;
 export function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
 ): Promise<Database & Collections<S> & PluginMethods<P>>;
+/**
+ * Drops a closed database: every store of it removed from the engine — the one given, or the files
+ * engine over `fsi` (the platform's by default). Held while it is taken: another instance's open
+ * database is `LOCKED`, never emptied under it; a path that holds nothing is nothing to do.
+ */
+export function dropDatabase(path: string, options?: { engine?: Engine; fsi?: Fsi }): Promise<void>;
 /** @deprecated `createDatabase()` — the name before the rename; removed in 1.0. */
 export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },

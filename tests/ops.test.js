@@ -2211,3 +2211,13 @@ test('a block stamped in the tombstone’s very ms by an origin above it survive
   assert.strictEqual(Object.hasOwn(olderAfter.entry.meta.blocks, 'outline'), false);
   assert.deepStrictEqual(read(olderAfter.entry), read(olderFirst.entry));
 });
+
+test('a delete’s change reports the fields the tombstone applied, not the payload as sent', () => {
+  const base = applyOp(null, op('write', 1, 'A', { data: { x: 1 } })).entry;
+  // A peer's payload: a field that is no path, an own `__proto__` — neither is applied, neither is reported.
+  const payload = JSON.parse('{"ok":2,"bad/":3,"__proto__":{"p":1}}');
+  const { entry, changes } = applyOp(base, op('delete', 2, 'B', { data: payload }));
+  assert.strictEqual(isAlive(entry), false);
+  assert.deepStrictEqual(changes, [{ action: 'delete', data: { ok: 2 } }]);
+  assert.deepStrictEqual(applyOp(base, op('delete', 2, 'B')).changes, [{ action: 'delete' }]);
+});

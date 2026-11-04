@@ -58,10 +58,15 @@ test('normalizeSchema', async (t) => {
       standard: false,
       validator: null,
       idField: 'id',
+      id: null,
       index: [],
+      indexes: [],
       unique: [],
       fields: null,
       search: [],
+      refs: null,
+      methods: null,
+      statics: null,
     });
   });
 
@@ -104,7 +109,7 @@ test('normalizeSchema', async (t) => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { uniqe: ['slug'] } } }),
       typeError(
-        "createDatabase({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search)",
+        "createDatabase({ schema }): entity Post: unknown key 'uniqe' (expected schema, idField, validate, index, unique, fields, search, id, refs, methods, statics)",
       ),
     );
     assert.throws(() => normalizeSchema({ entities: { Post: { validate: true } } }), /validate may only be false/);
@@ -117,11 +122,15 @@ test('normalizeSchema', async (t) => {
     }
     assert.throws(
       () => normalizeSchema({ entities: { Post: { index: 'orgId' } } }),
-      /index must be an array of field names/,
+      /index must be an array of field names and compound keys/,
     );
     assert.throws(
       () => normalizeSchema({ entities: { Post: { index: [''] } } }),
-      /index must be an array of field names/,
+      /index takes field names and arrays of them/,
+    );
+    assert.throws(
+      () => normalizeSchema({ entities: { Post: { index: [['a', 2]] } } }),
+      /index takes field names and arrays of them/,
     );
     assert.throws(() => normalizeSchema({ entities: { Post: { unique: 'slug' } } }), /unique must be an array/);
     assert.throws(() => normalizeSchema({ entities: { Post: { unique: [1] } } }), /field names and arrays of them/);
@@ -160,6 +169,8 @@ test('normalizeSchema', async (t) => {
     const { entities } = normalizeSchema({ entities: { Post: { schema, validate: false } } });
     const def = entities.get('Post');
     assert.deepStrictEqual(def.index, ['orgId', 'kind', 'code']);
+    // A compound index stays a key, in the schema's order; a single field is a one-field key.
+    assert.deepStrictEqual(def.indexes, [['orgId', 'kind'], ['code'], ['kind']]);
     assert.deepStrictEqual(def.unique, [['slug'], ['orgId', 'name'], ['email']]);
     assert.strictEqual(def.idField, 'postId');
     assert.strictEqual(def.validator, null, 'validate: false');
@@ -167,8 +178,12 @@ test('normalizeSchema', async (t) => {
     // Each of `index` and `unique` is overridden on its own.
     const explicit = normalizeSchema({ entities: { Post: { schema, validate: false, index: ['kind'] } } });
     assert.deepStrictEqual(explicit.entities.get('Post').index, ['kind']);
+    assert.deepStrictEqual(explicit.entities.get('Post').indexes, [['kind']]);
+    const compound = normalizeSchema({ entities: { Post: { index: ['a', ['a', 'b'], 'b', ['a', 'b']] } } });
+    assert.deepStrictEqual(compound.entities.get('Post').index, ['a', 'b']);
+    assert.deepStrictEqual(compound.entities.get('Post').indexes, [['a'], ['a', 'b'], ['b']]);
     assert.deepStrictEqual(explicit.entities.get('Post').unique, [['slug'], ['orgId', 'name'], ['email']]);
-    assert.deepStrictEqual(derivedIndexes('nope'), { index: new Set(), unique: [] });
+    assert.deepStrictEqual(derivedIndexes('nope'), { index: [], indexes: [], unique: [] });
   });
 
   await t.test('a schema object without ~standard needs validator.compile, or validate: false', () => {

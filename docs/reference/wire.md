@@ -66,7 +66,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `move` | `^` | `key`, `value` | `{ elem, cut, at, value }` |
 | `mark` | `*` | `key`, `value` | `{ start, end, key, value, many? }` or `{ off }` |
 | `tree` | `~` | `key`, `value` | `{ node, parent, fi }` — `parent` `null` at the root, `$trash` removed; `fi` a fractional index |
-| `delete` | `d` | — | A tombstone; a newer write revives the record |
+| `delete` | `d` | `data?` | A tombstone; a newer write revives the record. `data`, when given, is a plain object whose fields lie on the tombstone at its stamp — below what keeps a record alive, so the record is as dead as without them; a reader of the tombstone (a `change`, a snapshot page) reads them |
 | `purge` | `p` | — | Wins at any stamp; every entry of the id is scrubbed |
 | `merge` | `m` | `data`, `meta`, `from` | A snapshot record joined |
 | `advance` | `a` | `vector`, `from` | Which ops the joined state covers |
@@ -412,8 +412,10 @@ The rest of a directory: `node.json` `{ id, plugins }` (the node's id and
 the kind plugins it was opened with), `keys/sign-public.pem` and
 `keys/sign-private.pem` (the Ed25519 pair the id is), `keys/public.pem` and
 `keys/private.pem` (the RSA pair that seals an encrypted record),
-`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 3, indexes,
-stamp, rows }` — derived, rebuilt when stale), `tags/`.
+`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 4, indexes,
+stamp, rows }` — derived, rebuilt when stale; a row is `[id, type, v, encrypted, fields, gone, text,
+folded]`, the eighth cell a folded tombstone's stamps, see [cleanup](../guide/cleanup)), `local/` (the
+local documents), `pipeline/` (the pipelines' checkpoints), `tags/`.
 
 ## The procedures
 

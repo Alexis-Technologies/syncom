@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-11-01T21:51:03.984Z",
+  "generatedAt": "2026-11-02T19:36:21.805Z",
   "machine": {
     "cpu": "Apple M3 Max",
     "cores": 16,
@@ -299,41 +299,6 @@
       "opsPerSec": 1564
     },
     {
-      "subject": "log",
-      "name": "append — one op",
-      "opsPerSec": 39483
-    },
-    {
-      "subject": "log",
-      "name": "append — batch of 100",
-      "opsPerSec": 731306
-    },
-    {
-      "subject": "log",
-      "name": "since — last 500 entries",
-      "opsPerSec": 611433
-    },
-    {
-      "subject": "log",
-      "name": "since — everything (no cursor)",
-      "opsPerSec": 349
-    },
-    {
-      "subject": "log",
-      "name": "since — 20 from the middle, scoped",
-      "opsPerSec": 3340879
-    },
-    {
-      "subject": "log",
-      "name": "append with a roll every 8 batches",
-      "opsPerSec": 15361
-    },
-    {
-      "subject": "log",
-      "name": "reopen — index + segments + tail",
-      "opsPerSec": 2
-    },
-    {
       "subject": "search",
       "name": "index.put — a 43-word record",
       "opsPerSec": 15437
@@ -532,111 +497,6 @@
       "subject": "sequence",
       "name": "storage.push — one char into a 10 KB text, pipelined by 1 000 (memory fsi)",
       "opsPerSec": 45262
-    },
-    {
-      "subject": "storage",
-      "name": "insert — small record",
-      "opsPerSec": 4636
-    },
-    {
-      "subject": "storage",
-      "name": "insert — small record, layered([memory(), node:fs], write: back)",
-      "opsPerSec": 4423
-    },
-    {
-      "subject": "storage",
-      "name": "get — cached",
-      "opsPerSec": 52167
-    },
-    {
-      "subject": "storage",
-      "name": "get — cold (re-verifies the block)",
-      "opsPerSec": 51
-    },
-    {
-      "subject": "storage",
-      "name": "update — one field",
-      "opsPerSec": 8162
-    },
-    {
-      "subject": "storage",
-      "name": "history — 50 versions",
-      "opsPerSec": 11476
-    },
-    {
-      "subject": "storage",
-      "name": "tag",
-      "opsPerSec": 438
-    },
-    {
-      "subject": "storage",
-      "name": "get — at a tag (a copy)",
-      "opsPerSec": 6681
-    },
-    {
-      "subject": "storage",
-      "name": "get — at an event id (25 ops back)",
-      "opsPerSec": 12262
-    },
-    {
-      "subject": "storage",
-      "name": "set — whole record",
-      "opsPerSec": 9945
-    },
-    {
-      "subject": "storage",
-      "name": "swap — match (writes)",
-      "opsPerSec": 9586
-    },
-    {
-      "subject": "storage",
-      "name": "swap — mismatch (reads only)",
-      "opsPerSec": 53956
-    },
-    {
-      "subject": "storage",
-      "name": "has — existing id",
-      "opsPerSec": 48726
-    },
-    {
-      "subject": "storage",
-      "name": "record — cached Record instance",
-      "opsPerSec": 8837568
-    },
-    {
-      "subject": "storage",
-      "name": "list — 2000 ids (catalog)",
-      "opsPerSec": 10130859
-    },
-    {
-      "subject": "storage",
-      "name": "hasRecord — 2000 ids (catalog)",
-      "opsPerSec": 6443327
-    },
-    {
-      "subject": "storage",
-      "name": "select — covered eq over 2000",
-      "opsPerSec": 21223
-    },
-    {
-      "subject": "storage",
-      "name": "select — eq + order + limit over 2000",
-      "opsPerSec": 11819
-    },
-    {
-      "subject": "storage",
-      "name": "select — uncovered filter over 2000",
-      "opsPerSec": 1075
-    },
-    {
-      "subject": "storage",
-      "name": "open — catalog caught up from the log (2000 records)",
-      "opsPerSec": 25
-    },
-    {
-      "subject": "storage",
-      "name": "open — catalog rebuilt from a scan (2000 records, integrity lazy)",
-      "opsPerSec": 24
     },
     {
       "subject": "sync",
@@ -937,6 +797,186 @@
       "subject": "engines",
       "name": "open — 10,000 records — idb (fake-indexeddb)",
       "opsPerSec": 15
+    },
+    {
+      "subject": "catalog",
+      "name": "insert, then remove — a row among 100000, two sorted indexes",
+      "opsPerSec": 302469
+    },
+    {
+      "subject": "catalog",
+      "name": "put — a field changed, 100000 rows (the index that reads it re-keyed, the other kept)",
+      "opsPerSec": 1260531
+    },
+    {
+      "subject": "catalog",
+      "name": "load — 100000 rows, two sorted indexes built once",
+      "opsPerSec": 540027
+    },
+    {
+      "subject": "catalog",
+      "name": "define — 100000 rows under another key (the rows bare, the indexes built once)",
+      "opsPerSec": 949736
+    },
+    {
+      "subject": "catalog",
+      "name": "scan — 20 rows by prefix, of 100000 (two seeks, the entries pulled)",
+      "opsPerSec": 11044442
+    },
+    {
+      "subject": "catalog",
+      "name": "page — 100 rows after the edge of page 100, of 20000 (sought, not filtered)",
+      "opsPerSec": 2006585
+    },
+    {
+      "subject": "catalog",
+      "name": "count — by a prefix and a range, of 20000 (the index's, no record read)",
+      "opsPerSec": 363226
+    },
+    {
+      "subject": "storage",
+      "name": "insert — small record",
+      "opsPerSec": 5787
+    },
+    {
+      "subject": "storage",
+      "name": "insert — small record, layered([memory(), node:fs], write: back)",
+      "opsPerSec": 4170
+    },
+    {
+      "subject": "storage",
+      "name": "get — cached",
+      "opsPerSec": 51579
+    },
+    {
+      "subject": "storage",
+      "name": "get — cold (re-verifies the block)",
+      "opsPerSec": 43
+    },
+    {
+      "subject": "storage",
+      "name": "update — one field",
+      "opsPerSec": 7987
+    },
+    {
+      "subject": "storage",
+      "name": "history — 50 versions",
+      "opsPerSec": 10738
+    },
+    {
+      "subject": "storage",
+      "name": "tag",
+      "opsPerSec": 383
+    },
+    {
+      "subject": "storage",
+      "name": "get — at a tag (a copy)",
+      "opsPerSec": 14641
+    },
+    {
+      "subject": "storage",
+      "name": "get — at an event id (25 ops back)",
+      "opsPerSec": 13287
+    },
+    {
+      "subject": "storage",
+      "name": "set — whole record",
+      "opsPerSec": 9605
+    },
+    {
+      "subject": "storage",
+      "name": "swap — match (writes)",
+      "opsPerSec": 9387
+    },
+    {
+      "subject": "storage",
+      "name": "swap — mismatch (reads only)",
+      "opsPerSec": 51423
+    },
+    {
+      "subject": "storage",
+      "name": "has — existing id",
+      "opsPerSec": 52906
+    },
+    {
+      "subject": "storage",
+      "name": "record — cached Record instance",
+      "opsPerSec": 8302835
+    },
+    {
+      "subject": "storage",
+      "name": "list — 2000 ids (catalog)",
+      "opsPerSec": 11428040
+    },
+    {
+      "subject": "storage",
+      "name": "hasRecord — 2000 ids (catalog)",
+      "opsPerSec": 6448813
+    },
+    {
+      "subject": "storage",
+      "name": "select — covered eq over 2000",
+      "opsPerSec": 26062
+    },
+    {
+      "subject": "storage",
+      "name": "select — eq + order + limit over 2000",
+      "opsPerSec": 71663
+    },
+    {
+      "subject": "storage",
+      "name": "select — uncovered filter over 2000",
+      "opsPerSec": 16074
+    },
+    {
+      "subject": "storage",
+      "name": "open — catalog caught up from the log (2000 records)",
+      "opsPerSec": 26
+    },
+    {
+      "subject": "storage",
+      "name": "open — catalog rebuilt from a scan (2000 records, integrity lazy)",
+      "opsPerSec": 26
+    },
+    {
+      "subject": "log",
+      "name": "append — one op",
+      "opsPerSec": 41954
+    },
+    {
+      "subject": "log",
+      "name": "append — batch of 100",
+      "opsPerSec": 777182
+    },
+    {
+      "subject": "log",
+      "name": "since — last 500 entries",
+      "opsPerSec": 570566
+    },
+    {
+      "subject": "log",
+      "name": "since — everything (no cursor)",
+      "opsPerSec": 359
+    },
+    {
+      "subject": "log",
+      "name": "readSegment — 64 lines of 16 ops, checksums before the parse",
+      "opsPerSec": 1542
+    },
+    {
+      "subject": "log",
+      "name": "since — 20 from the middle, scoped",
+      "opsPerSec": 3381790
+    },
+    {
+      "subject": "log",
+      "name": "append with a roll every 8 batches",
+      "opsPerSec": 15652
+    },
+    {
+      "subject": "log",
+      "name": "reopen — index + segments + tail",
+      "opsPerSec": 3
     }
   ]
 }

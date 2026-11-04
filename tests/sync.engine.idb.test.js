@@ -8,7 +8,9 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const { IDBFactory } = require('fake-indexeddb');
-const { installBrowserGlobals, requireBrowserAll } = require('./utils/browser-env.js');
+const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
+// Before the suite and everything it loads: the shared modules resolve to the browser halves.
+prime();
 const { createIdbFsi } = require('../src/idb/idb.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 

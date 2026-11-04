@@ -9,10 +9,11 @@
 // under `log/` (src/files/journal.js). `createDatabase({ fsi })` opens through
 // this engine, so node:fs, OPFS, the IndexedDB file store, memory, `layered`
 // and `atRest` keep working as they are. Requires backend.js, engine.js,
-// shape.js, errors.js and journal.js only.
+// layout.js, write-set.js, shape.js, errors.js and journal.js only.
 
 const { checkFsi } = require('../backend.js');
-const { capabilitiesOf, KV_NAMESPACES, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
+const { capabilitiesOf, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
+const { DIRS, tagDirs } = require('../layout.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
@@ -25,10 +26,9 @@ const RECORD = '.json';
 // Records of a write set written side by side, this many at a time (a file system's parallelism, bounded).
 const WRITES_AT_ONCE = 8;
 
-// The directories a database writes under its path, besides a tag's two;
-// `remove(path)` empties them (fsi lists files, not directories, and no
-// backend has rmdir, so the empty directories stay).
-const DIRS = KV_NAMESPACES.concat(['data', 'log', 'log/open', 'log/corrupt', 'tags/.pending/data']);
+// The directories a database writes under its path (src/layout.js DIRS),
+// besides a tag's two; `remove(path)` empties them (fsi lists files, not
+// directories, and no backend has rmdir, so the empty directories stay).
 
 // A name that becomes a file's: checked before it reaches the backend (src/engine.js isKvKey).
 const named = (value, what) => {
@@ -65,7 +65,9 @@ const tagNames = async (fsi, path) => {
   const tags = parsed !== null && typeof parsed === 'object' && Array.isArray(parsed.tags) ? parsed.tags : [];
   for (let i = 0; i < tags.length; i++) {
     const tag = tags[i];
-    if (tag !== null && typeof tag === 'object' && typeof tag.name === 'string') names.push(tag.name);
+    // A name that is no kv key (a `/`, a `..`) would name a directory outside the path: not a tag's.
+    const named = tag !== null && typeof tag === 'object' && typeof tag.name === 'string' && isKvKey(tag.name);
+    if (named) names.push(tag.name);
   }
   return names;
 };
@@ -284,7 +286,10 @@ const filesEngine = (fsi) => {
       for (let i = 0; i < DIRS.length; i++) dirs.push(DIRS[i]);
       const tags = await tagNames(fsi, path);
       if (tags !== null) {
-        for (let i = 0; i < tags.length; i++) dirs.push(`${TAGS}/${tags[i]}/${DATA}`, `${TAGS}/${tags[i]}/index`);
+        for (let i = 0; i < tags.length; i++) {
+          const two = tagDirs(tags[i]);
+          dirs.push(two[0], two[1]);
+        }
       }
       for (let i = 0; i < dirs.length; i++) {
         const dir = dirs[i];

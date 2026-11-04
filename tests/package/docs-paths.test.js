@@ -145,7 +145,8 @@ test('the root CLAUDE.md indexes every nested one, and each stays within its len
   const long = [];
   for (const note of notes()) {
     const length = readFileSync(path.join(ROOT, note), 'utf8').split('\n').length;
-    const limit = note === 'CLAUDE.md' ? 250 : note === 'src/CLAUDE.md' ? 560 : 300;
+    // src/CLAUDE.md: 560 → 600 with the catalog derived from the records and the tombstones (review №6, E1.5; 2026-11-02).
+    const limit = note === 'CLAUDE.md' ? 250 : note === 'src/CLAUDE.md' ? 600 : 300;
     if (length > limit) long.push(`${note}: ${length} lines, past ${limit}`);
     if (note !== 'CLAUDE.md' && !root.includes(`](./${note})`)) unlisted.push(note);
   }

@@ -259,7 +259,11 @@ compatibility(diff(previousModel, model)); // 'full' | 'backward' | 'forward' | 
 | --- | --- | --- |
 | `schema.version` | `createDatabase({ schema })` | A positive integer, default 1; on every op as `v` |
 | `schema.snapshot` | `createDatabase({ schema })` | Any JSON describing the schema (`model.toJSON()`); hashed, in hello |
-| `schema.entities[name]` | `createDatabase({ schema })` | `{ schema?, idField?, validate?, index?, unique?, fields?, search? }`; `{}` is a bare collection |
+| `schema.entities[name]` | `createDatabase({ schema })`, `addCollections()` | `{ schema?, idField?, validate?, index?, unique?, fields?, search?, id?, refs?, methods?, statics? }`; `{}` is a bare collection |
+| `schema.entities[name].index` | | Fields and compound keys — `['orgId', ['orgId', 'createdAt']]` — each a sorted index the catalog keeps; read off a metaschema schema's `indexes` (a compound one stays a key) and `index: true` fields when absent. See [The plan](./query#the-plan) |
+| `schema.entities[name].id` | | A composite id: `{ fields, separator? }` — the record id is the fields' values joined (`'.'` unless given), derived on every insert; see [Composite ids](./database#composite-ids) |
+| `schema.entities[name].refs` | | `{ author: 'Author', tags: ['Tag'] }` — the records a field names; a `Document` reads it as a `Reference`, `populate()` resolves it; read off a metaschema relation (`author: 'Author'`, `{ many: 'Tag' }`) when absent. See [References](./database#references) |
+| `schema.entities[name].methods`, `.statics` | | Functions on every `Document` of the collection (bound, non-enumerable), and on the collection; a name a Document or a Collection answers to already is a `TypeError`. See [ORM](./database#orm-methods-and-statics) |
 | `schema.entities[name].search` | `createDatabase({ schema })` | Field paths `$text` searches; explicit for every validator, never read off a schema; needs `createDatabase({ search })` — see [Full-text search](./query#full-text-search) |
 | `schema.migrations` | `createDatabase({ schema })` | `{ [toVersion]: { up } \| { [entity]: { up } } }` |
 | `schema.ahead` | `createDatabase({ schema })` | `'apply'` (default) or `'hold'` |

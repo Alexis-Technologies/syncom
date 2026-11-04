@@ -9,13 +9,13 @@
 // beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
-const { Emitter, generateUUID, createLogger } = require('./utils.js');
+const { Emitter, generateUUID, createLogger, taskScope } = require('./utils.js');
 const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Document } = require('./document.js');
 const { Collection } = require('./collection.js');
-const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH } = require('./commit.js');
+const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH, ABSENT } = require('./commit.js');
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
@@ -24,7 +24,7 @@ const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
-const { project } = require('./schema/entity.js');
+const { project, namedId, idReason } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
 const { checkFsi, withSync } = require('./backend.js');
 const { checkEngine, checkEngineDb, kvNamespace } = require('./engine.js');
@@ -36,6 +36,9 @@ const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/write
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
 const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
+const { isOperators } = require('./operators.js');
+const { checkOrm, tombstone, operate, modifyIn } = require('./writes.js');
+const { dropDatabase } = require('./drop.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
@@ -80,6 +83,11 @@ const WHOLE = new Set(['write', 'merge', 'delete']);
 
 const NOOP = () => {};
 
+// How many records a collection defined after the open indexes at a time, inside the queue.
+const REINDEX_PAGE = 500;
+// How many chain blocks a cold read verified are kept parsed: the records of a batch are read close together.
+const VERIFIED_BLOCKS = 8;
+
 class Database extends Emitter {
   #path;
   #identity = null;
@@ -87,6 +95,14 @@ class Database extends Emitter {
   #chain = null;
   #schemaHook = null;
   #cursor = null;
+  // A Mango query as a predicate over `{ id, ...record }` — the query plugin's (`ifMatch`).
+  #matches = null;
+  // The `[SOURCE]` seam, built once at the first access and frozen: its members read the database's state as it is.
+  #source = null;
+  // The query plugin's `stats()`, for `stats().query`; null without the plugin.
+  #queryStats = null;
+  // The local documents (`db.local`) — the local plugin's.
+  #local = null;
   #settings;
   #log = null;
   #entries = null;
@@ -103,6 +119,9 @@ class Database extends Emitter {
   #sync = null;
   #cacheMax;
   #verify;
+  // The chain blocks cold reads verified lately, by hash — each parsed and hashed ONCE: a batch of N records is one
+  // block N long, and N reads of its records parsed and hashed it N times (10 000 records read in 19 s).
+  #blocks = new Map();
   #catalog = null;
   #catalogSave = null;
   #flushEvery;
@@ -126,6 +145,12 @@ class Database extends Emitter {
   #heardEarly = [];
   #schema = null;
   #entities = null;
+  // The collections, by name, as one frozen object (`db.collections`); made again when one is added or removed.
+  #collections = Object.freeze({});
+  // Who hears of every plan a cursor makes (`indexAdvisor` of @alexify/syncom/inspect).
+  #advisors = new Set();
+  // The text index factory (`createDatabase({ search })`), kept for a collection defined after the open.
+  #search = null;
   #version = null;
   #schemaHash = null;
   #schemaPrevious = null;
@@ -163,6 +188,13 @@ class Database extends Emitter {
   // run one after another, in log order.
   #inflight = new Map();
   #inflightCount = 0;
+  // The unique keys the records in flight hold — `entity\0fields\0key` → the ids, and per record its pairs — kept
+  // as a record takes off and settles, so `#conflicts` checks an op against them at once: a scan of every record in
+  // flight per op was N² views while a batch of N landed behind another (two batches of 4 000 rows, 7 s).
+  #inflightKeys = new Map();
+  #inflightPairs = new Map();
+  // The ids in flight whose view the lens has not composed yet: checked by hand.
+  #inflightUnkeyed = new Set();
   #landings = Promise.resolve();
   // Landing steps queued and not yet done: while there is one, a write
   // lands behind it, through the chain — never at once, ahead of it.
@@ -190,6 +222,10 @@ class Database extends Emitter {
   #encrypted;
   #hooks;
   #inHook = 0;
+  // The async context a transaction's (or a `modify()`'s) function runs in: a write made through the
+  // database from inside it would wait for the queue the function holds (IN_TRANSACTION); one made
+  // meanwhile by anyone else queues. Node's async context; the browser half tells neither apart.
+  #task = taskScope();
   #queued = 0;
   #queue = Promise.resolve();
   #closed = false;
@@ -287,31 +323,23 @@ class Database extends Emitter {
     // A collection becomes a property of the storage: a name the storage
     // already answers to — a method, a getter, anything up its prototype
     // chain — would replace it or break the open. Refused before anything
-    // is opened.
-    for (const name of normalized.entities.keys()) {
+    // is opened; so is a method or a static named like a member.
+    for (const [name, def] of normalized.entities) {
       if (name in this) {
         throw new TypeError(`createDatabase({ schema }): entity name '${name}' is taken by the storage itself`);
       }
+      checkOrm(def, 'createDatabase({ schema })');
     }
     this.#entities = normalized.entities;
     this.#schema = schema;
+    this.#search = search;
     // One text index per searchable entity, from the injected factory: the
     // core knows the contract, not the index — a node that never searches
     // ships none of it.
     const text = new Map();
     for (const def of normalized.entities.values()) {
-      if (def.search.length === 0) continue;
-      if (search === null) {
-        const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
-        throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
-      }
-      const index = search(def.name);
-      if (!isTextIndex(index)) {
-        throw new TypeError(
-          `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
-        );
-      }
-      text.set(def.name, index);
+      const index = this.#textIndexOf(def);
+      if (index !== null) text.set(def.name, index);
     }
     const { logger } = this;
     // Persisted through the engine's catalog store where it has one (a native
@@ -331,6 +359,22 @@ class Database extends Emitter {
     if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
       throw new TypeError("createDatabase({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
     }
+  }
+
+  // The text index of a searchable entity, from the injected factory; null for one without search fields.
+  #textIndexOf(def) {
+    if (def.search.length === 0) return null;
+    if (this.#search === null) {
+      const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
+      throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
+    }
+    const index = this.#search(def.name);
+    if (!isTextIndex(index)) {
+      throw new TypeError(
+        `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
+      );
+    }
+    return index;
   }
 
   async #init() {
@@ -420,8 +464,13 @@ class Database extends Emitter {
       if (hooks.seal) this.#seal = hooks.seal;
       if (hooks.chain) this.#chain = hooks.chain;
       if (hooks.schema) this.#schemaHook = hooks.schema;
-      if (hooks.query) this.#cursor = hooks.query.cursor;
+      if (hooks.query) {
+        this.#cursor = hooks.query.cursor;
+        this.#matches = hooks.query.matches ?? null;
+        this.#queryStats = hooks.query.stats ?? null;
+      }
       if (hooks.versions) this.#tags = hooks.versions.tags;
+      if (hooks.local) this.#local = hooks.local;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = writerOf(hooks.telemetry);
         adapted = true;
@@ -480,6 +529,8 @@ class Database extends Emitter {
     });
     await this.#loadIdentity();
     await this.#loadSchema();
+    // The folded tombstones listed before the catalog loads: what a read of a gone row falls back to.
+    await this.#entries.open();
     await this.#loadCatalog();
     if (this.#tags !== null) await this.#tags.load();
     this.#core = this.#lend();
@@ -613,6 +664,8 @@ class Database extends Emitter {
       actorOf: (given) => this.#actorOf(given),
       observe: (stamp, id) => this.#observeHeld(stamp, id),
       definitionOf: (data) => this.#definitionOf(data),
+      // The fields a record's composite id is derived from (its entity's `id.fields`), or null: immutable.
+      idFields: (data) => this.#definitionOf(data)?.id?.fields ?? null,
       conflicts: (id, entry) => this.#conflicts(id, entry),
       invalid: (op, entry) => this.#invalid(op, entry),
       persist: (touched, from, to) => this.#landing(() => this.#land(touched, from, to)),
@@ -648,18 +701,19 @@ class Database extends Emitter {
       kindOf: (entry, field) => kindOf(entry, field, this.#plugins),
       forget: (id) => this.#records.delete(id),
       flushDeferred: () => this.#flushDeferred(),
-      // A purge reaches the log and the tags alike.
-      scrub: async (id) => {
-        await this.#log.scrub(id);
-        if (this.#tags !== null) await this.#tags.scrub(id);
+      // A purge reaches the log and the tags alike; the ids of a batch together, every file holding them rewritten once.
+      scrub: async (ids) => {
+        await this.#log.scrub(ids);
+        if (this.#tags !== null) await this.#tags.scrub(ids);
       },
     });
   }
 
-  // The catalog is derived from the records: the persisted one is reused
-  // when the log can say what changed since it was saved (those records are
-  // re-read), rebuilt from a scan of `data/` otherwise — a first open, a
-  // stamp from another epoch or below the floor, other indexes.
+  // The catalog is derived from the records and the folded tombstones: the
+  // persisted one is reused when the log can say what changed since it was
+  // saved (those records are re-read), rebuilt from a scan of the records and
+  // the `tombstones` namespace otherwise — a first open, a stamp from another
+  // epoch or below the floor, other indexes.
   async #loadCatalog() {
     const saved = await this.#catalog.load();
     const tail = saved === null ? null : this.#log.since(saved.stamp);
@@ -682,6 +736,20 @@ class Database extends Emitter {
           if (ids.length < page) break;
           after = ids[ids.length - 1];
         }
+        // The folded tombstones — the ids the `tombstones` namespace listed at open — that no record file
+        // answered for: indexed from the namespace. An id with a file AND an entry (a fold torn between its two
+        // halves on files) keeps the file; the entry is taken away.
+        const folded = this.#entries.foldedIds();
+        const orphans = [];
+        for (let i = 0; i < folded.length; i++) {
+          if (this.#catalog.row(folded[i]) !== null) {
+            orphans.push(folded[i]);
+            continue;
+          }
+          await this.#entries.index(folded[i]);
+          count++;
+        }
+        if (orphans.length > 0 && !this.#readOnly) await this.#entries.dropMany(orphans, { keepRows: true });
         if (!this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
         return count;
       };
@@ -1007,6 +1075,83 @@ class Database extends Emitter {
 
   #initCollections() {
     for (const name of this.#entities.keys()) this[name] = new Collection(this, name);
+    this.#collected();
+  }
+
+  // `collections` made again: one frozen object of the collections by name.
+  #collected() {
+    const collections = {};
+    for (const name of this.#entities.keys()) collections[name] = this[name];
+    this.#collections = Object.freeze(collections);
+  }
+
+  /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
+  get collections() {
+    return this.#collections;
+  }
+
+  /** The local documents of this database (`get`, `set`, `delete`, `list`, `observe`, `scoped`) — the `local` plugin's. */
+  get local() {
+    if (this.#local === null) throw missing('db.local', 'local');
+    return this.#local;
+  }
+
+  /**
+   * Defines collections after the open: `{ [name]: definition }` (or a Map),
+   * each as an entity of `createDatabase({ schema })` would be — its validator,
+   * indexes, unique keys and search fields in force from here, the records
+   * of the type the catalog holds indexed under them. Nothing is persisted:
+   * the application adds them after every open, and the schema's hash in
+   * hello does not move. Every definition is checked before any is taken —
+   * a name defined already or taken by the database, a malformed definition
+   * — and that is a TypeError. The schema plugin's (`PLUGIN_MISSING` without it).
+   */
+  async addCollections(defs) {
+    if (this.#schemaHook === null) throw missing('addCollections()', 'schema');
+    const given = defs instanceof Map ? defs : isPlainObject(defs) ? new Map(Object.entries(defs)) : null;
+    if (given === null) throw new TypeError('addCollections() takes an object or a Map of definitions');
+    const added = [];
+    for (const [name, def] of given) {
+      if (this.#entities.has(name)) throw new TypeError(`addCollections(): collection '${name}' is defined already`);
+      if (name in this) {
+        throw new TypeError(`addCollections(): collection name '${name}' is taken by the database itself`);
+      }
+      const defined = this.#schemaHook.define(name, def, this.#entities.keys());
+      checkOrm(defined, 'addCollections()');
+      // The text index too, before anything is taken: a definition that needs one the database has not is refused whole.
+      added.push([defined, this.#textIndexOf(defined)]);
+    }
+    for (let i = 0; i < added.length; i++) {
+      const [def, index] = added[i];
+      this.#entities.set(def.name, def);
+      this.#catalog.define(def.name, def, index);
+      this[def.name] = new Collection(this, def.name);
+      // The records of the type the catalog holds, indexed under the definition: pages of 500, each read in one
+      // call of the engine, inside the queue behind the landings — a record in flight lands first, so no stale row
+      // is laid over it; the queue is free between the pages.
+      const ids = this.#catalog.ids(def.name).slice();
+      for (let k = 0; k < ids.length; k += REINDEX_PAGE) {
+        const page = ids.slice(k, k + REINDEX_PAGE);
+        await this.#run(() => this.#landing(() => this.#entries.indexMany(page)));
+      }
+    }
+    this.#collected();
+    this.#flushCatalog();
+  }
+
+  /**
+   * Forgets a collection's definition: the records stay (a collection's
+   * `remove()` deletes them), untyped by any definition from here. An
+   * unknown name is a TypeError.
+   */
+  removeCollection(name) {
+    if (!this.#entities.has(name)) throw new TypeError(`removeCollection(): no collection '${name}'`);
+    this.#entities.delete(name);
+    this.#catalog.define(name, null);
+    delete this[name];
+    this.#collected();
+    this.#flushCatalog();
+    this.#logger.info({ event: 'collection.removed', entity: name });
   }
 
   get schema() {
@@ -1029,6 +1174,12 @@ class Database extends Emitter {
     return this.#db;
   }
 
+  // A Mango query as a predicate over `{ id, ...record }`: the query plugin's (`ifMatch`).
+  #predicate(query) {
+    if (this.#matches === null) throw missing('update(id, delta, { ifMatch })', 'query');
+    return this.#matches(query);
+  }
+
   // The cursor over a source seam (this storage's by default; a tag's for a
   // view at a tag): the query plugin's, PLUGIN_MISSING without it.
   get [CURSOR]() {
@@ -1041,24 +1192,94 @@ class Database extends Emitter {
   // What a Cursor reads through: the catalog, and a record as it reads —
   // lensed, without the read hooks (like `snapshot` and `swap`).
   get [SOURCE]() {
+    if (this.#source !== null) return this.#source;
     const catalog = this.#catalog;
-    return {
+    this.#source = Object.freeze({
       logger: this.#logger,
+      // The telemetry writer (the disabled one without the plugin): what a block counts its work through.
+      otel: this.#otel,
       candidates: (entity, query) => catalog.candidates(entity, query),
       ids: (entity) => catalog.ids(entity),
       row: (id) => catalog.row(id),
       indexed: (entity) => catalog.indexed(entity),
+      indexes: (entity) => catalog.indexes(entity),
+      scan: (entity, plan, after) => catalog.scan(entity, plan, after),
+      // The catalog's counts, for the planner: a scan's entries, a posting list's size, the collection's live rows, the
+      // posting lists' union a scan is narrowed through.
+      estimate: (entity, plan) => catalog.estimate(entity, plan),
+      cardinality: (entity, field, values) => catalog.cardinality(entity, field, values),
+      live: (entity) => catalog.live(entity),
+      posting: (entity, field, values) => catalog.posting(entity, field, values),
+      // Every plan a cursor makes, told to the advisors; `advise(fn)` adds one and answers what takes it off.
+      planned: (entity, plan) => {
+        for (const fn of this.#advisors) {
+          try {
+            fn(entity, plan);
+          } catch (err) {
+            // An advisor is a listener: its throw is its own, never the cursor's.
+            this.#logger.warn({ event: 'listener.error', name: 'advise', err });
+          }
+        }
+      },
+      // A plugin's own write (a local document) refused as the queue would refuse a write: closed, or read-only.
+      guard: (what) => {
+        if (this.#closed) throw new SyncomError('CLOSED', 'Storage is closed');
+        if (this.#readOnly || this.#leaseLost) throw this.#refused(what);
+      },
+      advise: (fn) => {
+        this.#advisors.add(fn);
+        return () => this.#advisors.delete(fn);
+      },
       searches: (entity) => catalog.searches(entity),
       subscribe: (entity, fn) => catalog.subscribe(entity, fn),
+      // What a query result of `entity` is current as of: moves with every change of a record of the collection
+      // the catalog heard of (its row, or the one it left), with its redefinition, and with a load or an adopt.
+      generation: (entity) => catalog.generationOf(entity),
+      // What the definitions are as of: moves with addCollections()/removeCollection(); a plan made under another is made again.
+      definitions: () => catalog.definitions,
+      // The entity definition of a collection (null for none): its id rule, its references, its methods.
+      definition: (entity) => this.#entities.get(entity) ?? null,
+      // A transaction over this database's write API: what a cursor's write terminals run (a view at a
+      // tag reads alone: its source has none).
+      transact: (fn, options) => this.transact(fn, options),
+      // Several records purged as one turn of the queue — one append, one landing — then scrubbed
+      // from the log one by one: what a collection's `remove({ purge: true })` runs a page through.
+      purgeMany: (ids, options) => this.#purgeMany(ids, options),
+      // Every id the catalog holds a row for — live, encrypted, a tombstone — sorted (shared: read it).
+      all: () => catalog.all(),
+      // Whether an entry — `{ meta }` is enough — reads as alive (the op model's `isAlive`; a dump's `deleted`).
+      alive: (entry) => isAlive(entry),
+      // Whether `id` is a folded tombstone: its entry in the `tombstones` kv namespace, no record file.
+      folded: (id) => this.#entries.folded(id),
+      // Tombstones folded into the `tombstones` kv namespace (@alexify/syncom/cleanup), one write set: inside the
+      // queue, behind the landings, so nothing of the records is in flight meanwhile.
+      foldMany: (ids) => this.#run(() => this.#landing(() => this.#entries.foldMany(ids))),
+      // The log's retained entries of a record, and the registered nodes' acked vectors (the sync plugin's).
+      entriesOf: (id) => this.#log.entriesOf(id),
+      // Folded tombstones taken away with their rows (`cleanup({ drop: true })`): the catalog forgets the ids.
+      forgetMany: (ids) => this.#run(() => this.#landing(() => this.#entries.dropMany(ids))),
+      nodes: () => (this.#sync === null ? [] : this.#sync.listNodes()),
       load: async (id) => {
         const entry = await this.#entries.load(id);
         if (entry === null || entry.encrypted || !isAlive(entry)) return null;
         return this.#view(id, entry);
       },
+      // Several records as `load` reads them, in ONE read of the engine for the ones not cached: a
+      // Map by id, null for one absent, encrypted or gone (a cursor's `populate`, `findByIds`).
+      loadMany: async (ids) => {
+        const entries = await this.#entries.loadMany(ids);
+        const out = new Map();
+        for (const [id, entry] of entries) {
+          if (entry === null || entry.encrypted || !isAlive(entry)) out.set(id, null);
+          else out.set(id, await this.#view(id, entry));
+        }
+        return out;
+      },
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),
-    };
+    });
+    return this.#source;
   }
 
   // The unique keys `entry` would collide on, as the catalog knows them.
@@ -1067,29 +1288,87 @@ class Database extends Emitter {
     if (!def || def.unique.length === 0) return [];
     const view = await this.#view(id, entry);
     const conflicts = this.#catalog.uniqueConflicts(def.name, id, view);
+    if (this.#inflight.size === 0) return conflicts;
     // Each (holder, key) once.
     const seen = new Set();
     for (let i = 0; i < conflicts.length; i++) seen.add(`${conflicts[i].other}\0${conflicts[i].fields.join(',')}`);
+    const collide = (other, key) => {
+      const pair = `${other}\0${key.join(',')}`;
+      if (seen.has(pair)) return;
+      seen.add(pair);
+      conflicts.push({ fields: [...key], other });
+    };
     // The records in flight are not in the catalog yet: their newest entries
-    // are checked by hand — against this record's keys, read once.
-    if (this.#inflight.size === 0) return conflicts;
+    // hold their keys in `#inflightKeys`, read once each.
     const mine = [];
-    for (const key of def.unique) mine.push(this.#catalog.uniqueKey(view, key));
-    for (const [other, stack] of this.#inflight) {
-      if (other === id || stack.items.length === stack.head) continue;
-      const held = stack.items[stack.items.length - 1].entry;
-      if (held.data.$type !== entry.data.$type || !isAlive(held)) continue;
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      const text = this.#catalog.uniqueKey(view, key);
+      mine.push(text);
+      if (text === null) continue;
+      const ids = this.#inflightKeys.get(`${def.name}\0${key.join(',')}\0${text}`);
+      if (ids === undefined) continue;
+      for (const other of ids) if (other !== id) collide(other, key);
+    }
+    // The few a lens has not composed yet: by hand, as the catalog would.
+    for (const other of this.#inflightUnkeyed) {
+      if (other === id) continue;
+      const held = this.#inflightTop(other);
+      if (held === undefined || held.data.$type !== entry.data.$type) continue;
       const theirs = await this.#view(other, held);
       for (let k = 0; k < def.unique.length; k++) {
         const key = def.unique[k];
-        if (mine[k] === null || mine[k] !== this.#catalog.uniqueKey(theirs, key)) continue;
-        const pair = `${other}\0${key.join(',')}`;
-        if (seen.has(pair)) continue;
-        seen.add(pair);
-        conflicts.push({ fields: [...key], other });
+        if (mine[k] !== null && mine[k] === this.#catalog.uniqueKey(theirs, key)) collide(other, key);
       }
     }
     return conflicts;
+  }
+
+  // A record's view as `#view` composes it, where it needs no await: at once without a lens or for a record of
+  // this version, the lens's once it ran (`entry.view`); undefined before that.
+  #viewNow(entry) {
+    if (this.#lens === null || (entry.meta.v ?? 1) >= this.#version) {
+      return (entry.composed ??= compose(entry, this.#plugins));
+    }
+    return entry.view;
+  }
+
+  // The unique keys the entry a record is in flight as holds, standing for it until it settles or takes off again.
+  #keyInflight(id, entry) {
+    this.#unkeyInflight(id);
+    if (!isAlive(entry)) return;
+    const def = this.#definitionOf(entry.data);
+    if (!def || def.unique.length === 0) return;
+    const view = this.#viewNow(entry);
+    if (view === undefined) {
+      this.#inflightUnkeyed.add(id);
+      return;
+    }
+    const pairs = [];
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      const text = this.#catalog.uniqueKey(view, key);
+      if (text === null) continue;
+      const pair = `${def.name}\0${key.join(',')}\0${text}`;
+      let ids = this.#inflightKeys.get(pair);
+      if (ids === undefined) this.#inflightKeys.set(pair, (ids = new Set()));
+      ids.add(id);
+      pairs.push(pair);
+    }
+    if (pairs.length > 0) this.#inflightPairs.set(id, pairs);
+  }
+
+  #unkeyInflight(id) {
+    this.#inflightUnkeyed.delete(id);
+    const pairs = this.#inflightPairs.get(id);
+    if (pairs === undefined) return;
+    this.#inflightPairs.delete(id);
+    for (let i = 0; i < pairs.length; i++) {
+      const ids = this.#inflightKeys.get(pairs[i]);
+      if (ids === undefined) continue;
+      ids.delete(id);
+      if (ids.size === 0) this.#inflightKeys.delete(pairs[i]);
+    }
   }
 
   // The entity definition a record belongs to, by its `$type`.
@@ -1226,6 +1505,12 @@ class Database extends Emitter {
       // took (the next window is at least that), and the positions waiting.
       defer: { window: this.#defer, flushCost: this.#window.cost, positions: this.#window.positions },
       observers,
+      // The collections defined, the advisors watching the plans, the tombstones folded into their namespace, and
+      // the query plugin's cache (entries, the rows they hold) and live runs — null without the plugin.
+      collections: this.#entities.size,
+      advisors: this.#advisors.size,
+      tombstones: this.#entries.foldedCount,
+      query: this.#queryStats === null ? null : this.#queryStats(),
       log: {
         length: log.length,
         floor: log.floor,
@@ -1309,12 +1594,12 @@ class Database extends Emitter {
     if (stack === undefined) this.#inflight.set(id, (stack = { items: [], head: 0 }));
     const { items } = stack;
     const top = items.length > stack.head ? items[items.length - 1] : null;
-    if (top !== null && top.position === position) {
-      top.entry = entry;
-      return;
+    if (top !== null && top.position === position) top.entry = entry;
+    else {
+      items.push({ entry, position });
+      this.#inflightCount++;
     }
-    items.push({ entry, position });
-    this.#inflightCount++;
+    this.#keyInflight(id, entry);
   }
 
   // The op at `position` landed (or failed): its entry is no longer in flight.
@@ -1333,7 +1618,10 @@ class Database extends Emitter {
       }
     } else items.splice(i, 1);
     this.#inflightCount--;
-    if (stack.items.length === stack.head) this.#inflight.delete(id);
+    if (stack.items.length === stack.head) {
+      this.#inflight.delete(id);
+      this.#unkeyInflight(id);
+    }
   }
 
   // A group of appends failed: every in-flight entry at or past `from` was
@@ -1341,11 +1629,16 @@ class Database extends Emitter {
   #takenBack(from) {
     for (const [id, stack] of this.#inflight) {
       const { items } = stack;
+      let taken = 0;
       while (items.length > stack.head && items[items.length - 1].position >= from) {
         items.pop();
         this.#inflightCount--;
+        taken++;
       }
-      if (items.length === stack.head) this.#inflight.delete(id);
+      if (items.length === stack.head) {
+        this.#inflight.delete(id);
+        this.#unkeyInflight(id);
+      } else if (taken > 0) this.#keyInflight(id, items[items.length - 1].entry);
     }
   }
 
@@ -1384,6 +1677,14 @@ class Database extends Emitter {
         new SyncomError(
           'IN_HOOK',
           'Cannot write to the storage from inside a hook: the write would wait for the hook that waits for it',
+        ),
+      );
+    }
+    if (this.#task.inside()) {
+      return Promise.reject(
+        new SyncomError(
+          'IN_TRANSACTION',
+          'Cannot write to the database from inside a transaction or modify(): write through tx, or return the record',
         ),
       );
     }
@@ -1617,8 +1918,8 @@ class Database extends Emitter {
   // Public API
 
   async saveData(id, data, options = {}) {
-    const { encrypted = this.#encrypted, actor } = options;
-    await this[COMMIT]('write', id, { data }, { encrypted, actor });
+    const { encrypted = this.#encrypted, actor, expect = null } = options;
+    await this[COMMIT]('write', id, { data }, { encrypted, actor, expect });
   }
 
   async loadData(id) {
@@ -1641,12 +1942,9 @@ class Database extends Emitter {
     }
     const id = idOrOptions;
     try {
-      const block = await this.#chain.readBlock(blockHash);
+      const block = await this.#blockOf(blockHash);
+      if (block === null) return false;
       const expectedHash = await sha256(data);
-      if (!block) return false;
-      // The block must be the one it is filed under: a file planted beside
-      // the chain with the right `records` map is not a commit.
-      if ((await sha256(block)) !== blockHash) return false;
       // A local write commits `{ id, hash }`; a replicated batch commits
       // `{ records: { [id]: hash } }` for every record it touched.
       if (block.data.records) return block.data.records[id] === expectedHash;
@@ -1656,15 +1954,70 @@ class Database extends Emitter {
     }
   }
 
-  async insert(data, options = {}) {
-    // `getId` may be sync or async — both call sites already await this.
+  // The block filed under `blockHash`, verified — it must hash to the name it is filed under: a file planted beside
+  // the chain with the right `records` map is not a commit — and kept, the last VERIFIED_BLOCKS of them; null for
+  // one that is not there or is not what it claims.
+  async #blockOf(blockHash) {
+    const kept = this.#blocks.get(blockHash);
+    if (kept !== undefined) return kept;
+    const block = await this.#chain.readBlock(blockHash);
+    if (!block || (await sha256(block)) !== blockHash) return null;
+    if (this.#blocks.size >= VERIFIED_BLOCKS) this.#blocks.delete(this.#blocks.keys().next().value);
+    this.#blocks.set(blockHash, block);
+    return block;
+  }
+
+  // The id a record's data names under its entity's definition — a composite
+  // id from the declared fields, the id field's value — with the data the
+  // record is written as (the id field leaves it); null when the data names
+  // none, and the id is minted. A derived id outside the id class, or a
+  // composite with a field missing, is INVALID_ID.
+  #named(data) {
+    const def = this.#definitionOf(data);
+    if (def === undefined) return null;
+    const named = namedId(def, data);
+    if (named === null) return null;
+    if (named.id === null) {
+      throw typed('INVALID_ID', `A ${def.name} ${idReason(named)}`, { entity: def.name, field: named.field });
+    }
+    if (!isRecordId(named.id)) throw invalidId(named.id);
+    return named;
+  }
+
+  // A minted id: `getId` may be sync or async — every call site awaits this.
+  async #mint() {
     const id = await this.#getId();
     if (!isRecordId(id)) {
       const error = invalidId(id);
       error.message = `createDatabase({ getId }): ${error.message}`;
       throw error;
     }
-    await this.saveData(id, data, options);
+    return id;
+  }
+
+  /**
+   * Writes a new record: under the id its data names — its entity's
+   * composite id, or the id field's value — when it names one (a live record
+   * there already is `EXISTS`, decided inside the queue), else under a
+   * minted one. Resolves to the id.
+   */
+  async insert(data, options = {}) {
+    if (!isPlainObject(data)) throw new TypeError('insert() takes a plain object');
+    const named = this.#named(data);
+    if (named === null) {
+      const id = await this.#mint();
+      await this.saveData(id, data, options);
+      return id;
+    }
+    const { id } = named;
+    // A live record there already is EXISTS, decided inside the queue (`expect: ABSENT`) — an encrypted write too.
+    try {
+      await this.saveData(id, named.data, { ...options, expect: ABSENT });
+    } catch (error) {
+      if (error?.code === 'EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
+      throw error;
+    }
+    if (this.#otel.enabled) this.#otel.recordInsertNamed('ok');
     return id;
   }
 
@@ -1867,9 +2220,51 @@ class Database extends Emitter {
     await this.saveData(id, data, options);
   }
 
-  async delete(id, { actor } = {}) {
-    await this[COMMIT]('delete', id, {}, { actor });
+  /**
+   * Leaves a tombstone; with `data`, the fields it carries lie on the
+   * tombstone — read by whoever reads it (a `change` of `action: 'delete'`
+   * with `data`, a peer's hook), never by `get()`, which answers null.
+   */
+  async delete(id, { actor, data } = {}) {
+    await this[COMMIT]('delete', id, tombstone(data), { actor });
     this.#records.delete(id);
+  }
+
+  // `purge()` over several ids: the ops as one transaction, the scrubs after.
+  async #purgeMany(ids, { actor } = {}) {
+    const run = () =>
+      transact(
+        this.#core,
+        async (tx) => {
+          for (let i = 0; i < ids.length; i++) await tx.commit('purge', ids[i], {}, { actor });
+        },
+        { actor },
+      );
+    const { done } = await this.#run(run);
+    if (done !== null) await done;
+    await this.#core.scrub(ids);
+    for (let i = 0; i < ids.length; i++) this.#records.delete(ids[i]);
+  }
+
+  /**
+   * Drops the database: closed, and every store of it removed from the
+   * engine — the identity, the records, the log, the tags, the chain
+   * (`engine.remove(path)`) — under the lock, before it is let go of, so
+   * nothing opens the directory meanwhile. A follower, or a writer whose
+   * lease was lost, is refused (READ_ONLY): the database is another
+   * instance's to drop. A node opened at the path again is a new node.
+   * `dropDatabase(path, { engine })` does the same for a closed one — and is
+   * what a database closed already drops through.
+   */
+  async drop() {
+    if (this.#readOnly || this.#leaseLost) throw this.#refused('drop()');
+    this.#logger.info({ event: 'database.drop', path: this.#path });
+    if (this.#closing !== null) {
+      await this.#closing;
+      return dropDatabase(this.#path, { engine: this.#engine });
+    }
+    this.#closing = this.#close(true);
+    return this.#closing;
   }
 
   /**
@@ -1879,19 +2274,53 @@ class Database extends Emitter {
    */
   async purge(id, { actor } = {}) {
     await this[COMMIT]('purge', id, {}, { actor });
-    await this.#core.scrub(id);
+    await this.#core.scrub([id]);
     this.#records.delete(id);
   }
 
+  /**
+   * Sets the listed fields (a `set` op) — or, written in operators (`$set`,
+   * `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max`,
+   * `$rename`), the ops each one means by the kind of its field, as one
+   * transaction. With `ifMatch` (a Mango query, the query plugin's) the
+   * write is made only where the record matches it, inside the queue, and
+   * resolves to whether it was.
+   */
   update(id, delta, options) {
-    // A record held here and live is there: no file to ask.
+    const ifMatch = options?.ifMatch ?? null;
     if (isRecordId(id) && isPlainObject(delta)) {
+      let operators;
+      try {
+        operators = isOperators(delta);
+      } catch (error) {
+        return Promise.reject(error);
+      }
+      // The operators and a condition are decided inside the queue, over the record as it is: a transaction.
+      if (ifMatch !== null || operators) {
+        return this.transact((tx) => tx.update(id, delta, options), { actor: options?.actor });
+      }
+      // A record held here and live is there: no file to ask.
       const current = this.#currentNow(id);
       if (current !== undefined && current !== null && (current.encrypted || isAlive(current))) {
         return this.#write('set', id, { data: delta }, { actor: options?.actor });
       }
     }
     return this.#update(id, delta, options?.actor);
+  }
+
+  /**
+   * Changes record `id` by a function: `fn(copy)` runs inside the mutation
+   * queue over a copy of the record as it reads, and what it leaves — what
+   * it returns, or the copy when it returns nothing — is written as the ops
+   * that take the record there (a field changed, a field gone; `null`
+   * deletes). Two `modify()` calls on one record compose: each reads what
+   * the one before it left. A write through the database from inside `fn`
+   * is IN_TRANSACTION. Resolves to the record as it reads after, or null.
+   */
+  modify(id, fn, options = {}) {
+    if (typeof fn !== 'function') return Promise.reject(new TypeError('modify() takes a function'));
+    const { actor, message, source } = options;
+    return this.transact((tx) => modifyIn(tx, id, fn, { actor }), { actor, message, source });
   }
 
   async #update(id, delta, actor) {
@@ -2148,7 +2577,10 @@ class Database extends Emitter {
    */
   async transact(fn, options = {}) {
     if (typeof fn !== 'function') throw new TypeError('transact() takes a function');
-    const run = () => transact(this.#core, (tx) => fn(this.#transaction(tx)), options);
+    // While `fn` runs the queue is this transaction's: a write made through the database meanwhile is
+    // refused (IN_TRANSACTION) where it would otherwise wait for itself.
+    const guarded = (tx) => this.#task.run(() => fn(this.#transaction(tx)));
+    const run = () => transact(this.#core, guarded, options);
     const otel = this.#otel;
     const { result, done } = await this.#run(
       otel.enabled ? () => traced(otel, 'syncom.transact', {}, run, ({ ops }) => ({ 'syncom.ops.count': ops })) : run,
@@ -2197,23 +2629,46 @@ class Database extends Emitter {
       return entry !== null && (entry.encrypted || isAlive(entry));
     };
     api.insert = async (data, options = {}) => {
-      const id = await this.#getId();
-      if (!isRecordId(id)) {
-        const error = invalidId(id);
-        error.message = `createDatabase({ getId }): ${error.message}`;
+      if (!isPlainObject(data)) throw new TypeError('insert() takes a plain object');
+      const named = this.#named(data);
+      if (named === null) {
+        const id = await this.#mint();
+        await tx.commit('write', id, { data }, { actor: options.actor });
+        return id;
+      }
+      try {
+        await tx.commit('write', named.id, { data: named.data }, { actor: options.actor, expect: ABSENT });
+      } catch (error) {
+        if (error?.code === 'EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
         throw error;
       }
-      await tx.commit('write', id, { data }, { actor: options.actor });
-      return id;
+      if (this.#otel.enabled) this.#otel.recordInsertNamed('ok');
+      return named.id;
     };
     api.set = async (id, data, options = {}) => {
       if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
       await tx.commit('write', id, { data }, { actor: options.actor });
     };
     api.update = async (id, delta, options = {}) => {
-      if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
       if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
-      await tx.commit('set', id, { data: delta }, { actor: options.actor });
+      const operators = isOperators(delta);
+      const ifMatch = options.ifMatch ?? null;
+      // The condition compiled first: a malformed query is a TypeError before anything is read.
+      const test = ifMatch === null ? null : this.#predicate(ifMatch);
+      // Fields without a condition: the record's presence alone is read, never its view composed.
+      if (test === null && !operators) {
+        if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+        await tx.commit('set', id, { data: delta }, { actor: options.actor });
+        return undefined;
+      }
+      const view = await api.get(id);
+      if (view === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+      // The record's id laid last: a data field named `id` is not the record's.
+      if (test !== null && !test({ ...view, id })) return false;
+      // The operators decided over the view read once here.
+      if (operators) await operate(api, tx, id, delta, options, view);
+      else await tx.commit('set', id, { data: delta }, { actor: options.actor });
+      return test === null ? undefined : true;
     };
     api.swap = async (id, changes, prev, options = {}) => {
       if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
@@ -2221,8 +2676,12 @@ class Database extends Emitter {
       return op !== MISMATCH;
     };
     api.delete = async (id, options = {}) => {
-      await tx.commit('delete', id, {}, { actor: options.actor });
+      await tx.commit('delete', id, tombstone(options.data), { actor: options.actor });
       this.#records.delete(id);
+    };
+    api.modify = (id, fn, options = {}) => {
+      if (typeof fn !== 'function') throw new TypeError('modify() takes a function');
+      return modifyIn(api, id, fn, { actor: options.actor });
     };
     api.purge = () => {
       throw new TypeError('purge() is not transactional: it scrubs the log; call it on the storage');
@@ -2329,11 +2788,12 @@ class Database extends Emitter {
    * runs or after — it is the same close.
    */
   close() {
-    if (this.#closing === null) this.#closing = this.#close();
+    if (this.#closing === null) this.#closing = this.#close(false);
     return this.#closing;
   }
 
-  async #close() {
+  // The close; with `sweep`, the drop: every store removed under the lock before it is let go of.
+  async #close(sweep) {
     if (this.#closed) return;
     // What an editor's handle holds goes to the log while writes are taken.
     try {
@@ -2360,7 +2820,12 @@ class Database extends Emitter {
     this.#unhear?.();
     await this.#heard;
     this.#unleash?.();
-    await this.#lock?.release();
+    if (sweep) {
+      // Swept while the lock is held: nothing opens the directory meanwhile. The lock went with the rest: its
+      // release finds nothing to let go of.
+      await this.#engine.remove(this.#path);
+      await this.#lock?.release().catch(NOOP);
+    } else await this.#lock?.release();
     await this.#db.close();
     notify(this, this.#logger, 'close');
   }
@@ -2375,4 +2840,4 @@ Database.Record = Document;
 const createDatabase = (options) => new Database(options);
 const open = createDatabase;
 
-module.exports = { Database, createDatabase, Storage: Database, open };
+module.exports = { Database, createDatabase, dropDatabase, Storage: Database, open };

@@ -243,6 +243,11 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
       assert.strictEqual(await db.kv.get('blockchain', '.blockchain.json'), '{"tailHash":"h1"}');
       assert.strictEqual(await db.kv.get('', 'gone.json'), null);
       assert.deepStrictEqual((await db.records.get('x')).data, { n: 1 });
+      // A tombstone folded: its kv entry put and its record removed, in one set.
+      const tombstone = '{"type":null,"data":{},"meta":{}}';
+      await db.write({ kv: { put: [['tombstones', 'x', tombstone, undefined]] }, remove: ['x'] });
+      assert.strictEqual(await db.records.get('x'), null);
+      assert.strictEqual(await db.kv.get('tombstones', 'x'), tombstone);
     } finally {
       await done();
     }

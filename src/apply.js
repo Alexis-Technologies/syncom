@@ -539,7 +539,12 @@ const persist = async (batch) => {
   }
   // Unapplied, a batch whose records did not land is replayed at the next open.
   if (landed) core.log.applied(first, last);
-  if (batch.purged) for (const id of batch.purged) await core.scrub(id);
+  if (batch.purged) {
+    // The purged ids together: every log file holding one of them rewritten once.
+    const purged = [];
+    for (const id of batch.purged) purged.push(id);
+    await core.scrub(purged);
+  }
 };
 
 // afterApply sees a durable batch; whatever it does, the record views and
@@ -561,7 +566,17 @@ const announce = async (batch, result) => {
     }
     if (accepted.length > 0 && core.listening('transaction')) {
       const ts = accepted[accepted.length - 1].ts;
-      const event = { local: false, via, source: null, message: null, ops: accepted, changes, ts };
+      // Announced inside the queue: the log's last position is the batch's.
+      const event = {
+        local: false,
+        via,
+        source: null,
+        message: null,
+        ops: accepted,
+        changes,
+        ts,
+        eventId: core.log.lastEventId,
+      };
       event[ENTRIES] = batch.touched;
       core.emit('transaction', event);
     }

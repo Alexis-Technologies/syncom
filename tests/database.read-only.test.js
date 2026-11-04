@@ -438,3 +438,51 @@ test('the lease an engine holds a database by (MongoDB)', async (t) => {
     },
   );
 });
+
+test('drop() is READ_ONLY on a follower, and sweeps under the lock', async () => {
+  const inner = memoryEngine();
+  let held = null;
+  // The engine's `remove`, told whether the lock was still held when the sweep began.
+  const engine = {
+    name: 'memory+watched',
+    capabilities: inner.capabilities,
+    open: (path, options) => inner.open(path, options),
+    async remove(path) {
+      const db = await inner.open(path, {});
+      try {
+        held = await db.kv.has('', 'lock.json');
+      } finally {
+        await db.close();
+      }
+      return inner.remove(path);
+    },
+  };
+  const writer = await createDatabase({ ...base, path: 'app', engine });
+  const id = await writer.insert({ title: 'kept', $type: 'Note' });
+  const follower = await createDatabase({ ...base, path: 'app', engine, readOnly: true });
+  await assert.rejects(() => follower.drop(), { code: 'READ_ONLY', path: 'app', lease: false });
+  assert.deepStrictEqual(await writer.get(id), { title: 'kept', $type: 'Note' }, 'nothing of the writer went');
+  await follower.close();
+  await writer.drop();
+  assert.strictEqual(held, true, 'swept while the lock was held');
+  const check = await inner.open('app', {});
+  try {
+    assert.strictEqual(await check.records.has(id), false);
+    assert.strictEqual(await check.kv.has('', 'node.json'), false);
+    assert.strictEqual(await check.kv.has('', 'lock.json'), false, 'the lock went with the rest');
+  } finally {
+    await check.close();
+  }
+  // Closed first: the same, through dropDatabase — under a lock of its own.
+  const again = await createDatabase({ ...base, path: 'app', engine });
+  await again.insert({ title: 'x', $type: 'Note' });
+  await again.close();
+  await again.drop();
+  const empty = await inner.open('app', {});
+  try {
+    assert.deepStrictEqual(await empty.records.ids({ limit: 1 }), []);
+    assert.strictEqual(await empty.kv.has('', 'node.json'), false);
+  } finally {
+    await empty.close();
+  }
+});

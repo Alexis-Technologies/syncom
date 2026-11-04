@@ -1,6 +1,7 @@
 'use strict';
 
 const { fsiNamespace } = require('./engine.js');
+const { SortedIndex, rankOf, compare, beforePosition } = require('./sorted.js');
 
 // The record catalog: every live record's id, collection and indexed field
 // values, in memory, so `list()`, `hasRecord()` and a query by an indexed
@@ -26,19 +27,36 @@ const { fsiNamespace } = require('./engine.js');
 const FILE = 'catalog.json';
 // The key `ids()` caches the whole live list under.
 const ALL = Symbol('syncom.catalog.all');
-const FORMAT = 3;
+// 4: a folded tombstone's stamps ride on its row (`folded`, the eighth cell; @alexify/syncom/cleanup).
+// 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell); a
+//    folded tombstone lives in the `tombstones` kv namespace, whole, and its row is any tombstone's.
+const FORMAT = 5;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
 // A value by dotted path — a key spelled with the dot first (a catalog
 // row, a projected row), the walk otherwise; `undefined` when a step is
 // missing.
+// The segments of a dotted path, split once: a predicate, a sort and an index read the same few paths over and over.
+const PARTS = new Map();
+const MAX_PARTS = 4096;
+const partsOf = (path) => {
+  let parts = PARTS.get(path);
+  if (parts === undefined) {
+    if (PARTS.size >= MAX_PARTS) PARTS.clear();
+    parts = path.split('.');
+    PARTS.set(path, parts);
+  }
+  return parts;
+};
+
 const valueOf = (data, path) => {
   if (isObject(data) && Object.hasOwn(data, path)) return data[path];
+  const parts = partsOf(path);
   let value = data;
-  for (const part of path.split('.')) {
+  for (let i = 0; i < parts.length; i++) {
     if (!isObject(value)) return undefined;
-    value = value[part];
+    value = value[parts[i]];
   }
   return value;
 };
@@ -73,10 +91,14 @@ const keyOf = (value) => JSON.stringify(canonical(value));
 
 // Whether two catalog rows say the same: type, version, flags, text and every
 // indexed value.
+// Two stamps `[ts, origin]`, or none each.
+const sameStamp = (a, b) => (a === undefined ? b === undefined : b !== undefined && a[0] === b[0] && a[1] === b[1]);
+
 const sameRow = (a, b) => {
   if (a.type !== b.type || a.v !== b.v || a.encrypted !== b.encrypted || a.gone !== b.gone || a.text !== b.text) {
     return false;
   }
+  if (!sameStamp(a.deleted, b.deleted)) return false;
   const keys = Object.keys(a.fields);
   if (keys.length !== Object.keys(b.fields).length) return false;
   for (let i = 0; i < keys.length; i++) {
@@ -137,6 +159,91 @@ const post = (map, value, id, fn) => {
   for (let i = 0; i < value.length; i++) fn(map, keyOf(value[i]), id);
 };
 
+// What the catalog keeps of an entity definition: the indexed fields (the
+// `index` ones and every field of a unique key), the unique keys, the search fields.
+const defOf = (def) => {
+  const fields = new Set(def.index);
+  for (const key of def.unique) for (const field of key) fields.add(field);
+  const search = def.search ?? [];
+  // The sorted keys kept: the declared indexes (singles as one-field keys), each with its name.
+  let indexes = def.indexes ?? null;
+  if (indexes === null) {
+    indexes = [];
+    for (let i = 0; i < def.index.length; i++) indexes.push([def.index[i]]);
+  }
+  return { index: def.index, indexes, unique: def.unique, search, fields: [...fields], indexed: fields };
+};
+
+// What a sorted index holds of a row: its keys, one per field of the index
+// — and, where a field holds an array, one entry per element of it (as the
+// posting lists post an array, and as the predicate matches one: by any of
+// its elements), every combination of them; `multi` says an array was met.
+// Bounded: past 64 entries the array is keyed whole alone — `overflow` says
+// so, and every scan yields such a row for the predicate to decide.
+const MAX_ENTRIES = 64;
+const keysOf = (fields, index) => {
+  let tuples = [[]];
+  let multi = false;
+  let overflow = false;
+  for (let i = 0; i < index.length; i++) {
+    const value = valueOf(fields, index[i]);
+    const array = Array.isArray(value) && value.length > 0;
+    const elements = array && tuples.length * value.length <= MAX_ENTRIES ? value : null;
+    if (array && elements === null) overflow = true;
+    const next = [];
+    for (let t = 0; t < tuples.length; t++) {
+      if (elements === null) next.push(tuples[t].concat([value]));
+      else {
+        multi = true;
+        for (let e = 0; e < elements.length; e++) next.push(tuples[t].concat([elements[e]]));
+      }
+    }
+    tuples = next;
+  }
+  return { tuples, multi, overflow };
+};
+
+// The entries of `id` taken out of a bulk build's queue (a row removed before the build).
+const unqueue = (pending, id) => {
+  for (let i = pending.length - 1; i >= 0; i--) if (pending[i].id === id) pending.splice(i, 1);
+};
+
+// Whether two indexed values are one: the same, or objects with one canonical text.
+const sameValue = (x, y) =>
+  x === y || (typeof x === 'object' && typeof y === 'object' && x !== null && y !== null && keyOf(x) === keyOf(y));
+
+// Whether a key (a field list) names a field among `changed`.
+const touches = (fields, changed) => {
+  for (let i = 0; i < fields.length; i++) if (changed.has(fields[i])) return true;
+  return false;
+};
+
+// A range with one side open, closed at the edge of its kind: the floor of the given value's rank below, the first
+// value of the next rank above — so nothing (undefined), and no value of another kind, lies within a scan of it.
+// The planner admits a number, a string or a boolean as an edge (`ordered`).
+const FLOORS = { boolean: false, number: -Infinity, string: '' };
+const CEILINGS = { boolean: -Infinity, number: '', string: {} };
+const closed = (range) => {
+  if (range === null || (range.lower !== null && range.upper !== null)) return range ?? { lower: null, upper: null };
+  if (range.lower === null) {
+    const floor = FLOORS[typeof range.upper.value];
+    return { lower: floor === undefined ? null : { value: floor, inclusive: true }, upper: range.upper };
+  }
+  const ceiling = CEILINGS[typeof range.lower.value];
+  return { lower: range.lower, upper: ceiling === undefined ? null : { value: ceiling, inclusive: false } };
+};
+
+// A row with nothing indexed: what a record of a collection keeps while
+// its definition changes (the caller indexes it again).
+const bare = (row) => {
+  const out = { type: row.type, v: row.v, encrypted: row.encrypted, fields: {} };
+  if (row.gone) {
+    out.gone = true;
+    if (row.deleted !== undefined) out.deleted = row.deleted;
+  }
+  return out;
+};
+
 class Catalog {
   #store;
   #rowStore;
@@ -146,6 +253,13 @@ class Catalog {
   #byType = new Map();
   #eq = new Map();
   #unique = new Map();
+  // Per type, per declared index (by its name): `{ fields, sorted, multi, overflow, pending }` — a SortedIndex
+  // (src/sorted.js) of the rows' keys in key order then id, what a range, a prefix or a sort reads in order
+  // (`scan`); `multi` how many rows are keyed per element of an array, `overflow` the ids whose array passed
+  // the cap (keyed whole), `pending` the entries a bulk build sorts once.
+  #keyed = new Map();
+  // A bulk build under way (a load, a definition, an adoption): the sorted indexes' entries wait for one sort.
+  #bulk = false;
   #watchers = new Map();
   #dirty = 0;
   // The rows put since the last save, by id (null: removed), and whether the
@@ -157,6 +271,14 @@ class Catalog {
   #text;
   #textPending = new Map();
   #logger;
+  // Moved by every put, a definition, an adoption, a load: what a query result is current as of.
+  #generation = 0;
+  // The generation per collection — the last `#generation` a put, a definition moved it to — and the floor every
+  // collection stands at since the last load or adopt: what a query result of a collection is current as of.
+  #typeGen = new Map();
+  #floor = 0;
+  // Moved by every definition (`define`): what a cursor's plan, and a cached result's key, are made under.
+  #defGeneration = 0;
 
   constructor({ store = null, rows = null, fsi = null, path = null, entities, text = new Map(), logger = null }) {
     // A text store given (a kv namespace), a rows store (a native engine's:
@@ -168,16 +290,256 @@ class Catalog {
     this.#store = store ?? (rows === null ? fsiNamespace(fsi, `${path}/index`) : null);
     this.#text = text;
     this.#logger = logger;
+    for (const [name, def] of entities) this.#defs.set(name, defOf(def));
+    this.#rekey();
+  }
+
+  // What a persisted catalog must have been built with to be reused: the
+  // collections, their indexes, unique keys and search fields.
+  #rekey() {
     const shape = [];
-    for (const [name, def] of entities) {
-      const fields = new Set(def.index);
-      for (const key of def.unique) for (const field of key) fields.add(field);
-      const search = def.search ?? [];
-      this.#defs.set(name, { index: def.index, unique: def.unique, search, fields: [...fields], indexed: fields });
-      shape.push([name, def.index, def.unique, search]);
+    for (const [name, def] of this.#defs) shape.push([name, def.index, def.indexes, def.unique, def.search]);
+    // The format rides in the key: rows saved in another shape are not reused, by a file or a row store.
+    this.#indexKey = keyOf([FORMAT, shape]);
+  }
+
+  /** The declared indexes of a collection — the keys as field lists, the sorted indexes kept. Shared: read it, do not edit it. */
+  indexes(type) {
+    return this.#defs.get(type)?.indexes ?? [];
+  }
+
+  /**
+   * The rows a plan (src/query/plan.js) reads from a sorted index, in its
+   * order — the rows whose first keys are `prefix`, within `range` on the
+   * key after it (`{ lower: { value, inclusive }, upper }`, either side
+   * open: closed at the rank's floor or ceiling, so nothing of another kind
+   * lies within), forward or backward (`desc`) — as a pull: `next()` an id,
+   * or null past the last; `sorted` whether the ids come in the index's
+   * order (no key holds an array); `estimate` how many entries lie between
+   * the edges (the rows, where sorted). `after` (a page's edge: the order's
+   * keys, which are the index's from the prefix on, and the id) begins the
+   * scan after it where it is sorted. The rows whose array passed the cap
+   * (keyed whole) come last, every scan: the predicate decides.
+   */
+  scan(type, plan, after = null) {
+    const { index, prefix, range, desc } = plan;
+    const held = this.#keyed.get(type)?.get(index.join(','));
+    if (held === undefined) return { next: () => null, sorted: true, estimate: 0 };
+    if (plan.in !== undefined && plan.in !== null) return this.#scanIn(type, plan, after, held);
+    const { sorted } = held;
+    const k = prefix.length;
+    const edges = closed(range);
+    let from =
+      edges.lower === null
+        ? sorted.seek(prefix, k, null, true)
+        : sorted.seek(prefix.concat([edges.lower.value]), k + 1, null, edges.lower.inclusive);
+    let to =
+      edges.upper === null
+        ? sorted.seek(prefix, k, null, false)
+        : sorted.seek(prefix.concat([edges.upper.value]), k + 1, null, !edges.upper.inclusive);
+    const exact = held.multi === 0 && held.overflow.size === 0;
+    let startAt = null;
+    if (after !== null && exact) {
+      // The first entry past the edge. Forward, the scan begins there; backward, the rest of the edge's group
+      // (the ids above the edge's) comes first, then the groups below it — or, the edge last of its group, the
+      // groups below alone.
+      const probe = prefix.concat(after.keys);
+      const past = sorted.seek(probe, probe.length, after.id, false);
+      if (!desc) {
+        if (beforePosition(from, past)) from = past;
+      } else if (beforePosition(past, to) && sorted.holds(past, probe, probe.length)) startAt = past;
+      else {
+        const group = sorted.seek(probe, probe.length, null, true);
+        if (beforePosition(group, to)) to = group;
+      }
     }
-    // What a persisted catalog must have been built with to be reused.
-    this.#indexKey = keyOf(shape);
+    const estimate = Math.max(0, sorted.ordinal(to) - sorted.ordinal(from));
+    const iterator = sorted.iterate(from, to, desc, startAt);
+    // An array keyed per element lists a row once per element in range, and a row keyed whole may lie in the
+    // range as well: each id once.
+    const seen = exact ? null : new Set();
+    const overflow = exact ? null : [...held.overflow];
+    let o = 0;
+    const next = () => {
+      for (;;) {
+        let id = iterator.next();
+        if (id === null) {
+          if (overflow === null || o >= overflow.length) return null;
+          id = overflow[o++];
+        }
+        if (seen !== null) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        return id;
+      }
+    };
+    return { next, sorted: exact, estimate };
+  }
+
+  // A `$in` on the field after the prefix: one sub-scan per value, in key order (the values descending for
+  // `desc`), concatenated. A page's edge falls in one of them — the value its first key holds — the values before
+  // it are skipped whole, the ones after come whole.
+  #scanIn(type, plan, after, held) {
+    const { index, prefix, range, desc } = plan;
+    const values = plan.in.values.slice().sort(compare);
+    if (desc) values.reverse();
+    const parts = [];
+    let estimate = 0;
+    for (let i = 0; i < values.length; i++) {
+      let edge = null;
+      if (after !== null) {
+        const order = compare(values[i], after.keys[0]);
+        if (desc ? order > 0 : order < 0) continue;
+        if (order === 0) edge = { keys: after.keys.slice(1), id: after.id };
+      }
+      const part = this.scan(type, { index, prefix: prefix.concat([values[i]]), range, desc }, edge);
+      estimate += part.estimate;
+      parts.push(part);
+    }
+    const exact = held.multi === 0 && held.overflow.size === 0;
+    const seen = exact ? null : new Set();
+    let i = 0;
+    const next = () => {
+      for (;;) {
+        if (i >= parts.length) return null;
+        const id = parts[i].next();
+        if (id === null) {
+          i++;
+          continue;
+        }
+        if (seen !== null) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        return id;
+      }
+    };
+    return { next, sorted: exact, estimate };
+  }
+
+  /** How many entries a plan's scan would walk: a bound on the rows it yields, exact where it comes sorted. */
+  estimate(type, plan) {
+    return this.scan(type, plan, null).estimate;
+  }
+
+  /** How many rows hold any of `values` under `field` — the posting lists' sizes summed; 0 where the field is not indexed. */
+  cardinality(type, field, values) {
+    const list = this.#eq.get(type)?.get(field);
+    if (list === undefined) return 0;
+    let count = 0;
+    for (let i = 0; i < values.length; i++) count += list.get(keyOf(values[i]))?.size ?? 0;
+    return count;
+  }
+
+  /** The ids holding any of `values` under `field`: a fresh Set, the posting lists' union (empty where none is indexed). */
+  posting(type, field, values) {
+    const out = new Set();
+    const list = this.#eq.get(type)?.get(field);
+    if (list === undefined) return out;
+    for (let i = 0; i < values.length; i++) {
+      const held = list.get(keyOf(values[i]));
+      if (held !== undefined) for (const id of held) out.add(id);
+    }
+    return out;
+  }
+
+  /** How many live records the collection holds. */
+  live(type) {
+    return this.#byType.get(type)?.size ?? 0;
+  }
+
+  // A row's entries into the type's sorted indexes, or out of them.
+  #key(type, id, fields, def, into) {
+    let byIndex = this.#keyed.get(type);
+    if (byIndex === undefined) {
+      if (!into) return;
+      byIndex = new Map();
+      for (let i = 0; i < def.indexes.length; i++) {
+        const key = def.indexes[i];
+        const held = { fields: key, sorted: new SortedIndex(key.length), multi: 0, overflow: new Set(), pending: null };
+        if (this.#bulk) held.pending = [];
+        byIndex.set(key.join(','), held);
+      }
+      this.#keyed.set(type, byIndex);
+    }
+    for (const held of byIndex.values()) this.#keyInto(held, id, fields, into);
+  }
+
+  // One row into one sorted index, or out of it: `multi` counts the rows keyed per element (a scan is sorted again
+  // once the last leaves), `overflow` the ids whose array passed the cap (keyed whole; every scan yields them). Under
+  // a bulk build the entries wait for one sort (`#endBulk`).
+  #keyInto(held, id, fields, into) {
+    const { tuples, multi, overflow } = keysOf(fields, held.fields);
+    if (multi) held.multi += into ? 1 : -1;
+    if (overflow) {
+      if (into) held.overflow.add(id);
+      else held.overflow.delete(id);
+    }
+    for (let t = 0; t < tuples.length; t++) {
+      if (!into) {
+        if (!held.sorted.remove(tuples[t], id) && held.pending !== null) unqueue(held.pending, id);
+      } else if (held.pending !== null) held.pending.push({ keys: tuples[t], id });
+      else held.sorted.insert(tuples[t], id);
+    }
+  }
+
+  // A bulk build begun: every sorted index queues what comes until `#endBulk` sorts it once.
+  #beginBulk() {
+    this.#bulk = true;
+    for (const byIndex of this.#keyed.values()) {
+      for (const held of byIndex.values()) if (held.pending === null) held.pending = [];
+    }
+  }
+
+  #endBulk() {
+    this.#bulk = false;
+    for (const byIndex of this.#keyed.values()) {
+      for (const held of byIndex.values()) {
+        if (held.pending === null) continue;
+        held.sorted.build(held.pending);
+        held.pending = null;
+      }
+    }
+  }
+
+  /**
+   * Defines collection `name` after the catalog was built (`addCollections`),
+   * or forgets its definition (`def` null, `removeCollection`): the rows of
+   * the type keep their place and lose what was indexed of them — the caller
+   * indexes the records again — and `$text` reads `index` from then on (null:
+   * no search). A catalog saved before is not reused by a reopen under
+   * other definitions: it is rebuilt from the records.
+   */
+  define(name, def, index = null) {
+    const ids = [...(this.#byType.get(name) ?? [])];
+    const rows = [];
+    // Under the definition the rows were posted under: the postings, the unique keys and the sorted indexes go
+    // whole, first — then each row, bare.
+    this.#eq.delete(name);
+    this.#unique.delete(name);
+    this.#keyed.delete(name);
+    for (let i = 0; i < ids.length; i++) {
+      const row = bare(this.#rows.get(ids[i]));
+      this.#remove(ids[i]);
+      rows.push(row);
+    }
+    if (def === null) this.#defs.delete(name);
+    else this.#defs.set(name, defOf(def));
+    if (index === null) this.#text.delete(name);
+    else this.#text.set(name, index);
+    for (const [id, pending] of this.#textPending) if (pending.type === name) this.#textPending.delete(id);
+    // The bare rows back, their sorted indexes built once (the caller indexes the records again).
+    this.#beginBulk();
+    for (let i = 0; i < ids.length; i++) {
+      this.#insert(ids[i], rows[i]);
+      this.#dirty++;
+      this.#changed.set(ids[i], rows[i]);
+    }
+    this.#endBulk();
+    this.#rekey();
+    this.#bump(name);
+    this.#defGeneration++;
   }
 
   // The row's text into the entity's text index, or out of it. Derived
@@ -209,6 +571,26 @@ class Catalog {
     return this.#rows.size;
   }
 
+  /** A number that moves with every change of a record the catalog heard of: what a result is current as of. */
+  get generation() {
+    return this.#generation;
+  }
+
+  /** What a query result of `type` is current as of: moved by a put of a record of the collection, its definition, a load or an adopt. */
+  generationOf(type) {
+    const own = this.#typeGen.get(type);
+    return own === undefined || own < this.#floor ? this.#floor : own;
+  }
+
+  #bump(type) {
+    this.#typeGen.set(type, ++this.#generation);
+  }
+
+  /** A number that moves with every definition (`define`): what a plan, and a cached result's key, were made under. */
+  get definitions() {
+    return this.#defGeneration;
+  }
+
   /** Puts since the last save. */
   get dirty() {
     return this.#dirty;
@@ -226,13 +608,17 @@ class Catalog {
     this.#index(id, row, false);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
     if (!def) return;
+    // The type's structures may be gone already (`define` takes them whole, then the rows).
     const eq = this.#eq.get(row.type);
-    for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
+    if (eq !== undefined) for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
     const unique = this.#unique.get(row.type);
-    for (const key of def.unique) {
-      const value = this.#uniqueKey(row.fields, key);
-      if (value !== null) drop(unique.get(key.join(',')), value, id);
+    if (unique !== undefined) {
+      for (const key of def.unique) {
+        const value = this.#uniqueKey(row.fields, key);
+        if (value !== null) drop(unique.get(key.join(',')), value, id);
+      }
     }
+    this.#key(row.type, id, row.fields, def, false);
   }
 
   /** What unique key `key` (a field list) reads as in `data` — null when a field is missing. */
@@ -281,6 +667,7 @@ class Catalog {
       const value = this.#uniqueKey(row.fields, key);
       if (value !== null) add(unique.get(key.join(',')), value, id);
     }
+    this.#key(row.type, id, row.fields, def, true);
   }
 
   /**
@@ -293,11 +680,21 @@ class Catalog {
     const was = this.#rows.get(id);
     const before = was && !was.gone ? was.type : null;
     const gone = view !== null && view.gone === true;
-    const type = view === null ? null : typeof view.type === 'string' ? view.type : null;
+    // A tombstone's view may name no collection (its data is empty): the row keeps the one it had — unless the
+    // record was purged, which erases the collection with it.
+    const kept = gone && view.purged !== true && was !== undefined ? was.type : null;
+    const type = view === null ? null : typeof view.type === 'string' ? view.type : kept;
+    // A result of the collection the record was of, or joins, is of before this put — a no-op put too: the record
+    // may read as another where the row does not say.
+    if (before !== null) this.#bump(before);
+    if (type !== null && type !== before) this.#bump(type);
     let row = null;
     if (view !== null) {
       row = { type, v: view.v ?? null, encrypted: view.encrypted === true, fields: {} };
-      if (gone) row.gone = true;
+      if (gone) {
+        row.gone = true;
+        if (Array.isArray(view.deleted)) row.deleted = view.deleted;
+      }
       const def = type === null || gone ? undefined : this.#defs.get(type);
       if (def && !row.encrypted) {
         for (const field of def.fields) {
@@ -314,15 +711,68 @@ class Catalog {
     // sort or save — but a watcher reads more than the row, so it hears of
     // the change (`false`: the row stayed; a covered cursor need not run).
     if (was !== undefined && row !== null && sameRow(was, row)) {
-      if (before !== null) this.#wake(before, false);
+      if (before !== null) this.#wake(before, false, id, 'update');
+      return;
+    }
+    // A live row of the collection it was of, changed: only what reads a changed field is kept up — the postings,
+    // the unique keys and the sorted indexes of those fields; the sorted id lists stay (the id set did not move).
+    const live = was !== undefined && row !== null && !was.gone && !row.gone && !was.encrypted && !row.encrypted;
+    const same = live && type !== null && type === was.type ? this.#defs.get(type) : undefined;
+    if (same !== undefined) {
+      this.#update(id, was, row, same);
+      this.#dirty++;
+      this.#changed.set(id, row);
+      this.#wake(type, true, id, 'update');
       return;
     }
     this.#remove(id);
     this.#dirty++;
     this.#changed.set(id, row);
-    if (before !== null) this.#wake(before, true);
-    if (!gone && type !== null && type !== before) this.#wake(type, true);
+    // The collection the record was of hears an update, or its leaving (gone,
+    // or of another collection now); the one it joins hears an insert.
+    if (before !== null) this.#wake(before, true, id, !gone && type === before ? 'update' : 'remove');
+    if (!gone && type !== null && type !== before) this.#wake(type, true, id, 'insert');
     if (row !== null) this.#insert(id, row);
+  }
+
+  // A live row changed within its collection: the fields whose values moved, and what reads them — a posting
+  // list, a unique key, a sorted index — taken out under the old value and put under the new; the text, where
+  // it changed. Nothing else is touched.
+  #update(id, was, row, def) {
+    this.#rows.set(id, row);
+    const changed = new Set();
+    for (const field of Object.keys(was.fields)) {
+      if (!sameValue(was.fields[field], row.fields[field])) changed.add(field);
+    }
+    for (const field of Object.keys(row.fields)) if (!Object.hasOwn(was.fields, field)) changed.add(field);
+    const eq = this.#eq.get(row.type);
+    for (const field of changed) {
+      const list = eq.get(field);
+      if (list === undefined) continue;
+      if (was.fields[field] !== undefined) post(list, was.fields[field], id, drop);
+      if (row.fields[field] !== undefined) post(list, row.fields[field], id, add);
+    }
+    const unique = this.#unique.get(row.type);
+    for (const key of def.unique) {
+      if (!touches(key, changed)) continue;
+      const before = this.#uniqueKey(was.fields, key);
+      const after = this.#uniqueKey(row.fields, key);
+      if (before === after) continue;
+      if (before !== null) drop(unique.get(key.join(',')), before, id);
+      if (after !== null) add(unique.get(key.join(',')), after, id);
+    }
+    const byIndex = this.#keyed.get(row.type);
+    if (byIndex !== undefined) {
+      for (const held of byIndex.values()) {
+        if (!touches(held.fields, changed)) continue;
+        this.#keyInto(held, id, was.fields, false);
+        this.#keyInto(held, id, row.fields, true);
+      }
+    }
+    if (was.text !== row.text) {
+      if (row.text === undefined) this.#index(id, was, false);
+      else this.#index(id, row, true);
+    }
   }
 
   /** Whether `$text` can be asked of this collection: it has search fields and an index. */
@@ -348,9 +798,11 @@ class Catalog {
   }
 
   /**
-   * Calls `fn(changed)` after every change to a record of `type` — `changed`
-   * false when the record's catalog row stayed as it was; returns the
-   * unsubscribe.
+   * Calls `fn(changed, id, action)` after every change to a record of
+   * `type` — `changed` false when the record's catalog row stayed as it was,
+   * `action` what the change was to the collection: `insert`, `update` or
+   * `remove` (deleted, purged, encrypted, or of another collection now);
+   * returns the unsubscribe.
    */
   subscribe(type, fn) {
     let fns = this.#watchers.get(type);
@@ -362,9 +814,9 @@ class Catalog {
     };
   }
 
-  #wake(type, changed) {
+  #wake(type, changed, id, action) {
     const fns = this.#watchers.get(type);
-    if (fns) for (const fn of [...fns]) fn(changed);
+    if (fns) for (const fn of [...fns]) fn(changed, id, action);
   }
 
   row(id) {
@@ -495,17 +947,21 @@ class Catalog {
   /** Takes rows as `rows()` hands them out — a copy of another catalog, under the same definitions. */
   adopt(rows) {
     this.#loaded = false;
+    this.#floor = ++this.#generation;
+    this.#beginBulk();
     for (const [id, row] of rows) {
       this.#remove(id);
       this.#insert(id, row);
       this.#dirty++;
       this.#changed.set(id, row);
     }
+    this.#endBulk();
   }
 
   // `strict: false` reuses a catalog saved under other indexes — a tag's,
   // where the rows say what existed and the indexes are those of its day.
   async load({ strict = true } = {}) {
+    this.#floor = ++this.#generation;
     if (this.#rowStore !== null) return this.#loadRows(strict);
     const text = await this.#store.get(FILE);
     if (text === null) return null;
@@ -517,14 +973,16 @@ class Catalog {
     }
     const usable =
       isObject(parsed) &&
-      parsed.format === FORMAT &&
+      // A tag's catalog (`strict: false`) saved as format 4 still reads; the live one asks for today's format.
+      (parsed.format === FORMAT || (!strict && parsed.format === 4)) &&
       (!strict || parsed.indexes === this.#indexKey) &&
       typeof parsed.stamp === 'string' &&
       Array.isArray(parsed.rows);
     if (!usable) return null;
+    this.#beginBulk();
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
-      const [id, type, v, encrypted, fields, gone, text] = row;
+      const [id, type, v, encrypted, fields, gone, seventh] = row;
       this.#remove(id);
       const loaded = {
         type: typeof type === 'string' ? type : null,
@@ -532,12 +990,15 @@ class Catalog {
         encrypted: encrypted === true,
         fields: isObject(fields) ? fields : {},
       };
-      if (gone === true) loaded.gone = true;
-      else if (typeof text === 'string') loaded.text = text;
+      if (gone === true) {
+        loaded.gone = true;
+        if (Array.isArray(seventh) && typeof seventh[0] === 'number') loaded.deleted = seventh;
+      } else if (typeof seventh === 'string') loaded.text = seventh;
       // Replayed through #insert: the text index is rebuilt here, under the
       // file's stamp, from the rows alone.
       this.#insert(id, loaded);
     }
+    this.#endBulk();
     this.#dirty = 0;
     return { stamp: parsed.stamp };
   }
@@ -552,11 +1013,13 @@ class Catalog {
     const saved = await this.#rowStore.load();
     if (saved === null || (strict && saved.indexes !== this.#indexKey) || typeof saved.stamp !== 'string') return null;
     const rows = saved.rows;
+    this.#beginBulk();
     for (let i = 0; i < rows.length; i++) {
       const [id, row] = rows[i];
       this.#remove(id);
       this.#insert(id, row);
     }
+    this.#endBulk();
     this.#dirty = 0;
     this.#changed.clear();
     this.#loaded = true;
@@ -582,8 +1045,10 @@ class Catalog {
     const rows = [];
     for (const [id, row] of this.#rows) {
       const cells = [id, row.type, row.v, row.encrypted, row.fields];
-      if (row.gone) cells.push(true);
-      else if (row.text !== undefined) cells.push(false, row.text);
+      if (row.gone) {
+        cells.push(true);
+        if (row.deleted !== undefined) cells.push(row.deleted);
+      } else if (row.text !== undefined) cells.push(false, row.text);
       rows.push(cells);
     }
     const saved = this.#dirty;
@@ -593,4 +1058,4 @@ class Catalog {
   }
 }
 
-module.exports = { Catalog, valueOf, textOf, isTextIndex };
+module.exports = { Catalog, valueOf, textOf, isTextIndex, rankOf, compare };

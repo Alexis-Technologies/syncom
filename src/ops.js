@@ -983,7 +983,10 @@ const applyOp = (previous, op, limits = null) => {
   changes.covered = new Set();
   const outcome = (changed, whole = false) => {
     if (whole) delete changes.covered;
-    else changesOf(entry, delta, changes, plugins);
+    else {
+      if (changed) revived(previous, entry, delta, changes.covered);
+      changesOf(entry, delta, changes, plugins);
+    }
     // The newest stamp, carried: the source's and this op's (a merge joins
     // another meta's stamps — walked when asked). Only along a line a write
     // path has asked (`latestHeld`): an entry made from nothing, or folded by
@@ -1004,7 +1007,12 @@ const applyOp = (previous, op, limits = null) => {
     erase(entry, stamp, delta);
     const before = previous ? previous.meta.purged : undefined;
     const changed = before === undefined || compareClock(meta.purged, before) > 0;
-    if (changed) changes.push({ action: 'purge' });
+    if (changed) {
+      // The collection the record was of rides with the purge (its catalog row goes with it): a reader that
+      // follows a collection's turns hears of the purge.
+      const type = previous && typeof previous.data?.$type === 'string' ? previous.data.$type : null;
+      changes.push(type === null ? { action: 'purge' } : { action: 'purge', type });
+    }
     return outcome(changed, true);
   }
 
@@ -1033,11 +1041,18 @@ const applyOp = (previous, op, limits = null) => {
       meta.base = stamp;
       meta.deleted = stamp;
       applyBase(entry, delta, plugins);
+      // The data a delete carries lies on the tombstone, at its stamp: below
+      // what keeps a record alive, so the record is as dead as without it,
+      // and there for whoever reads the tombstone (`delete(id, { data })`) —
+      // reported with the delete, never as puts of a record that is gone.
+      if (isPlainObject(op.data)) applyFields(entry, op.data, stamp, delta, rejected, plugins, null);
       // A field stamped above the tombstone survives it and keeps the record alive (a concurrent
       // write landed first): the reading shows the survivor and the fields that went — reported so
       // (`unset` each, from the delta), never as a record gone (EVT-5).
       if (isAlive(entry)) return outcome(true);
-      changes.push({ action: 'delete' });
+      // What the tombstone carries: the fields the delete's data applied — never the payload as sent.
+      const carried = Object.keys(entry.data).length > 0 ? asJson(entry.data) : null;
+      changes.push(carried === null ? { action: 'delete' } : { action: 'delete', data: carried });
       return outcome(true, true);
     }
   } else if (op.type === 'merge') {
@@ -1063,6 +1078,7 @@ const applyOp = (previous, op, limits = null) => {
         const moved =
           joined.meta.base !== (before ? before.base : null) ||
           joined.meta.deleted !== (before ? before.deleted : null);
+        revived(previous, joined, delta, changes.covered);
         const gone = isAlive(joined) ? changesOf(joined, delta, changes, plugins) : [{ action: 'delete' }];
         return { entry: joined, changed: true, delta, rejected, moved, changes: gone };
       }
@@ -1112,6 +1128,21 @@ const applyOp = (previous, op, limits = null) => {
     meta.base !== (before ? before.base : null) ||
     meta.deleted !== (before ? before.deleted : null);
   return outcome(changed);
+};
+
+// A record alive again — an op above its tombstone, a joined state — reads
+// what the tombstone carried too (`delete(id, { data })`, below what keeps
+// a record alive): reported with the op that revived it, as the resets of
+// the fields its own path did not report, so the changes say what the
+// reading shows (EVT-1). Nothing to add for a record that was alive, or is
+// not, or whose tombstone carried nothing.
+const revived = (previous, entry, delta, covered) => {
+  if (!previous || previous.meta.deleted === null || isAlive(previous) || !isAlive(entry)) return;
+  const { data } = entry;
+  for (const field of Object.keys(data)) {
+    if (Object.hasOwn(delta, field) || (covered !== undefined && covered.has(field))) continue;
+    delta[field] = data[field];
+  }
 };
 
 // The changes of an op, completed from its delta: a field the op's own path

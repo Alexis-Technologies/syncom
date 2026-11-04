@@ -24,6 +24,11 @@ same process may run with others.
 | `@alexify/syncom/telemetry` | the OpenTelemetry adapter: `{ api }` or `{ tracer, meter }` into the writer the engine records through; `createTelemetry()` | `createDatabase({ plugins: [telemetry], telemetry })` |
 | `@alexify/syncom/query` | the cursor behind `select()`, `count()` and `watch()` on a collection; the catalog stays in the core | `createDatabase({ plugins: [query] })` |
 | `@alexify/syncom/versions` | the past: `get(id, { at })`, `history()`, `diff()` between versions, `restore()`, the tags; `applyPatches()` and `compact()` stay in the core | `createDatabase({ plugins: [versions] })` |
+| `@alexify/syncom/local` | local documents: `db.local` and `collection.local`, JSON values beside the records that never become an op | `createDatabase({ plugins: [local] })` |
+| `@alexify/syncom/state` | persistent app state by name and path, over a record (replicated, a path a register) or a local document | `createState(db, name)` |
+| `@alexify/syncom/dump` | a database as JSON and back: `exportJSON`/`exportPages`, `importJSON` (merge or insert), `migrateStorage` between engines | functions over a database |
+| `@alexify/syncom/pipeline` | a handler over every change of a collection, once, in order, checkpointed — a derived collection | `createPipeline(db, { name, source, handler })` |
+| `@alexify/syncom/cleanup` | tombstone cleanup: an old, acknowledged tombstone folded whole into the `tombstones` kv namespace | `cleanup(db, options)` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |
@@ -111,17 +116,23 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 
 | Entry | min+gzip | Entry | min+gzip |
 | --- | ---: | --- | ---: |
-| the core | 56.7 KB | `/all` | 117.1 KB |
-| `/text` | 42.8 KB | `/tree` | 8.6 KB |
-| `/sync` | 16.6 KB | `/versions` | 34.8 KB |
-| `/signing` | 5.7 KB | `/chain` | 2.1 KB |
-| `/encryption` | 3.6 KB | `/schema` | 5.9 KB |
-| `/query` | 6.4 KB | `/telemetry` | 3.3 KB |
-| `/undo` | 8.7 KB | `/branch` | 4.6 KB |
-| `/presence` | 4.4 KB | `/inspect` | 5.0 KB |
-| `/editor` | 4.6 KB | `/store` | 1.0 KB |
-| `/prosemirror` | 7.8 KB | `/codemirror` | 7.8 KB |
-| `/memory` | 0.5 KB | `/layered` | 1.5 KB |
+| the core | 75.4 KB | `/all` | 162.4 KB |
+| `/text` | 44.0 KB | `/tree` | 8.6 KB |
+| `/sync` | 16.9 KB | `/versions` | 40.6 KB |
+| `/signing` | 6.6 KB | `/chain` | 3.8 KB |
+| `/encryption` | 6.4 KB | `/schema` | 7.0 KB |
+| `/query` | 17.3 KB | `/telemetry` | 4.1 KB |
+| `/undo` | 8.8 KB | `/branch` | 4.7 KB |
+| `/presence` | 4.5 KB | `/inspect` | 5.4 KB |
+| `/editor` | 4.6 KB | `/store` | 1.1 KB |
+| `/prosemirror` | 7.8 KB | `/codemirror` | 6.4 KB |
+| `/memory` | 3.3 KB | `/layered` | 1.5 KB |
+| `/local` | 2.8 KB | `/state` | 2.9 KB |
+| `/dump` | 6.6 KB | `/pipeline` | 3.1 KB |
+| `/cleanup` | 3.0 KB | `/engines` | 9.9 KB |
+| `/idb` | 4.9 KB | `/search` | 1.1 KB |
+| `/order` | 1.0 KB | `/contracts` | 1.0 KB |
+| `/wrpc` | 0.7 KB | | |
 
 A block measured alone carries the core modules it stands on, so the rows do
 not add up: in an app bundle those are counted once, and the script checks

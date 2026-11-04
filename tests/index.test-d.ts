@@ -221,6 +221,7 @@ expectAssignable<syncom.SyncomErrorCode>('CYCLE');
 expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
 expectType<Promise<void>>(storage.purge('id', { actor: 'u2' }));
 expectType<Promise<number>>(log.scrub('id'));
+expectType<Promise<number>>(log.scrub(['id', 'other']));
 expectType<true | undefined>(log.held()[0].scrubbed);
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'purge', id: 'r' });
 expectType<syncom.ClockStamp | null | undefined>(entry.meta.purged);
@@ -296,7 +297,7 @@ record.on('update', (data, delta) => {
 record.off('update');
 expectType<unknown>(record.title);
 declare const reference: Reference;
-expectType<Promise<SyncomRecord>>(reference.record());
+expectType<Promise<SyncomRecord | null>>(reference.record());
 expectType<unknown>(syncom.apply({}, [{ type: 'delete', id: 'r1' }]));
 expectType<unknown>(syncom.apply({}, [{ type: 'delete', key: 'a' }]));
 
@@ -573,6 +574,9 @@ expectType<void>(log.retain((entry) => entry.op.type === 'write'));
 expectType<void>(log.retain(null));
 expectError(log.retain(true));
 expectType<number>(storage.stats().cache.pinned);
+expectType<number>(storage.stats().collections);
+expectType<number>(storage.stats().tombstones);
+expectType<{ cache: { entries: number; rows: number }; live: number } | null>(storage.stats().query);
 expectType<string>(storage.stats().engine.name);
 expectType<{ heard: number; failed: number; caughtUp: number } | null>(storage.stats().follow);
 expectType<number>(storage.stats().engine.writes);
@@ -903,6 +907,132 @@ storage.record<Post>('id').then((record) => {
   expectType<Promise<syncom.SyncomDocument<RecordData>>>(typed.Post.record('id'));
   const legacy = await syncom.open({ fsi: memory() });
   expectAssignable<syncom.Database>(legacy);
+}
+
+// Collections defined after the open: `collections`, `addCollections()`, `removeCollection()`.
+{
+  const db = await syncom.createDatabase({ schema: { entities: { Post: {} } } });
+  expectAssignable<syncom.Collection>(db.collections.Post);
+  expectType<Promise<void>>(db.addCollections({ Tag: { index: ['n'], unique: ['name'] } }));
+  expectType<Promise<void>>(db.addCollections(new Map<string, EntityDefinition>()));
+  expectError(db.addCollections({ Tag: { index: 'n' } }));
+  expectType<void>(db.removeCollection('Tag'));
+  expectError((db.collections.Tag = db.collections.Post));
+}
+
+// Named ids, upserts and the bulk writes.
+{
+  const db = await syncom.createDatabase({
+    schema: { entities: { Post: { id: { fields: ['orgId', 'n'], separator: '-' } }, Tag: {} } },
+  });
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(db.Post.upsert({ orgId: 'o', n: 1 }));
+  expectType<Promise<syncom.SyncomDocument<RecordData>>>(db.Post.insertIfAbsent({ orgId: 'o', n: 1 }));
+  const bulk = await db.Post.bulkInsert([{ orgId: 'o', n: 1 }], { message: 'import' });
+  expectType<string[]>(bulk.success);
+  expectType<number>(bulk.error[0].index);
+  expectType<string | null>(bulk.error[0].id);
+  expectType<Error>(bulk.error[0].error);
+  expectType<Promise<syncom.BulkResult<RecordData>>>(db.Tag.bulkUpsert([{ id: 't1' }]));
+  expectType<Promise<syncom.BulkResult<string>>>(db.Tag.bulkRemove(['t1']));
+  expectError(db.Tag.bulkRemove([1]));
+  expectAssignable<syncom.EntityDefinition>({ id: { fields: ['a'] } });
+  expectError<syncom.EntityDefinition>({ id: { fields: 'a' } });
+  expectType<Promise<RecordData | null>>(db.Tag.modify('t1', (doc) => doc));
+  expectType<Promise<RecordData | null>>(db.modify('t1', () => null));
+  expectType<Promise<RecordData | null>>(db.modify('t1', async () => undefined, { message: 'm' }));
+  await db.transact(async (tx) => {
+    expectType<Promise<{ n: number } | null>>(tx.modify<{ n: number }>('t1', (doc) => void (doc.n += 1)));
+  });
+  expectError(db.modify('t1', 'nope'));
+  expectType<Promise<void>>(db.update('t1', { $inc: { n: 1 }, $addToSet: { tags: { $each: ['a'] } } }));
+  expectType<Promise<boolean>>(db.update('t1', { $set: { n: 1 } }, { ifMatch: { n: 0 } }));
+  expectType<Promise<boolean>>(db.Tag.update('t1', { n: 1 }, { ifMatch: { n: { $lt: 1 } } }));
+  expectType<Promise<void>>(db.Tag.update('t1', { $pop: { list: -1 }, $rename: { a: 'b' } }));
+  expectAssignable<syncom.UpdateOperators>({ $pop: { list: 1 }, $min: { n: 2 } });
+  expectNotAssignable<syncom.UpdateOperators>({ $pop: { list: 2 } });
+  expectNotAssignable<syncom.UpdateOperators>({ $inc: { n: 'x' } });
+  await db.transact(async (tx) => {
+    expectType<Promise<boolean>>(tx.update('t1', { $max: { n: 3 } }, { ifMatch: {} }));
+    expectType<Promise<void>>(tx.update('t1', { $unset: ['a'] }));
+    expectType<Promise<void>>(tx.delete('t1', { data: { why: 'x' } }));
+  });
+  expectType<Promise<syncom.WriteByQuery>>(db.Tag.select({ n: 1 }).update({ $inc: { n: 1 } }));
+  expectType<Promise<syncom.WriteByQuery>>(db.Tag.select().modify((row) => row));
+  expectType<Promise<syncom.WriteByQuery>>(db.Tag.select().delete({ data: { why: 'x' } }));
+  expectType<Promise<void>>(db.delete('t1', { data: { why: 'x' } }));
+  expectType<Promise<void>>(db.Tag.delete('t1', { data: { why: 'x' }, actor: 'me' }));
+  expectError(db.delete('t1', { data: 5 }));
+  const change: syncom.Change = { action: 'delete', data: { why: 'x' } };
+  expectAssignable<syncom.Change>(change);
+  expectAssignable<syncom.EntityDefinition>({ refs: { author: 'Author', tags: ['Tag'] } });
+  expectAssignable<syncom.EntityDefinition>({
+    methods: {
+      shout(this: syncom.SyncomDocument<{ title: string }>) {
+        return this.title.toUpperCase();
+      },
+    },
+    statics: {
+      latest(this: syncom.SyncomCollection) {
+        return this.select().one();
+      },
+    },
+  });
+  expectError<syncom.EntityDefinition>({ methods: { x: 1 } });
+  db.Tag.on('change', (event) => {
+    expectType<string>(event.id);
+    expectType<'insert' | 'update' | 'remove'>(event.action);
+  });
+  db.Tag.once('remove', (event) => expectType<string>(event.id));
+  expectError(db.Tag.on('nope', () => {}));
+  expectType<Promise<{ id: string }>>(db.Tag.toPromise('insert'));
+  expectType<Promise<{ removed: number }>>(db.Tag.remove({ purge: true, actor: 'me' }));
+  expectType<Promise<void>>(db.drop());
+  expectType<Promise<void>>(syncom.dropDatabase('data'));
+  expectType<Promise<void>>(syncom.dropDatabase('data', { fsi: memory() }));
+  expectError(syncom.dropDatabase());
+  expectError<syncom.EntityDefinition>({ refs: { tags: ['Tag', 'Other'] } });
+  const doc = await db.Tag.document('t1');
+  expectType<Promise<syncom.SyncomDocument<RecordData> | null | (syncom.SyncomDocument<RecordData> | null)[]>>(
+    doc.populate('author'),
+  );
+  expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().populate(['author']));
+  expectType<boolean>(db.Tag.select({ n: { $mod: [2, 1] }, tags: { $all: ['a'], $size: 1 } }).matches({ n: 1 }));
+  expectType<() => void>(db.Tag.select().watchCount((count) => expectType<number>(count)));
+  const page = await db.Tag.select().order('n').limit(10).page();
+  expectType<syncom.QueryRow<RecordData>[]>(page.rows);
+  expectType<syncom.PageToken | null>(page.next);
+  if (page.next !== null)
+    expectType<syncom.Cursor<syncom.QueryRow<RecordData>>>(db.Tag.select().order('n').after(page.next));
+  expectType<Promise<unknown[]>>(db.Tag.distinct('n', { k: 1 }));
+  expectType<AsyncIterableIterator<syncom.QueryRow<RecordData>>>(db.Tag.select().stream({ batch: 50 }));
+  const made = db.Tag.select({ n: 1 }).order('k').explain();
+  expectType<'text' | 'index' | 'postings' | 'collection'>(made.scan);
+  expectType<string[] | null>(made.index);
+  expectType<boolean>(made.sortedByIndex);
+  expectType<string[]>(made.uses.equalities);
+  expectType<number | null>(made.estimate);
+  expectType<{ field: string; values: unknown[] }[]>(made.narrow);
+  expectType<Promise<Map<string, RecordData>>>(db.Tag.findByIds(['a', 'b']));
+  expectAssignable<syncom.EntityDefinition>({ index: ['a', ['a', 'b']] });
+  expectError<syncom.EntityDefinition>({ index: [['a', 1]] });
+  expectType<Promise<{ value: unknown; count: number }[]>>(db.Tag.select().countBy('n'));
+  expectType<Promise<{ distance: number; row: syncom.QueryRow<RecordData> }[]>>(
+    db.Tag.select().nearest('v', [1, 2], 3, { distance: 'euclidean' }),
+  );
+  expectError(db.Tag.select().nearest('v', [1, 2], 3, { distance: 'nope' }));
+  expectAssignable<syncom.MangoQuery>({
+    $nor: [{ a: 1 }],
+    v: { $type: 'null' },
+    items: { $elemMatch: { k: { $gt: 1 } } },
+  });
+  expectNotAssignable<syncom.MangoOperators>({ $type: 'date' });
+  const reference = null as unknown as Reference;
+  expectType<string>(reference.id);
+  expectType<Promise<syncom.SyncomDocument<RecordData> | null>>(reference.document());
+  const code: syncom.SyncomErrorCode = 'EXISTS';
+  const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
+  expectType<'EXISTS'>(code);
+  expectType<'IN_TRANSACTION'>(inTx);
 }
 
 // The engine contract: an fsi becomes the files engine.

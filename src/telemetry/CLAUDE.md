@@ -34,4 +34,6 @@ src/telemetry/writer.js   the telemetry writer contract: DISABLED, isWriter, wri
   `otel.gauges(read)`; `includeIdentity: false` strips `IDENTITY_KEYS` (the
   scope among them) at span start AND end and records a failure's `code`
   rather than the exception. A new `event:` name goes into the table in
-  `docs/guide/telemetry.md` — the names are a surface.
+  `docs/guide/telemetry.md` — the names are a surface. A block (query, pipeline, cleanup, dump, a collection) records
+  through the writer the `[SOURCE]` seam hands it (`otel`; a tag's source has none — guard with `otel?.enabled`), through
+  a `record*` method of the writer (DISABLED + METHODS + the adapter), never through a require of the plugin.

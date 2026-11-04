@@ -8,20 +8,51 @@
 const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
 const { isPlainObject } = require('./shape.js');
-const { COMMIT, REFRESH } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+
+// A field of a declared reference, as a Document holds it: a string made a
+// Reference to the declared collection, an array of them where the reference
+// is to many; anything else as it is (a reference not yet set, a value of
+// another shape).
+const referenced = (value, many, storage, entity) => {
+  if (!many) return typeof value === 'string' ? new Reference(value, storage, entity) : value;
+  if (!Array.isArray(value)) return value;
+  const out = [];
+  for (let i = 0; i < value.length; i++) {
+    out.push(typeof value[i] === 'string' ? new Reference(value[i], storage, entity) : value[i]);
+  }
+  return out;
+};
 
 class Reference {
   #id;
   #storage = null;
+  // The collection the reference is declared to name; null where none was.
+  #entity;
 
-  constructor(id, storage) {
+  constructor(id, storage, entity = null) {
     this.#id = id;
     this.#storage = storage;
+    this.#entity = entity;
   }
 
-  /** The live Document the reference names. */
+  /** The id the reference names. */
+  get id() {
+    return this.#id;
+  }
+
+  /**
+   * The live Document the reference names, or null when the record is not there (gone, or never was) — or is
+   * not of the collection the reference is declared to name.
+   */
   async document() {
+    if (!this.#storage.hasRecord(this.#id)) return null;
+    if (this.#entity !== null && this.#storage[SOURCE].row(this.#id)?.type !== this.#entity) return null;
     return await this.#storage.document(this.#id);
+  }
+
+  toJSON() {
+    return this.#id;
   }
 
   /** @deprecated `document()` — the name before the rename. */
@@ -55,16 +86,55 @@ class Document extends Emitter {
     this.#data = JSON.parse(JSON.stringify(rawData));
     this.#convertToReferences(this.#data);
     this.#defineProperties();
+    this.#defineMethods();
   }
 
-  // A field's value as the Record holds it: a copy, a string naming a record
-  // made a Reference.
-  #own(value) {
-    if (typeof value === 'string') return this.#storage.hasRecord(value) ? new Reference(value, this.#storage) : value;
-    if (!value || typeof value !== 'object') return value;
-    const copy = JSON.parse(JSON.stringify(value));
-    this.#convertToReferences(copy);
-    return copy;
+  // The collection's `methods`, on this Document: each bound to it, hidden
+  // from enumeration (a field is enumerable, a method is not), defined once.
+  #defineMethods() {
+    const type = this.#data?.$type;
+    if (typeof type !== 'string') return;
+    const methods = this.#storage[SOURCE].definition(type)?.methods ?? null;
+    if (methods === null) return;
+    for (const name of Object.keys(methods)) {
+      if (Object.hasOwn(this, name)) continue;
+      Object.defineProperty(this, name, { value: methods[name].bind(this), enumerable: false, configurable: true });
+    }
+  }
+
+  // The references the record's collection declares (`refs`), by field; null for none.
+  #refs() {
+    const type = this.#data?.$type;
+    if (typeof type !== 'string') return null;
+    return this.#storage[SOURCE].definition(type)?.refs ?? null;
+  }
+
+  // A field's value as the Record holds it: a copy — a declared reference's
+  // value too, whatever its shape — a declared reference's id made a Reference.
+  #own(key, value) {
+    const copy = !value || typeof value !== 'object' ? value : JSON.parse(JSON.stringify(value));
+    const refs = this.#refs();
+    const ref = refs !== null && Object.hasOwn(refs, key) ? refs[key] : null;
+    return ref === null ? copy : referenced(copy, ref.many, this.#storage, ref.entity);
+  }
+
+  /**
+   * The record(s) a declared reference field names, as live Documents: one
+   * (or null when the record is not there), or an array of them where the
+   * reference is to many. A field that is no declared reference is a TypeError.
+   */
+  async populate(field) {
+    const refs = this.#refs();
+    if (refs === null || !Object.hasOwn(refs, field)) {
+      throw new TypeError(`populate(): ${field} is not a declared reference (refs)`);
+    }
+    const value = this.#data[field];
+    if (!refs[field].many) return value instanceof Reference ? value.document() : null;
+    const out = [];
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) out.push(value[i] instanceof Reference ? await value[i].document() : null);
+    }
+    return out;
   }
 
   // The fields a write changed laid over what the Record holds, from the
@@ -83,28 +153,19 @@ class Document extends Emitter {
         continue;
       }
       if (!Object.hasOwn(this.#data, key)) added = true;
-      this.#data[key] = this.#own(data[key]);
+      this.#data[key] = this.#own(key, data[key]);
     }
     if (added) this.#defineProperties();
     return true;
   }
 
+  // The declared references of the record's collection, made References: a
+  // field named in `refs` alone — never a string that happens to equal an id.
   #convertToReferences(data) {
-    if (!data || typeof data !== 'object') return;
-    const keys = Object.keys(data);
-    for (let i = 0; i < keys.length; i++) {
-      const key = keys[i];
-      const value = data[key];
-      if (typeof value === 'string') {
-        if (this.#storage.hasRecord(value)) {
-          data[key] = new Reference(value, this.#storage);
-        }
-      } else if (value && typeof value === 'object') {
-        const isReference = value instanceof Reference;
-        if (!isReference) {
-          this.#convertToReferences(value);
-        }
-      }
+    const refs = this.#refs();
+    if (refs === null) return;
+    for (const key of Object.keys(refs)) {
+      if (Object.hasOwn(data, key)) data[key] = referenced(data[key], refs[key].many, this.#storage, refs[key].entity);
     }
   }
 
@@ -157,8 +218,9 @@ class Document extends Emitter {
       return;
     }
     if (!plain || !this.#patch(data, delta)) this.#adopt(data);
+    // What is staged lies back on top as the Record holds a field (a declared reference's id a Reference).
     const pending = Object.keys(this.#changes);
-    for (let i = 0; i < pending.length; i++) this.#data[pending[i]] = this.#changes[pending[i]];
+    for (let i = 0; i < pending.length; i++) this.#data[pending[i]] = this.#own(pending[i], this.#changes[pending[i]]);
     if (source !== this) notify(this, this.#storage.logger, 'update', this.#data, delta);
   }
 

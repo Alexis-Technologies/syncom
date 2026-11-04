@@ -147,6 +147,26 @@
       "types": "./src/versions/versions.d.ts",
       "default": "./src/versions/versions.js"
     },
+    "./local": {
+      "types": "./src/local/local.d.ts",
+      "default": "./src/local/local.js"
+    },
+    "./state": {
+      "types": "./src/state/state.d.ts",
+      "default": "./src/state/state.js"
+    },
+    "./dump": {
+      "types": "./src/dump/dump.d.ts",
+      "default": "./src/dump/dump.js"
+    },
+    "./pipeline": {
+      "types": "./src/pipeline/pipeline.d.ts",
+      "default": "./src/pipeline/pipeline.js"
+    },
+    "./cleanup": {
+      "types": "./src/cleanup/cleanup.d.ts",
+      "default": "./src/cleanup/cleanup.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

@@ -965,59 +965,67 @@ class OpLog {
    * crash in the middle tears it — a torn segment is skipped at the next
    * open (what it held is gone from `since`, and a peer resuming through it
    * bootstraps), a torn open file is dropped — the price of forgetting over
-   * a backend with no rename.
+   * a backend with no rename. Takes one id or an array of them: a file
+   * holding entries of several is rewritten once.
    */
-  scrub(id) {
+  scrub(ids) {
+    const list = typeof ids === 'string' ? [ids] : ids;
     return this.#serialize(() => {
       const otel = this.#otel;
-      if (!otel.enabled) return this.#scrub(id);
+      if (!otel.enabled) return this.#scrub(list);
       return traced(
         otel,
         'syncom.log.scrub',
         {},
-        () => this.#scrub(id),
+        () => this.#scrub(list),
         (fresh) => ({ 'syncom.log.scrubbed': fresh }),
       );
     });
   }
 
-  async #scrub(id) {
-    // Every entry of the id (from the index, not a walk), for the files to
+  async #scrub(ids) {
+    // Every entry of each id (from the index, not a walk), for the files to
     // rewrite; the ones still holding a payload, for the count. A rewrite
     // that failed last time left the files behind memory: the id stays
     // marked torn, and the next scrub rewrites them whether or not
     // anything is fresh.
-    const seqs = this.#byId.get(id) ?? new Set();
-    const torn = this.#torn.has(id);
     // The files to rewrite are the ones holding what this scrub takes —
-    // every file of the id only after a rewrite that failed: a file whose
+    // every file of an id only after a rewrite that failed: a file whose
     // entries of the id were scrubbed before is as it should be, and a peer
     // that sends op after op for a purged id must not cost a rewrite of
     // every segment that ever held it.
     const taken = [];
     let fresh = 0;
-    for (const seq of seqs) {
-      const entry = this.#entryAt(seq);
-      if (!entry) continue;
-      if (!entry.scrubbed) {
-        scrubOp(entry.op);
-        entry.scrubbed = true;
-        fresh++;
-        taken.push(seq);
-      } else if (torn) taken.push(seq);
+    for (let k = 0; k < ids.length; k++) {
+      const id = ids[k];
+      const seqs = this.#byId.get(id);
+      if (seqs === undefined) continue;
+      const torn = this.#torn.has(id);
+      for (const seq of seqs) {
+        const entry = this.#entryAt(seq);
+        if (!entry) continue;
+        if (!entry.scrubbed) {
+          scrubOp(entry.op);
+          entry.scrubbed = true;
+          fresh++;
+          taken.push(seq);
+        } else if (torn) taken.push(seq);
+      }
     }
     if (taken.length === 0) return 0;
-    this.#torn.add(id);
+    for (let k = 0; k < ids.length; k++) this.#torn.add(ids[k]);
     // The lane is this scrub's: no append or roll changes `seqs` meanwhile.
     // The medium writes the files (or rows) holding what was taken again, as
-    // the entries are now; a copy kept as evidence that names the id goes whole.
+    // the entries are now, each once; a copy kept as evidence that names one
+    // of the ids goes whole.
     const sorted = taken.sort((a, b) => a - b);
     await this.#store.scrub(sorted, {
-      id,
+      id: ids.length === 1 ? ids[0] : null,
+      ids: ids.slice(),
       sealedTo: this.#sealedTo,
       entriesBetween: (from, to) => this.#between(from, to),
     });
-    this.#torn.delete(id);
+    for (let k = 0; k < ids.length; k++) this.#torn.delete(ids[k]);
     return fresh;
   }
 

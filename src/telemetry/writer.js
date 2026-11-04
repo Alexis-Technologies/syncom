@@ -65,6 +65,14 @@ const DISABLED = Object.freeze({
   recordRefusal: noop,
   recordPresenceRefused: noop,
   recordHandleFlush: noop,
+  recordQueryCache: noop,
+  recordQueryLive: noop,
+  recordQueryPlan: noop,
+  recordBulk: noop,
+  recordPipeline: noop,
+  recordCleanup: noop,
+  recordDump: noop,
+  recordInsertNamed: noop,
   gauges: noop,
 });
 
@@ -94,6 +102,14 @@ const METHODS = Object.freeze([
   'recordRefusal',
   'recordPresenceRefused',
   'recordHandleFlush',
+  'recordQueryCache',
+  'recordQueryLive',
+  'recordQueryPlan',
+  'recordBulk',
+  'recordPipeline',
+  'recordCleanup',
+  'recordDump',
+  'recordInsertNamed',
   'gauges',
 ]);
 

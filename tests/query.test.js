@@ -79,6 +79,17 @@ test('compileQuery', async (t) => {
   });
 
   await t.test('a malformed query is a TypeError at compile time', () => {
+    // A query nests 32 levels at most: deeper is a TypeError, never a RangeError.
+    const nest = (depth) => {
+      let query = { n: 1 };
+      for (let i = 0; i < depth; i++) query = { $and: [query] };
+      return query;
+    };
+    assert.deepStrictEqual(ids(nest(30)), ['a']);
+    assert.throws(() => compileQuery(nest(40)), /nests deeper than 32 levels/);
+    let elem = { n: 1 };
+    for (let i = 0; i < 40; i++) elem = { tags: { $elemMatch: elem } };
+    assert.throws(() => compileQuery(elem), /nests deeper than 32 levels/);
     const bad = (query, pattern) => assert.throws(() => compileQuery(query), { name: 'TypeError', message: pattern });
     bad('n', /takes a query object/);
     bad([], /takes a query object/);
@@ -216,4 +227,29 @@ test('query guards: a pattern the size of a document, a projection of __proto__'
   assert.doesNotThrow(() => compileQuery({ key: { $regex: 'a'.repeat(1000) } }));
   const source = { logger: null, candidates: () => null, ids: () => [], row: () => null, indexed: () => new Set() };
   assert.throws(() => new Cursor(source, 'T').projection(['__proto__']), TypeError);
+});
+
+test('QueryCache holds at most maxRows rows of idle results, never one past it alone, and counts no live run', () => {
+  const { QueryCache } = require('../src/query/cache.js');
+  const cache = new QueryCache({ max: 10, maxRows: 5 });
+  cache.keep('a', 1, [1, 2, 3]);
+  cache.keep('b', 1, [4, 5]);
+  assert.deepStrictEqual([cache.size, cache.held], [2, 5]);
+  // Past five rows: the least recently used result goes.
+  cache.keep('c', 1, [6]);
+  assert.deepStrictEqual([cache.size, cache.held, cache.rows('a', 1), cache.rows('b', 1)], [2, 3, null, [4, 5]]);
+  // Past five rows alone: not kept.
+  cache.keep('d', 1, [1, 2, 3, 4, 5, 6]);
+  assert.deepStrictEqual([cache.size, cache.rows('d', 1)], [2, null]);
+  // The same key again: its rows replaced, counted once.
+  cache.keep('b', 2, [4, 5, 6]);
+  assert.deepStrictEqual([cache.size, cache.held], [2, 4]);
+  // A live run's rows are not counted; released, they are, and the idle results make room.
+  cache.live('e', (entry) => {
+    entry.rows = [7, 8, 9, 10];
+    return {};
+  });
+  assert.deepStrictEqual([cache.size, cache.held], [3, 4]);
+  cache.release('e');
+  assert.deepStrictEqual([cache.size, cache.held, cache.rows('e', -1)], [1, 4, [7, 8, 9, 10]]);
 });

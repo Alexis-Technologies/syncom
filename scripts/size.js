@@ -167,7 +167,37 @@ const ENTRIES = [
   // checkWriteSet; review №5 S-3/S-5) — a seam's property names do not minify; both together 63. 63.5, raised by name.
   // 63.5 with one read a record (pieces.getMany, a page of records at a time) and the engine measured (stats().engine;
   // review №5 P-3/P-4/O-4). 64, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 64 },
+  // 64.1 with collections defined after the open (`collections`, `addCollections()`, `removeCollection()`,
+  // `Catalog.define`) and the catalog's action stream (collections plan, C1.1). 64.5, raised by name.
+  // 65.2 with records named by their data (composite ids, the id field as the id, EXISTS), the bulk writes,
+  // `upsert()`/`insertIfAbsent()` and IN_TRANSACTION (collections plan, C1.2–C1.3). 65.5, raised by name.
+  // 66.9 with the update operators (src/operators.js, `operate`) and `ifMatch` (collections plan, C1.5). 67, raised by name.
+  // 67.0 with `delete(id, { data })` and a revival's resets; declared references, `populate()` (collections plan,
+  // C1.7–C1.8). 67.5, raised by name.
+  // 67.7 with an entity's methods and statics and the collection events (collections plan, C1.9–C1.10). 68, raised by name.
+  // 68.2 with `collection.remove()`, `drop()`/`dropDatabase()` and src/layout.js (collections plan, C1.11). 68.5, raised by name.
+  // 68.8 with the catalog's sorted indexes (compound keys, `scan`) and `compare` shared, an array keyed per element (collections plan, C3.1). 69.5, raised by name.
+  // 69.8 with folded tombstones (Catalog.fold, EntryStore.fold, the row rebuilt on a read; collections plan,
+  // C4.5) and the transaction event's eventId. 70, raised by name.
+  // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (catalog FORMAT 5; review №6, E1.1;
+  // 2026-11-02). 70.5, raised by name. 70.5 with the folded tombstones in the `tombstones` kv namespace (EntryStore.foldMany,
+  // the fallback read, the rebuild over both stores; review №6, E1.2–E1.3). 71, raised by name.
+  // 71.0 with a row's id laid last, writes by query matched again inside the queue, drop() under the lock, dropDatabase()
+  // refusing a stray directory, composite ids refused on the separator and immutable (ID_IMMUTABLE), EXISTS by
+  // `expect: ABSENT` (review №6, E2). 71.5, raised by name.
+  // 72.7 with the catalog's sorted indexes on SortedIndex (src/sorted.js, chunked sorted arrays: 1.2 of it), a put that
+  // re-keys only the indexes a changed field belongs to, load/define/adopt built once (review №6, E4.2; the design
+  // estimated 0.6 less). 73, raised by name.
+  // 73.0 with a scan that seeks a page's edge and yields lazily, a one-sided range closed at its kind's edge (review №6,
+  // E4.4). 73.5, raised by name.
+  // 73.5 with the planner's cost model, a plan that follows the definitions, a path split once (review №6, E4.5–E4.8).
+  // 74, raised by name.
+  // 74.2 with the unique keys in flight kept in a map, a purge's ids scrubbed together, remove() over the ids as the
+  // call began (review №6, E5.1, E5.5; 2026-11-02). 74.5, raised by name.
+  // 74.7 with the collection's events on a microtask, the unique keys in maps, one operator per field, a query's depth
+  // bound (review №6, E6; 2026-11-02). 75, raised by name.
+  // 75.1 with the writer's record methods, the stats fields, the error fields and the log lines of E7 (review №6, E7; 2026-11-02). 75.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 75.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -230,12 +260,13 @@ const ENTRIES = [
     budget: 5,
   },
   // Presence: the emitter, the bounds, the signed entries; the identity comes from the storage.
+  // 4.5 (over by bytes) with the writer's new record methods it bundles (review №6, E7; 2026-11-02). 4.75, raised by name.
   {
     label: 'presence — browser (@alexify/syncom/presence)',
     entry: 'src/presence/presence.js',
     platform: 'browser',
     // 3.8 measured: shape.js (the canonical JSON, the stream and key checks) comes with the emitter.
-    budget: 4.5,
+    budget: 4.75,
   },
   // The editor binding: deltas composed and transformed, the diff between two readings (the text plugin's Myers
   // comes along, and the vector keys), the binding itself, selections and presence cursors. The plan said 4; the
@@ -372,7 +403,31 @@ const ENTRIES = [
   // 139.9 with the keys of the contract checked in the core (review №5 E1, see the main entry). 140.5, raised by name.
   // 140.6 with the catalog's delta, the at-rest place and base64 in chunks (review №5 E4); both branches together
   // 141.4. 142, raised by name. 142.0 with a follower's counts (stats().follow; review №5 O-6). 142.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 142.5 },
+  // 142.7 with collections defined after the open (collections plan, C1.1). 143, raised by name.
+  // 143.9 with named ids, the bulk writes and upserts (collections plan, C1.2–C1.3). 144.5, raised by name.
+  // 145.7 with the update operators and `ifMatch` (collections plan, C1.5). 146, raised by name.
+  // 146.0 with `delete(id, { data })`, the writes by query, declared references (collections plan, C1.6–C1.8). 147, raised by name.
+  // 147.4 with methods, statics and the collection events (collections plan, C1.9–C1.10). 148, raised by name.
+  // 148.4 with collection.remove/drop, immutable cursors and the six query operators (collections plan, C1.11–C2.1).
+  // 149, raised by name.
+  // 150.1 with live queries kept by event-reduce, watchCount and the query cache (collections plan, C2.2). 150.5,
+  // raised by name.
+  // 151.2 with keyset paging, distinct/countBy and nearest (collections plan, C2.3). 151.5, raised by name.
+  // 152.8 with compound indexes, the planner and explain() (collections plan, C3.1–C3.2). 153.5, raised by name.
+  // 153.8 with the local plugin registered (collections plan, C4.1). 154.5, raised by name.
+  // 154.6 with a tombstone's row typed and stamped (review №6, E1.1; 2026-11-02). 155, raised by name.
+  // 155.1 with the folded tombstones in the `tombstones` kv namespace (review №6, E1.2–E1.3). 155.5, raised by name.
+  // 155.5 with the writes made safe (review №6, E2). 156, raised by name.
+  // 157.5 with the sorted indexes on SortedIndex (review №6, E4.2). 158, raised by name.
+  // 158.1 with the lazy, seeking scan (review №6, E4.4). 158.5, raised by name.
+  // 159.2 with the planner's cost model (review №6, E4.5). 159.5, raised by name.
+  // 159.8 with the unique keys of the records in flight and of a transaction's own kept in maps (review №6, E5.1;
+  // 2026-11-02). 160, raised by name.
+  // 160.2 with the query cache per collection and the live delivery (review №6, E5.2–E5.3). 160.5, raised by name.
+  // 160.5 with a purge's ids scrubbed together through the log and the tags (review №6, E5.5). 161, raised by name.
+  // 161.3 with the events, the guards and the bounds of E6 (review №6, E6). 161.5, raised by name.
+  // 162.3 with the blocks recording their work (review №6, E7). 162.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 162.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -441,7 +496,9 @@ const ENTRIES = [
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
   // 3.4 with the blocks in a store — the database's `blockchain` namespace, or a directory (engines plan, E1.3). 3.5, raised by name.
   // 3.6 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES; review №5 E1). 3.75, raised by name.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 3.75 },
+  // 3.8 with the `tombstones` namespace among the contract's keys and a tombstone's row typed and stamped (review №6, E1.1;
+  // 2026-11-02). 4, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 4 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
   // 4.1 with the key pair read through a store (engines plan, E1.3). 4.5, raised by name.
   // 5.7 with atRest over an engine (src/encryption/at-rest-engine.js: every store's value sealed, the log's entries and
@@ -494,20 +551,41 @@ const ENTRIES = [
     // main entry 50.8 → 50.1; 2026-10-27). 6, raised by name.
     // 6.0 (over by bytes) with a peer's `actor` and `from` bounded in shape.js (MAX_ACTOR; review №4, E4). 6.5,
     // raised by name.
-    budget: 6.5,
+    // 6.6 with the id named by the data, a composite id and the declared references read off a schema's relations
+    // (collections plan, C1.2–C1.8). 7, raised by name.
+    budget: 7,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
+  // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
   {
     label: 'telemetry — browser (@alexify/syncom/telemetry)',
     entry: 'src/telemetry/telemetry.js',
     platform: 'browser',
-    budget: 4,
+    budget: 4.5,
   },
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
   // 6.0 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
   // 7.0 with the catalog persisted through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 7.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 7.5 },
+  // 7.6 with `Catalog.define` and the action stream (collections plan, C1.1). 7.8, raised by name.
+  // 7.9 with the write terminals (update/modify/delete by query) and `matches` (collections plan, C1.5–C1.6). 8.2, raised by name.
+  // 8.3 with a page's references populated (`populate`; collections plan, C1.8). 8.5, raised by name.
+  // 8.7 with immutable builders, `$type`/`$size`/`$mod`/`$all`/`$elemMatch`/`$nor` and `matches` (collections plan, C2.1). 9, raised by name.
+  // 10.3 with live queries kept by event-reduce (src/query/live.js), `watchCount` and the query cache
+  // (src/query/cache.js; collections plan, C2.2). 10.5, raised by name.
+  // 11.3 with keyset paging (`page`/`after`), `distinct`/`countBy` and `nearest` over src/search/distance.js
+  // (collections plan, C2.3). 11.5, raised by name.
+  // 12.8 with the planner (src/query/plan.js), `explain()` and the catalog's sorted indexes it reads (collections plan,
+  // C3.1–C3.2). 13.5, raised by name.
+  // 14.9 with the catalog it is measured with standing on SortedIndex (src/sorted.js, bundled alone here; in an app the
+  // core shares it) (review №6, E4.2). 15, raised by name.
+  // 15.5 with the cursor pulling a lazy scan, keyset by id over the postings and the collection, count() from the index,
+  // stream() running once where no index sorts (review №6, E4.4). 15.5 — at the measure; 16, raised by name.
+  // 16.5 with the planner's cost model — estimate, cardinality, narrow, a $in scanned value by value (review №6, E4.5;
+  // the design estimated 14.5 for all of E4). 17, raised by name.
+  // 17.0 with a live run delivering a row that stayed as the copy it was, nearest() streamed into its sink, the
+  // cache bounded by rows and the key built once (review №6, E5.2–E5.3; 2026-11-02). 17.5, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 17.5 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.
@@ -530,7 +608,42 @@ const ENTRIES = [
     // 38.5 (over by bytes) with the log's failed line taken out, the index's counter kept, the evidence copies
     // scrubbed, the writes counted by path and one close (review №4, E3–E9). 39, raised by name.
     // 39.5 with the log's store seam the versions plugin bundles with the log (engines plan, E1.2). 40, raised by name.
-    budget: 40,
+    // 40.1 with the write path's `expect: ABSENT` and the immutables it bundles (review №6, E2). 40.5, raised by name.
+    // 40.5 (over by bytes) with the cursor and the catalog it bundles grown through E5 (review №6, E5.6; 2026-11-02). 41,
+    // raised by name.
+    budget: 41,
+  },
+  // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
+  // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
+  // 2.5 with the changes of a key one at a time (`set(key, fn)`), a contained observer and CORRUPT (review №6, E3b). 2.75,
+  // raised by name.
+  // 2.8 with a write after close() or a lost lease refused through the seam's guard (review №6, E6; 2026-11-02). 3,
+  // raised by name.
+  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 3 },
+  // Persistent app state by name and path, over a record or a local document — measured with the paths and the
+  // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
+  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },
+  // Dumps: export/import over snapshot pages, a move between engines — measured with the engines' copy it ships
+  // (collections plan, C4.3).
+  // 6.5 measured; 7.
+  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
+  // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
+  // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
+  // raised by name.
+  {
+    label: 'pipeline — browser (@alexify/syncom/pipeline)',
+    entry: 'src/pipeline/pipeline.js',
+    platform: 'browser',
+    // 2.8 measured; 3.
+    budget: 3.25,
+  },
+  // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
+  // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.
+  {
+    label: 'cleanup — browser (@alexify/syncom/cleanup)',
+    entry: 'src/cleanup/cleanup.js',
+    platform: 'browser',
+    budget: 3.25,
   },
 ];
 
@@ -584,6 +697,9 @@ const COMPOSITE = [
   'src/telemetry/telemetry.js',
   'src/query/query.js',
   'src/versions/versions.js',
+  // The local plugin is registered by `/all` too (src/all/all.js PLUGINS); the other side stores
+  // (state, dump, pipeline, cleanup) are functions over a database, not plugins, and `/all` ships none.
+  'src/local/local.js',
   'src/memory/memory.js',
   'src/layered/layered.js',
 ];

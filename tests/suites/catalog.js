@@ -6,6 +6,7 @@
 // memory backend is wrapped to count reads, so "no I/O" is a number.
 
 const { memory } = require('../../src/memory/memory.js');
+const { SOURCE } = require('../../src/symbols.js');
 
 const counting = (fsi) => {
   const reads = [];
@@ -147,6 +148,34 @@ const runCatalogTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test('a tombstone’s row keeps its collection and its stamp, across a reopen and a rebuild', async (t2) => {
+    const fsi = memory();
+    let storage = await createStorage(t2, 'A', { fsi, schema });
+    const id = (await storage.Post.insert({ orgId: 'o1', slug: 'gone' })).id;
+    await storage.delete(id);
+    const row = storage[SOURCE].row(id);
+    assert.strictEqual(row.type, 'Post', 'the collection the record was of');
+    assert.strictEqual(row.gone, true);
+    assert.strictEqual(typeof row.deleted[0], 'number');
+    assert.strictEqual(row.deleted[1], storage.nodeId, 'the stamp of the delete: its ms and its origin');
+    const { path } = storage;
+    await storage.close();
+    // The catalog reused.
+    storage = await createStorage(t2, 'A', { fsi, schema });
+    assert.deepStrictEqual(storage[SOURCE].row(id), row);
+    await storage.close();
+    // Rebuilt from the records (other indexes): the stored record of a tombstone carries its type.
+    storage = await createStorage(t2, 'A', { fsi, schema: { entities: { Post: { index: ['slug'] } } } });
+    assert.deepStrictEqual(storage[SOURCE].row(id), row, 'rebuilt under other indexes');
+    await storage.close();
+    // Rebuilt with no catalog file at all.
+    await fsi.remove(`${path}/index`, 'catalog.json');
+    storage = await createStorage(t2, 'A', { fsi, schema });
+    assert.deepStrictEqual(storage[SOURCE].row(id), row, 'rebuilt from nothing');
+    assert.strictEqual(storage.hasRecord(id), false);
+    await storage.close();
+  });
+
   await t.test('the catalog follows a peer’s ops, a lens, and a tombstone', async (t2) => {
     const storage = await createStorage(t2, 'A', {
       schema: {
@@ -170,7 +199,8 @@ const runCatalogTests = async (t, assert, createStorage) => {
   });
 
   await t.test('the cache is bounded; a live Record pins its entry; absent ids are not cached', async (t2) => {
-    const storage = await createStorage(t2, 'A', { cache: { max: 3 } });
+    const schema = { entities: { Link: { refs: { to: 'Link' } } } };
+    const storage = await createStorage(t2, 'A', { cache: { max: 3 }, schema });
     const ids = [];
     for (let i = 0; i < 5; i++) ids.push(await storage.insert({ i }));
     assert.strictEqual(storage.getCachedData(ids[0]), null, 'evicted');
@@ -185,11 +215,17 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.strictEqual(pinned.i, 1);
     assert.strictEqual(await storage.get('nope'), null);
     assert.strictEqual(storage.getCachedData('nope'), null);
-    // A string field naming an evicted record is still a reference.
-    const referrer = await storage.insert({ to: ids[2] });
+    // A declared reference to an evicted record is still a reference, and reads it back in — a record of the
+    // declared collection; one of another collection, or of none, resolves to null.
+    const target = await storage.insert({ $type: 'Link', i: 2 });
+    for (let i = 12; i < 16; i++) ids.push(await storage.insert({ i }));
+    assert.strictEqual(storage.getCachedData(target), null, 'evicted');
+    const referrer = await storage.insert({ $type: 'Link', to: target });
     const record = await storage.document(referrer);
     assert.strictEqual(typeof record.to.record, 'function');
     assert.strictEqual((await record.to.document()).i, 2);
+    const loose = await storage.document(await storage.insert({ $type: 'Link', to: ids[2] }));
+    assert.strictEqual(await loose.to.document(), null, 'not a Link');
     await assert.rejects(() => createStorage(t2, 'B', { cache: { max: 0 } }), /cache.max must be a positive integer/);
     await assert.rejects(() => createStorage(t2, 'B', { catalog: { flushEvery: 'often' } }), /flushEvery must be/);
   });

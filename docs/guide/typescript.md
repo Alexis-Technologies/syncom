@@ -108,9 +108,9 @@ nothing beyond that, as the collection's writes do under `RecordData`.
 
 `SyncomDocument<R>` is the record's methods and one getter/setter per field
 of `R` — a field named like a method (`data`, `save`, `index`, `block`…)
-is never a property; `data()` has it. A string field holding a known record
-id reads as a `Reference` at run time, whatever the type says. Under
-`RecordData` every name reads as `unknown`.
+is never a property; `data()` has it. A field the entity declares a
+reference (`refs`) reads as a `Reference` at run time, whatever the type
+says. Under `RecordData` every name reads as `unknown`.
 
 ## The browser
 

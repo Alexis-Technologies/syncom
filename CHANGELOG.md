@@ -21,8 +21,55 @@ refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystr
 or typed through a transaction or a handle that continue each other are one op, so one `change`
 and one `commit` event, not one per call.
 
+**Upgrading a checkout from before review №6** (nothing published): the catalog is format 5 — a tombstone's row
+keeps its collection and its `deleted` stamp — so the live catalog is rebuilt once at the first open (a tag's
+format-4 catalog still reads). Tombstones folded by the format-4 build were stamps on a catalog row alone and were
+lost at any rebuild: a database that ran that build's `cleanup` is best re-synced from a peer.
+
 ### Changed
 
+- **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
+  stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
+  object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the
+  open builds them once. The planner fits every index and takes the one expected to read the fewest records
+  (`explain().estimate`; the indexed equalities it leaves `narrow` the scan before a record is read; a `$in` of a
+  few ordered values is scanned value by value), the rows are the index's only where the order's keys reach its end,
+  an unordered window over a range is the first rows by id, a page after its edge is sought in the index or by id
+  (`stream()` reads each row once, and runs once where no index sorts), a one-sided range holds its kind alone, and
+  `count()` over a sorted index entered by a prefix or a range reads no record. A plan and a cached result follow
+  `addCollections()`/`removeCollection()`; `addCollections()` indexes the records in pages inside the queue.
+- **Tombstones are folded whole (review №6, E1).** `cleanup` moves an old, acknowledged tombstone — its data and its
+  whole meta — into the `tombstones` kv namespace in ONE write set with its file's removal; the catalog is derived
+  from the records and that namespace, a rebuild reads both, a fold changes no row, and a tombstone's row keeps the
+  record's collection and its `deleted` stamp (catalog format 5). A late op below the stamp stays moot on a folded
+  node as on any other; a pipeline and a dump see a plain delete's collection.
+- **Writes made safe (review №6, E2).** A write by query and `ifMatch` go by the record's id — a data field named
+  `id` names no other record; `drop()` is `READ_ONLY` on a follower or after a lost lease and sweeps under the lock;
+  `dropDatabase()` refuses a directory that holds no database; a composite id whose field holds the separator, or is
+  not a string, a number or a boolean, is `INVALID_ID` (`entity`, `field`), and the fields of a composite id are
+  immutable (`ID_IMMUTABLE`); `$type` is immutable through `unset`, `$unset`, `$rename` and `modify()`; a named
+  `insert()` with `encrypted: true` is `EXISTS` like any other (`expect: ABSENT`, inside the queue); `populate()` and a
+  `Reference` resolve a record of the declared collection alone; a `delete` change reports the data applied.
+- **Bounded, and refused out loud (review №6, E5–E6).** One transaction takes 10 000 rows of a bulk write or matches
+  of a write by query (`MAX_BATCH`, a `TypeError` before anything lands); two update operators naming one field are a
+  `TypeError`, as MongoDB refuses a conflicting update, and `$rename` takes a register; `collection.remove()` takes
+  `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`, not the collection gone) and pages
+  over the records as the call began; a bulk write whose `afterWrite` hook fails after the rows landed keeps its
+  verdicts (the failure is the `error` event); a purge's ids are scrubbed together (`log.scrub(ids)`: every file
+  holding them rewritten once); a transaction's unique keys and the records' in flight are checked through maps, not
+  a scan per op; the query cache is current per collection and holds 10 000 rows at most; a live run delivers a row
+  that stayed as the copy it was; `nearest()` takes `k` of at most 1000 and a vector of at most 4096 numbers; a query
+  nests 32 levels at most; a collection's events fire on a microtask after the landing and the catalog's subscription
+  goes with the last listener; a local write after `close()` is `CLOSED`; a cold read verifies its chain block parsed
+  and hashed once per batch (10 000 records read in 0.1 s, not 19); a pipeline's replay and rebuild are paged by 500
+  with the checkpoint after the last page, and live turns join while one is handled.
+- **Observable (review №6, E7).** `stats()` answers `collections`, `advisors`, `tombstones` and the query plugin's
+  `{ cache: { entries, rows }, live }`; the blocks record their work — `syncom.query.cache`, `syncom.query.live`,
+  `syncom.query.plans`, `syncom.bulk.rows`, `syncom.pipeline.turns`, `syncom.pipeline.lag`,
+  `syncom.cleanup.tombstones` and the `syncom.cleanup.sweep` span, `syncom.dump.pages`, `syncom.insert.named`; the
+  destructive operations are info lines (`database.drop`, `collection.remove`, `collection.removed`,
+  `pipeline.rebuild`); a composite id's `INVALID_ID` names its `entity` and `field`, a refused bulk row the id its
+  data named.
 - **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
   `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
   `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.
@@ -39,6 +86,149 @@ and one `commit` event, not one per call.
 
 ### Added
 
+- **Collections at run time: `db.collections`, `addCollections()`, `removeCollection()`.** The collections
+  by name as one frozen object, and definitions added after the open — each as an entity of
+  `createDatabase({ schema })` would be, its validator, indexes, unique keys and search fields in force at
+  once over the records of its type the catalog holds (indexed from the records, `Catalog.define`) — or
+  forgotten (the records stay). Nothing of it is persisted: the application adds them after every open,
+  and the schema's hash in hello does not move; a reopen under fewer definitions rebuilds the catalog.
+  The schema plugin's. The catalog's watchers hear what a change was to the collection (`insert`,
+  `update`, `remove`) beside whether the row moved.
+- **Records named by their data; bulk writes; `upsert()`, `insertIfAbsent()`.** `insert()` (the
+  database's, a collection's, `tx.insert()`) writes under the id the data names — an entity's composite
+  id (`id: { fields, separator }`, derived from the fields, which stay in the record) or the id field's
+  value (which leaves the data) — and mints one only when the data names none; a live record under a
+  named id is `EXISTS`, decided inside the queue. `collection.upsert(data)` writes the named record whole,
+  `insertIfAbsent(data)` only when none is live (the Document either way). `bulkInsert(rows)`,
+  `bulkUpsert(rows)`, `bulkRemove(ids)` are ONE transaction with a verdict per row — `{ success, error:
+  [{ index, id, data, error }] }`: a row refused on its own account (its validator, a unique key, its
+  id, its collection) stays out and the rest land; a batch that cannot reach the disk lands nothing.
+- **Update operators and `ifMatch`.** `update(id, delta)` — the database's, a collection's, `tx`'s — takes
+  `$set`, `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max` and `$rename` in place of
+  fields (every key one of them, or none), each laid onto the write API by the kind of its field
+  (`src/operators.js`): `$inc` is `inc()` on a counter and `FIELD_KIND` on a register, `$addToSet`/`$pull`
+  are `add()`/`remove()` on a set and a last-writer-wins rewrite of an array a register holds,
+  `$push`/`$pop` a `push()`/`splice()` on a list and a rewrite of a register's array, `$min`/`$max` a set
+  only where the comparison holds, `$rename` an `unset` and a `set` — decided inside the queue over the
+  record as it reads, written as one transaction, refused whole where a kind refuses its part.
+  `update(id, delta, { ifMatch: query })` writes only where the record matches the Mango query (the
+  `query` plugin's), inside the queue, and resolves to whether it did.
+- **Tombstone cleanup: `@alexify/syncom/cleanup`.** `cleanup(db, { minimumDeletedTime, runEach, awaitSync })`
+  folds an old tombstone whole — its collection, the data the delete carried, its meta — into the `tombstones`
+  kv namespace and removes the file and its pieces in ONE write set (`EntryStore.foldMany`); the catalog row
+  stays, and a read of the id finds the tombstone in the namespace — a peer's op stamped below it is still
+  moot (below an unset or a set removal above the delete too), a revival above it writes a file again and
+  takes the kv entry away in the same set, a snapshot still hands the deletion on whole, a rebuild of the
+  catalog reads the namespace beside the records. The sweep reads no file: a tombstone's row keeps its
+  collection and its `deleted` stamp (catalog format 5). With `awaitSync` a tombstone this node made is folded
+  only once every enabled registered node acknowledged its delete (one the log no longer retains folds but is
+  never dropped); `run({ drop: true })` takes the entry and the row too.
+- **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
+  over every change of a collection, in order, inside one transaction per turn — at least once: a handler
+  that throws stops the pipeline before the turn (`PIPELINE_FAILED`), and `start()` hands it over again — and keeps the turn's
+  log position as its checkpoint after the transaction landed — a reopen resumes from it (the turns since
+  replayed from the log), or hands every record of the source over once where the log cannot resume. The
+  `transaction` event carries `eventId`, the log position of the turn's last op.
+- **Dumps: `@alexify/syncom/dump`.** `exportJSON(db)` is every record a snapshot would hand a peer — live
+  ones and tombstones, each with its meta, under the node, the schema's version and hash, the kinds and
+  the log position (`meta: false`: the live data alone); `exportPages` the same a page at a time.
+  `importJSON(db, dump, { mode })` joins it back as a `merge` (a bootstrap: one op per record, exact to
+  the source) or as an `insert` (plain writes under the same ids, new ops — a foreign `{ records: [{ id,
+  data }] }` too); a dump made under another schema hash is `SCHEMA_MISMATCH` unless forced.
+  `migrateStorage({ from, to, path })` moves a database between engines as the same node (`copyEngine`),
+  or by `merge` into a new one.
+- **Local documents: `@alexify/syncom/local`.** `createDatabase({ plugins: [local] })` hands the core
+  `db.local` — `get`, `set`, `delete`, `list`, `observe`, `scoped` — JSON values kept in the `local` kv
+  namespace beside the records that never become an op: not logged, not in the catalog or a snapshot,
+  never at a peer; `collection.local` prefixes the collection's name, the database emits `local`, and
+  `toStore(db.local, key)` follows one. Registered by `/all`.
+- **App state: `@alexify/syncom/state`.** `createState(db, name)` — one object kept by name, read and
+  written by path (`get('theme')`, `set('panel/width', 320)`, `set('count', (n) => n + 1)`), over the
+  record `state.<name>`, every path a register of its own (two nodes writing different paths both keep
+  theirs), or over a local document with `{ local: true }`; `observe(path, listener)`, `toStore(state, path)`.
+- **`findByIds()`, `indexAdvisor()`.** `collection.findByIds(ids)` reads many records in one call of the
+  engine — a `Map` of the live ones of the collection. `indexAdvisor(db)` (`@alexify/syncom/inspect`)
+  watches every plan the cursors make and suggests the keys — the equalities, a range field, the sort —
+  that would serve the queries no index served or sorted (`suggest()` → `[{ entity, index, queries }]`);
+  `explain()` carries `uses`, what a query asks of its fields.
+- **Compound indexes, a planner, `explain()`.** An entity's `index` takes compound keys beside fields —
+  `index: ['orgId', ['orgId', 'createdAt']]`, or a metaschema `indexes` entry kept whole — each a sorted
+  key the catalog keeps (in memory, rebuilt from the rows at load) beside the equality postings. A cursor
+  is planned once over them: the index with the longest prefix of equalities, then one field more for a
+  range (`$gt`/`$gte`/`$lt`/`$lte`) or the sort; where the rows come sorted by the index an ordered,
+  limited cursor reads `offset + limit` records and no more, a sort it cannot serve is read by the prefix
+  and sorted after. `cursor.explain()` shows the plan: the scan (`text`, `index`, `postings`,
+  `collection`), the index and how it is entered, `sortedByIndex`, `covered`, `residual`.
+- **Keyset paging, `distinct()`/`countBy()`, `nearest()`.** `cursor.page()` hands back `{ rows, next }` and
+  `cursor.after(next)` the cursor from after that row — keyset paging in the result's one order (the
+  keys, then the id), so a row is never read twice and one that came between the pages is taken where
+  it sorts; `cursor.stream({ batch })` — what `for await` is — reads the rows `fetch()` would give a batch
+  at a time by keyset, in bounded memory. `distinct(field)` and `countBy(field)` on a
+  cursor and a collection group the matches by a field, from the catalog alone where it is indexed.
+  `nearest(field, vector, k, { distance })` ranks the matches by a vector field — cosine, euclidean,
+  manhattan, dot (`@alexify/syncom/search` exports the four, and `isVector`) or a function — a scan with
+  the `k` best kept.
+- **Live queries kept, not run again; `watchCount()`; the query cache.** `watch()` keeps its rows as the
+  collection changes: the record that changed is read once, matched and placed (in and matching → moved
+  to where it sorts; in and not → out; not in and matching → in; a full window that lost a row, or a
+  `$text` query, runs the cursor again) and emits only when an id came, went or moved or a row reads
+  as another object — never the same rows twice. `watchCount()` keeps the matching ids and moves the
+  count by one per change. Every `watch()` of one query shares one run; a `fetch()` of a query the
+  catalog has not moved since reads nothing (the run's rows while it runs, the last result after, up to
+  a hundred unobserved queries, the least recently used let go of first); a cursor with a `filter(fn)`
+  runs every time. A result has one order — the keys, then the id; a `$text` query without keys keeps
+  the index's ranking — so an unordered cursor hands its rows out by id.
+- **Queries: immutable cursors, `$type`/`$size`/`$mod`/`$all`/`$elemMatch`/`$nor`, `matches()`.** Every
+  builder of a cursor — `order`, `desc`, `limit`, `offset`, `filter`, `projection`, `populate` — hands back
+  a new cursor and leaves the one it was called on as it was, so two may be built on one. The predicate
+  takes `$type` (`null`, `boolean`, `number`, `string`, `array`, `object`), `$size`, `$mod`, `$all`,
+  `$elemMatch` (an object element by a query of its fields, a scalar one by the operators) and `$nor`.
+  `cursor.matches(doc)` and `matches(query)` from `@alexify/syncom/query` test a document in hand.
+- **`collection.remove({ purge })`, `db.drop()`, `dropDatabase(path, { engine, fsi })`.** A collection's
+  records deleted as ops that replicate — tombstones, or purges scrubbed from every log — in pages of
+  500, each page one transaction; the definition stays (`removeCollection()` forgets it). A database
+  dropped: closed, then every store of it removed from the engine (`engine.remove(path)`), so a node
+  opened at the path again is a new node; `dropDatabase()` does it for a closed one, held by the lock —
+  another instance's open database is `LOCKED`, never emptied under it. `src/layout.js` names every
+  directory a database keeps under its path, and `tests/package/layout.test.js` holds every module
+  that names a kv namespace to it.
+- **ORM: `methods` and `statics`.** An entity's `methods` go on every `Document` of the collection, bound
+  to it and hidden from enumeration (a field is enumerable, a method is not); its `statics` on the
+  collection. A name a Document or a Collection answers to already is a `TypeError` where the
+  definition is taken.
+- **Collection events.** A collection is an emitter: `change` (`{ id, action }`) and `insert`,
+  `update`, `remove` (`{ id }`) — what the catalog decided of a record of its own, once per landing
+  (a record joining the collection, written or revived, an `insert`; one leaving it, deleted or
+  purged, a `remove`; several ops of one turn one `update`) — with one listener of the catalog per
+  collection, taken at the first `on()` and let go of at the last `off()`.
+- **Declared references: `refs`, `populate()`.** An entity declares the records its fields name —
+  `refs: { author: 'Author', tags: ['Tag'] }`, or read off a metaschema schema's relations (`author:
+  'Author'`, `{ type }`, `{ many }` naming an entity of the model) — and a `Document` reads such a field
+  as a `Reference` (an array of them for many; `id`, `document()` → the Document or `null` where the
+  record is not there, the id as JSON), `document.populate(field)` resolves it, and a cursor's
+  `populate(fields)` lays the records (`{ id, …data }`, or `null`) into a page in one read per field.
+  Nothing else is a Reference any more: the heuristic that made one of any string equal to a known id
+  is gone (a `Document` read strings through `hasRecord()` on every refresh; an unrelated string that
+  matched an id became a Reference).
+- **Writes by query: a cursor's `update(delta)`, `modify(fn)`, `delete({ data })`.** One transaction over
+  the records the cursor matched when it started (its order, offset and limit applied), each written
+  inside the queue as the method says; `{ matched, written }` — a record gone meanwhile is skipped. A
+  cursor at a tag is read-only.
+- **`delete(id, { data })`.** The fields a delete carries lie on the tombstone at its stamp — below
+  what keeps a record alive, so the record is as dead as without them and `get()` answers `null` —
+  and whoever reads the tombstone reads them: the `delete` change carries `data`, a peer's hook sees
+  the op's, a snapshot page the tombstone's, and a revival above the tombstone builds on them. On the
+  database, a collection, a `Document`, `tx` and a cursor.
+- **`modify(id, fn)`** — on the database, a collection and `tx`: `fn(copy)` runs inside the mutation queue
+  over a copy of the record as it reads, and what it leaves (what it returns, or the copy when it returns
+  nothing) is written as the ops that take the record there — a field changed a `set`, a field gone an
+  `unset`, `null` a delete — as one transaction. Two calls on one record compose, each reading what the
+  one before it left: no lost update, no conflict to retry. A field of another kind than a register
+  changed by the function is `FIELD_KIND`.
+- **`IN_TRANSACTION`.** A write made through the database from inside `transact()`'s or `modify()`'s
+  function — which holds the mutation queue the write would wait for — is refused at once, where it used
+  to deadlock (told by the function's async context in Node; the browser half has none and such a write
+  still waits there). A write made meanwhile by anyone else queues, as it always did.
 - **Storage engines: `createDatabase({ engine })`.** Every byte a database persists goes through
   its engine — a factory of databases, each a set of stores: `kv` by namespace and key (`node.json`,
   `schema.json`, `tags.json`, the keys, the lock, the chain's blocks, the registry, a catalog),

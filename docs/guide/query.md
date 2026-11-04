@@ -42,31 +42,49 @@ for await (const row of storage.Task.select({ boardId: 'b1' }).order('key').limi
 | `$in`, `$nin` | Any of the values matches (the array rule applies), or none does |
 | `$gt`, `$gte`, `$lt`, `$lte` | Ordered comparison between values of **one kind** — number with number, string with string, boolean with boolean; anything else is false. An array field: any element |
 | `$exists` | `true`: the field is present (`null` counts); `false`: absent |
+| `$type` | What the value is, in JSON's terms: `'null'`, `'boolean'`, `'number'`, `'string'`, `'array'`, `'object'` |
 | `$regex`, `$options` | A `RegExp` or a source string, with flags; strings only (an array field: any element); the `g` and `y` flags are dropped |
-| `$and: [...]`, `$or: [...]`, `$not: {...}` | Nest freely |
+| `$size` | An array of exactly that many elements |
+| `$mod: [divisor, remainder]` | A number with that remainder |
+| `$all: [...]` | An array holding every one of the values |
+| `$elemMatch: {...}` | An array with an element matching the query — an object element by a query of its fields, a scalar one by the operators (`{ $elemMatch: { $gt: 3 } }`) |
+| `$and: [...]`, `$or: [...]`, `$nor: [...]`, `$not: {...}` | Nest freely |
 | `$text: 'words'` | Full-text, over the entity's `search` fields through the injected index; top level only, once — see [Full-text search](#full-text-search) |
 
 A malformed query — an unknown operator, `$in` without an array, an invalid
 regex, a `$text` that is not a string, is over 1000 characters or sits inside
 `$and`/`$or`/`$not`, a `$text` on a collection with no search fields — is a
-`TypeError` at `select()`, not at `fetch()`.
+`TypeError` at `select()`, not at `fetch()`. A query nests 32 levels at most (`$and`, `$or`, `$nor`, `$not`, `$elemMatch` within one
+another): deeper is a `TypeError`.
 
 ## The cursor
 
+A cursor is immutable: every builder hands back a new cursor and leaves the one it was called on as it
+was, so two may be built on one (`const open = db.Task.select({ status: 'open' }); open.order('due');
+open.desc('priority').limit(5)`).
+
 | Builder | Meaning |
 | --- | --- |
-| `order(field)`, `desc(field)` | Sort keys, applied in the order given; nothing (`null`, absent) first, then booleans, numbers, strings; arrays and objects stay where they were; stable |
+| `order(field)`, `desc(field)` | Sort keys, applied in the order given; nothing (`null`, absent) first, then booleans, numbers, strings; arrays and objects stay where they were. A result has one order — the keys, then the id — so an unordered cursor hands its rows out by id (a `$text` query without keys keeps the index's ranking) |
 | `limit(n)`, `offset(n)` | Cut after the sort |
-| `filter(fn)` | A predicate over the loaded row — what a query cannot say |
+| `filter(fn)` | A predicate over the loaded row — what a query cannot say; a cursor with one is never cached |
 | `projection(fields)` | Each row carries only those fields, plus `id`; a dotted field comes back under its dotted name |
+| `populate(fields)` | The declared [references](./database#references) of those fields resolved on every row: the record as `{ id, …data }` (`null` where gone), an array for many — one read per field per page |
+| `after(next)` | The cursor from after the row a page's `next` names — [paging](#paging) |
 
 | Terminal | Returns |
 | --- | --- |
 | `fetch()` | `Promise<row[]>` — `{ id, ...data }` as the record reads: the [lens](./schema#reading-an-older-record-the-lens) applied, `$type` included |
 | `count()` | `Promise<number>` — no sort, no slice |
 | `one()` | `Promise<row \| null>` — `limit(1)` |
-| `for await (const row of cursor)` | The rows, one by one |
-| `watch(listener, { onError }?)` | Runs now and again after every change to the collection; returns the stop function |
+| `page()` | `Promise<{ rows, next }>` — one page and the token of the next, see [Paging](#paging) |
+| `stream({ batch }?)`, `for await (const row of cursor)` | The rows `fetch()` would give, read lazily a batch (100) at a time by keyset |
+| `distinct(field)`, `countBy(field)` | The distinct values of a field among the matches, in the sort order; with how many hold each — see [Aggregates](#aggregates) |
+| `nearest(field, vector, k, { distance }?)` | The `k` matches nearest to a vector by an array field, `[{ distance, row }]` — see [Aggregates](#aggregates) |
+| `matches(doc)` | Whether a document in hand matches the query (the filter aside); `matches(query)` of the subpath is the same predicate without a cursor |
+| `explain()` | How the cursor is answered — see [The plan](#the-plan) |
+| `watch(listener, { onError }?)`, `watchCount(listener)` | The rows, or their count, now and whenever they change — see [Live queries](#live-queries) |
+| `update(delta)`, `modify(fn)`, `delete({ data }?)` | Every match written as one transaction — see [Writes by query](#writes-by-query) |
 
 A cursor reads the records themselves — like `snapshot()` and `swap()`, not
 through `get()`, so `beforeRead`/`afterRead` do not run. Records outside the
@@ -81,36 +99,65 @@ query there is a `TypeError`.
 
 ## The plan
 
-The entity's `index` fields and `unique` keys — explicit, or read off a
-[metaschema schema](./schema#a-metaschema-model) — are what the
-[catalog](./database#the-catalog-and-the-cache) keeps per record. A cursor
-reads from it twice:
+The entity's `index` — fields, and compound keys of fields: `index: ['boardId', ['boardId', 'rank']]`,
+explicit or read off a [metaschema schema](./schema#a-metaschema-model) — and its `unique` keys are
+what the [catalog](./database#the-catalog-and-the-cache) keeps per record, in memory on every engine:
+a posting list per indexed field for equality, and a **sorted index** per declared key (the rows in key
+order, then id). A cursor is planned over them once — and again where the collection is defined anew
+(`addCollections()`, `removeCollection()`) — and `explain()` shows the plan:
 
-- an **equality** on an indexed field (`field: value`, `$eq`, `$in`) narrows
-  the candidates to that field's posting list before any record is read —
-  `{ boardId: 'b1', priority: { $gte: 2 } }` reads the board's records only.
-  The narrowing follows every `$and` branch, and an `$or` whose branches all
-  name an indexed equality; a `$not`, or a branch without one, is left to the
-  predicate. An indexed array field — a [set](./sync#registers-counters-sets-lists-and-text),
-  a [list](./lists) or any array — is posted under each of its elements as well, so
-  `{ tags: 'bug' }` narrows to the records whose array holds it, and an array
-  value to the records holding that array whole; a unique key over an array
-  compares the whole array;
-- a query whose fields, order and projection are **all indexed**, with no
-  `filter`, is answered from the catalog alone: not one record read.
-  `{ boardId: 'b1', status: 'open' }` with `projection(['status'])` is one;
-  without the projection the rows are the records, which must be read.
+```js
+db.Task.select({ boardId: 'b1', rank: { $gte: 10 } }).order('rank').limit(4).explain();
+// { scan: 'index', index: ['boardId', 'rank'], prefix: ['b1'], in: null,
+//   range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
+//   desc: false, sortedByIndex: true, covered: false, residual: false,
+//   narrow: [], estimate: 4,
+//   uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] } }
+```
 
-Everything else reads the candidates — from the cache for the recent ones,
-from disk otherwise, sixteen at a time — and evaluates the predicate on each.
-There is no B-tree: an ordered range over an unindexed field is a scan of the
-collection, which is fine for the tens of thousands of records a local-first
-app holds and the wrong tool for millions. An unordered cursor with a `limit`
-stops reading at enough matches; an ordered one with a `limit` keeps only the
-best `offset + limit` rows as the candidates go by, instead of sorting every
-match — the first page of a large collection costs its reads, not its sort.
-A `$text` seeds the candidates with the text index's ranking, best first, and
-every equality narrows that order rather than replacing it.
+- **An index** serves a query by its longest prefix of fields the query holds an equality on
+  (`field: value`, `$eq`), then a `$in` of a few ordered values on the next field (`in`: one sub-scan per
+  value, in key order), then one field more for a range (`$gt`/`$gte`/`$lt`/`$lte`) or the sort. The
+  scan is bounded — a binary search to each edge — and comes **sorted by the index** where the order's
+  keys are the index's next fields in one direction, reaching its end (`desc` scans backwards); then an
+  ordered, limited cursor reads `offset + limit` records and no more. A sort the index cannot serve reads
+  by the prefix and sorts after. Of several indexes the one expected to read the fewest records wins
+  (`estimate`: the scan's entries, no more than the narrowest posting list of the indexed equalities it
+  leaves to the catalog — those `narrow` the scan before a record is read — no more than the window where
+  sorted); a tie goes to the sorted one, then the longer prefix. An index that serves the sort alone is
+  taken only for a finite window where no indexed equality could narrow instead. An array-valued key is
+  entered once per element (as the posting lists post it) and never trusted for a sort;
+- **the posting lists** narrow a query no index serves but which holds an equality (or `$in`) on an
+  indexed field, before any record is read: `{ boardId: { $in: ['b1', 'b2'] }, priority: { $gte: 2 } }`
+  reads those boards' records only. The narrowing follows every `$and` branch, and an `$or` whose
+  branches all name an indexed equality; a `$not`, a `$nor` or a branch without one is left to the
+  predicate. An indexed array field — a [set](./sync#registers-counters-sets-lists-and-text), a
+  [list](./lists) or any array — is posted under each of its elements as well, so `{ tags: 'bug' }`
+  narrows to the records whose array holds it; a unique key over an array compares the whole array;
+- a query whose fields, order and projection are **all indexed**, with no `filter`, is **covered**:
+  answered from the catalog alone, not one record read. `{ boardId: 'b1', status: 'open' }` with
+  `projection(['status'])` is one; without the projection the rows are the records, which must be read;
+- everything else is a scan of the **collection**: the candidates read — from the cache for the recent
+  ones, from disk otherwise, sixteen at a time — and the predicate evaluated on each. That is fine for
+  the tens of thousands of records a local-first app holds and the wrong tool for millions; an
+  unordered cursor with a `limit` stops reading at enough matches (its candidates in id order, the
+  result's order), an ordered one keeps only the best `offset + limit` rows as the candidates go by.
+
+A `$text` query is the text index's ranking, best first, and every equality narrows that order rather
+than replacing it; it plans no index. `indexAdvisor(db)` of [`@alexify/syncom/inspect`](./devtools)
+watches the plans and suggests the keys the queries asked for and no index served.
+
+### The query cache
+
+Every `watch()` of one query — the same entity, query, order, window, projection and populated fields,
+whatever the key order — shares one [live run](#live-queries), and a `fetch()` of it reads nothing
+while the run lasts: the run's rows are the result. After the run stops the last result stays, as do up
+to a hundred unobserved results holding ten thousand rows between them (a larger result alone is not
+kept), the least recently used let go of first, each as current as its collection was when it was read:
+a `fetch()` of a query whose collection has not changed since — no record of it written, folded or
+purged, the collection not defined again, the catalog not loaded again — reads nothing, whatever the
+other collections did meanwhile. A cursor with a `filter(fn)` has no key and runs every time; a cursor at
+a tag is never cached.
 
 ## Full-text search
 
@@ -177,18 +224,81 @@ logged (`catalog.search`) and the write lands all the same. A `TextIndex` of
 your own — `{ put(id, text), remove(id), query(text) }`, `query` returning
 every match as `{ id, score }`, best first — can replace `createSearch()`.
 
-## watch()
+## Live queries
 
 ```js
-const stop = storage.Task.select({ status: 'open' }).order('priority').watch((rows) => render(rows));
-// … every insert, update, delete or peer op on a Task runs it again, once per batch
+const stop = db.Task.select({ status: 'open' }).order('priority').limit(20).watch((rows) => render(rows));
+const stopCount = db.Task.select({ status: 'open' }).watchCount((n) => badge(n));
 stop();
+stopCount();
 ```
 
-The first run is a microtask after `watch()`; changes that land while a run
-is in flight coalesce into one more run. A failing run — the query, or the
-listener — goes to `onError`, or to the logger at warn. Watching keys off
-the catalog, so a cursor over `Task` never wakes for a `Tag`.
+A live query is kept, not run again. The catalog says which record changed; the record is read once (it
+was just written: the cache has it), matched, and placed — in the result and matching, moved to where
+it sorts; in and not matching, taken out; not in and matching, put where it sorts; neither, nothing. A
+window (`offset + limit`) holds that many rows from the top; a row that leaves a full window, or moves
+to its end, runs the cursor again for the successor beyond it, as does a `$text` query, whose order is
+the index's. The listener hears only when the rows changed — an id came, went or moved, or a row reads
+as another; a write of the value a field held, or of a field the projection drops, is no change.
+`watchCount()` keeps the matching ids and moves the count by one per change, never counting again; the
+window (`limit`, `offset`) does not apply to a count. A row that stayed is delivered as the very object it
+was delivered as before, so a change costs one copy, however many rows the result holds, and a listener
+may tell a row that moved by its identity — what it receives is the run's: read it, never edit it (a
+populated result is read whole every time).
+
+The first run is a microtask after `watch()`; a failing run, or a listener that throws, goes to
+`onError` or to the logger at warn — and an `onError` that throws goes to the logger too. A cursor over `Task` never wakes for a `Tag`: the catalog's action
+stream is per collection, and a change that left a covered cursor's rows as they were wakes nothing.
+Every `watch()` of one query shares one run (see [the query cache](#the-query-cache)); `toStore()` of
+`@alexify/syncom/store` is a store over `watch()`.
+
+## Paging
+
+```js
+let page = await db.Task.select({ boardId: 'b1' }).order('rank').limit(50).page();
+while (page.next !== null) page = await db.Task.select({ boardId: 'b1' }).order('rank').limit(50).after(page.next).page();
+for await (const row of db.Task.select({ boardId: 'b1' }).order('rank').stream({ batch: 50 })) use(row);
+```
+
+`page()` hands back `limit` rows at most and `next`, the token of the page after — the last row's order
+keys and its id — or `null` at the last page. `after(next)` is the cursor from after that row: keyset
+paging in the result's one order (the keys, then the id), so a row is never read twice and a row that
+came between the pages is taken where it sorts, left out before the edge, taken after it; `offset` does
+not apply from an edge. `stream({ batch })` — what `for await` is — reads the rows `fetch()` would give
+a batch at a time the same way, in bounded memory. A `$text` query without an order has no edge to page
+by.
+
+## Aggregates
+
+```js
+await db.Task.distinct('status');                       // ['done', 'open']
+await db.Task.countBy('boardId', { status: 'open' });   // [{ value: 'b1', count: 12 }, ...]
+await db.Doc.select().nearest('embedding', vector, 5);  // [{ distance, row }, ...], nearest first
+```
+
+`distinct(field)` and `countBy(field)` — on a cursor, or on a collection with a query — group the
+matches by a field, compared as the predicate compares them (an array by the whole array; a record
+without the field under `null`), in the sort order; from the catalog alone where the field is indexed
+and the query covered. `nearest(field, vector, k, { distance })` ranks the matches by an array field of
+numbers of the vector's length: a scan over the matches with the `k` best kept, by `'cosine'` (the
+default), `'euclidean'`, `'manhattan'`, `'dot'` (the negated product) or a function of two vectors —
+the distances `@alexify/syncom/search` exports. There is no vector index: thousands, not millions.
+
+## Writes by query
+
+```js
+await db.Task.select({ status: 'open', due: { $lt: today } }).update({ $set: { late: true } });
+// { matched: 7, written: 7 }
+await db.Task.select({ boardId: 'b9' }).delete({ data: { reason: 'board closed' } });
+```
+
+A cursor's `update(delta)`, `modify(fn)` and `delete(options)` are one transaction over the records the
+cursor matched when it started (its order, offset and limit applied), each matched again inside the queue
+over the record as it reads there: it is written as the [database's method](./database#update-operators)
+would, and a record gone or no longer a match meanwhile is skipped and counted out of `written`. One
+transaction takes 10 000 matches at most: past that the write is a `TypeError` before anything lands — narrow
+the query or `limit()` the cursor and go page by page. A cursor at a tag is read-only. In a row the `id` is
+the record's: a data field named `id` is not it, in a query, a write by query or an `ifMatch`.
 
 ## Unique keys
 

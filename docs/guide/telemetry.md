@@ -92,6 +92,7 @@ wrpc's spans around the actual calls.
 | `syncom.version` | `get(id, { at })`, and each version `diff()` and `restore()` name: one version folded out of the log (a tag's copy is a file read, not a fold, and has no span) | `syncom.ops.count` (the entries inside the cut) |
 | `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op made (each a `syncom.commit` child) and appended as one transaction | `syncom.ops.count`, `syncom.ops.applied` |
 | `syncom.transact` | `transact()`: `fn` run, every op made (each a `syncom.commit` child), the group appended | `syncom.ops.count` |
+| `syncom.cleanup.sweep` | one sweep of the tombstone cleanup (`run()`, or the timer's): what it folded, dropped and skipped | `syncom.cleanup.folded`, `syncom.cleanup.dropped`, `syncom.cleanup.skipped` |
 
 † off the span when `includeIdentity` is false (so is `syncom.scope`).
 
@@ -138,6 +139,15 @@ appears on one.
 | `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
 | `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
 | `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
+| `syncom.query.cache` | Counter | `{query}` | `syncom.result` (`hit` — the result read from the cache, nothing read / `miss` — a run) — every `fetch()` of a cursor with a key |
+| `syncom.query.live` | Counter | `{change}` | `syncom.result` (`reduce` — a changed record read once and placed / `rerun` — the cursor run again: a full window lost a row, a `$text` query) |
+| `syncom.query.plans` | Counter | `{plan}` | `syncom.scan` (`index` / `postings` / `collection` / `text`) — a cursor planned (once per cursor, again under other definitions) |
+| `syncom.bulk.rows` | Counter | `{row}` | `syncom.result` (`success` / `error`) — the rows of `bulkInsert()`, `bulkUpsert()`, `bulkRemove()` by verdict |
+| `syncom.pipeline.turns` | Counter | `{turn}` | `syncom.result` (`handled` / `failed`) — the batches a pipeline handed its handler |
+| `syncom.pipeline.lag` | Histogram | `ms` | — (a live turn's last op's stamp to its handler done: skew plus the handler's wait, a trend; a replay has no stamp) |
+| `syncom.cleanup.tombstones` | Counter | `{tombstone}` | `syncom.result` (`folded` / `dropped`) — what a cleanup sweep took |
+| `syncom.dump.pages` | Counter | `{page}` | `syncom.kind` (`export` / `import`) — the pages of `exportPages()`/`exportJSON()` and `importJSON()` |
+| `syncom.insert.named` | Counter | `{insert}` | `syncom.result` (`ok` / `exists` — a live record held the id) — an insert under an id the data named, through the database or a transaction |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |
@@ -267,7 +277,7 @@ alert to key on:
 | error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
 | warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |
 | warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Document` not refreshed after a change, a read hook having thrown |
-| warn | `listener.error`, `watch.error`, `schema.drift` | an event listener or a watcher threw; two builds of one schema version |
+| warn | `listener.error`, `watch.error`, `hook.failed`, `pipeline.failed`, `pipeline.checkpoint.unreadable`, `cleanup.failed`, `schema.drift` | an event listener, an advisor or a watcher threw (a `watch()`'s `onError` too); an `afterWrite` hook failed after a bulk write landed (`hook`, `method`); a pipeline's handler threw (`name`, `eventId`); a pipeline's checkpoint did not parse (`name`; every record handed over again); a cleanup sweep on its timer threw; two builds of one schema version |
 | warn | `handle.unlogged` | a text handle's flush (`openText()`) could not be logged — the append failed, a hook or a validator refused — and its edits were dropped (`id`, `field`, `edits`); written whether or not anything listens to the handle |
 | warn | `edits.unlogged` | `close()` flushed every open text handle and some could not be logged (`handles`, `edits`); the storage closes all the same |
 | warn | `log.journal.unrewritten` | a group's append failed, or a scrub reached its journal, and the journal could not be written again whole (`file`, `first`, `reason`): a group's line is not there to reuse and the log did not answer its whole range (a proxy sends the scrubbed entries alone); the journal stays as it is, and a reopen reads the line only where no later group shadows it |
@@ -285,7 +295,8 @@ alert to key on:
 | error | `tags.unreadable` | `tags.json` unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired |
 | warn | `tags.dropped`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); a registry entry that cannot be read, skipped |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
-| debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues` | routine |
+| info | `database.drop`, `collection.remove`, `collection.removed`, `pipeline.rebuild` | the destructive operations said out loud: `drop()` (`path`); `collection.remove()` done (`entity`, `purge`, `removed`); `removeCollection()` (`entity`); a pipeline handing every record of its source over (`name`, `records`) |
+| debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues`, `cleanup.sweep` (`folded`, `dropped`, `skipped`, `ms`) | routine |
 
 ## Failures
 

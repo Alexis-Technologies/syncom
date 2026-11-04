@@ -109,3 +109,22 @@ test('search: the index', async (t) => {
     assert.throws(() => createSearch({ minOverlap: NaN }), TypeError);
   });
 });
+
+test('search: the distances a vector field is searched by', async (t) => {
+  const { cosine, euclidean, manhattan, dot, isVector } = require('../src/search/search.js');
+  await t.test('cosine, euclidean, manhattan, dot: smaller is nearer; a zero vector is as far as cosine goes', () => {
+    assert.strictEqual(cosine([1, 0], [1, 0]), 0);
+    assert.strictEqual(cosine([1, 0], [0, 1]), 1);
+    assert.strictEqual(cosine([1, 0], [-1, 0]), 2);
+    assert.strictEqual(cosine([0, 0], [1, 0]), 1);
+    assert.strictEqual(euclidean([0, 0], [3, 4]), 5);
+    assert.strictEqual(manhattan([0, 0], [3, -4]), 7);
+    assert.strictEqual(dot([1, 2], [3, 4]), -11);
+    assert.ok(dot([1, 2], [3, 4]) < dot([1, 2], [1, 1]), 'a larger product is nearer');
+    assert.strictEqual(isVector([1, 2.5]), true);
+    assert.strictEqual(isVector([]), false);
+    assert.strictEqual(isVector([1, 'x']), false);
+    assert.strictEqual(isVector([1, NaN]), false);
+    assert.strictEqual(isVector('1'), false);
+  });
+});

@@ -31,6 +31,8 @@ const { SyncomError, typed } = require('./errors.js');
 // `undefined` for an encrypted record (saved locally, no op), and MISMATCH
 // for a swap whose expectation no longer held.
 const MISMATCH = Symbol('syncom.mismatch');
+// `expect: ABSENT` — a named insert: a live record there already is EXISTS, decided inside the queue.
+const ABSENT = Symbol('syncom.absent');
 const commitResult = (op) => (op === undefined ? 'encrypted' : op === null || op === MISMATCH ? 'noop' : 'applied');
 
 // `$type` names the collection a record belongs to and never changes: a
@@ -74,6 +76,35 @@ const refuse = (core, id, rejected) => {
   const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
   const where = fields.prefix === undefined ? `Field ${field}` : `Field ${field} lies under ${fields.prefix}, which`;
   throw new SyncomError('FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
+};
+
+// `$type` and the fields a composite id is derived from are the record's for
+// good: an unset of them, or a set of an id field to another value (as text —
+// the id was derived as text), is refused before anything is stamped;
+// `sameType` holds `$type` on a write and a set.
+const immutables = (core, type, id, payload, data) => {
+  const fields = core.idFields(data);
+  if (type === 'unset') {
+    const named = fields === null ? null : new Set(fields);
+    const names = payload.value;
+    for (let i = 0; i < names.length; i++) {
+      if (names[i] === '$type' && typeof data.$type === 'string') {
+        throw typed('TYPE_IMMUTABLE', `Record ${id} is a ${data.$type}; $type is immutable`);
+      }
+      if (named !== null && named.has(names[i])) {
+        throw typed('ID_IMMUTABLE', `Record ${id}: ${names[i]} is part of its id and cannot be unset`);
+      }
+    }
+    return;
+  }
+  if (fields === null || !isPlainObject(payload.data)) return;
+  for (let i = 0; i < fields.length; i++) {
+    const field = fields[i];
+    if (!Object.hasOwn(payload.data, field)) continue;
+    if (String(payload.data[field]) !== String(data[field])) {
+      throw typed('ID_IMMUTABLE', `Record ${id}: ${field} is part of its id and cannot change`);
+    }
+  }
 };
 
 // A swap's expectation, checked inside the queue against the record as it
@@ -517,10 +548,11 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
 // One turn's worth of ops announced as a whole — a local write, a
 // transaction, a peer's page, a joined snapshot — with every change tagged
 // by its record: what a view updates itself by, once.
-const transacted = (core, { local, via, source, message, ops, changes, entries }) => {
+// `eventId` is the log position of the turn's last op: where a reader that follows the turns resumes from.
+const transacted = (core, { local, via, source, message, ops, changes, entries, eventId }) => {
   if (ops.length === 0 || !core.listening('transaction')) return;
   const ts = ops[ops.length - 1].ts;
-  const event = { local, via, source, message, ops, changes, ts };
+  const event = { local, via, source, message, ops, changes, ts, eventId };
   // The records as the turn left them, for a handle's base (off the public surface: a symbol).
   event[ENTRIES] = entries;
   core.emit('transaction', event);
@@ -634,10 +666,16 @@ const prepare = async (core, type, id, payload, options) => {
   const { source = null, via = null, from = null, encrypted = false, actor, expect = null, message } = options;
   const msg = messageArg(message);
   const current = await core.current(id);
+  if (expect === ABSENT && current && (current.encrypted || isAlive(current))) {
+    throw new SyncomError('EXISTS', `Record ${id} exists already`, { id, entity: current.data?.$type ?? null });
+  }
   if (encrypted && current && !current.encrypted) {
     throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
-  if (expect !== null && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
+  if (expect !== null && expect !== ABSENT && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
+  if ((type === 'set' || type === 'unset') && current && !current.encrypted && isAlive(current)) {
+    immutables(core, type, id, payload, current.data);
+  }
   payload = copyPayload(payload);
   // Sealed: this write is encrypted, or the record already is. An
   // encrypted record has no op log — writes to it stay local.
@@ -675,6 +713,13 @@ const opOf = (core, type, id, payload, current, visible, who, from, msg, ctx) =>
     // be left out of the op without a word.
     for (const key of Object.keys(payload.data ?? {})) fieldName(type === 'write' ? 'set' : 'update', key);
     const data = sameType(type, id, payload.data, visible);
+    if (ctx !== null) ctx.data = data;
+    payload = { ...payload, data };
+  } else if (type === 'delete' && payload.data !== undefined) {
+    // A tombstone that carries data keeps the record's collection: the tombstone stays the
+    // collection's (a collection's export, its events), as a reset does.
+    for (const key of Object.keys(payload.data)) fieldName('delete', key);
+    const data = sameType('write', id, payload.data, visibleOf(core, current, true));
     if (ctx !== null) ctx.data = data;
     payload = { ...payload, data };
   }
@@ -845,7 +890,17 @@ const landNow = (core, made, position) => {
     if (core.listening('transaction')) {
       const entries = new Map([[op.id, entry]]);
       const message = op.msg ?? null;
-      transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes), entries });
+      const eventId = core.log.formatId(position);
+      transacted(core, {
+        local: true,
+        via,
+        source,
+        message,
+        ops: [op],
+        changes: tagged(op, changes),
+        entries,
+        eventId,
+      });
     }
   }
 };
@@ -866,7 +921,17 @@ const commitLocal = async (core, type, id, payload, options) => {
       if (core.listening('transaction')) {
         const message = op.msg ?? null;
         const entries = new Map([[op.id, entry]]);
-        transacted(core, { local: true, via, source, message, ops: [op], changes: tagged(op, changes), entries });
+        const eventId = core.log.formatId(seq);
+        transacted(core, {
+          local: true,
+          via,
+          source,
+          message,
+          ops: [op],
+          changes: tagged(op, changes),
+          entries,
+          eventId,
+        });
       }
     }
   });
@@ -874,30 +939,27 @@ const commitLocal = async (core, type, id, payload, options) => {
 };
 
 // The unique keys a transaction's own writes would share: the records it
-// touched are not in the catalog nor in flight yet, so they are checked by
-// hand, after the storage's own check.
-const conflictsIn = async (core, touched, id, entry) => {
+// touched are not in the catalog nor in flight yet, so they are checked
+// against the keys the transaction holds for them (`uniques`), after the
+// storage's own check.
+const conflictsIn = async (core, uniques, id, entry) => {
   const found = await core.conflicts(id, entry);
   const def = core.definitionOf(entry.data);
-  if (!def || def.unique.length === 0) return found;
+  if (!def || def.unique.length === 0 || uniques.size === 0) return found;
   const view = await core.view(id, entry);
   // Each (holder, key) once: the storage's own finds first.
   const seen = new Set();
   for (let i = 0; i < found.length; i++) seen.add(`${found[i].other}\0${found[i].fields.join(',')}`);
-  // This record's keys, read once for every record the transaction touched.
-  const mine = [];
-  for (const key of def.unique) mine.push(core.catalog.uniqueKey(view, key));
-  for (const [other, held] of touched) {
-    if (other === id || !isAlive(held) || held.data.$type !== entry.data.$type) continue;
-    const theirs = await core.view(other, held);
-    for (let k = 0; k < def.unique.length; k++) {
-      const key = def.unique[k];
-      if (mine[k] === null || mine[k] !== core.catalog.uniqueKey(theirs, key)) continue;
-      const pair = `${other}\0${key.join(',')}`;
-      if (seen.has(pair)) continue;
-      seen.add(pair);
-      found.push({ fields: [...key], other });
-    }
+  for (let k = 0; k < def.unique.length; k++) {
+    const key = def.unique[k];
+    const text = core.catalog.uniqueKey(view, key);
+    if (text === null) continue;
+    const other = uniques.get(`${def.name}\0${key.join(',')}\0${text}`);
+    if (other === undefined || other === id) continue;
+    const pair = `${other}\0${key.join(',')}`;
+    if (seen.has(pair)) continue;
+    seen.add(pair);
+    found.push({ fields: [...key], other });
   }
   return found;
 };
@@ -945,6 +1007,12 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const items = [];
   const touched = new Map();
   const reserved = new Map();
+  // The unique keys the records touched here hold — `entity\0fields\0key` →
+  // id, and per record the pairs it holds — kept as each op joins, so an op
+  // is checked against them at once (`conflictsIn`): a scan of every touched
+  // record's view per op was N² views, 4 000 rows in 1.8 s.
+  const uniques = new Map();
+  const uniquesOf = new Map();
   // Per record: the index of its newest op here, and its ops' deltas laid
   // one over the other — what the live Record is refreshed by, once.
   const newestOf = new Map();
@@ -962,13 +1030,37 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       made.previous = null;
     }
   };
+  // A record as its newest op here left it: what `current` reads, its unique
+  // keys standing for it in `uniques` (none once it is dead).
+  const hold = async (id, entry) => {
+    touched.set(id, entry);
+    const held = uniquesOf.get(id);
+    if (held !== undefined) {
+      for (let i = 0; i < held.length; i++) if (uniques.get(held[i]) === id) uniques.delete(held[i]);
+      uniquesOf.delete(id);
+    }
+    if (!isAlive(entry)) return;
+    const def = core.definitionOf(entry.data);
+    if (!def || def.unique.length === 0) return;
+    const view = await core.view(id, entry);
+    const pairs = [];
+    for (let k = 0; k < def.unique.length; k++) {
+      const key = def.unique[k];
+      const text = core.catalog.uniqueKey(view, key);
+      if (text === null) continue;
+      const pair = `${def.name}\0${key.join(',')}\0${text}`;
+      uniques.set(pair, id);
+      pairs.push(pair);
+    }
+    if (pairs.length > 0) uniquesOf.set(id, pairs);
+  };
   const tx = {
     ...core,
     current: (id) => (touched.has(id) ? touched.get(id) : core.current(id)),
     // A stream's seq counts the ops made here and not yet appended.
     seqOf: (key) => Math.max(core.seqOf(key), reserved.get(key) ?? 0),
     run: (task) => task(),
-    conflicts: (id, entry) => conflictsIn(core, touched, id, entry),
+    conflicts: (id, entry) => conflictsIn(core, uniques, id, entry),
   };
   // An op made here that continues the one made just before it — of its
   // record, the record's newest, its stream, field, actor and message — is
@@ -985,21 +1077,23 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const before = items[i];
     if (!grown(before, op, made, coalesce)) return null;
     deltas.set(op.id, assignData(deltas.get(op.id) ?? {}, made.delta));
-    touched.set(op.id, made.entry);
     return before.op;
   };
   // An op made here joins the transaction: grown into the one before it, or an item of its own.
-  const join = (made) => {
+  const join = async (made) => {
     const grown = grows(made);
-    if (grown !== null) return grown;
     const { op } = made;
     const { id } = op;
+    if (grown !== null) {
+      await hold(id, made.entry);
+      return grown;
+    }
     const was = newestOf.get(id);
     if (was !== undefined) release(items[was]);
     newestOf.set(id, items.length);
     deltas.set(id, assignData(deltas.get(id) ?? {}, made.delta));
     items.push(made);
-    touched.set(id, made.entry);
+    await hold(id, made.entry);
     reserved.set(opKey(op), op.seq);
     return op;
   };
@@ -1128,7 +1222,8 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
       }
       if (listening) tagged(op, items[i].changes, changes);
     }
-    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes, entries: touched });
+    const eventId = core.log.formatId(to);
+    transacted(core, { local: true, via: null, source, message: msg ?? null, ops, changes, entries: touched, eventId });
     if (failed !== null) throw failed;
   });
   return { result, done, ops: items.length };
@@ -1182,4 +1277,4 @@ const commit = (core, type, id, payload, options = {}) => {
   return tracedCommit(core, type, id, payload, options);
 };
 
-module.exports = { commit, commitAtOnce, transact, rehearse, link, prepareOp, applyLocal, MISMATCH };
+module.exports = { commit, commitAtOnce, transact, rehearse, link, prepareOp, applyLocal, MISMATCH, ABSENT };

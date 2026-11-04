@@ -220,7 +220,7 @@ default) on the storage and on its sync manager; one more throws.
 | --- | --- | --- |
 | `change` | `(op, via, { changes })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; keystrokes sent without waiting, or typed through a transaction, that continue each other are one op (typed on at the end of their run, or a chain of cuts), announced once with the changes of each in order; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op) |
 | `commit` | `({ op, seq, source, before, after, kinds, embeds? })` | A local write is durable — any kind of op made through the write API, `transact()`, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Document` whose `save()` it was or the `source` given to `transact()`/`applyPatches()` (`null` otherwise), `before`/`after` the record as copies in the op model's terms — every [path](./database#paths) a field of its own, not composed (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`), `embeds` the markers of a text's [embed slots](./lists#embeds-and-blocks) by index on each side, when a side holds any; `op.msg` the transaction's message — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Document`'s `update`, before `change`; a transaction's fire once it has landed whole, in op order |
-| `transaction` | `({ local, via, source, message, ops, changes, ts })` | One turn's ops durable and announced, after their `change` events: a local write (`ops` one), a `transact()` (its ops, `source` and `message`), a peer's page (`local` false, `via` the peer), a joined snapshot (`local` true, `via` the host) — `changes` every op's, tagged with its record `id`, `ts` the last op's stamp; built only while something listens |
+| `transaction` | `({ local, via, source, message, ops, changes, ts })` | One turn's ops durable and announced, after their `change` events: a local write (`ops` one), a `transact()` (its ops, `source` and `message`), a peer's page (`local` false, `via` the peer), a joined snapshot (`local` true, `via` the host) — `changes` every op's, tagged with its record `id`, `ts` the last op's stamp; built only while something listens; `eventId` the log position of the turn's last op, where a reader of the turns resumes from (`log.since`) |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./database#queries) |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./database#reading-across-versions) |
@@ -228,10 +228,17 @@ default) on the storage and on its sync manager; one more throws.
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them — see [The log](./sync#the-log) |
 | `lease` | `({ state: 'renewed' \| 'late' \| 'lost', path })` | The engine's lease on the database (MongoDB) was renewed; a renewal failed and is being retried (`late`, once per run of failures); it went to another instance or was given up (`lost`, with the `error` event `LEASE_LOST`) — see [Engines](./backends#engines) |
 | `close` | — | After `close()` sealed the log |
+| `local` | `({ key, value })` | A [local document](./local) written (`value`) or deleted (`null`) through `db.local` or a collection's — never an op, so no `change`; the `local` plugin's |
 
 A `Document` emits `update` `(data, delta)` on a staged assignment and when the
 record changes in storage (`null` data once deleted) — once per transaction
 that changed it, with the delta of all its ops.
+
+A collection (`db.Post`) emits what the catalog decides of its records — `change` (`{ id, action }`)
+and `insert`, `update`, `remove` (`{ id }`), once per landing of a record of its own — on a microtask
+after the landing: the row is in the catalog by then, a listener never holds the write, and the write
+resolves after its listeners ran. The catalog's subscription is taken at the first `on()` and let go of
+with the last listener (an `off()`, a `once()` that fired).
 
 To follow one record rather than every op, `observe(id, path?, listener)`
 calls the listener after every turn that changed the record — with its

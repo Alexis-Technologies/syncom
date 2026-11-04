@@ -12,7 +12,14 @@ tests/                    *.test.js are tests; anything else is a helper
 
 `node:test` + `node:assert`. Browser halves run under Node with the OPFS mock
 (`tests/utils/mock-opfs.js`) and `node:crypto`'s `webcrypto` — see
-`tests/index.browser.test.js`. Cross-platform behaviour goes in `tests/suites/`
+`tests/index.browser.test.js`. `tests/utils/browser-env.js` primes the require cache with the browser halves ONCE,
+when a twin calls `prime()` right after requiring it and before its suite (the mesh's link loads `src/utils.js`;
+`requireBrowserAll()` primes where no one did), and throws if a shared module was loaded before the priming; the
+collections twin asserts `require('../src/utils.js') === require('../src/utils.browser.js')`. `tests/crypto.cross.test.js`
+never primes: it holds both halves by their own paths. The browser
+half has no async context (`taskScope` of utils.browser.js): a write through the database from inside `transact()`
+or `modify()` is not told apart there and would wait for the queue it holds — a suite skips such a case when its
+factory carries `createStorage.browser === true`, never runs it blind. Cross-platform behaviour goes in `tests/suites/`
 and is run against both halves (`schema`, `catalog`, `query`, `search`, `purge`,
 `hooks`, `fsi`, `sync-engine`, `signatures`, `signing`, each with a `*.test.js`
 and a `*.browser.test.js`

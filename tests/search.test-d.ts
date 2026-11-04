@@ -1,6 +1,15 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
-import { createSearch, normalize, trigrams } from '../src/search/search.js';
-import type { TextIndex } from '../src/search/search.js';
+import {
+  createSearch,
+  normalize,
+  trigrams,
+  cosine,
+  euclidean,
+  manhattan,
+  dot,
+  isVector,
+} from '../src/search/search.js';
+import type { TextIndex, Distance } from '../src/search/search.js';
 import { open } from '../index.js';
 import type { StorageOptions } from '../index.js';
 
@@ -16,4 +25,9 @@ expectType<string>(normalize('Crème'));
 expectType<string[]>(trigrams('quick'));
 expectAssignable<StorageOptions['search']>(createSearch({ minOverlap: 0.5 }));
 expectError(createSearch({ minOverlap: 'high' }));
+expectType<number>(cosine([1, 0], [0, 1]));
+expectAssignable<Distance>(euclidean);
+expectAssignable<Distance>(manhattan);
+expectAssignable<Distance>(dot);
+expectType<boolean>(isVector([1]));
 void open({ search: createSearch(), schema: { entities: { Post: { search: ['title'] } } } });

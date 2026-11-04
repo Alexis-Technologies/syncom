@@ -199,7 +199,12 @@ const mergeBatch = async (core, records, via, from) => {
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (await core.persist(batch.touched, first, last)) core.log.applied(first, last);
-  if (batch.purged) for (const id of batch.purged) await core.scrub(id);
+  if (batch.purged) {
+    // The purged ids together: every log file holding one of them rewritten once.
+    const purged = [];
+    for (const id of batch.purged) purged.push(id);
+    await core.scrub(purged);
+  }
   core.saveCatalog();
   const changes = [];
   // Every merge is announced whatever an afterWrite hook did to one of them —
@@ -220,7 +225,16 @@ const mergeBatch = async (core, records, via, from) => {
   }
   if (core.listening('transaction')) {
     const ts = batch.ops[batch.ops.length - 1].ts;
-    const event = { local: true, via, source: null, message: null, ops: batch.ops, changes, ts };
+    const event = {
+      local: true,
+      via,
+      source: null,
+      message: null,
+      ops: batch.ops,
+      changes,
+      ts,
+      eventId: core.log.lastEventId,
+    };
     event[ENTRIES] = batch.touched;
     core.emit('transaction', event);
   }

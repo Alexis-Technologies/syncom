@@ -59,6 +59,7 @@ expectType<
     syncom.Plugin,
     syncom.Plugin,
     syncom.Plugin,
+    syncom.Plugin,
   ]
 >(syncom.PLUGINS);
 expectType<syncom.Plugin>(syncom.versions);

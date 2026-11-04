@@ -37,6 +37,11 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/schema/CLAUDE.md](./src/schema/CLAUDE.md) | Schemas: the validator after `applyOp`, the lens |
 | [src/wrpc/CLAUDE.md](./src/wrpc/CLAUDE.md) | The wrpc adapter: WebRTC and wrpc are wrpc's, injected |
 | [src/encryption/CLAUDE.md](./src/encryption/CLAUDE.md) | Encryption: encrypted records are local |
+| [src/local/CLAUDE.md](./src/local/CLAUDE.md) | Local documents: never an op |
+| [src/state/CLAUDE.md](./src/state/CLAUDE.md) | App state: by name and path, a path a register |
+| [src/dump/CLAUDE.md](./src/dump/CLAUDE.md) | Dumps: a merge is a bootstrap, an insert is a write |
+| [src/pipeline/CLAUDE.md](./src/pipeline/CLAUDE.md) | Pipelines: once, in order, checkpointed after the write |
+| [src/cleanup/CLAUDE.md](./src/cleanup/CLAUDE.md) | Tombstone cleanup: a folded tombstone still wins |
 | [tests/CLAUDE.md](./tests/CLAUDE.md) | Tests: the suites run twice, the mesh, coverage, INVARIANTS.md |
 | [bench/CLAUDE.md](./bench/CLAUDE.md) | Benchmarks: the comparison's own package, the generated charts |
 | [docs/CLAUDE.md](./docs/CLAUDE.md) | Documentation: examples run before they are written, the pages kept in step with the code, the matrices as data |
@@ -76,8 +81,9 @@ and the whole suite with `node --test --test-timeout=120000` (never a run withou
 
 - **An adapted algorithm brings its notice.** Code or a rule taken from an MIT or BSD project is named in
   `THIRD_PARTY_NOTICES.md` (project, commit, the syncom files that carry it) with the upstream notice.
-  Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0) — those are read
-  as specifications only; the clones live in `../../open-source/local-first-alternatives/`.
+  Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0), nor from RxDB (Apache-2.0)
+  and its event-reduce-js (MIT) — those are read as specifications only (the live query of `src/query/live.js` is
+  the event-reduce idea written anew); the clones live in `../../open-source/local-first-alternatives/`.
 - **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build.
 - **No runtime dependencies.** Helpers go in `src/utils.js`. `scripts/size.js`
   fails at resolve time on any bare import reaching a browser bundle, so a

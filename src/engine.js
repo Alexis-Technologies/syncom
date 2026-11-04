@@ -14,7 +14,8 @@
 //            `get/has/list/put/remove` by namespace and key; `create` where the
 //            medium can make a key exclusively (the lock prefers it)
 //   records  the records by id: `get(id)` the stored record as the engine
-//            holds it (`{ data, meta, encrypted, timestamp, block, gen? }`),
+//            holds it (`{ data, meta, encrypted, timestamp, block, gen?, type? }` — `type` the
+//            collection of a tombstone, whose data is empty),
 //            `raw(id)` its text, `getMany`, `has`, `ids({ after, limit })` in id
 //            order
 //   pieces   the runs of a large block beside its record, `(id, n)` → text; `getMany(id, names)` → Map, one call
@@ -131,7 +132,7 @@ const fsiNamespace = (fsi, dir) => {
 // The kv namespaces a database writes besides a tag's (`tags/<tag>/index`):
 // the one list `copyEngine` copies and the files engine sweeps — a plugin
 // that writes a namespace of its own adds it here.
-const KV_NAMESPACES = Object.freeze(['', 'keys', 'blockchain', 'index', 'remote']);
+const KV_NAMESPACES = Object.freeze(['', 'keys', 'blockchain', 'index', 'remote', 'local', 'pipeline', 'tombstones']);
 
 // A kv key, a tag's name, a piece's name: a text that names one thing and
 // nothing else — no separator, no `.`/`..`, no control character, 255 at

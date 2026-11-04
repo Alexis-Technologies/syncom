@@ -183,6 +183,15 @@ const createTelemetry = (telemetry) => {
   let refused = null;
   let presenceRefused = null;
   let handleFlushes = null;
+  let queryCache = null;
+  let queryLive = null;
+  let queryPlans = null;
+  let bulkRows = null;
+  let pipelineTurns = null;
+  let pipelineLag = null;
+  let cleanupTombstones = null;
+  let dumpPages = null;
+  let insertsNamed = null;
   let gauges = null;
 
   if (hasMethod(meter, 'createCounter') && hasMethod(meter, 'createHistogram')) {
@@ -268,6 +277,42 @@ const createTelemetry = (telemetry) => {
       handleFlushes = meter.createCounter('syncom.handle.flushes', {
         unit: '{flush}',
         description: 'Text handle flushes (openText), by result: ok, unlogged, error',
+      });
+      queryCache = meter.createCounter('syncom.query.cache', {
+        unit: '{query}',
+        description: 'Query results asked of the cache, by result: hit (nothing read), miss (a run)',
+      });
+      queryLive = meter.createCounter('syncom.query.live', {
+        unit: '{change}',
+        description: 'Live query changes, by result: reduce (the record placed), rerun (the cursor run again)',
+      });
+      queryPlans = meter.createCounter('syncom.query.plans', {
+        unit: '{plan}',
+        description: 'Cursors planned, by scan: index, postings, collection, text',
+      });
+      bulkRows = meter.createCounter('syncom.bulk.rows', {
+        unit: '{row}',
+        description: 'Rows of bulk writes, by result: success, error',
+      });
+      pipelineTurns = meter.createCounter('syncom.pipeline.turns', {
+        unit: '{turn}',
+        description: 'Pipeline turns handed to a handler, by result: handled, failed',
+      });
+      pipelineLag = meter.createHistogram('syncom.pipeline.lag', {
+        unit: 'ms',
+        description: 'From the last op of a turn to its handler done (live turns; a replay has no stamp)',
+      });
+      cleanupTombstones = meter.createCounter('syncom.cleanup.tombstones', {
+        unit: '{tombstone}',
+        description: 'Tombstones a cleanup sweep took, by result: folded, dropped',
+      });
+      dumpPages = meter.createCounter('syncom.dump.pages', {
+        unit: '{page}',
+        description: 'Pages of a dump, by kind: export, import',
+      });
+      insertsNamed = meter.createCounter('syncom.insert.named', {
+        unit: '{insert}',
+        description: 'Inserts under an id the data named, by result: ok, exists',
       });
       // Observable: read when the SDK collects, through the callbacks
       // `gauges(read)` registers. Optional — a meter without the factory
@@ -435,6 +480,40 @@ const createTelemetry = (telemetry) => {
 
     recordHandleFlush(result) {
       add(handleFlushes, 1, { 'syncom.result': result });
+    },
+
+    recordQueryCache(result) {
+      add(queryCache, 1, { 'syncom.result': result });
+    },
+
+    recordQueryLive(result) {
+      add(queryLive, 1, { 'syncom.result': result });
+    },
+
+    recordQueryPlan(scan) {
+      add(queryPlans, 1, { 'syncom.scan': scan });
+    },
+
+    recordBulk(result, count) {
+      if (count > 0) add(bulkRows, count, { 'syncom.result': result });
+    },
+
+    // `ts` is the turn's last op's stamp (the origin's clock): the lag is skew plus the handler's wait, a trend.
+    recordPipeline(result, ts) {
+      add(pipelineTurns, 1, { 'syncom.result': result });
+      if (typeof ts === 'number') record(pipelineLag, Math.max(0, Date.now() - ts));
+    },
+
+    recordCleanup(result, count) {
+      if (count > 0) add(cleanupTombstones, count, { 'syncom.result': result });
+    },
+
+    recordDump(kind) {
+      add(dumpPages, 1, { 'syncom.kind': kind });
+    },
+
+    recordInsertNamed(result) {
+      add(insertsNamed, 1, { 'syncom.result': result });
     },
 
     /**

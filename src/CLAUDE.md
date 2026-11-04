@@ -11,15 +11,20 @@ src/<name>/<name>.js      every subpath is a folder under src/ with its entry an
 src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption): the
                           API as it was before the blocks
 src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/crypto/digest.js
-src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/
-                          resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
+src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
+src/local/local.js        @alexify/syncom/local — the local plugin: db.local over the `local` kv namespace, never an op (its own CLAUDE.md)
+src/state/state.js        @alexify/syncom/state — createState(db, name): app state by path over a record or a local document (its own CLAUDE.md)
+src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
+src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
+src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded whole into the tombstones kv namespace (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
 src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
+src/layout.js             DIRS, tagDirs — every directory a database keeps under its path (the kv namespaces, the files engine's, a tag's two): what engine.remove sweeps, tests/package/layout.test.js holds every module to — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
                           cache; 'back' drains its queue before any lower layer is consulted; create is exclusive across layers
@@ -34,8 +39,7 @@ src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser cryp
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — what `anonymize` hashes a string by (src/inspect/inspect.js); a checksum, never a signature — no requires
-src/crc32.js              CRC-32 of a string's UTF-8, 8 hex digits — the checksum every log file carries; zlib's in Node.js, the table of
-                          src/crc32.browser.js where it is absent and in the browser (package.json#browser)
+src/crc32.js              CRC-32 of a string's UTF-8, 8 hex digits — the checksum every log file carries; zlib's in Node.js, the table of src/crc32.browser.js where it is absent and in the browser (package.json#browser)
 src/header.js             what names an op, the core's: the header (v1, `prev` last), payloadOf, the salted digest every node mints
                           (`digest`), the fingerprint (SHA-256 of the header) — requires digest.js and shape.js only (the signing subpath
                           ships it); `link` in src/commit.js sets an op's `prev` from the op before it in its stream
@@ -48,26 +52,25 @@ src/order/order.js        the @alexify/syncom/order subpath — fractional index
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Database and what it hands out — no requires
-src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor
-                          the data and the delta share, copied as it is — no requires
+src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — createDatabase()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
-src/catalog.js            the record catalog: live ids, collections, indexed values; catalog.json through a kv store — requires engine.js only
+src/catalog.js            the record catalog: live ids, collections, indexed values, the sorted indexes; catalog.json through a kv store — requires engine.js, sorted.js only
+src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — no requires
 src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
                           `createDatabase()` (and the pre-rename aliases `Database`, `open`)
+src/writes.js             the facade's write helpers: checkOrm (an entity's methods/statics against what a Document and a Collection answer to), tombstone (a delete's payload), operate (an operator delta as the calls over a transaction's api), modifyIn (`modify(id, fn)` as the difference) — requires document.js, collection.js, operators.js, plugin.js, shape.js, errors.js only
+src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js only
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
 src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
-src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods
-                          come with it; Database keeps a delegate per method
-src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on
-                          applyPatches); appliedHere lives in log.js
-src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`),
-                          the bounded cache, the catalog row each change leaves
+src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
+src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
+src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on applyPatches); appliedHere lives in log.js
+src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`), the bounded cache, the catalog row each change leaves, the folded tombstones in the tombstones kv namespace
 src/document.js           Reference, Document — what the application holds of one record; public API + the symbols only
 src/collection.js         Collection — an entity's records, `db.<Entity>`; public API + SOURCE/CURSOR only
-src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`);
-                          `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
+src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`); `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
 src/errors.js             SyncomError, ValidationError, typed() — no requires
@@ -123,7 +126,8 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   and `src/index.browser.js`. `tests/package/consistency.test.js` catches a
   missed one. To run shared code against the browser halves under Node, load
   it through `tests/utils/browser-env.js` — requiring `src/index.browser.js`
-  alone does NOT redirect the nested requires.
+  alone does NOT redirect the nested requires; a browser twin calls its `prime()` right after requiring it and before its
+  suite (a suite's mesh loads `src/utils.js`), and the priming throws if a shared module was loaded before it.
 - **A record id is checked where it enters, nowhere else.** `isRecordId` in
   `src/shape.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
   (every local writer), `insert` (what `getId` minted), `admit` in
@@ -156,7 +160,9 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   `createDatabase({ chain: false })` with it, `core.chain` is null: `persistLocal`/`seal` in
   `src/commit.js` and `#persistBatch` write `block: null`, `verify` is forced off,
   `validate()` throws `NO_CHAIN` (the message says which of the two). A new place that reads
-  the chain must take null.
+  the chain must take null. A cold read is verified against its block (`validate(id, data, block)` through
+  `EntryStore`'s `verify`): the block read, parsed and hashed once and kept (`#blockOf`, `VERIFIED_BLOCKS`), so the
+  N records of a batch cost one hash each, never N parses of a block N long.
 - **Live Records are weak.** `#records` holds `WeakRef`s (a
   `FinalizationRegistry` clears the slot); go through `#live(id)`, never
   `#records.get`. A Record the application still holds pins its cache entry;
@@ -166,8 +172,8 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   order) — never await a read hook inside the queue.
 - **A purge is a scrub, not a delete.** `purge` wins at any stamp and a
   purged entry takes nothing but another purge or a merge (`applyOp`
-  returns early). The payload leaves the log through `OpLog.scrub(id)`,
-  which rewrites the files holding what it takes (every file of the id only after a failed
+  returns early). The payload leaves the log through `OpLog.scrub(ids)` — one id or the ids of a batch together —
+  which rewrites the files holding what it takes, each once (every file of an id only after a failed
   rewrite); `persist` in `src/apply.js` and `mergeBatch` in `src/bootstrap.js` scrub every id
   of the batch whose entry the batch purged, after the batch is durable and before the relay,
   and an op that lands on a record purged BEFORE it is stripped (`scrubOp`, src/header.js) and
@@ -460,7 +466,8 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   reach the storage's state from a path module except through `core`. A
   transaction (`transact` in src/commit.js, what `storage.transact()`,
   `applyPatches`/`restore`/`compact` run) is the first path over a core
-  whose `current` and `seqOf` see the ops made before — `prepare` per op,
+  whose `current` and `seqOf` see the ops made before — `prepare` per op (a unique key checked against a map of the
+  keys its own records hold, `conflictsIn`, as `#conflicts` keeps one of the records' in flight — never a scan of them per op),
   ONE `log.append` of them all, one `core.land` (a chain block, the files),
   the announces after; a throw from `fn` leaves nothing appended. An op that continues the one made
   just before it — of its record, stream, field, actor and message — is that op, grown, where the
@@ -522,9 +529,25 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   first await, one save in flight at a time, `close()` awaits it — so a write
   never waits for the catalog file. Do not `await` a save inside a write path.
   `list()`/`hasRecord()` read it, and so does `snapshot()`: a tombstone is a
-  row flagged `gone` (there, not listed), so a page is a slice of
-  `catalog.all()` and never a directory listing. A new way of changing a
+  row flagged `gone` (there, not listed; it keeps the record's `type` and its `deleted` stamp), so a page is a slice of
+  `catalog.all()` and never a directory listing. The catalog is derived from the records AND the `tombstones` kv
+  namespace (a folded tombstone's whole entry, `EntryStore.foldMany`; a fold changes no row; `#loadCatalog` rebuilds
+  from both). A new way of changing a
   record's file must put too, or the catalog lies until the next rebuild.
+- **A collection is a definition over the one write path, never a path of its own.** `Collection` (src/collection.js)
+  derives the id its data names through `namedId` (src/schema/entity.js: the composite id's fields or the id field,
+  a value with the separator or not a string/number/boolean INVALID_ID with `entity`/`field`) and writes through the
+  core — `insert` as a `write` with `expect: ABSENT` (EXISTS decided inside the queue, an encrypted write too),
+  `upsert`/`set` as a `write`, the operators expanded in the queue (`operate`), `modify` as the difference, a bulk as
+  ONE `transact` with a verdict per row (`ownVerdict`: a row's own refusal is its verdict, anything else fails the
+  batch) — MAX_BATCH (10 000) rows a transaction; the fields of a composite id and `$type` are immutable
+  (`immutables` in src/commit.js). `addCollections`/`removeCollection` are `Catalog.define` (the postings, unique keys
+  and sorted indexes of the type dropped and built once; the records re-indexed in pages inside the queue behind the
+  landings) — nothing persisted, a reopen rebuilds. A write from inside a hook or a transaction's `fn` through the
+  database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
+  write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
+  (a cursor's writes), `guard` (a local write) — every member a `#run` of the queue or a refusal of it; a new member
+  goes through the queue the same way.
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the
@@ -551,7 +574,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   scopes are the per-peer filter). Only the hooks that run inside the
   mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
-  queues. Every event leaves through `notify()` (a path module's through `core.emit`, which is it):
+  queues. A collection's events (`Collection#hear`, fed by `Catalog.subscribe` inside the landing) are queued
+  there and told on a microtask after it — the row in the catalog, the landing never held by a listener. A
+  plugin's own write (a local document) asks the seam's `guard(what)` first: CLOSED, or READ_ONLY as `#run` refuses
+  one. Every event leaves through `notify()` (a path module's through `core.emit`, which is it):
   never `await this.emit(...)`, never emit `error` any other way (the Emitter
   throws on an unheard `error`, and that throw used to fail a push before the
   vector moved). A remote op a `beforeApply` skipped is still appended, with

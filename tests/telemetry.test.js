@@ -178,6 +178,87 @@ test('createTelemetry: what enables it', async (t) => {
     assert.strictEqual(sum(await points('syncom.commits')), 1);
   });
 
+  await t.test(
+    'the blocks record their work: the query cache, live changes, plans, bulk rows, pipeline turns, a cleanup sweep, dump pages, named inserts',
+    async (t2) => {
+      const { meter, points, collect } = createMetrics();
+      const { tracer, spans } = createTracing();
+      const schema = { entities: { Post: { index: ['n'] } } };
+      const { storage } = await openTemp(t2, { telemetry: { tracer, meter }, schema });
+      const labelled = async (name, label, value) => {
+        let total = 0;
+        for (const point of await points(name)) if (point.attributes[label] === value) total += point.value;
+        return total;
+      };
+      // Named inserts: one ok, one exists.
+      await storage.Post.insert({ id: 'p1', n: 1 });
+      await assert.rejects(storage.Post.insert({ id: 'p1', n: 2 }), { code: 'EXISTS' });
+      assert.deepStrictEqual(
+        [
+          await labelled('syncom.insert.named', 'syncom.result', 'ok'),
+          await labelled('syncom.insert.named', 'syncom.result', 'exists'),
+        ],
+        [1, 1],
+      );
+      // Bulk rows by verdict.
+      await storage.Post.bulkInsert([
+        { id: 'p2', n: 2 },
+        { id: 'p1', n: 9 },
+        { id: 'p3', n: 3 },
+      ]);
+      assert.deepStrictEqual(
+        [
+          await labelled('syncom.bulk.rows', 'syncom.result', 'success'),
+          await labelled('syncom.bulk.rows', 'syncom.result', 'error'),
+        ],
+        [2, 1],
+      );
+      // A plan by its scan, the cache missed then hit, a live change reduced.
+      const cursor = storage.Post.select({ n: { $gte: 2 } }).order('n');
+      await cursor.fetch();
+      await cursor.fetch();
+      assert.strictEqual(await labelled('syncom.query.plans', 'syncom.scan', 'index'), 1);
+      assert.deepStrictEqual(
+        [
+          await labelled('syncom.query.cache', 'syncom.result', 'miss'),
+          await labelled('syncom.query.cache', 'syncom.result', 'hit'),
+        ],
+        [1, 1],
+      );
+      const stop = cursor.watch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      await storage.Post.update('p2', { n: 5 });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      stop();
+      assert.strictEqual(await labelled('syncom.query.live', 'syncom.result', 'reduce'), 1);
+      assert.deepStrictEqual(storage.stats().query, { cache: { entries: 1, rows: 2 }, live: 0 });
+      assert.strictEqual(storage.stats().collections, 1);
+      // A pipeline's turns and its lag; a dump's pages; a cleanup sweep's span and counts.
+      const { createPipeline } = require('../src/pipeline/pipeline.js');
+      const pipeline = createPipeline(storage, { name: 'p', source: 'Post', handler: () => {} });
+      await pipeline.start();
+      await pipeline.awaitIdle();
+      await storage.Post.update('p3', { n: 7 });
+      await pipeline.awaitIdle();
+      pipeline.stop();
+      assert.ok((await labelled('syncom.pipeline.turns', 'syncom.result', 'handled')) >= 2);
+      assert.ok((await points('syncom.pipeline.lag')).length > 0);
+      const { exportJSON } = require('../src/dump/dump.js');
+      await exportJSON(storage);
+      assert.ok((await labelled('syncom.dump.pages', 'syncom.kind', 'export')) >= 1);
+      const { cleanup } = require('../src/cleanup/cleanup.js');
+      await storage.Post.delete('p1');
+      const sweeper = cleanup(storage, { minimumDeletedTime: 0, awaitSync: false });
+      assert.deepStrictEqual(await sweeper.run(), { folded: 1, dropped: 0, skipped: 0 });
+      assert.strictEqual(await labelled('syncom.cleanup.tombstones', 'syncom.result', 'folded'), 1);
+      assert.strictEqual(storage.stats().tombstones, 1);
+      const sweep = spans().find((span) => span.name === 'syncom.cleanup.sweep');
+      assert.ok(sweep, 'a span of the sweep');
+      assert.strictEqual(sweep.attributes['syncom.cleanup.folded'], 1);
+      await collect();
+    },
+  );
+
   await t.test('a meter missing a factory leaves metrics off, not the writer', () => {
     const otel = createTelemetry({ meter: { createCounter: () => ({ add() {} }) } });
     assert.strictEqual(otel.enabled, true);

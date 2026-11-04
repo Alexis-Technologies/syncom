@@ -279,6 +279,7 @@ export const ENGINE_SUBJECTS = [
   { id: 'storage', title: 'Database' },
   { id: 'write', title: 'Write path' },
   { id: 'engines', title: 'Engines' },
+  { id: 'catalog', title: 'Catalog' },
   { id: 'search', title: 'Search' },
   { id: 'apply', title: 'Apply' },
   { id: 'sequence', title: 'Lists and text' },
@@ -300,6 +301,8 @@ const SUBJECT_NOTES = {
     'One awaited write through the pure build (core + text + sync, defer 16): a counter, a field, a keystroke, a push; pipelined and as a transaction.',
   engines:
     'The same database over every engine: the files engine on node:fs, memory, SQLite, IndexedDB (fake-indexeddb under Node), MongoDB (the driver in memory) — the chain off.',
+  catalog:
+    'The record catalog in memory, 100k rows with two sorted indexes (chunked sorted arrays): a put keeps them up, a load or a definition builds them once, a scan seeks; a page sought after its edge and a count the index answers, over the memory engine.',
   search: 'The @alexify/syncom/search trigram index: a put per write, $text answered from the catalog in rank order.',
   apply: "A peer's page once it has arrived: admit, fold, append, write, announce. The applyRemote rows count ops.",
   sequence:
