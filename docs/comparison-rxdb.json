@@ -2554,10 +2554,10 @@
           "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "nats": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js",
-          "detail": "wrpc has a NATS broker transport; syncom does not use it (the shared-log hub mode is reserved)."
+          "mark": "✅",
+          "text": "a wrpc broker's log — NATS JetStream, Redis Streams, Kafka, AMQP — as the hubs' shared log (`sync.sharedLog: broker.log`): every hub appends what it accepts, serves `changes` from it, a client resumes on any hub",
+          "source": "src/sync/shared.js; src/sync/hosting.js; docs/guide/scaling.md#a-shared-log; tests/hub.shared.test.js",
+          "detail": "The log is the hubs' bus and the clients' cursor space; a subject per document (RxDB's replication-nats) is a different shape — a client that speaks NATS itself is the `/connector` recipe (S2)."
         },
         "gdrive": {
           "mark": "❌",
@@ -2761,8 +2761,8 @@
         },
         "serverStorage": {
           "mark": "",
-          "text": "a full syncom node over any engine: node:fs, SQLite (`sqliteEngine`) or MongoDB (`mongoEngine`, one writer by lease, read-only followers over change streams)",
-          "source": "src/sqlite/sqlite.js; src/mongodb/mongodb.js; docs/guide/backends.md#engines"
+          "text": "a full syncom node over any engine: node:fs, SQLite (`sqliteEngine`) or MongoDB (`mongoEngine`, one writer by lease, read-only followers over change streams); several hub processes over one shared log (`mongoSharedLog`, or a wrpc broker's)",
+          "source": "src/sqlite/sqlite.js; src/mongodb/mongodb.js; docs/guide/backends.md#engines; src/sync/shared.js"
         },
         "atRest": {
           "mark": "✅",

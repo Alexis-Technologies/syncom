@@ -18,8 +18,9 @@
 // instance holds a database by a lease on the server's clock, and every
 // document a handle writes carries the lease's generation (`gen`): a put or
 // a removal never reaches a document of a newer lease (the fence). Nothing
-// here opens or closes a connection: the client is the caller's. Requires
-// engine.js and errors.js only.
+// here opens or closes a connection: the client is the caller's. The subpath
+// also exports `mongoSharedLog` (./shared-log.js). Requires engine.js,
+// errors.js and shared-log.js only.
 //
 //   collection  _id (the key as JSON)   fields beside it
 //   kv          [p, ns, key]            p, ns, key, v, gen — the small named texts (node.json, schema.json, the keys, the lock…)
@@ -35,6 +36,7 @@
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
+const { mongoSharedLog } = require('./shared-log.js');
 
 const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
 // A lease per database path: `{ _id: path, owner, gen, expires }`, renewed by its holder, taken once it lapsed.
@@ -858,4 +860,4 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   });
 };
 
-module.exports = { mongoEngine };
+module.exports = { mongoEngine, mongoSharedLog };

@@ -529,6 +529,10 @@ backing off and re-opening the subscription from the last event id are the
 manager only repeats `hello` + `push`, the outbound half a transport cannot know
 about.
 
+The cursor is one hub's log position — `<epoch>.<seq>` — unless the hub
+serves `changes` from a [shared log](./scaling#hubs), where it is a position
+in that log and the same on every hub.
+
 A page that cannot be applied — a `beforeApply` that throws, a log append
 that fails — is a **break in the stream**, not a page to step over (an op on
 a record file this node cannot read is skipped, `OP_UNREADABLE`, and the
@@ -724,7 +728,7 @@ once `close()` was called is refused at once.
 | `log.rollAfter` | `64` | Groups of appends per sealed segment |
 | `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
-| `sharedLog` | — | Reserved for a hub mode on a broker's log; refused in this version — see [Scaling](./scaling#hubs) |
+| `sharedLog` | — | A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`) or `mongoSharedLog()` — alone or as `{ log, topic, inbox }`: every op this node accepts goes to the topic, the other hubs' are applied from it, `changes` is served from it, a read-only hub hosts over it — see [Scaling](./scaling#hubs) |
 
 The `telemetry` option sits beside `sync` on `createDatabase()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.
@@ -793,6 +797,22 @@ const unit = storage.sync.unit({
 ```
 
 See [wrpc transport](./wrpc) for mounting it.
+
+**Over a shared log** (`sync.sharedLog`, [Scaling](./scaling#hubs)) the
+unit hosts from the log rather than from this node's own: `changes` reads the
+topic from the client's cursor — a position in the log, the same on every
+hub, and `hello` answers the log's epoch (`shared:<topic>`) so a client moved
+between hubs keeps it — a client with no cursor is told to bootstrap, and a
+snapshot's first page is positioned at a marker the hub appended and its
+consumer passed (`eventId`). A hub that cannot write — a follower
+(`readOnly: true`) over MongoDB, a writer whose lease was lost — hosts there
+too, and nowhere else (`sync.unit()` is `READ_ONLY` without a shared log):
+its hello answers the vector as the log moved it, and a push is held to that
+vector and forwarded to the inbox for a hub that writes to land (the answer
+says `forwarded: true`; the writer's refusals — forged, out of scope — are
+the writer's to report); without an inbox (`inbox: false`) a push is 503
+(`READ_ONLY`), and a snapshot the shared log did not answer for in time is
+503 (`SHARED_LOG`).
 
 ## The link contract
 

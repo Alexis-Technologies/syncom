@@ -130,16 +130,26 @@ test('Hosting limits', async (t) => {
     assert.strictEqual('bucket' in host.sync.unit({ limits: null }).push, false);
   });
 
-  await t.test('the shared-log contract is checked, and refused as an option for now', async (t2) => {
+  await t.test('the shared-log contract is checked, and the option with it', async (t2) => {
     const log = { append: async () => '1.1', read: () => ({}), parseId: () => null };
     assert.strictEqual(isSharedLog(log), true);
     assert.strictEqual(syncom.isSharedLog(log), true);
     for (const value of [null, 'log', {}, { append() {}, read() {} }, { ...log, parseId: 'nope' }]) {
       assert.strictEqual(isSharedLog(value), false, String(value));
     }
-    await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: log } }), {
+    const message = /a shared log \(append, read, parseId\), or \{ log, topic, inbox \}/;
+    for (const sharedLog of ['log', {}, { log: {} }, { topic: 'x' }]) {
+      await assert.rejects(async () => openTemp(t2, { sync: { sharedLog } }), { name: 'TypeError', message });
+    }
+    await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, topic: '' } } }), {
       name: 'TypeError',
-      message: 'sync.sharedLog is reserved: the shared-log hub mode is not in this version',
+      message: /topic must be a non-empty string/,
     });
+    for (const inbox of ['', 7, 'ops']) {
+      await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, topic: 'ops', inbox } } }), {
+        name: 'TypeError',
+        message: /inbox must be a non-empty string other than the topic, or false/,
+      });
+    }
   });
 });

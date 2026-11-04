@@ -437,6 +437,12 @@ asks to be held to (`['*']` for all); `token` its registered credential,
 for the host's `authorize`; `schema` `{ version, hash }` or `null`; `kinds`
 the names of the kind plugins it runs.
 
+Over a [shared log](../guide/scaling#a-shared-log) `epoch` is the log's
+(`shared:<topic>`), the same on every hub, so a client moved between hubs
+keeps its cursor; and a hub that cannot write — a follower, a writer whose
+lease was lost — answers the `vector` as the log moved it, not its own as of
+its open.
+
 `proof` is there only when the caller's node id is a signing key and the
 host's `vector` holds more of one of the caller's own streams (`node`,
 `node@scope`, `node@~`) than the caller's `vector` says — a directory
@@ -474,6 +480,11 @@ An op outside the scopes hello granted is refused before anything reads it
 (`outOfScope`), and so is one whose record the host reads as outside them;
 one that [equivocates](#the-per-stream-chain) is refused too
 (`equivocations`, the host's `refused` event with `reason: 'equivocation'`).
+A hub that cannot write and has a [shared log](#the-shared-log) with an
+inbox answers `forwarded: true` beside the counts: the ops in order of
+their streams went to the inbox for a hub that writes to land, `vector`
+moved past them, a duplicate or a gap by the vector the log keeps current
+counted and not forwarded.
 
 | Code | `reason` | When |
 | --- | --- | --- |
@@ -490,7 +501,10 @@ one that [equivocates](#the-per-stream-chain) is refused too
 
 Records in id order, tombstones included, each with its `meta`; `cursor`
 is the last id of the page and `null` when the page is the last; `vector`
-rides on the first page only. On a binary-capable transport a page under
+rides on the first page only. Over a [shared log](#the-shared-log) the
+first page's `eventId` is the id of a marker the host appended and its
+consumer passed before the page was taken, and a read-only hub's `vector`
+is the one the log moved. On a binary-capable transport a page under
 `pageBytes` (4 MiB) goes as a wrpc stream of NDJSON — one record per line
 — and the answer is `{ id, size, cursor, eventId, vector? }`, `id` the
 stream to read. `scopes` narrows what hello granted (403 `SCOPES` when
@@ -509,7 +523,12 @@ resume from the last id replays exactly what was missed; the ops are the
 host's log from the cursor on, in the scopes asked for, less the
 subscriber's own and what came from it. `{ bootstrap: true }` ends the
 feed when the cursor cannot be resumed — another epoch, or compacted past
-it — and the dialer pages `snapshot` instead.
+it — and the dialer pages `snapshot` instead. Over a [shared log](#the-shared-log)
+the position is the log's entry id, one page per entry (its ops narrowed to
+the scopes, less the subscriber's own; an empty page at least every 64
+entries passed), a subscription with no cursor is told to bootstrap, and a
+position the log no longer has — another log's, trimmed past — ends the
+feed with `bootstrap` too.
 
 ### The presence event
 
@@ -533,6 +552,39 @@ At most 1 024 entries. A host takes an update that is the peer's own
 relayed. What passes goes to the room `syncom:<scope>` but the sender, and
 into the host's memory of the room (`max` 1 024 states per scope, for
 `timeout` ms, 30 000), which a newcomer is sent at hello.
+
+## The shared log
+
+What the hubs of a mesh append to one log (`sync.sharedLog`,
+[Scaling](../guide/scaling#a-shared-log)) and read back. An entry's value is
+one JSON text, its headers one string:
+
+```
+value    { "v": 1, "node": "<the appender's node id>", "ops": [packed…], "scopes"?: ["…"] }
+         { "v": 1, "node": "<the appender's node id>", "mark": true }
+headers  { "by": "<the appender's token, one per process>" }
+```
+
+`ops` are the [nineteen slots](#packed-the-nineteen-slots), at most the
+appender's `pageSize` (500) an entry, in the order the appender accepted
+them; `scopes` rides on an inbox entry alone — the scopes the forwarding
+hub granted the client, what the landing hub bounds the ops to. A `mark`
+positions a snapshot: the id its append answered is the first page's
+`eventId`. `by` lets a hub pass its own entries without parsing them. The
+ids are the log's (`<epoch>.<n>` on wrpc's brokers and `mongoSharedLog`);
+a hub keeps its consumer's cursors and the watermark of what it appended
+in `shared/cursor.json`:
+
+```json
+{"topic":"k1x9ab.42","inbox":null,"appended":"mvqe40dinmi2cx.17"}
+```
+
+A hub that cannot write forwards a client's push to the inbox topic
+(`<topic>.inbox`) as an entry of the same shape; the hub that writes lands
+it through `applyRemote` with `via` `{ url: null, node: <the client>, inbox:
+true }` and relays it to the topic, where every hub applies it with `via`
+`{ url: null, node: <the appending hub>, shared: true }` and appends it no
+further.
 
 ## Bounds
 

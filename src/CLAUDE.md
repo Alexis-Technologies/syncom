@@ -563,7 +563,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A batch of records is
   ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions — the chain's block and tail ride in
   it as kv puts, the pieces a record drops with its row, the tags' copies ahead of the records; a lost lease swaps the stores and the log's medium for the read-only ones
-  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine and neither dials nor hosts (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
+  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine, never dials and hosts over a shared log alone (`sync.sharedLog`, src/sync/shared.js: its feed from the log, its pushes forwarded to the inbox) (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write

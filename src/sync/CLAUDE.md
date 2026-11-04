@@ -15,7 +15,11 @@ src/sync/wire.js          packOps / unpackOps and the type codes — the ops as 
 src/sync/link.js          isSyncLink — the link contract check; the root barrel and the wrpc adapter take it from here — no requires
 src/sync/outbound.js      outbound(log, { exclude, vector, scopes, own }) — the ops a receiver lacks, the first retained seq per own
                           stream; a push and a branch merge both pick with it — requires scope.js, vector.js only
-src/sync/shared-log.js    isSharedLog — the reserved broker-log contract (wrpc BrokerLog shape), no consumer yet — no requires
+src/sync/shared-log.js    isSharedLog — the shared-log contract (wrpc BrokerLog shape: append/read/parseId); the root barrel exports it — no requires
+src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`): the relay (what this hub accepts → the topic, a batch an
+                          entry), the consumer (the topic and the inbox → applyRemote; a read-only hub shadows the vector), the marker a
+                          snapshot is positioned at, a read-only hub's forwarded push; normalizeShared, parseEntry — requires wire.js,
+                          protocol.js, shared-log.js, vector.js, shape.js, errors.js, hooks.js only
 ```
 
 ## Rules
@@ -52,6 +56,24 @@ src/sync/shared-log.js    isSharedLog — the reserved broker-log contract (wrpc
   nothing for the peer, the cursor moves there without a page. `lastEventId`
   is `next - 1` and runs ahead of the entries while an append is in flight —
   a feed that jumped there lost the batch in flight (it was tried).
+- **The shared log is a bus, never a second log.** What a hub appends to the topic (src/sync/shared.js) is what its
+  own log already holds — every op it accepted, per `#fanOut`, except what came FROM the topic (`via.shared`) — and
+  what it applies from the topic goes through `applyRemote` like a push (`via`/`peer` the appending hub, `bound`
+  the inbox entry's scopes, never `adoptFrom`). The topic's ids are the positions a client resumes by, so a hub
+  over a shared log answers `epoch: shared:<topic>` at hello, serves `changes` from the topic alone (one page per
+  entry, labelled with the entry's id — never split: a resume would skip the rest), tells a subscription with no
+  cursor to bootstrap, and positions a snapshot's first page at a marker it appended and its consumer PASSED —
+  the consumer applies every entry before the marker first, so nothing lands between the pages and the cursor.
+  A read-only hub (`storage.readOnly`: a follower, a lost lease) applies nothing and relays nothing: it shadows
+  the vector from the topic read whole (`vector()`), answers it at hello and in a snapshot's `vector`, holds a
+  push to it and forwards the page to the inbox — the shadow moved only once the append landed, so a failed
+  forward is pushed again — and stops reading the inbox (the next writer takes it from the saved cursor, which
+  only a writer saves). A failure is told once and recovered from (`SHARED_LOG_FAILED`, `reason`): the relay
+  falls `behind` and re-appends `log.since(appended)` (duplicates in the topic are every consumer's to drop); a
+  cursor gone reads from the oldest; an entry that will not apply three times leaves its topic `stuck` — never
+  skipped, a skipped entry is a gap for good. The loops begin a turn after `start()` (setImmediate), so a listener
+  attached right after the open hears the first read's failure. A read's 410/400 means the position is not the
+  log's — the codes wrpc's brokers and `mongoSharedLog` answer; a log of another shape must answer them too.
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a

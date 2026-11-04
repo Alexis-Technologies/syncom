@@ -216,6 +216,8 @@ export interface SyncManager {
   peers(): PeerView[];
   /** Hosting side: every peer with a live `changes` feed here. */
   hosted(): HostedPeer[];
+  /** The shared log as this hub stands to it (`sync.sharedLog`), or null without one. */
+  shared(): SharedStats | null;
   /**
    * Carries a presence instance (`@alexify/syncom/presence`): its updates go
    * to every connected host as the `syncom/presence` event, a host's come
@@ -224,6 +226,28 @@ export interface SyncManager {
    */
   presence(instance: PresenceCarried): () => void;
   unit(options?: SyncUnitOptions): SyncUnit;
+}
+
+/** `sync.shared()`: the topics, the consumer's cursors, the relay's watermark (this node's own log position appended through) and the counts. */
+export interface SharedStats {
+  topic: string;
+  inbox: string | false;
+  running: boolean;
+  cursor: { topic: string | null; inbox: string | null };
+  appended: string | null;
+  /** An append failed: nothing more goes out until the recovery appends what the log holds since `appended`. */
+  behind: boolean;
+  /** A topic whose entry failed to apply three times: nothing past it is taken until `stop()` and `start()`. */
+  stuck: { topic: boolean; inbox: boolean };
+  /** A read-only hub keeps the vector as the log moved it. */
+  shadow: boolean;
+  /** Ops this hub appended; entries read from the topic and the inbox; ops applied from them; ops forwarded to the inbox; entries that did not read. */
+  relayed: number;
+  entries: number;
+  applied: number;
+  forwarded: number;
+  malformed: number;
+  appendFailures: number;
 }
 
 /** What `presence()` carries: the shape of a `Presence` of `@alexify/syncom/presence`. */

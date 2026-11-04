@@ -86,6 +86,21 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
 
 ### Added
 
+- **A log shared by the hubs of a mesh: `createDatabase({ sync: { sharedLog } })`.** A broker's log —
+  wrpc's `BrokerLog`: Redis Streams, NATS, Kafka, AMQP, the memory broker — or `mongoSharedLog()` of
+  `@alexify/syncom/mongodb` (two collections of a MongoDB database, a topic's entries numbered by its head
+  document, a change stream or a poll as the tail). Every op a hub accepts goes to the topic once, a
+  batch an entry; every other hub applies it from there; `changes` is served from the topic, so a
+  client's cursor is a position in the log — the same on every hub, whose hello answers the log's
+  epoch — and a client moved between hubs resumes without a bootstrap; a client with no cursor
+  bootstraps from a hub's snapshot, positioned at a marker. A read-only hub — a follower over MongoDB, a
+  writer whose lease was lost — hosts over it: its hello answers the vector as the log moved it, its
+  feed comes from the log, and a push is forwarded to the inbox (`<topic>.inbox`) for a hub that writes
+  to land; `sync.unit()` without a shared log stays `READ_ONLY`. `sync.shared()` is the cursors, the
+  watermark and the counts. A failure is `SHARED_LOG_FAILED` with its `reason` (`append`, `lost`,
+  `gone`, `stuck`, `marker`, `stopped`), and recovered from: an append that fails is appended again from
+  the log once the broker answers, a trimmed cursor reads from the oldest entry, a stuck entry waits for
+  `sync.stop()` and `start()`. The option was reserved and refused before.
 - **Collections at run time: `db.collections`, `addCollections()`, `removeCollection()`.** The collections
   by name as one frozen object, and definitions added after the open — each as an entity of
   `createDatabase({ schema })` would be, its validator, indexes, unique keys and search fields in force at

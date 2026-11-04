@@ -427,7 +427,10 @@ const ENTRIES = [
   // 160.5 with a purge's ids scrubbed together through the log and the tags (review №6, E5.5). 161, raised by name.
   // 161.3 with the events, the guards and the bounds of E6 (review №6, E6). 161.5, raised by name.
   // 162.3 with the blocks recording their work (review №6, E7). 162.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 162.5 },
+  // 165.9 with the shared log (src/sync/shared.js: the relay, the consumer, a read-only hub's shadow vector and its
+  // forwarded pushes; the feed and the positioned snapshot in hosting.js; sync-parity plan, S0; 2026-11-04). 166.5,
+  // raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 166.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

@@ -30,6 +30,7 @@ const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
+const { SharedHub, normalizeShared } = require('./shared.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT } = require('../shape.js');
 const { SIGNER, REWIND, DB } = require('../symbols.js');
@@ -94,6 +95,9 @@ class SyncManager extends Emitter {
   #hooks;
   #maxOutbox = DEFAULT_MAX_OUTBOX;
   #maxPageBytes = DEFAULT_MAX_PAGE_BYTES;
+  // The log shared with the other hubs (src/sync/shared.js), or null.
+  #sharedOptions = null;
+  #shared = null;
 
   constructor(storage, options = {}) {
     super({ maxListeners: options?.maxListeners });
@@ -113,10 +117,7 @@ class SyncManager extends Emitter {
       this.#maxPageBytes = maxPageBytes;
     }
     this.#otel = writerOf(storage.telemetry);
-    // Reserved for the broker-backed hub mode (see src/sync/shared-log.js).
-    if (this.#options.sharedLog !== undefined) {
-      throw new TypeError('sync.sharedLog is reserved: the shared-log hub mode is not in this version');
-    }
+    this.#sharedOptions = normalizeShared(this.#options.sharedLog);
     // The registry lives where the storage does: over its backend.
     this.#registry = new NodeRegistry(storage[DB].kv, storage.logger);
     return this.#init();
@@ -133,6 +134,14 @@ class SyncManager extends Emitter {
     // them: nobody else can hand a host what this node wrote offline, so
     // retention compacts only what was delivered (and what others made).
     if (typeof connect === 'function') this.#storage.log.retain((entry) => this.#undelivered(entry));
+    // The shared log, read and appended to from the open on: what the hubs
+    // of a mesh hold in common, whether or not this one dials.
+    if (this.#sharedOptions !== null) {
+      const kv = this.#storage[DB].kv;
+      const pageSize = this.#options.pageSize ?? DEFAULT_PAGE_SIZE;
+      this.#shared = new SharedHub(this, this.#storage, this.#sharedOptions, { kv, pageSize });
+      await this.#shared.start();
+    }
     if (autoStart && typeof connect === 'function') await this.start();
     return this;
   }
@@ -246,8 +255,11 @@ class SyncManager extends Emitter {
   // The dialing side
 
   async start() {
+    // Stopped with the dialing, started with it: a shared log's consumer left `stuck` is read again from here.
+    if (this.#shared !== null) await this.#shared.start();
     if (this.#started) return;
     if (typeof this.#options.connect !== 'function') {
+      if (this.#shared !== null) return;
       throw new TypeError('sync.start() needs a connect(node) factory in the storage sync options');
     }
     this.#started = true;
@@ -260,6 +272,7 @@ class SyncManager extends Emitter {
   async stop() {
     this.#started = false;
     for (const url of [...this.#peers.keys()]) this.#disconnect(url);
+    if (this.#shared !== null) await this.#shared.stop();
     await this.#registry.drain();
     notify(this, this.#storage.logger, 'stop');
   }
@@ -998,6 +1011,8 @@ class SyncManager extends Emitter {
   // One op landed here (locally or from a peer): wake the hosting feeds, and
   // queue it for every dialed peer except the one it came from.
   #fanOut(op, via) {
+    // To the shared log first: what the other hubs, and every feed read from it, learn of this op.
+    if (this.#shared !== null) this.#shared.offer(op, via);
     if (this.#wakers.size > 0) for (const wake of [...this.#wakers]) wake();
     if (this.#peers.size === 0) return;
     const key = opKey(op);
@@ -1113,12 +1128,14 @@ class SyncManager extends Emitter {
    * src/sync/hosting.js from what both halves share.
    */
   unit(options = {}) {
-    // A follower's log and vector are as of its open (the shared log is to
-    // come): a feed served from it would never move, so it hosts no more than
-    // it dials. A writer whose lease was lost is the same from then on.
-    if (this.#storage.readOnly) {
+    // A follower's log and vector are as of its open: a feed served from them
+    // would never move, so without a shared log it hosts no more than it dials
+    // (a writer whose lease was lost is the same from then on). Over a shared
+    // log it hosts from the log: the feed, the vector a hello answers, the
+    // pushes forwarded to the inbox.
+    if (this.#storage.readOnly && this.#shared === null) {
       const { path } = this.#storage;
-      throw new SyncomError('READ_ONLY', `Storage at ${path} is read-only: it does not host`, {
+      throw new SyncomError('READ_ONLY', `Storage at ${path} is read-only: it does not host without a shared log`, {
         path,
         lease: this.#storage.stats().lock !== null,
         reason: 'hosting',
@@ -1130,7 +1147,13 @@ class SyncManager extends Emitter {
       wakers: this.#wakers,
       feeds: this.#feeds,
       drift: (schema, peer) => this.#drift(schema, peer),
+      shared: this.#shared,
     });
+  }
+
+  /** The shared log as this hub stands to it — its cursors, the relay's watermark, the counts — or null without one. */
+  shared() {
+    return this.#shared === null ? null : this.#shared.stats();
   }
 }
 

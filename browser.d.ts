@@ -48,6 +48,7 @@ export type {
   StorageEvents,
   RecordEvents,
   SharedLog,
+  SharedLogOptions,
   SharedLogEntry,
   SharedLogRead,
   Collections,

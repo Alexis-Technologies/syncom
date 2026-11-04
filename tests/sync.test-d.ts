@@ -1,6 +1,6 @@
 import { expectError, expectType } from 'tsd';
 import { sync as syncPlugin, SyncManager, isSyncLink } from '../src/sync/sync.js';
-import type { Plugin, SyncApi, SyncUnit, HostedPeer, Node, SchemaInfo } from '../src/sync/sync.js';
+import type { Plugin, SyncApi, SyncUnit, HostedPeer, Node, SchemaInfo, SharedStats } from '../src/sync/sync.js';
 import { open } from '../index.js';
 
 expectType<Plugin<SyncApi>>(syncPlugin);
@@ -28,6 +28,16 @@ expectType<boolean>(sync.started);
 expectType<Promise<void>>(sync.enableNode('ws://a', false));
 expectType<Promise<Array<{ url: string; pushed: number }>>>(sync.sync());
 expectType<number>(sync.peers()[0].pending);
+// The shared log as this hub stands to it, or null without one.
+expectType<SharedStats | null>(sync.shared());
+const shared = sync.shared()!;
+expectType<string>(shared.topic);
+expectType<string | false>(shared.inbox);
+expectType<string | null>(shared.cursor.topic);
+expectType<string | null>(shared.appended);
+expectType<boolean>(shared.behind);
+expectType<boolean>(shared.stuck.inbox);
+expectType<number>(shared.relayed);
 expectType<string | null>(sync.listNodes()[0].cursor);
 expectType<SchemaInfo | null>(sync.listNodes()[0].remote!.schema);
 sync.on('hello', ({ schema }) => expectType<SchemaInfo | null>(schema));

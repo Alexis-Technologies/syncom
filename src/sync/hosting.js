@@ -22,9 +22,15 @@ const { isKeyId, isPlainObject, isStreamName } = require('../shape.js');
 const MAX_SCOPES = 256;
 const { isUpdate: isPresenceUpdate, isEntry: isPresenceEntry, sized } = require('../presence/presence.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
+const { parseEntry, sleep } = require('./shared.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
 const TRACKED = Symbol.for('wrpc.tracked');
+// A feed over a shared log labels a page at least every so many entries it passed without one for its peer.
+const PASS_EVERY = 64;
+// A feed whose read of the shared log failed waits this long before it reads again, doubling.
+const FEED_BACKOFF = 1000;
+const MAX_FEED_BACKOFF = 60_000;
 const encoder = new TextEncoder();
 
 // A refusal as it goes on the wire: the numeric `code` a transport carries
@@ -257,10 +263,14 @@ const hello = (host) => async (context, args) => {
   notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
   handPresence(host, context, scopes);
+  // Over a shared log the epoch is the log's, the same on every hub, so a
+  // client moved between hubs keeps its cursor; a hub that cannot write
+  // answers the vector as the log moved it, not its own as of its open.
+  const { shared } = host;
   const answer = {
     node: storage.nodeId,
-    vector: storage.vector,
-    epoch: storage.log.epoch,
+    vector: (shared === null ? null : shared.vector()) ?? storage.vector,
+    epoch: shared === null ? storage.log.epoch : shared.epoch,
     version: PROTOCOL,
     schema: schemaOf(storage.schemaInfo),
     // The kinds this host can hold: a dialer that holds more does not
@@ -292,6 +302,19 @@ const push = (host) => async (context, args) => {
     else outOfScope++;
   }
   if (outOfScope > 0) refuseOps(host, node, 'scope', outOfScope);
+  // A hub that cannot write — a follower, a writer whose lease was lost —
+  // lands nothing: over a shared log with an inbox it forwards the page for a
+  // writer to land (held to the vector as the log moved it), else the client
+  // is told to push elsewhere.
+  if (storage.readOnly) {
+    if (host.shared === null || host.shared.inbox === false) {
+      host.otel.recordRefusal(503);
+      host.logger.warn({ event: 'sync.push.refused', code: 503, reason: 'READ_ONLY', node });
+      throw coded('This hub is read-only and forwards nothing: push to another', 503, 'READ_ONLY');
+    }
+    const result = await host.shared.forward(granted, node, scopes);
+    return { ...result, outOfScope: outOfScope + result.outOfScope };
+  }
   // `url` is null: a host does not dial, so it has no url for the peer.
   const via = state.ref ?? { url: null, node };
   // `bound`: the records the peer writes must be in its scopes too, as this
@@ -312,21 +335,107 @@ const push = (host) => async (context, args) => {
   return { vector, ...result, outOfScope: outOfScope + result.outOfScope };
 };
 
+// Over a shared log a snapshot is positioned in the log, not in this hub's
+// own: a marker appended first, the first page taken once the consumer
+// passed it — so everything the log held before the marker is in the pages,
+// and the client resumes after it — and the vector a hub that cannot write
+// answers is the one the log moved.
+const positioned = async (host) => {
+  const { shared } = host;
+  try {
+    const id = await shared.mark();
+    await shared.reached(id);
+    return id;
+  } catch (error) {
+    host.otel.recordRefusal(503);
+    host.logger.warn({ event: 'sync.snapshot.refused', code: 503, reason: 'SHARED_LOG', err: error });
+    throw coded(`The shared log did not answer: ${error.message}`, 503, 'SHARED_LOG');
+  }
+};
+
 const snapshot = (host) => async (context, args) => {
   const state = peerOf(host, context);
+  const cursor = args?.cursor ?? null;
+  const position = host.shared !== null && cursor === null ? await positioned(host) : null;
   const page = await host.storage.snapshot({
-    cursor: args?.cursor ?? null,
+    cursor,
     limit: host.pageSize,
     scopes: grant(args?.scopes, state.scopes),
   });
+  if (position !== null) {
+    page.eventId = position;
+    page.vector = host.shared.vector() ?? page.vector;
+  }
   // The vector rides on the first page only: the dialer adopts it as of
   // the start, and a hub's is too large to repeat.
-  if (args?.cursor) page.vector = undefined;
+  if (cursor !== null) page.vector = undefined;
   return streamed(context?.client, page, host.pageBytes);
+};
+
+// The feed over a shared log: the topic from the client's cursor on, every
+// entry's ops narrowed to its scopes and less its own echoes, one page per
+// entry, labelled with the entry's id — the same position on every hub. A
+// position the log no longer has (another log's, trimmed past) ends the feed
+// with `bootstrap`; a fresh subscription (no cursor) too: the snapshot's first
+// page is what positions a client in the log. A read that fails is read again
+// from the cursor, backed off.
+const sharedChanges = async function* (host, context, args, subscription) {
+  const { shared, feeds } = host;
+  const { node, scopes: granted } = peerOf(host, context);
+  const { lastEventId, signal } = subscription;
+  const scopes = grant(args?.scopes, granted);
+  if (lastEventId === undefined || lastEventId === null) {
+    yield { bootstrap: true };
+    return;
+  }
+  let cursor = lastEventId;
+  const feed = { node, scopes, since: Date.now(), cursor };
+  feeds.add(feed);
+  try {
+    let passed = 0;
+    let backoff = 0;
+    for (;;) {
+      if (signal?.aborted) return;
+      try {
+        for await (const entry of shared.read(cursor, signal)) {
+          if (signal?.aborted) return;
+          backoff = 0;
+          const parsed = parseEntry(entry.value);
+          const ops = [];
+          if (parsed !== null && parsed !== undefined) {
+            for (let i = 0; i < parsed.ops.length; i++) {
+              const op = parsed.ops[i];
+              if (opInScope(op, scopes) && op.origin !== node && op.from !== node) ops.push(op);
+            }
+          }
+          cursor = entry.id;
+          // Nothing for this peer: the position moves without a page, labelled
+          // every PASS_EVERY entries so a resume looks at few of these again.
+          if (ops.length === 0 && ++passed < PASS_EVERY) continue;
+          passed = 0;
+          feed.cursor = cursor;
+          yield host.track(cursor, { ops: packOps(ops), eventId: cursor });
+        }
+        // The read ended without an abort — the log closed, a tail that ends: read again from the cursor.
+      } catch (error) {
+        if (signal?.aborted) return;
+        if (error?.code === 410 || error?.code === 400) {
+          yield { bootstrap: true };
+          return;
+        }
+        host.logger.warn({ event: 'shared.feed.failed', topic: shared.topic, node, err: error });
+      }
+      backoff = backoff === 0 ? FEED_BACKOFF : Math.min(backoff * 2, MAX_FEED_BACKOFF);
+      await sleep(backoff, signal);
+    }
+  } finally {
+    feeds.delete(feed);
+  }
 };
 
 const changes = (host) =>
   async function* (context, args, subscription = {}) {
+    if (host.shared !== null) return yield* sharedChanges(host, context, args, subscription);
     const { storage, feeds, wakers, pageSize } = host;
     const { node, scopes: granted } = peerOf(host, context);
     const { lastEventId, signal } = subscription;
@@ -471,7 +580,7 @@ const handPresence = (host, context, scopes) => {
   }
 };
 
-const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) => {
+const createUnit = (manager, options, { storage, otel, wakers, feeds, drift, shared = null }) => {
   const {
     access = 'session',
     authorize = null,
@@ -506,6 +615,7 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) =
     wakers,
     feeds,
     drift,
+    shared,
     authorize,
     limits,
     pageSize,

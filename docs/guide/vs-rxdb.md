@@ -471,7 +471,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Supabase</td><td>❌ none</td><td>✅ <code>replication-supabase</code>: PostgREST compare-and-set; Realtime for live rows</td></tr>
 <tr><td>Appwrite</td><td>❌ none</td><td>⚠️ <code>replication-appwrite</code>: browser only; updates read then write, not atomic</td></tr>
 <tr><td>MongoDB</td><td>❌ none</td><td>✅ <code>replication-mongodb</code> (Node): change streams; push in a transaction; replica set</td></tr>
-<tr><td>NATS JetStream</td><td>❌ none</td><td>✅ <code>replication-nats</code>: a subject per document; updates checked by sequence</td></tr>
+<tr><td>NATS JetStream</td><td>✅ a wrpc broker's log — NATS JetStream, Redis Streams, Kafka, AMQP — as the hubs' shared log (<code>sync.sharedLog: broker.log</code>): every hub appends what it accepts, serves <code>changes</code> from it, a client resumes on any hub</td><td>✅ <code>replication-nats</code>: a subject per document; updates checked by sequence</td></tr>
 <tr><td>Google Drive</td><td>❌ none</td><td>⚠️ <code>replication-google-drive</code>, beta: JSON files and a lock file in the user's Drive</td></tr>
 <tr><td>Microsoft OneDrive</td><td>❌ none</td><td>⚠️ <code>replication-microsoft-onedrive</code>, beta: the same file-and-lock scheme over Graph</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Conflicts and clocks</strong></td></tr>
@@ -515,7 +515,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>HTTP framework adapters</td><td>✅ any wrpc host (MIT): its own <code>Server</code>, <code>uws</code>, <code>fastify</code>, <code>express</code></td><td>⚠️ Express free (SSPL); Fastify and Koa are Premium (Pro Plus)</td></tr>
 <tr><td>What the server serves</td><td><code>hello</code>, <code>push</code>, <code>snapshot</code>, <code>changes</code> (a resumable subscription)</td><td>per collection <code>pull</code>, <code>push</code>, <code>pullStream</code> (SSE); REST <code>query</code>, <code>get</code>, <code>set</code>, <code>delete</code></td></tr>
 <tr><td>Queries for thin clients</td><td>❌ none: a client replicates its scopes and queries locally</td><td>✅ RxServer REST endpoint and <code>client-rest</code>; live results over SSE</td></tr>
-<tr><td>Server-side storage</td><td>a full syncom node over any engine: node:fs, SQLite (<code>sqliteEngine</code>) or MongoDB (<code>mongoEngine</code>, one writer by lease, read-only followers over change streams)</td><td>any RxStorage of the server's RxDatabase: memory, MongoDB, FoundationDB…</td></tr>
+<tr><td>Server-side storage</td><td>a full syncom node over any engine: node:fs, SQLite (<code>sqliteEngine</code>) or MongoDB (<code>mongoEngine</code>, one writer by lease, read-only followers over change streams); several hub processes over one shared log (<code>mongoSharedLog</code>, or a wrpc broker's)</td><td>any RxStorage of the server's RxDatabase: memory, MongoDB, FoundationDB…</td></tr>
 </tbody>
 </table>
 

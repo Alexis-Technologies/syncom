@@ -502,10 +502,22 @@ expectType<number>(storage.listenerCount('change'));
 expectError(storage.on('nope', () => {}));
 expectError(syncom.open({ sync: { sharedLog: {} } }));
 expectType<boolean>(syncom.isSharedLog({}));
-expectAssignable<syncom.SharedLog>({
+const sharedLog: syncom.SharedLog = {
   append: async () => '1.1',
   read: () => ({ ready: Promise.resolve(), [Symbol.asyncIterator]: async function* () {} }),
   parseId: (text) => (typeof text === 'string' ? text : null),
+};
+expectAssignable<syncom.SharedLog>(sharedLog);
+// The log alone, or with its topic and inbox.
+expectAssignable<StorageOptions>({ sync: { sharedLog } });
+expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, topic: 'ops', inbox: 'ops.in' } } });
+expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, inbox: false } } });
+expectError(syncom.open({ sync: { sharedLog: { topic: 'ops' } } }));
+expectError(syncom.open({ sync: { sharedLog: { log: sharedLog, inbox: 7 } } }));
+expectAssignable<syncom.SharedLogOptions>({ log: sharedLog });
+storage.on('change', (_op, via) => {
+  expectType<true | undefined>(via!.shared);
+  expectType<true | undefined>(via!.inbox);
 });
 
 // ids, skew, scopes and codes

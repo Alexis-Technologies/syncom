@@ -612,6 +612,7 @@ export type SyncomErrorCode =
   | 'READ_ONLY'
   | 'LEASE_LOST'
   | 'FOLLOW_LOST'
+  | 'SHARED_LOG_FAILED'
   | 'TARGET_NOT_EMPTY'
   | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
@@ -1278,8 +1279,23 @@ export interface SyncOptions {
   maxPageBytes?: number;
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
-  /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */
-  sharedLog?: never;
+  /**
+   * A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`: Redis Streams, NATS, Kafka, AMQP, the
+   * memory broker) or `mongoSharedLog()` — so a client resumes on any hub: every op this node accepts is appended to
+   * the topic, what the other hubs appended is applied from it, and `changes` is served from it (a client's cursor is a
+   * position in the log). A read-only node (a follower over MongoDB, a writer whose lease was lost) hosts over it too:
+   * its hello answers the vector as the log moved it, and a push is forwarded to the inbox for a writer to land. The
+   * log alone, or `{ log, topic, inbox }`. See SharedLog.
+   */
+  sharedLog?: SharedLog | SharedLogOptions;
+}
+
+export interface SharedLogOptions {
+  log: SharedLog;
+  /** The topic every hub appends to and serves `changes` from; `'syncom'` by default. */
+  topic?: string;
+  /** The topic a read-only hub forwards its clients' pushes to, consumed by a hub that writes; `<topic>.inbox` by default, `false` for none (a read-only hub then refuses a push with 503). */
+  inbox?: string | false;
 }
 
 /** What a write hook sees: the op being made, and the record it lands on. */
@@ -1525,6 +1541,10 @@ export interface ApplyContext {
 export interface PeerRef {
   url: string | null;
   node: string | null;
+  /** The op came from the shared log: `node` is the hub that appended it. */
+  shared?: true;
+  /** The op came from the shared log's inbox — a read-only hub forwarded a client's push: `node` is that client. */
+  inbox?: true;
 }
 
 /** The lockfile's knobs: `open({ lock: { mode, staleAfter, poll, timeout } })`. */
@@ -1826,7 +1846,11 @@ export interface Transaction extends TextMethods, TreeMethods {
   insert(data: object, options?: WriteOptions): Promise<string>;
   set(id: string, data: object, options?: WriteOptions): Promise<void>;
   /** The fields set, or the operators run — over what the transaction left; with `ifMatch`, whether it wrote. */
-  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(
+    id: string,
+    delta: object | UpdateOperators,
+    options: UpdateOptions & { ifMatch: MangoQuery },
+  ): Promise<boolean>;
   update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   delete(id: string, options?: DeleteOptions): Promise<void>;
@@ -1867,9 +1891,11 @@ export interface Node {
 }
 
 /**
- * @experimental Reserved: the contract of a log shared by several hub
- * processes, for a hub mode after this version — structurally wrpc's
- * `BrokerLog`, so a broker's `.log` fits with no adapter.
+ * The contract of a log shared by several hubs (`createDatabase({ sync: { sharedLog } })`): structurally wrpc's
+ * `BrokerLog`, so a broker's `.log` — the memory broker's, Redis Streams', NATS', Kafka's, AMQP's — fits with no
+ * adapter, and so does `mongoSharedLog()` of `@alexify/syncom/mongodb`. `read` tails the topic live from `after` on
+ * (or from the oldest entry, `from: 'earliest'`); an id of another log or one trimmed past fails with `code` 410, a
+ * malformed one or one past the tip with 400.
  */
 export interface SharedLogEntry {
   id: string;
@@ -2492,7 +2518,11 @@ export interface Database {
    * its field, as one transaction; with `ifMatch` (the `query` plugin's) only where the record matches,
    * decided inside the queue, resolving to whether it wrote.
    */
-  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(
+    id: string,
+    delta: object | UpdateOperators,
+    options: UpdateOptions & { ifMatch: MangoQuery },
+  ): Promise<boolean>;
   update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
@@ -2543,7 +2573,9 @@ export interface Database {
    * defined already or taken by the database, or a malformed definition, is a
    * TypeError and nothing is taken. The `schema` plugin's (`PLUGIN_MISSING` without it).
    */
-  addCollections(definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>): Promise<void>;
+  addCollections(
+    definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>,
+  ): Promise<void>;
   /** Forgets a collection's definition; the records stay. An unknown name is a TypeError. */
   removeCollection(name: string): void;
   /**
@@ -2714,7 +2746,14 @@ export interface Cursor<T = QueryRow> {
     field: string,
     vector: readonly number[],
     k: number,
-    options?: { distance?: 'cosine' | 'euclidean' | 'manhattan' | 'dot' | ((a: readonly number[], b: readonly number[]) => number) },
+    options?: {
+      distance?:
+        | 'cosine'
+        | 'euclidean'
+        | 'manhattan'
+        | 'dot'
+        | ((a: readonly number[], b: readonly number[]) => number);
+    },
   ): Promise<{ distance: number; row: T }[]>;
   /** Every match updated — fields or operators — as ONE transaction over the matches when it starts (10 000 at most, else a TypeError): `{ matched, written }`. */
   update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
