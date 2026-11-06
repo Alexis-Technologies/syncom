@@ -530,18 +530,24 @@ new challenge.
 ### `query` and `count`
 
 ```
-→ { entity, query?, order?: [field | { field, desc }], limit?, offset?, scopes? }   (query)
+→ { entity, query?, order?: [field | { field, desc }], limit?, offset?, scopes?, hello? }   (query)
 ← { rows: [{ id, …fields }] }
-→ { entity, query?, scopes? }                                                        (count)
+→ { entity, query?, scopes?, hello? }                                                        (count)
 ← { count }
 ```
 
 A thin client's read of the host's records through the query plugin
-(`unit({ query: true })`; 403 `QUERY_DISABLED` otherwise): the rows are the
-cursor's — a Mango `query`, the sort keys in order, the window — narrowed to
-the caller's scopes (as the host scopes a record) and capped by
+(`unit({ query: true })`; a host without it mounts no such procedure): the
+rows are the cursor's — a Mango `query`, the sort keys in order, the window —
+narrowed to the caller's scopes (as the host scopes a record) and capped by
 `limits.rowsPerQuery` (500); a scoped `count` reads the rows (as many as the
-cap allows). An entity or a query the cursor refuses is 400 `BAD_QUERY`.
+cap allows). An entity or a query the cursor refuses is 400 `BAD_QUERY`. A
+caller that said no hello is 428 `HELLO_FIRST` — unless the call carries one:
+`hello` is the [hello](#hello)'s own arguments, taken as a hello is
+(`authorize`, the scopes, the revocations; `UNPROVEN` under `prove`) and kept
+nowhere — no room, no session, no presence — for a client over a stateless
+transport (plain HTTP, where one request is one client and nothing can come
+first).
 
 ### `snapshot`
 

@@ -273,7 +273,12 @@ const proofOf = (storage, node, claimed, held) => {
   return ops.length === 0 ? null : packOps(ops);
 };
 
-const hello = (host) => async (context, args) => {
+// A hello: the peer named, checked and granted its scopes, its state on the client; `keep` false for a hello
+// carried by a thin client's call over a stateless transport (one request, one client — `greeted`): the state is
+// set for the call and nothing of the client is kept — no room, no session, no presence.
+const hello = (host) => (context, args) => greet(host, context, args, true);
+
+const greet = async (host, context, args, keep) => {
   const { storage } = host;
   if (!args || typeof args.node !== 'string') throw refuse(host, 'hello needs a node id', 400, 'BAD_HELLO');
   if (args.version !== undefined && args.version !== PROTOCOL) {
@@ -339,14 +344,16 @@ const hello = (host) => async (context, args) => {
       generation: 0,
     };
     context.client.data.syncom = state;
-    if (typeof context.client.join === 'function') {
-      for (const scope of scopes) context.client.join(`syncom:${scope}`);
+    if (keep) {
+      if (typeof context.client.join === 'function') {
+        for (const scope of scopes) context.client.join(`syncom:${scope}`);
+      }
+      remember(host, context, state);
     }
-    remember(host, context, state);
   }
   notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
-  handPresence(host, context, scopes);
+  if (keep) handPresence(host, context, scopes);
   // Over a shared log the epoch is the log's, the same on every hub, so a
   // client moved between hubs keeps its cursor; a hub that cannot write
   // answers the vector as the log moved it, not its own as of its open.
@@ -697,8 +704,16 @@ const scoped = (host, rows, scopes) => {
   return out;
 };
 
+// The peer of a read: greeted before, or — a thin client over a stateless transport, where one request is one
+// client and no hello can come first — greeting with the call itself, `args.hello` the hello's own arguments, taken
+// as a hello is (authorize, the scopes, the revocations) and kept nowhere.
+const greeted = async (host, context, args, procedure) => {
+  if (!context?.client?.data?.syncom && isPlainObject(args?.hello)) await greet(host, context, args.hello, false);
+  return peerOf(host, context, procedure);
+};
+
 const query = (host) => async (context, args) => {
-  const state = peerOf(host, context, 'query');
+  const state = await greeted(host, context, args, 'query');
   let cursor = cursorOf(host, args, 'query', state);
   const cap = host.limits.rowsPerQuery;
   const limit = Number.isInteger(args.limit) && args.limit > 0 ? Math.min(args.limit, cap) : cap;
@@ -716,7 +731,7 @@ const query = (host) => async (context, args) => {
 };
 
 const count = (host) => async (context, args) => {
-  const state = peerOf(host, context, 'count');
+  const state = await greeted(host, context, args, 'count');
   const cursor = cursorOf(host, args, 'count', state);
   const scopes = grant(args.scopes, state.scopes);
   try {

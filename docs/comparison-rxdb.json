@@ -2518,10 +2518,10 @@
           "source": "src/wrpc/wrpc.js; tests/wrpc.integration.test.js:59-160"
         },
         "http": {
-          "mark": "⚠️",
-          "text": "no request–response sync; wrpc's SSE transport untested in the repo",
-          "source": "src/wrpc/wrpc.js; scratchpad/replication/verify/syncom-over-sse.js",
-          "note": "In a one-off check over wrpc 2.0.1, `transport: 'sse'` synced both ways with a live update; plain `http` cannot (the subscription is refused, then every call answers 428)."
+          "mark": "✅",
+          "text": "the protocol over wrpc's Server-Sent Events transport (`transport: 'sse'`: `GET …/events` down, `POST` up) — a bootstrap from the page itself, pushes, live updates; a thin client over plain HTTP reads `syncom/query`/`syncom/count` with its hello in the call",
+          "source": "docs/guide/wrpc.md#over-http-and-server-sent-events; src/sync/hosting.js (streamed, greeted); tests/wrpc.integration.test.js",
+          "detail": "Plain `transport: 'http'` cannot subscribe, so it is a thin client's transport, not a replica's; a replica over HTTP is SSE."
         },
         "graphql": {
           "mark": "✅",
@@ -2757,8 +2757,8 @@
         },
         "remoteQuery": {
           "mark": "✅",
-          "text": "`unit({ query: true })`: `syncom/query` and `syncom/count` — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, capped by `limits.rowsPerQuery`; live results = ask again on `changes`",
-          "source": "src/sync/hosting.js (query, count); tests/sync.rules.test.js; docs/reference/wire.md#query-and-count",
+          "text": "`unit({ query: true })`: `syncom/query` and `syncom/count` — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, capped by `limits.rowsPerQuery`; a thin client over plain HTTP carries its hello in the call; live results = ask again on `changes`",
+          "source": "src/sync/hosting.js (query, count, greeted); tests/sync.rules.test.js; tests/wrpc.integration.test.js; docs/guide/wrpc.md#thin-clients-over-http; docs/reference/wire.md#query-and-count",
           "detail": "A REST face is wrpc's (its express/fastify adapters over the same procedures)."
         },
         "serverStorage": {

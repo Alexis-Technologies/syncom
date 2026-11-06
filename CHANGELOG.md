@@ -110,6 +110,11 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   has no compare-and-set, said in the docs — Realtime the signal); Google Drive and OneDrive as one JSON file of
   the collection in the user's drive through an injected `fetch` and token, the file's ETag the compare-and-set
   (a 412 read again and tried once more), a probe of the ETag the stream (`poll`).
+- **The wrpc recipes, run.** The protocol over wrpc's Server-Sent Events transport (`transport: 'sse'`: a dialer
+  bootstraps from the snapshot page itself, pushes and hears live updates), a thin client over plain HTTP reading
+  `syncom/query`/`syncom/count` with its hello carried in the call (`hello: { node, token, scopes }` — taken as a
+  hello is and kept nowhere, for a transport where one request is one client), and two hubs over a wrpc
+  `MemoryBroker`'s log — each a case of `tests/wrpc.integration.test.js` and a section of the wrpc guide.
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

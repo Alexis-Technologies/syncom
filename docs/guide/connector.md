@@ -93,8 +93,10 @@ Where the far end speaks a protocol of its own, an adapter beside this module wr
 injected client or `fetch` — nothing of the backend's SDK ships with syncom, every adapter is a subpath of its own
 under 2 KB, and each is tested over a fake of its backend. Where the far end is reachable over a wire wrpc already
 carries — HTTP and Server-Sent Events, WebSocket, WebRTC, a worker port, a broker (NATS, Redis, Kafka, AMQP) — no
-connector is needed: the other side runs a syncom node and the protocol goes over wrpc as it is
-([wrpc transport](./wrpc), [Scaling](./scaling#a-shared-log)).
+connector is needed: the other side runs a syncom node and the protocol goes over wrpc as it is — the recipes are
+[HTTP and Server-Sent Events](./wrpc#over-http-and-server-sent-events), [thin clients over HTTP](./wrpc#thin-clients-over-http),
+[WebSocket](./wrpc#dialing-a-node), [WebRTC](./webrtc), [a broker as the hubs' shared log](./scaling#a-shared-log) and
+[end-to-end encryption](./scaling#end-to-end-encryption).
 
 Every adapter answers `{ pull, push }` to spread into `replicate()`'s options (GraphQL the sides it was given), and
 keeps in memory what a compare-and-set needs — the revision or the stamp it last saw for each document — for the

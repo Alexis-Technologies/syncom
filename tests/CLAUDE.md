@@ -32,7 +32,10 @@ subscription from its last event id against a fresh server-side client) and
 `tests/utils/mesh.js` (N storages from an adjacency list, `settle()`).
 `tests/wrpc.integration.test.js` runs two real wrpc `Server`s and a dialer,
 the `onRequest` rate-limit recipe of `docs/guide/scaling.md` (keep the two in
-step), plus syncom over a fake WebRTC data channel
+step), the recipes of `docs/guide/wrpc.md` — a dialer over wrpc's SSE transport
+(`@alexify/wrpc/sse`), a thin client over plain HTTP carrying its hello in
+`syncom/query`, two hubs over a `MemoryBroker`'s log (`@alexify/wrpc/broker`),
+each skipped when its subpath is absent — plus syncom over a fake WebRTC data channel
 (`tests/utils/fake-channel.js`) attached to an `RpcServer` and to a
 `PeerHost`, and skips when `@alexify/wrpc` (2.x) is not installed. Two things bite there: two nodes'
 clocks are independent, so "later" needs a `tick()` between writes on

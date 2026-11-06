@@ -52,7 +52,10 @@ defineRouter({ syncom: hub.sync.unit({ access: 'session', authorize, limits, met
 ```
 
 `{ log, topic, inbox }` names the topic (`'syncom'`) and the inbox
-(`<topic>.inbox`; `false` for none). Without a broker, a MongoDB the hubs
+(`<topic>.inbox`; `false` for none). wrpc's in-process `MemoryBroker` is the
+same log in one process — `tests/wrpc.integration.test.js` runs two hubs over
+its `log` behind real servers and moves a client between them, which resumes
+from its cursor without a bootstrap. Without a broker, a MongoDB the hubs
 already share carries the log: `mongoSharedLog()` of `@alexify/syncom/mongodb`
 keeps a topic's entries in two collections, numbered by the topic's head
 document, with a change stream (or a poll) as the tail — the writer hub and
