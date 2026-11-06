@@ -10,6 +10,16 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
                           collection's turns pushed as rows with what the backend was assumed to hold, conflicts the backend wins,
                           the checkpoint `{ pull, pushed }` in the `connector` kv namespace — requires symbols.js, engine.js,
                           shape.js, errors.js, hooks.js, emitter.js only
+src/connector/couchdb.js  @alexify/syncom/connector/couchdb — couchdb({ url, fetch, headers, longpoll }): the handlers over one CouchDB
+                          database through an injected fetch — _changes with the documents, a long poll as the stream, _bulk_docs with
+                          the revisions last seen, a conflict read back — no requires
+src/connector/graphql.js  @alexify/syncom/connector/graphql — graphql({ url, fetch, headers, request, pull, push, stream }): the application's
+                          queries posted and their answers read by its functions; one adapter for every schema — no requires
+src/connector/mongodb.js  @alexify/syncom/connector/mongodb — mongodb({ collection, changes, now }): the handlers over one collection of the
+                          injected driver — _rev, _deleted, _updated the adapter's fields, a change stream the signal — no requires
+src/connector/supabase.js @alexify/syncom/connector/supabase — supabase({ client, table, primaryKey, modifiedColumn, deletedColumn, channel,
+                          stream, now }): the handlers over one table through the injected client — PostgREST with the modified column
+                          as the compare-and-set, Realtime's postgres_changes the signal — no requires
 ```
 
 ## Rules
@@ -39,3 +49,15 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
   `'RESYNC'`; without one a live connector pulls every `retryTime`. `cancel()` is for good (the stream stopped, the
   listener off, what is in flight awaited, the waiters rejected); `reSync()` pulls and pushes again. Under `/shared`
   the leader runs the connector (`leader` is the plan's; not here yet).
+- **An adapter is the two handlers over an injected client, and nothing of the backend's.** No SDK, no HTTP client
+  and no protocol of the backend's ships with syncom: an adapter takes `fetch`, the driver's collection or the
+  vendor's client as it is given, answers `{ pull, push }` to spread into `replicate()`'s options, and requires nothing
+  (`scripts/size.js` holds each under 2 KB). What a compare-and-set needs — the revision or the stamp last seen for a
+  document — lives in the adapter's memory for the connector's life: a connector started anew learns it with its
+  first pull, a push of a document never seen lands as a new one and is a conflict where one exists. A conflict is
+  answered as the backend holds the document (a deletion where it holds nothing), never guessed. A backend whose
+  schema is the application's (GraphQL) takes the queries and the readers as options — syncom knows no schema. Every
+  adapter is tested over a fake of its backend in `tests/utils/fake-<name>.js` (`fake-couch`, `fake-graphql`,
+  `fake-mongo` — the engine's, `fake-supabase`) through one scenario in `tests/connector.adapters.test.js`: a local
+  write out without `$type`, the backend's write in, a change behind the adapter's back a conflict the backend wins,
+  a deletion both ways, a restart resumed.

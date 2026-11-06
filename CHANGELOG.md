@@ -96,6 +96,13 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   what the log holds since it. A handler that fails is `REPLICATION_FAILED` (`direction`) on the connector's
   `error` event and tried again after `retryTime`. `awaitInitialReplication()`, `awaitInSync()`, `reSync()`,
   `cancel()`, `stats()`.
+- **Connector adapters: `/connector/couchdb`, `/connector/graphql`, `/connector/mongodb`, `/connector/supabase`.**
+  Each answers `{ pull, push }` for `replicate()` over an injected client — a `fetch` for CouchDB (`_changes` with the
+  documents, a long poll as the stream, `_bulk_docs` with the revisions last seen) and GraphQL (the application's
+  queries posted, their answers read by its functions, its subscription the stream), the driver's collection for
+  MongoDB (`_rev`, `_deleted`, `_updated` the adapter's fields, a change stream the signal), the vendor's client for
+  Supabase (PostgREST with the modified column as the compare-and-set, Realtime the signal). A conflict is answered
+  as the backend holds the document; nothing of a backend's SDK ships, each adapter weighs under 2 KB.
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

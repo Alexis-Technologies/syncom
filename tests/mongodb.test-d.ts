@@ -47,3 +47,13 @@ expectType<Promise<void>>(tail());
 await createDatabase({ engine, sync: { sharedLog: log } });
 await createDatabase({ engine, readOnly: true, sync: { sharedLog: { log, inbox: false } } });
 mongoSharedLog({ db, changes: false, gapTimeout: 500, logger: { warn: () => {} } });
+
+// The connector adapter over a collection of the driver's: a subpath of its own beside the engine's.
+import { mongodb as mongodbConnector } from '../src/connector/mongodb.js';
+import type { MongodbHandlers, MongoLikeCollection } from '../src/connector/mongodb.js';
+import { replicate } from '../src/connector/connector.js';
+declare const collection: MongoLikeCollection;
+const handlers = mongodbConnector({ collection, changes: false });
+expectType<MongodbHandlers>(handlers);
+expectType<number | undefined>(handlers.revisionOf('t1'));
+replicate(await createDatabase({ engine }), { name: 'mongo', collection: 'Task', ...handlers });

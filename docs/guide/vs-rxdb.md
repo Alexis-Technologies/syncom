@@ -28,7 +28,7 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 - **RxDB is the broader toolkit.** It has storages for more runtimes (Deno KV, FoundationDB,
   localStorage), replication plugins for nine backends and handlers that sync with one you already
   run, attachments, several tabs writing one database, a backup writer, conditional ops that replay
-  on every replica, and packages for Vue, Angular and signals. In 12 rows RxDB has something where
+  on every replica, and packages for Vue, Angular and signals. In 8 rows RxDB has something where
   syncom has nothing; the rows are not equal in weight, so read the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
@@ -465,12 +465,12 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Transports and backends</strong></td></tr>
 <tr><td>WebSocket</td><td>✅ a wrpc <code>WrpcClient</code> through <code>createWrpcLink</code> (<code>@alexify/syncom/wrpc</code>)</td><td>⚠️ <code>replication-websocket</code>: RxDB to RxDB, a Node server, no authentication<sup>40</sup></td></tr>
 <tr><td>HTTP / Server-Sent Events</td><td>⚠️ no request–response sync; wrpc's SSE transport untested in the repo<sup>41</sup></td><td>✅ your endpoints under <code>replicateRxCollection</code>; RxServer serves pull, push and SSE</td></tr>
-<tr><td>GraphQL</td><td>❌ none</td><td>✅ <code>replication-graphql</code>; live through graphql-ws; schema and query generators<sup>42</sup></td></tr>
-<tr><td>CouchDB</td><td>❌ none</td><td>✅ <code>replication-couchdb</code>: <code>_changes</code> long-poll, <code>_bulk_docs</code> with <code>_rev</code></td></tr>
+<tr><td>GraphQL</td><td>✅ <code>@alexify/syncom/connector/graphql</code>: the application's pull and push queries posted over <code>fetch</code> or its own client, their answers read by its functions, its subscription client the stream — one adapter for every schema</td><td>✅ <code>replication-graphql</code>; live through graphql-ws; schema and query generators<sup>42</sup></td></tr>
+<tr><td>CouchDB</td><td>✅ <code>@alexify/syncom/connector/couchdb</code>: <code>_changes</code> with the documents as the pull, a long poll as the stream, <code>_bulk_docs</code> with the revisions last seen as the push, a conflict read back as the database holds it</td><td>✅ <code>replication-couchdb</code>: <code>_changes</code> long-poll, <code>_bulk_docs</code> with <code>_rev</code></td></tr>
 <tr><td>Firestore</td><td>❌ none</td><td>✅ <code>replication-firestore</code> (<code>firebase</code> peer); <code>pull.filter</code>; live via <code>onSnapshot</code><sup>43</sup></td></tr>
-<tr><td>Supabase</td><td>❌ none</td><td>✅ <code>replication-supabase</code>: PostgREST compare-and-set; Realtime for live rows</td></tr>
+<tr><td>Supabase</td><td>✅ <code>@alexify/syncom/connector/supabase</code>: one table through the injected client — PostgREST with the modified column as the compare-and-set, Realtime's <code>postgres_changes</code> the signal</td><td>✅ <code>replication-supabase</code>: PostgREST compare-and-set; Realtime for live rows</td></tr>
 <tr><td>Appwrite</td><td>❌ none</td><td>⚠️ <code>replication-appwrite</code>: browser only; updates read then write, not atomic</td></tr>
-<tr><td>MongoDB</td><td>❌ none</td><td>✅ <code>replication-mongodb</code> (Node): change streams; push in a transaction; replica set</td></tr>
+<tr><td>MongoDB</td><td>✅ <code>@alexify/syncom/connector/mongodb</code>: one collection of the injected driver — <code>_rev</code>, <code>_deleted</code>, <code>_updated</code> the adapter's fields, a change stream the signal — beside the engine and the hubs' shared log over the same driver</td><td>✅ <code>replication-mongodb</code> (Node): change streams; push in a transaction; replica set</td></tr>
 <tr><td>NATS JetStream</td><td>✅ a wrpc broker's log — NATS JetStream, Redis Streams, Kafka, AMQP — as the hubs' shared log (<code>sync.sharedLog: broker.log</code>): every hub appends what it accepts, serves <code>changes</code> from it, a client resumes on any hub</td><td>✅ <code>replication-nats</code>: a subject per document; updates checked by sequence</td></tr>
 <tr><td>Google Drive</td><td>❌ none</td><td>⚠️ <code>replication-google-drive</code>, beta: JSON files and a lock file in the user's Drive</td></tr>
 <tr><td>Microsoft OneDrive</td><td>❌ none</td><td>⚠️ <code>replication-microsoft-onedrive</code>, beta: the same file-and-lock scheme over Graph</td></tr>

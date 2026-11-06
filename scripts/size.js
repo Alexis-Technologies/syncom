@@ -648,6 +648,11 @@ const ENTRIES = [
     platform: 'browser',
     budget: 7.5,
   },
+  // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
+  { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
+  { label: 'connector/graphql — browser', entry: 'src/connector/graphql.js', platform: 'browser', budget: 2 },
+  { label: 'connector/mongodb — browser', entry: 'src/connector/mongodb.js', platform: 'browser', budget: 2 },
+  { label: 'connector/supabase — browser', entry: 'src/connector/supabase.js', platform: 'browser', budget: 2 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.

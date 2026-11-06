@@ -171,6 +171,22 @@
       "types": "./src/connector/connector.d.ts",
       "default": "./src/connector/connector.js"
     },
+    "./connector/couchdb": {
+      "types": "./src/connector/couchdb.d.ts",
+      "default": "./src/connector/couchdb.js"
+    },
+    "./connector/graphql": {
+      "types": "./src/connector/graphql.d.ts",
+      "default": "./src/connector/graphql.js"
+    },
+    "./connector/mongodb": {
+      "types": "./src/connector/mongodb.d.ts",
+      "default": "./src/connector/mongodb.js"
+    },
+    "./connector/supabase": {
+      "types": "./src/connector/supabase.d.ts",
+      "default": "./src/connector/supabase.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

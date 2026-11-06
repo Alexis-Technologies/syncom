@@ -2524,14 +2524,14 @@
           "note": "In a one-off check over wrpc 2.0.1, `transport: 'sse'` synced both ways with a live update; plain `http` cannot (the subscription is refused, then every call answers 428)."
         },
         "graphql": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/graphql`: the application's pull and push queries posted over `fetch` or its own client, their answers read by its functions, its subscription client the stream — one adapter for every schema",
+          "source": "src/connector/graphql.js; docs/guide/connector.md#graphql; tests/connector.adapters.test.js"
         },
         "couchdb": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/couchdb`: `_changes` with the documents as the pull, a long poll as the stream, `_bulk_docs` with the revisions last seen as the push, a conflict read back as the database holds it",
+          "source": "src/connector/couchdb.js; docs/guide/connector.md#couchdb; tests/connector.adapters.test.js"
         },
         "firestore": {
           "mark": "❌",
@@ -2539,9 +2539,9 @@
           "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "supabase": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/supabase`: one table through the injected client — PostgREST with the modified column as the compare-and-set, Realtime's `postgres_changes` the signal",
+          "source": "src/connector/supabase.js; docs/guide/connector.md#supabase; tests/connector.adapters.test.js"
         },
         "appwrite": {
           "mark": "❌",
@@ -2549,9 +2549,9 @@
           "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
         },
         "mongodb": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/mongodb`: one collection of the injected driver — `_rev`, `_deleted`, `_updated` the adapter's fields, a change stream the signal — beside the engine and the hubs' shared log over the same driver",
+          "source": "src/connector/mongodb.js; docs/guide/connector.md#mongodb; tests/connector.adapters.test.js"
         },
         "nats": {
           "mark": "✅",

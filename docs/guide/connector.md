@@ -89,8 +89,115 @@ conflicts, and what is pending.
 
 ## Adapters and recipes
 
-Where the far end speaks a protocol of its own, an adapter beside this module writes the handlers over an injected
-client (see the pages of this section as they land). Where the far end is reachable over a wire wrpc already carries
-— HTTP and Server-Sent Events, WebSocket, WebRTC, a worker port, a broker (NATS, Redis, Kafka, AMQP) — no connector
-is needed: the other side runs a syncom node and the protocol goes over wrpc as it is ([wrpc transport](./wrpc),
-[Scaling](./scaling#a-shared-log)).
+Where the far end speaks a protocol of its own, an adapter beside this module writes the two handlers over an
+injected client or `fetch` — nothing of the backend's SDK ships with syncom, every adapter is a subpath of its own
+under 2 KB, and each is tested over a fake of its backend. Where the far end is reachable over a wire wrpc already
+carries — HTTP and Server-Sent Events, WebSocket, WebRTC, a worker port, a broker (NATS, Redis, Kafka, AMQP) — no
+connector is needed: the other side runs a syncom node and the protocol goes over wrpc as it is
+([wrpc transport](./wrpc), [Scaling](./scaling#a-shared-log)).
+
+Every adapter answers `{ pull, push }` to spread into `replicate()`'s options (GraphQL the sides it was given), and
+keeps in memory what a compare-and-set needs — the revision or the stamp it last saw for each document — for the
+connector's life: a connector started anew learns them with its first pull, and a push of a document it has never
+seen lands as a new one, a conflict where one exists, as it should. A conflict is answered as the backend holds the
+document, so the connector sets the record to it ([conflicts](#what-goes-out)).
+
+### CouchDB
+
+```js
+const { couchdb } = require('@alexify/syncom/connector/couchdb');
+
+replicate(db, {
+  name: 'couch',
+  collection: 'Task',
+  ...couchdb({ url: 'https://couch.example.com/tasks', headers: { authorization: `Basic ${credentials}` } }),
+});
+```
+
+One database. A pull is `_changes?include_docs=true` since the checkpoint (CouchDB's `last_seq`), `limit` the batch,
+a `_deleted` change a deletion; the stream is `_changes?feed=longpoll` asked again and again (`longpoll` the wait in
+ms, 60 000). A push is `_bulk_docs` with the `_rev` the adapter last saw on each document — the database's
+compare-and-set — and a `conflict` answer is the document read back as the database holds it (a 404 a deletion).
+`fetch` is the platform's unless given, `headers` ride on every request, and `revisionOf(id)` says what the adapter
+holds. A request that fails is an error with its `status`, which the connector tries again after `retryTime`.
+
+### GraphQL
+
+A GraphQL schema is the application's, so the adapter posts the queries it is given and reads their answers through
+the functions it is given — one adapter for every schema:
+
+```js
+const { graphql } = require('@alexify/syncom/connector/graphql');
+
+replicate(db, {
+  name: 'api',
+  collection: 'Task',
+  ...graphql({
+    url: 'https://api.example.com/graphql',
+    headers: { authorization: `Bearer ${token}` },
+    pull: {
+      query: `query ($since: Int, $limit: Int!) {
+        tasks(since: $since, limit: $limit) { documents { id data deleted } checkpoint }
+      }`,
+      variables: (checkpoint, batchSize) => ({ since: checkpoint, limit: batchSize }),
+      read: (data) => data.tasks,
+    },
+    push: {
+      query: `mutation ($rows: [TaskInput!]!) { pushTasks(rows: $rows) { conflicts { id data deleted } } }`,
+      variables: (rows) => ({ rows }),
+      read: (data) => data.pushTasks.conflicts,
+    },
+    stream: (emit) => subscribeToTasks(() => emit('RESYNC')),
+  }),
+});
+```
+
+`url` and `fetch` post `{ query, variables }` as JSON with `headers`; `request(query, variables)` is the
+application's own client instead, answering the `data`. An answer with `errors` is a failure the connector tries
+again. `pull.read(data)` answers `{ documents, checkpoint }` as a pull handler does, `push.read(data)` the conflicts
+(nothing is none); the stream is the application's subscription client, as `replicate()` takes one. What a
+compare-and-set needs — a revision on every row, say — is the schema's to carry and the readers' to remember: the
+repository's test endpoint answers a `rev` with every document and the rows it refused as it holds them.
+
+### MongoDB
+
+```js
+const { mongodb } = require('@alexify/syncom/connector/mongodb');
+
+replicate(db, {
+  name: 'mongo',
+  collection: 'Task',
+  ...mongodb({ collection: client.db('app').collection('tasks') }),
+});
+```
+
+One collection of the driver's, injected — a collection of the application's documents, not a syncom database (the
+[engine](./backends#engines) and the [shared log](./scaling#a-shared-log) are the other two things syncom does over
+the driver). Every document carries three fields of the adapter's: `_rev` (a count of its writes, the
+compare-and-set), `_deleted` (a tombstone, so a pull sees a deletion) and `_updated` (the position, stamped by `now`:
+a pull is the documents `_updated` after the checkpoint, in that order; two writes in one millisecond are read again
+at the next pull, and an equal document makes no op). The stream is a change stream on the collection, every change
+a `RESYNC` — a replica set; `changes: false` without one, and a live connector pulls every `retryTime`. A push is a
+`replaceOne` matched on the `_rev` last seen (an upsert for a document never seen; a duplicate key is a conflict),
+and a conflict is the document read back. `revisionOf(id)` says what the adapter holds.
+
+### Supabase
+
+```js
+const { createClient } = require('@supabase/supabase-js');
+const { supabase } = require('@alexify/syncom/connector/supabase');
+
+const client = createClient(url, anonKey);
+replicate(db, { name: 'supabase', collection: 'Task', ...supabase({ client, table: 'tasks' }) });
+```
+
+One table through the injected client (`@supabase/supabase-js`, or anything with its `from().select()…` shape): a
+primary key column (`primaryKey`, `id`), a boolean column of a deletion (`deletedColumn`, `deleted`) and a text column
+the database sets on every write (`modifiedColumn`, `updated_at` — a trigger, or the adapter's own stamp, `now`, an
+ISO date). A pull is the rows modified after the checkpoint, in that order; a push is an `update` matched on the
+primary key and the modified value last seen — PostgREST's compare-and-set, no row matched a conflict — or an
+`insert` for a row never seen (a duplicate key a conflict), and a conflict is the row read back. The stream is
+Realtime's `postgres_changes` on the table (`channel`, `syncom:<table>`; `stream: false` for none, and a client
+without channels has none), every change a `RESYNC`. `stampOf(id)` says what the adapter holds.
+
+The adapters to come — Firestore, Appwrite, Google Drive, OneDrive — take the same shape.
