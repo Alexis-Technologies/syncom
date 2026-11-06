@@ -79,7 +79,7 @@ const kvPuts = async (source, ns, { identity }) => {
 /**
  * `copyEngine(from, to, { path, batch })` — the database at `path` copied
  * from one engine to another, `batch` records (or log entries) per write set
- * (500). Answers what was copied: `{ records, pieces, copies, kv, entries }`.
+ * (500). Answers what was copied: `{ records, pieces, copies, kv, entries, blobs }`.
  */
 const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
   checkEngine(from, 'copyEngine(from)');
@@ -89,7 +89,7 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
   const source = checkEngineDb(await from.open(path, {}), 'copyEngine(from)');
   const target = checkEngineDb(await to.open(path, {}), 'copyEngine(to)');
   const held = [];
-  const counts = { records: 0, pieces: 0, copies: 0, kv: 0, entries: 0 };
+  const counts = { records: 0, pieces: 0, copies: 0, kv: 0, entries: 0, blobs: 0 };
   // A lease that goes while the copy runs: the next write set fails, nothing lands over another holder's.
   let gone = null;
   const onLost = (cause) => {
@@ -119,6 +119,17 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
       const puts = await kvPuts(source, namespaces[i], { identity: false });
       if (puts.length > 0) await write({ kv: { put: puts } });
       counts.kv += puts.length;
+    }
+    // The attachments' blobs, where both engines keep them: one by one, by digest.
+    if (source.blobs !== undefined && target.blobs !== undefined) {
+      const digests = await source.blobs.list();
+      for (let i = 0; i < digests.length; i++) {
+        check();
+        const bytes = await source.blobs.get(digests[i]);
+        if (bytes === null) continue;
+        await target.blobs.put(digests[i], bytes);
+        counts.blobs++;
+      }
     }
     // The records with their pieces, `batch` per write set, in id order.
     let after = null;

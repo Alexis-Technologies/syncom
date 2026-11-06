@@ -29,3 +29,6 @@ src/idb/engine.js         idbEngine({ name, indexedDB, IDBKeyRange, durability, 
   object; `raw(id)` stringifies on demand; a text that is no record is kept as `{ text }` and reads as `INTEGRITY`.
   The log's entries are clones too (a scrub puts the stripped entries again — `scrub`), and the catalog's rows are one
   meta value. `fake-indexeddb` runs it all under Node (`tests/engine.idb.test.js`, `tests/sync.engine.idb-engine.test.js`).
+- **Seven stores, version 2.** `blobs` (`[p, digest]` → a Uint8Array) joined the six at VERSION 2: `onupgradeneeded` makes the
+  stores a database lacks, so an IndexedDB database of version 1 is upgraded at its open and loses nothing. A new store is a
+  new version, never a store made outside the upgrade.

@@ -13,6 +13,7 @@
 
 const { checkFsi } = require('../backend.js');
 const { capabilitiesOf, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
+const { toBase64, fromBase64 } = require('../crypto/pem.js');
 const { DIRS, tagDirs } = require('../layout.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
@@ -40,6 +41,7 @@ const unreadable = (id, cause) => unreadableRecord(SyncomError, id, cause);
 
 // A directory under `path`: the path itself for the root namespace.
 const dirOf = (path, ns) => (ns === '' ? path : `${path}/${ns}`);
+const BLOBS = 'blobs';
 
 // The tag names a database holds, read from tags.json (null when unreadable).
 // A file's text, or null where there is none: one read, not an `exists` and a read.
@@ -179,6 +181,21 @@ const openDb = (fsi, path, capabilities, logger) => {
     remove: async (id, name) => fsi.remove(data, named(name, 'piece')),
   };
 
+  // Attachments' bytes by digest, as base64 text under blobs/: an fsi carries text.
+  const blobsDir = `${path}/${BLOBS}`;
+  const blobs = {
+    async get(digest) {
+      const text = await readOrNull(fsi, blobsDir, digest);
+      return text === null ? null : fromBase64(text);
+    },
+    has: (digest) => fsi.exists(blobsDir, digest),
+    async list() {
+      return (await fsi.list(blobsDir)).sort();
+    },
+    put: (digest, bytes) => fsi.write(blobsDir, digest, toBase64(bytes)),
+    remove: (digest) => fsi.remove(blobsDir, digest),
+  };
+
   const copies = {
     async get(tag, id) {
       return readOrNull(fsi, copiesDir(tag), recordFile(id));
@@ -257,6 +274,7 @@ const openDb = (fsi, path, capabilities, logger) => {
     pieces,
     copies,
     log,
+    blobs,
     write,
     // The database never closes a backend it was handed: two databases may share one.
     close: async () => {},
@@ -275,6 +293,7 @@ const filesEngine = (fsi) => {
   const capabilities = capabilitiesOf({
     exclusiveCreate: typeof fsi.create === 'function',
     append: typeof fsi.append === 'function',
+    blobs: true,
   });
   return Object.freeze({
     name: 'files',

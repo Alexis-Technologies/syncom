@@ -38,7 +38,7 @@ const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 const { mongoSharedLog } = require('./shared-log.js');
 
-const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
+const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
 // A lease per database path: `{ _id: path, owner, gen, expires }`, renewed by its holder, taken once it lapsed.
 const LOCKS = 'locks';
 const DEFAULT_LEASE = 30_000;
@@ -50,6 +50,7 @@ const INDEXES = {
   log: { p: 1, seq: 1 },
   meta: { p: 1, key: 1 },
   catalog: { p: 1, id: 1 },
+  blobs: { p: 1, digest: 1 },
 };
 const DUPLICATE = 11000;
 // A duplicate key as the driver reports it: the code on the error, or on the first write error of a bulk.
@@ -119,6 +120,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     changeStream: changes,
     lock: 'native',
     shared: true,
+    blobs: true,
   });
   const c = {};
   for (let i = 0; i < COLLECTIONS.length; i++) c[COLLECTIONS[i]] = database.collection(COLLECTIONS[i]);
@@ -324,6 +326,23 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         fenced((session) => bulk(c.copies, [put(keyOf([p, tag, id]), { p, tag, id, t: text })], session)),
       remove: (tag, id) => fenced((session) => bulk(c.copies, [del(keyOf([p, tag, id]))], session)),
       drop: (tag) => fenced((session) => bulk(c.copies, [{ deleteMany: { filter: { p, tag, ...fence() } } }], session)),
+    };
+
+    // Attachments' bytes by digest: a Binary (the driver's) or the bytes themselves (a fake's), answered as a Uint8Array.
+    const bytesOf = (value) => {
+      if (value === null || value === undefined) return null;
+      if (value instanceof Uint8Array) return new Uint8Array(value);
+      if (ArrayBuffer.isView(value?.buffer)) return new Uint8Array(value.buffer);
+      if (typeof value?.value === 'function') return new Uint8Array(value.value(true));
+      return null;
+    };
+    const blobs = {
+      get: async (digest) => bytesOf((await one(c.blobs, keyOf([p, digest]), { _id: 0, b: 1 }))?.b),
+      has: async (digest) => (await one(c.blobs, keyOf([p, digest]), { _id: 1 })) !== null,
+      list: async () => sorted(await many(c.blobs, { p }, { projection: { _id: 0, digest: 1 } }), 'digest'),
+      put: (digest, bytes) =>
+        fenced((session) => bulk(c.blobs, [put(keyOf([p, digest]), { p, digest, b: new Uint8Array(bytes) })], session)),
+      remove: (digest) => fenced((session) => bulk(c.blobs, [del(keyOf([p, digest]))], session)),
     };
 
     const meta = async (key) => {
@@ -825,6 +844,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       copies,
       log,
       catalog,
+      blobs,
       write,
       lock,
       close: async () => {},

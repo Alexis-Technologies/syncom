@@ -36,6 +36,7 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS log (p TEXT NOT NULL, seq INTEGER NOT NULL, first INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (p, seq)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS meta (p TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (p, key)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS catalog (p TEXT NOT NULL, id TEXT NOT NULL, row TEXT NOT NULL, PRIMARY KEY (p, id)) WITHOUT ROWID',
+  'CREATE TABLE IF NOT EXISTS blobs (p TEXT NOT NULL, digest TEXT NOT NULL, bytes BLOB NOT NULL, PRIMARY KEY (p, digest)) WITHOUT ROWID',
 ];
 const SQL = {
   kvGet: 'SELECT value FROM kv WHERE p = ? AND ns = ? AND key = ?',
@@ -57,6 +58,10 @@ const SQL = {
   copyPut: 'INSERT OR REPLACE INTO copies (p, tag, id, text) VALUES (?, ?, ?, ?)',
   copyRemove: 'DELETE FROM copies WHERE p = ? AND tag = ? AND id = ?',
   copyDrop: 'DELETE FROM copies WHERE p = ? AND tag = ?',
+  blobGet: 'SELECT bytes FROM blobs WHERE p = ? AND digest = ?',
+  blobList: 'SELECT digest FROM blobs WHERE p = ? ORDER BY digest',
+  blobPut: 'INSERT OR REPLACE INTO blobs (p, digest, bytes) VALUES (?, ?, ?)',
+  blobRemove: 'DELETE FROM blobs WHERE p = ? AND digest = ?',
   logAll: 'SELECT seq, first, entry FROM log WHERE p = ? ORDER BY seq',
   logPut: 'INSERT OR REPLACE INTO log (p, seq, first, entry) VALUES (?, ?, ?, ?)',
   logDrop: 'DELETE FROM log WHERE p = ? AND seq >= ? AND seq <= ?',
@@ -106,7 +111,7 @@ const pragmas = (file, full) => {
 const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable = false } = {}) => {
   if (typeof file !== 'string' || file.length === 0) throw new TypeError('sqliteEngine: file is a path or ":memory:"');
   if (driver !== null && typeof driver?.open !== 'function') throw new TypeError('sqliteEngine: driver has no open()');
-  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true });
+  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true, blobs: true });
   let connection = null;
   let opening = null;
   let statements = new Map();
@@ -278,6 +283,19 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       put: (tag, id, text) => run(SQL.copyPut, [p, tag, id, text]),
       remove: (tag, id) => run(SQL.copyRemove, [p, tag, id]),
       drop: (tag) => run(SQL.copyDrop, [p, tag]),
+    };
+
+    // Attachments' bytes by digest, a BLOB a row.
+    const blobs = {
+      get: async (digest) => {
+        const row = await get(SQL.blobGet, [p, digest]);
+        return none(row) ? null : new Uint8Array(row.bytes);
+      },
+      has: async (digest) => !none(await get(SQL.blobGet, [p, digest])),
+      list: async () => names(await all(SQL.blobList, [p]), 'digest'),
+      put: (digest, bytes) =>
+        run(SQL.blobPut, [p, digest, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)]),
+      remove: (digest) => run(SQL.blobRemove, [p, digest]),
     };
 
     const meta = async (tx, key) => {
@@ -511,6 +529,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       copies,
       log,
       catalog,
+      blobs,
       write,
       close: async () => {},
     });

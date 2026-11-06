@@ -19,6 +19,7 @@
 // Requires engine.js and errors.js only; the cipher is handed in.
 
 const { checkEngine, capabilitiesOf, unreadableRecord } = require('../engine.js');
+const { toBase64, fromBase64 } = require('../crypto/pem.js');
 const { SyncomError } = require('../errors.js');
 
 const unreadable = (id) => unreadableRecord(SyncomError, id);
@@ -45,6 +46,7 @@ const placeOf = (path) => {
     piece: (name) => `${at}data/${name}`,
     copy: (tag, id) => `${at}tags/${tag}/data/${id}.json`,
     kv: (ns, key) => (ns === '' ? `${at}${key}` : `${at}${ns}/${key}`),
+    blob: (digest) => `${at}blobs/${digest}`,
     log: (seq) => `${at}log/${seq}`,
     index: `${at}log/index.json`,
   };
@@ -55,6 +57,7 @@ const placeOf = (path) => {
  * `atRest(engine, options)` from the encryption subpath makes one with the
  * cipher (`seal(name, text)`, `open(name, text)`) of the options given.
  */
+
 const atRestEngine = (engine, cipher) => {
   const inner = checkEngine(engine, 'atRest()');
   if (inner.name === 'files') {
@@ -70,6 +73,7 @@ const atRestEngine = (engine, cipher) => {
       copy: copyKey,
       kv: kvKey,
       log: logKey,
+      blob: blobKey,
       index: INDEX,
     } = placeOf(db.path);
     const kv = {
@@ -278,6 +282,23 @@ const atRestEngine = (engine, cipher) => {
 
     const wrapped = { path: db.path, capabilities, kv, records, pieces, copies, log, write, close: () => db.close() };
     if (db.changes !== undefined) wrapped.changes = db.changes;
+    if (db.blobs !== undefined) {
+      // An attachment's bytes: base64, sealed at the blob's place, the ciphertext's bytes stored; the digest stays a name.
+      const encoder = new TextEncoder();
+      const decoder = new TextDecoder();
+      wrapped.blobs = {
+        get: async (digest) => {
+          const stored = await db.blobs.get(digest);
+          if (stored === null) return null;
+          return fromBase64(await open(blobKey(digest), decoder.decode(stored)));
+        },
+        has: (digest) => db.blobs.has(digest),
+        list: () => db.blobs.list(),
+        put: async (digest, bytes) =>
+          db.blobs.put(digest, encoder.encode(await seal(blobKey(digest), toBase64(bytes)))),
+        remove: (digest) => db.blobs.remove(digest),
+      };
+    }
     if (typeof db.lock === 'function') wrapped.lock = (options) => db.lock(options);
     return Object.freeze(wrapped);
   };

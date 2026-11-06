@@ -18,6 +18,7 @@ src/state/state.js        @alexify/syncom/state — createState(db, name): app s
 src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
 src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
 src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded whole into the tombstones kv namespace (its own CLAUDE.md)
+src/attachments/attachments.js @alexify/syncom/attachments — attachments({ compression }): db.attachments over the engine's blobs store, the record's `_attachments/<name>` register, the bytes fetched from a peer on demand (its own CLAUDE.md)
 src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase, path, engine, channel, election }): several instances over one database, one leading, the others following and writing through it (its own CLAUDE.md)
 src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push }): a collection kept in step with a backend through two handlers, checkpointed (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
@@ -37,7 +38,8 @@ src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: t
                           path names every op by) at once on both, `hashOf` at once but a promise in the browser past 64 KiB
 src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only) — no requires
 src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half; the signing and encryption subpaths share it; KEY_FILE_MODE — requires errors.js only
-src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
+src/crypto/pem.js         base64/PEM helpers over btoa/atob (Buffer where there is one) for the browser crypto halves of signing and encryption, and
+                          the one base64 of a blob's bytes (the files engine, the at-rest wrapper, the host's `blob` answer) — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — what `anonymize` hashes a string by (src/inspect/inspect.js); a checksum, never a signature — no requires
@@ -108,7 +110,7 @@ src/                      ships as-is — no build step, CommonJS, 'use strict'
   `setup(ctx)` — `{ fsi, db, path, logger, options, settings, storage, hash, catalogOf }`, run in `#open` before the
   log opens, in registration order — and hands back hooks the core takes: `identity` (`{ id,
 sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
-  encryption plugin), `chain` (a Blockchain, the chain plugin) — and `open(ctx)` — `{ storage,
+  encryption plugin), `chain` (a Blockchain, the chain plugin), `local` and `attachments` (the stores the facade hands out as `db.local` and `db.attachments`) — and `open(ctx)` — `{ storage,
 options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
   sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
   `core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is

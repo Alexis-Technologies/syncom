@@ -14,7 +14,9 @@
 const { KV_NAMESPACES } = require('./engine.js');
 
 /** The directories of a database under its path, the kv namespaces first (`''` the root). */
-const DIRS = Object.freeze(KV_NAMESPACES.concat(['data', 'log', 'log/open', 'log/corrupt', 'tags/.pending/data']));
+const DIRS = Object.freeze(
+  KV_NAMESPACES.concat(['data', 'log', 'log/open', 'log/corrupt', 'tags/.pending/data', 'blobs']),
+);
 
 /** The two directories a tag adds: its copies and its catalog. */
 const tagDirs = (tag) => [`tags/${tag}/data`, `tags/${tag}/index`];

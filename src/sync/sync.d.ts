@@ -102,7 +102,7 @@ export interface SyncUnitOptions {
    * Which procedures this unit serves (every one by default): a peer asking for `push` where it is off is refused
    * with 403 `READ_ONLY`, for `snapshot` or `changes` with 403 `NOT_SERVED`.
    */
-  allow?: { push?: boolean; changes?: boolean; snapshot?: boolean };
+  allow?: { push?: boolean; changes?: boolean; snapshot?: boolean; blob?: boolean };
   /**
    * The host's rule on what a peer may write, asked of every pushed op before it is applied, with the record as it
    * is here (`current`, null for none) and as the op would leave it (`after`): `false` refuses the op — logged as a
@@ -286,6 +286,8 @@ export interface SyncManager {
    * A grant of everything (`'*'`) is not narrowed by a scope: revoke what hello granted.
    */
   revoke(node: string, scopes: string[]): void;
+  /** The bytes of an attachment's blob asked of the connected peers by digest (`syncom/blob`), checked and kept here; `BLOB_NOT_FOUND` where none holds them. */
+  fetchBlob(digest: string): Promise<Uint8Array>;
   /** The shared log as this hub stands to it (`sync.sharedLog`), or null without one. */
   shared(): SharedStats | null;
   /**

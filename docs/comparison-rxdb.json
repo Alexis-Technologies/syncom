@@ -1783,9 +1783,9 @@
           "source": "src/files/files.js; src/entries.js (writeMany); tests/engine.idb.test.js; tests/engine.sqlite.test.js"
         },
         "compression": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "✅",
+          "text": "attachments: `attachments({ compression: 'gzip' | 'deflate' })` through CompressionStream, the encoding on the register; records themselves are not compressed (the engines' own)",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js"
         },
         "docCache": {
           "mark": "✅",
@@ -1793,9 +1793,9 @@
           "source": "src/entries.js:62-73; src/options.js:9,53-58; docs/guide/database.md#the-catalog-and-the-cache"
         },
         "attachments": {
-          "mark": "❌",
-          "text": "none: JSON records only, no binary type",
-          "source": "src/shape.js; docs/guide/database.md"
+          "mark": "✅",
+          "text": "`@alexify/syncom/attachments`: `db.attachments.put/get/has/list/remove` — the bytes in the engine's `blobs` store under their SHA-256 (every engine; sealed at rest), the name a register on the record that replicates like any field",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js"
         },
         "localDocs": {
           "mark": "✅",
@@ -2702,9 +2702,10 @@
           "detail": "Tombstones are never cleaned up, so a long-offline peer cannot resurrect a record by absence; a newer write revives it by stamp."
         },
         "replAttachments": {
-          "mark": "❌",
-          "text": "none: records are JSON, with no binary type",
-          "source": "docs/guide/database.md"
+          "mark": "⚠️",
+          "text": "the register replicates with the record; the bytes are fetched on demand from a peer that holds them (`syncom/blob`, checked by digest) when a node reads the attachment — never pushed ahead of a read",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js",
+          "detail": "A phone syncing a thousand records downloads no photo it does not open; a node offline when it first reads one has `BLOB_NOT_FOUND`."
         },
         "lifecycle": {
           "mark": "✅",
@@ -2793,9 +2794,9 @@
           "source": "src/crypto/keys.js:20-37; docs/guide/database.md#encryption-at-rest"
         },
         "encAttachments": {
-          "mark": "—",
-          "text": "no attachments",
-          "source": "docs/reference/api.md (no attachment API)"
+          "mark": "✅",
+          "text": "the at-rest wrapper seals a blob's bytes at the blob's place as it seals a record; the digest stays a name",
+          "source": "src/encryption/at-rest-engine.js; tests/attachments.test.js"
         },
         "encExport": {
           "mark": "—",

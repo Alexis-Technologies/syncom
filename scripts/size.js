@@ -199,7 +199,9 @@ const ENTRIES = [
   // 75.1 with the writer's record methods, the stats fields, the error fields and the log lines of E7 (review №6, E7; 2026-11-02). 75.5, raised by name.
   // 75.5 (over by bytes) with a peer's register write that lost told as a conflict (applyFields' `lost`, apply.js
   // reportLost; sync-parity plan, S1; 2026-11-06). 76, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 76 },
+  // 76.4 with the attachments getter, the files engine's blobs store and the one base64 of crypto/pem.js (sync-parity
+  // plan, S4). 77, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 77 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -233,7 +235,8 @@ const ENTRIES = [
     label: 'engines — browser (@alexify/syncom/engines)',
     entry: 'src/engines/engines.js',
     platform: 'browser',
-    budget: 10,
+    // 10.1 with the blobs store proxied and copied (sync-parity plan, S4). 10.5, raised by name.
+    budget: 10.5,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
@@ -436,7 +439,8 @@ const ENTRIES = [
   // S1; 2026-11-06). 167.5, raised by name.
   // 169.6 with the host's rules and the dialer's (authorizeWrite, beforeSend, prove, revoke, query/count, forget;
   // sync-parity plan, S1; 2026-11-06). 170, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 170 },
+  // 170.9 with the blobs stores, fetchBlob and the host's blob procedure (sync-parity plan, S4). 172, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 172 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -518,7 +522,8 @@ const ENTRIES = [
     label: 'encryption — browser (@alexify/syncom/encryption)',
     entry: 'src/encryption/encryption.js',
     platform: 'browser',
-    budget: 6.5,
+    // 6.6 with the blobs sealed at rest (sync-parity plan, S4). 7, raised by name.
+    budget: 7,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).
@@ -531,7 +536,8 @@ const ENTRIES = [
     // 3.2 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES) and a scrub that swaps a wrapper's copies
     // (review №5 E1). 3.25, raised by name.
     // 3.3 with the engines' shared errors beside the contract (review №5 M-4). 3.5, raised by name.
-    budget: 3.5,
+    // 3.5 with the blobs store and the change stream (sync-parity plan, S3/S4). 4, raised by name.
+    budget: 4,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',
@@ -551,7 +557,8 @@ const ENTRIES = [
   // 25.4 with the shared log (src/sync/shared.js), one-way links, the awaits, a host's rules — authorizeWrite,
   // prove, revoke, query/count — and the dialer's beforeSend and revert (sync-parity plan, S0–S1; 2026-11-06).
   // 25.5, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 25.5 },
+  // 26.4 with the host's `blob` procedure and the dialer's `fetchBlob` (sync-parity plan, S4). 27, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 27 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {
@@ -659,6 +666,9 @@ const ENTRIES = [
   // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).
   { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.5 },
   { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2 },
+  // Attachments: the plugin over the engine's blobs store — the plan said 2.5 KB; the browser digest half brings its
+  // JavaScript SHA-256 along (hashText), 4.1 measured (sync-parity plan, S4). 4.5, raised by name.
+  { label: 'attachments — browser', entry: 'src/attachments/attachments.js', platform: 'browser', budget: 4.5 },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
   { label: 'shared — browser', entry: 'src/shared/shared.js', platform: 'browser', budget: 6 },

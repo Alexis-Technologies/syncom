@@ -210,6 +210,7 @@ export default withMermaid({
               { text: 'Tombstone cleanup', link: '/guide/cleanup' },
               { text: 'Connectors', link: '/guide/connector' },
               { text: 'Several tabs', link: '/guide/shared' },
+              { text: 'Attachments', link: '/guide/attachments' },
             ],
           },
         ],

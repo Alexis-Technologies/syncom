@@ -527,6 +527,20 @@ signature over another message or under another key is 403 `BAD_PROOF`, a call
 without one (or without a challenge pending) 400 `BAD_PROOF`. Every hello is a
 new challenge.
 
+### `blob`
+
+```
+→ { digest }
+← { id, size, digest }                 (a wrpc stream of the bytes, where the transport carries one)
+← { digest, size, base64 }             (the bytes themselves otherwise)
+```
+
+An attachment's bytes by their SHA-256 (hex, 64 characters): what a node that holds a record naming bytes it lacks
+asks of the peers it dials ([Attachments](../guide/attachments)). The host answers a stream on a binary-capable
+transport and base64 on a text one (SSE); the dialer checks the bytes against the digest before it keeps them. 404
+`BLOB_NOT_FOUND` where the host holds none (or has no blobs store), 403 `NOT_SERVED` where `allow.blob` is off, 400
+`BAD_DIGEST` for what is no digest, 428 `HELLO_FIRST` before a hello.
+
 ### `query` and `count`
 
 ```

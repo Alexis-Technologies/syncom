@@ -41,6 +41,12 @@ const LOG_GETTERS = ['journaled', 'sealedTo', 'open', 'segments', 'corrupt', 'he
 const ARGS_MAX = 4;
 
 const refused = (what) => new TypeError(`serveEngine(): ${what}`);
+// A blob's digest: hex, 64 characters (SHA-256).
+const digest = (value) => {
+  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+    throw refused(`${JSON.stringify(value)} is not a digest`);
+  }
+};
 const text = (value, what) => {
   if (typeof value !== 'string') throw refused(`${what} is a text`);
   return value;
@@ -142,6 +148,16 @@ const CHECKS = Object.freeze({
       for (let i = 0; i < names.length; i++) key(names[i], 'piece');
     },
     remove: pieceName,
+  }),
+  blobs: Object.freeze({
+    get: digest,
+    has: digest,
+    list: () => {},
+    put: (name, bytes) => {
+      digest(name);
+      if (!(bytes instanceof Uint8Array)) throw refused('a blob is a Uint8Array');
+    },
+    remove: digest,
   }),
   copies: Object.freeze({
     get: copyKey,
@@ -581,6 +597,15 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       remove: method('copies', 'remove'),
       drop: method('copies', 'drop'),
     };
+    const blobs = capabilities.blobs
+      ? {
+          get: method('blobs', 'get'),
+          has: method('blobs', 'has'),
+          list: method('blobs', 'list'),
+          put: method('blobs', 'put'),
+          remove: method('blobs', 'remove'),
+        }
+      : undefined;
     // The log store's getters are read at once by the OpLog: the last state the served side answered with.
     let state = { journaled: false, sealedTo: null, open: 0, segments: [], corrupt: 0, health: null };
     const logCall = async (name, args) => {
@@ -646,6 +671,7 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       write: (batch) => value({ h, store: 'write', args: [batch] }),
       close: () => value({ h, close: true }),
     };
+    if (blobs !== undefined) db.blobs = blobs;
     if (capabilities.changeStream) {
       db.changes = {
         subscribe(listener) {

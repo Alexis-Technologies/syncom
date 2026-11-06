@@ -47,7 +47,7 @@ const CAPABILITIES = Object.freeze({
   lock: 'kv',
   // Several instances may open one database at once (read-only followers).
   shared: false,
-  // A `blobs` store for attachments.
+  // A `blobs` store for attachments: `get(digest)`, `has`, `list()`, `put(digest, bytes)`, `remove` — bytes by their SHA-256.
   blobs: false,
   // The log's medium appends a line to a journal (a file per group otherwise).
   append: false,

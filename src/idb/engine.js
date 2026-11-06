@@ -27,7 +27,7 @@
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
-const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
+const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'blobs'];
 const KEYS = {
   kv: ['p', 'ns', 'key'],
   records: ['p', 'id'],
@@ -35,8 +35,10 @@ const KEYS = {
   copies: ['p', 'tag', 'id'],
   log: ['p', 'seq'],
   meta: ['p', 'key'],
+  blobs: ['p', 'digest'],
 };
-const VERSION = 1;
+// 2: the `blobs` store (attachments). An older database is upgraded at its open: the stores it lacks are made.
+const VERSION = 2;
 
 const request = (req) =>
   new Promise((resolve, reject) => {
@@ -88,6 +90,7 @@ const idbEngine = ({
     indexes: true,
     changeStream: broadcasts,
     shared: true,
+    blobs: true,
   });
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let opening = null;
@@ -271,6 +274,31 @@ const idbEngine = ({
       put: (tag, id, text) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.put({ p, tag, id, text })),
       remove: (tag, id) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.delete([p, tag, id])),
       drop: (tag) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.delete(under([p, tag]))),
+    };
+
+    // Attachments' bytes by digest, a Uint8Array a row.
+    const blobs = {
+      get: (digest) =>
+        transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
+          const row = await request(s.get([p, digest]));
+          return row === undefined ? null : new Uint8Array(row.bytes);
+        }),
+      has: (digest) =>
+        transaction(
+          ['blobs'],
+          'readonly',
+          async ({ blobs: s }) => (await request(s.getKey([p, digest]))) !== undefined,
+        ),
+      list: () =>
+        transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
+          const keys = await request(s.getAllKeys(under([p])));
+          const digests = [];
+          for (let i = 0; i < keys.length; i++) digests.push(keys[i][1]);
+          return digests;
+        }),
+      put: (digest, bytes) =>
+        transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.put({ p, digest, bytes: new Uint8Array(bytes) })),
+      remove: (digest) => transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.delete([p, digest])),
     };
 
     // The catalog's rows, as one value of the meta store: a structured clone, no text.
@@ -464,7 +492,19 @@ const idbEngine = ({
         }
       : undefined;
 
-    const db = { path: p, capabilities, kv, records, pieces, copies, catalog, log, write, close: async () => {} };
+    const db = {
+      path: p,
+      capabilities,
+      kv,
+      records,
+      pieces,
+      copies,
+      catalog,
+      log,
+      blobs,
+      write,
+      close: async () => {},
+    };
     if (changes !== undefined) db.changes = changes;
     return Object.freeze(db);
   };

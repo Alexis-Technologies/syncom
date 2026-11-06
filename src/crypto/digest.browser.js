@@ -19,12 +19,14 @@ const LARGE = 1 << 16;
 const digestOf = async (text) =>
   new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
 
-const sha256 = async (data) => {
-  const digest = await digestOf(JSON.stringify(data));
+const toHex = (digest) => {
   let hex = '';
   for (let i = 0; i < digest.length; i++) hex += HEX[digest[i]];
   return hex;
 };
+const sha256 = async (data) => toHex(await digestOf(JSON.stringify(data)));
+// SHA-256 of bytes as hex: what names an attachment's blob.
+const hashBytes = async (bytes) => toHex(new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes)));
 
 // 32 bytes as 43 base64url characters, unpadded: ten groups of three bytes,
 // then the last two as three characters.
@@ -47,4 +49,4 @@ const hashOf = (data) => {
   return text.length <= LARGE ? hashText(text) : digestOf(text).then(base64url);
 };
 
-module.exports = { sha256, hashOf, hashText };
+module.exports = { sha256, hashOf, hashText, hashBytes };

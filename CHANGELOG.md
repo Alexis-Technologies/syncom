@@ -125,6 +125,15 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   `failover` ms). A follower's `transact` is recorded and carried whole. `NOT_LEADER` for what is the leader's
   (`sync`, `serve`). The memory engine announces every write set to the instances listening (`changes`), as the
   IndexedDB engine does.
+- **Attachments: `@alexify/syncom/attachments`.** `createDatabase({ plugins: [attachments({ compression })] })` hands
+  the core `db.attachments`: `put(id, name, bytes, { type })` keeps the bytes in the engine's new `blobs` store under
+  their SHA-256 and names them on the record as the register `_attachments/<name>` (`{ digest, type, length,
+  encoding? }`), which replicates like any field; `get` reads them — bytes this node lacks are asked of the peers it
+  dials (`syncom/blob`: a stream, or base64 on a text transport), checked against the digest and kept; none has
+  them, `BLOB_NOT_FOUND` — `has`, `list`, `remove`. Compression through `CompressionStream`. Every engine keeps blobs
+  (the IndexedDB database at version 2, upgraded at its open; the files engine as base64 under `blobs/`), the at-rest
+  wrapper seals them, `copyEngine()` carries them, a read-only database reads them. `unit({ allow: { blob } })`,
+  `sync.fetchBlob(digest)`.
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

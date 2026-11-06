@@ -28,3 +28,5 @@ src/memory/engine.js      memoryEngine(): the engine in memory — a record as t
   follower alone subscribes, `createDatabase({ readOnly: true })`), so there is nothing of its own to leave out, unlike
   the IndexedDB engine's token. `capabilities.changeStream` is true. The log's groups are not announced: a follower
   reads records whole.
+- **Blobs are copies.** `blobs` keeps a Uint8Array per digest and answers a copy (`slice()`): what a caller changes after a put
+  or a get is not in the store, as the engine suite asks of every engine.

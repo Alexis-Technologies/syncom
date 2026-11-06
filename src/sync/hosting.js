@@ -17,7 +17,8 @@ const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { isKeyId, isPlainObject, isStreamName } = require('../shape.js');
-const { SIGNER, CURSOR } = require('../symbols.js');
+const { SIGNER, CURSOR, DB } = require('../symbols.js');
+const { toBase64 } = require('../crypto/pem.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
 const MAX_SCOPES = 256;
@@ -55,9 +56,9 @@ const nextOrIdle = (pending, ms) =>
 // `unit({ allow })`: which of the three procedures this unit serves; a peer
 // asking for one it does not is refused by code (403): `push` as READ_ONLY —
 // the host takes nothing — `snapshot` and `changes` as NOT_SERVED.
-const ALLOW_KEYS = new Set(['push', 'changes', 'snapshot']);
+const ALLOW_KEYS = new Set(['push', 'changes', 'snapshot', 'blob']);
 const normalizeAllow = (allow) => {
-  const normalized = { push: true, changes: true, snapshot: true };
+  const normalized = { push: true, changes: true, snapshot: true, blob: true };
   if (allow === undefined || allow === null) return normalized;
   if (typeof allow !== 'object') throw new TypeError('unit({ allow }): allow must be an object');
   for (const key of Object.keys(allow)) {
@@ -730,6 +731,32 @@ const query = (host) => async (context, args) => {
   }
 };
 
+// An attachment's bytes by digest (`syncom/blob`): a wrpc stream of the bytes where the transport carries one, the
+// bytes as base64 otherwise; 404 `BLOB_NOT_FOUND` where this host holds none (or has no blobs store), 403
+// `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for what is no digest.
+const DIGEST = /^[0-9a-f]{64}$/;
+const blob = (host) => async (context, args) => {
+  const state = peerOf(host, context, 'blob');
+  if (!host.allow.blob) throw refuseCall(host, 'blob', 'This host serves no blobs', 403, 'NOT_SERVED', state.node);
+  const digest = args?.digest;
+  if (typeof digest !== 'string' || !DIGEST.test(digest)) {
+    throw refuseCall(host, 'blob', 'blob needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST', state.node);
+  }
+  const store = host.storage[DB]?.blobs;
+  const bytes = store === undefined ? null : await store.get(digest);
+  if (bytes === null) throw refuseCall(host, 'blob', `No blob ${digest} here`, 404, 'BLOB_NOT_FOUND', state.node);
+  const client = context?.client;
+  if (client && client.binary !== false && typeof client.createStream === 'function') {
+    const stream = client.createStream('syncom/blob', bytes.length);
+    queueMicrotask(() => {
+      stream.write(bytes);
+      stream.end();
+    });
+    return { id: stream.id, size: bytes.length, digest };
+  }
+  return { digest, size: bytes.length, base64: toBase64(bytes) };
+};
+
 const count = (host) => async (context, args) => {
   const state = await greeted(host, context, args, 'count');
   const cursor = cursorOf(host, args, 'count', state);
@@ -919,6 +946,7 @@ const createUnit = (
     snapshot: procedure(snapshot(host)),
     changes: procedure(changes(host)),
     prove: procedure(prove(host)),
+    blob: procedure(blob(host)),
     // An inbound event (wrpc's `on` block): fire-and-forget, never answered.
     on: { presence: procedure(presence(host)) },
   };

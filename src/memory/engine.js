@@ -18,6 +18,7 @@ const CAPABILITIES = capabilitiesOf({
   indexes: true,
   shared: true,
   changeStream: true,
+  blobs: true,
 });
 
 // A record handed in as text that is no record: kept as the text, read as
@@ -150,6 +151,26 @@ const openDb = (path) => {
     let keys = spaces.get(ns);
     if (keys === undefined) spaces.set(ns, (keys = new Map()));
     return keys;
+  };
+  // Attachments' bytes by digest, copied in and out.
+  const blobs = new Map();
+  const blobStore = {
+    async get(digest) {
+      const bytes = blobs.get(digest);
+      return bytes === undefined ? null : bytes.slice();
+    },
+    async has(digest) {
+      return blobs.has(digest);
+    },
+    async list() {
+      return sorted(blobs.keys());
+    },
+    async put(digest, bytes) {
+      blobs.set(digest, new Uint8Array(bytes));
+    },
+    async remove(digest) {
+      blobs.delete(digest);
+    },
   };
   const kv = {
     async get(ns, key) {
@@ -337,6 +358,7 @@ const openDb = (path) => {
     copies: copyStore,
     catalog: catalogStore,
     log: logStore(),
+    blobs: blobStore,
     changes,
     write,
     close: async () => {},

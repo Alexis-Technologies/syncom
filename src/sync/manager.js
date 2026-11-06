@@ -35,6 +35,8 @@ const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT } = require('../shape.js');
 const { scrubOp } = require('../header.js');
 const { SIGNER, REWIND, DB } = require('../symbols.js');
+const { hashBytes } = require('../crypto/digest.js');
+const { fromBase64 } = require('../crypto/pem.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
@@ -48,6 +50,9 @@ const DEFAULT_MAX_OUTBOX = 10_000;
 // its own pageSize, and a host that streams without end must not take this
 // node's memory with it.
 const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
+// What a peer may answer for one blob: 64 MiB.
+const MAX_BLOB_BYTES = 64 * 1024 * 1024;
+const encoder = new TextEncoder();
 // A failed recovery waits this long (doubling, by timestamp) before the next.
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
@@ -1257,6 +1262,76 @@ class SyncManager extends Emitter {
     if (!peer.closed) this.#subscribe(peer);
     this.#settle();
     return { pages, records: total };
+  }
+
+  /**
+   * The bytes of an attachment's blob asked of the peers this node dials, by digest (`syncom/blob`): the first
+   * connected peer that holds them answers — a stream where the transport carries one, base64 otherwise — the
+   * bytes are checked against the digest and kept in this node's blobs store. None has them: `BLOB_NOT_FOUND`
+   * (`digest`, `asked`). Past `MAX_BLOB_BYTES` a peer's answer is refused.
+   */
+  async fetchBlob(digest) {
+    if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
+      throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
+    }
+    let asked = 0;
+    let cause = null;
+    for (const peer of this.#peers.values()) {
+      if (!peer.connected || peer.link === null) continue;
+      asked++;
+      let bytes;
+      try {
+        const answer = await peer.link.call('syncom/blob', { digest });
+        bytes = await this.#readBlob(peer.link, answer);
+      } catch (error) {
+        // Not there (404), not served (403), a transport's failure: the next peer.
+        cause = error;
+        continue;
+      }
+      if ((await hashBytes(bytes)) !== digest) {
+        this.#storage.logger.warn({ event: 'sync.blob.mismatch', url: peer.node.url, node: peer.ref.node, digest });
+        continue;
+      }
+      const store = this.#storage[DB]?.blobs;
+      if (store !== undefined) await store.put(digest, bytes);
+      return bytes;
+    }
+    throw new SyncomError('BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, {
+      digest,
+      asked,
+      cause,
+    });
+  }
+
+  // A blob as a host answers it: the bytes of a stream, or base64 in the answer itself; bounded by MAX_BLOB_BYTES.
+  async #readBlob(link, answer) {
+    if (answer === null || typeof answer !== 'object') {
+      throw new SyncomError('BAD_PAGE', 'A blob answer that is no object');
+    }
+    if (typeof answer.base64 === 'string') {
+      if (answer.base64.length > (MAX_BLOB_BYTES / 3) * 4 + 4) {
+        throw new SyncomError('BAD_PAGE', 'A blob past MAX_BLOB_BYTES');
+      }
+      return fromBase64(answer.base64);
+    }
+    if (typeof link.stream !== 'function') {
+      throw new SyncomError('STREAMS_UNSUPPORTED', 'The host streamed a blob but the link cannot read streams');
+    }
+    const chunks = [];
+    let length = 0;
+    for await (const chunk of link.stream(answer.id)) {
+      const bytes = typeof chunk === 'string' ? encoder.encode(chunk) : chunk;
+      length += bytes.length;
+      if (length > MAX_BLOB_BYTES) throw new SyncomError('BAD_PAGE', 'A blob past MAX_BLOB_BYTES');
+      chunks.push(bytes);
+    }
+    const out = new Uint8Array(length);
+    let at = 0;
+    for (let i = 0; i < chunks.length; i++) {
+      out.set(chunks[i], at);
+      at += chunks[i].length;
+    }
+    return out;
   }
 
   // A streamed page: NDJSON, one `{ id, data, meta }` per line, parsed line

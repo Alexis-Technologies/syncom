@@ -41,6 +41,7 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/state/CLAUDE.md](./src/state/CLAUDE.md) | App state: by name and path, a path a register |
 | [src/dump/CLAUDE.md](./src/dump/CLAUDE.md) | Dumps: a merge is a bootstrap, an insert is a write |
 | [src/pipeline/CLAUDE.md](./src/pipeline/CLAUDE.md) | Pipelines: once, in order, checkpointed after the write |
+| [src/attachments/CLAUDE.md](./src/attachments/CLAUDE.md) | Attachments: bytes in the engine's blobs store by digest, a register on the record, fetched from a peer on demand |
 | [src/shared/CLAUDE.md](./src/shared/CLAUDE.md) | Several tabs: the leader and the followers over one engine, the election, the channel, the failover |
 | [src/connector/CLAUDE.md](./src/connector/CLAUDE.md) | Connectors: a collection and a backend kept in step — pulls land as writes, pushes follow the turns, the backend wins a conflict |
 | [src/cleanup/CLAUDE.md](./src/cleanup/CLAUDE.md) | Tombstone cleanup: a folded tombstone still wins |

@@ -40,3 +40,5 @@ src/sqlite/sqlite.js      @alexify/syncom/sqlite — sqliteEngine({ file, databa
   it but `durable`. `destroy()` deletes the file with its `-wal`/`-shm`. `durable: true` on any database sets `PRAGMA
 synchronous = FULL` for the connection; a connection the engine opened gets `journal_mode = WAL` for a file,
   `synchronous = NORMAL` and a `busy_timeout`.
+- **A blob is a BLOB row.** `blobs (p, digest, bytes)` keeps an attachment's bytes as the driver's binary (`node:sqlite`
+  answers a Uint8Array; an injected driver must take and answer one), outside the write set and the lane's transaction.

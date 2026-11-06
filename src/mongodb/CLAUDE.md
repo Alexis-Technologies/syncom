@@ -82,3 +82,5 @@ src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes
   `error`, `close` and `end` are listened to (an unheard `error` would crash the process): the listener hears
   `{ error }` once and the subscription is over — the follower subscribes again and reads every record again
   (`FOLLOW_LOST`). `changes: false` for a standalone server, where `watch` would fail.
+- **A blob is a document of bytes.** `blobs` (`{ _id, p, digest, b }`, `b` the bytes: the driver's Binary, answered as a
+  Uint8Array through `bytesOf`; a fake's own Uint8Array as it is), fenced like every put; one document a blob, under 16 MB.

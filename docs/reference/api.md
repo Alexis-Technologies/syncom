@@ -384,6 +384,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `NOT_LEADER` | `shared.sync`, `shared.serve()` or a write without a channel on a follower of `@alexify/syncom/shared`: replication, the served writers and a write of its own are the leader's | `path`, `what` |
 | `LEADER_LOST` | a follower's write (`@alexify/syncom/shared`) that reached no leader within `failover` ms — the leader gone and none elected in time, or a channel answering nothing readable (`method`, `attempts`, `cause`); the shared facade's `error` event when the instance elected could not open the database as the leader (`path`, `cause`) | `path`, `method`, `attempts`, `cause` |
+| `BLOB_NOT_FOUND` | `db.attachments.get()`: the record names bytes this node lacks and no connected peer holds (`id`, `name`, `digest`), or `fetch: false`; `sync.fetchBlob(digest)`: no connected peer holds the blob (`digest`, `asked`, `cause`) | `id`, `name`, `digest`, `asked`, `cause` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on and writes nothing more; what was logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Also what an engine's write set, log group, seal, index, kv or copies put answers when a newer lease's document sits where it would write (MongoDB's fence) | `path`, `cause` |
 | `FOLLOW_LOST` | the storage's `error` event, on a follower (`readOnly: true`): the engine's change stream ended — an error, a close — so what the writer landed meanwhile was not heard; the follower subscribes again first and then reads every record again (a record removed meanwhile loses its row) | `path`, `cause` |
 | `KEYS_INCOMPLETE` | `createDatabase()` with the `encryption` or `signing` plugin, `loadKeys()` (`@alexify/syncom/encryption`), `loadSigningKeys()` (`@alexify/syncom/signing`) when one file of a pair (RSA or signing) is missing | — |
@@ -796,6 +797,21 @@ Events (contained): `leader`, `follower`, `rebind` `({ path, generation })`, `er
 `elect({ name, locks, channel, heartbeat, misses })` is the election on its own: `{ lead, leader, mode, onLost, release }`.
 `createSharedChannel(client, { unit }?)` of `@alexify/syncom/wrpc` is the follower's channel over a `WrpcClient`.
 
+## Attachments (subpath)
+
+`@alexify/syncom/attachments` — `attachments({ compression })`, a plugin: `db.attachments`, bytes beside a record
+in the engine's blobs store, named on it as the register `_attachments/<name>` — see [Attachments](../guide/attachments).
+
+| Member | Notes |
+| --- | --- |
+| `put(id, name, bytes, { type }?)` → `{ digest, type, length, encoding? }` | The bytes (a `Uint8Array`, an `ArrayBuffer`, a string as UTF-8) kept under their SHA-256 — compressed where the plugin was told to — and named on the record (an `update`); `NOT_FOUND` for a record that is not there; a name is up to 128 letters, digits, `.`, `_`, `@`, `-` |
+| `get(id, name, { fetch }?)` → `{ bytes, type, length, digest, encoding? }` or null | The attachment named; bytes this node lacks are asked of the connected peers (`syncom/blob`), checked by digest and kept — `fetch: false` asks nobody; none has them, `BLOB_NOT_FOUND` |
+| `has(id, name)`, `list(id)` | Whether this node holds the bytes; the record's attachments by name |
+| `remove(id, name)` | The name off the record (an `unset`, replicated); the bytes stay in the store |
+
+`FIELD` is `'_attachments'`. The engine must have a blobs store (`capabilities.blobs`); the plugin is refused at
+`createDatabase()` otherwise. `db.sync.fetchBlob(digest)` fetches by digest alone.
+
 ## Cleanup (subpath)
 
 `@alexify/syncom/cleanup` — `cleanup(db, { minimumDeletedTime, runEach, awaitSync, leader, now }?)`: a deleted record
@@ -903,7 +919,7 @@ host that lacks one of its own (`KINDS_MISMATCH`).
 A plugin that is not a kind sets the core up before the log opens — the
 identity (`signing`), the sealing of records (`encryption`), the chain
 (`chain`), the definitions of `schema`, the writer of `telemetry`, the
-cursor of `query`, the tags of `versions` — through `setup(ctx)`, where `ctx`
+cursor of `query`, the tags of `versions`, the stores of `local` and `attachments` — through `setup(ctx)`, where `ctx`
 carries `db` (the engine's database: its `kv` namespaces, `copies`), `fsi`
 (the files engine's backend, `null` under a native engine), `path`, `logger`,
 `options`, `settings`, `storage`, `hash` and `catalogOf(name)` — or once it is

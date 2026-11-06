@@ -207,6 +207,10 @@
       "types": "./src/shared/shared.d.ts",
       "default": "./src/shared/shared.js"
     },
+    "./attachments": {
+      "types": "./src/attachments/attachments.d.ts",
+      "default": "./src/attachments/attachments.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

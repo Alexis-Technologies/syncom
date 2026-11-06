@@ -188,6 +188,14 @@ export interface EngineDb {
     remove(tag: string, id: string): Promise<void>;
     drop(tag: string): Promise<void>;
   };
+  /** Attachments' bytes by their SHA-256 (hex), where `capabilities.blobs`: a copy in, a copy out. */
+  readonly blobs?: {
+    get(digest: string): Promise<Uint8Array | null>;
+    has(digest: string): Promise<boolean>;
+    list(): Promise<string[]>;
+    put(digest: string, bytes: Uint8Array): Promise<void>;
+    remove(digest: string): Promise<void>;
+  };
   /** The op log's medium — what `OpLog` writes its groups, segments and index through; its shape is the store's (src/files/journal.js). */
   readonly log: object;
   write(batch: EngineWriteSet): Promise<void>;
@@ -616,6 +624,7 @@ export type SyncomErrorCode =
   | 'LEASE_LOST'
   | 'NOT_LEADER'
   | 'LEADER_LOST'
+  | 'BLOB_NOT_FOUND'
   | 'FOLLOW_LOST'
   | 'SHARED_LOG_FAILED'
   | 'REVOKED'
@@ -2613,6 +2622,8 @@ export interface Database {
   readonly collections: { readonly [name: string]: SyncomCollection };
   /** The local documents of this database — the `local` plugin's (`PLUGIN_MISSING` without it). */
   readonly local: LocalStore;
+  /** The attachments of this database — the `attachments` plugin's (`PLUGIN_MISSING` without it). */
+  readonly attachments: AttachmentStore;
   /**
    * Defines collections after the open — each as an entity of `createDatabase({ schema })`
    * would be, in force from here over the records of its type; nothing is persisted
@@ -3044,6 +3055,33 @@ export interface BulkResult<I = RecordData> {
  * values kept beside the records that never become an op — not logged, not in the catalog or a
  * snapshot, never at a peer. A key is a kv key (no `/`); a collection's store prefixes `<name>.`.
  */
+/** What a record says of one attachment: the register `_attachments/<name>`. */
+export interface AttachmentEntry {
+  /** SHA-256 of the stored bytes, hex. */
+  digest: string;
+  type: string;
+  /** The bytes' length before compression. */
+  length: number;
+  encoding?: 'gzip' | 'deflate';
+}
+
+export interface Attachment extends AttachmentEntry {
+  bytes: Uint8Array;
+}
+
+/** `db.attachments` — the `attachments` plugin's. */
+export interface AttachmentStore {
+  /** The bytes kept under the record as `name` (the engine's blobs store, by digest) and named on it. Rejects `NOT_FOUND` for a record that is not there. */
+  put(id: string, name: string, bytes: Uint8Array | ArrayBuffer | string, options?: { type?: string }): Promise<AttachmentEntry>;
+  /** The attachment named, or null; bytes this node lacks are asked of the peers it dials unless `fetch: false` — none has them, `BLOB_NOT_FOUND`. */
+  get(id: string, name: string, options?: { fetch?: boolean }): Promise<Attachment | null>;
+  /** Whether this node holds the bytes of the attachment named. */
+  has(id: string, name: string): Promise<boolean>;
+  list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
+  /** Takes the name off the record (replicated); the bytes stay in the store. */
+  remove(id: string, name: string): Promise<void>;
+}
+
 export interface LocalStore {
   readonly local: true;
   /** The value under `key`, or null. */

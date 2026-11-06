@@ -103,6 +103,8 @@ class Database extends Emitter {
   #queryStats = null;
   // The local documents (`db.local`) — the local plugin's.
   #local = null;
+  // The attachments (`db.attachments`) — the attachments plugin's.
+  #attachments = null;
   #settings;
   #log = null;
   #entries = null;
@@ -471,6 +473,7 @@ class Database extends Emitter {
       }
       if (hooks.versions) this.#tags = hooks.versions.tags;
       if (hooks.local) this.#local = hooks.local;
+      if (hooks.attachments) this.#attachments = hooks.attachments;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = writerOf(hooks.telemetry);
         adapted = true;
@@ -1094,6 +1097,12 @@ class Database extends Emitter {
   get local() {
     if (this.#local === null) throw missing('db.local', 'local');
     return this.#local;
+  }
+
+  /** The attachments of this database (`put`, `get`, `has`, `list`, `remove`) — the `attachments` plugin's. */
+  get attachments() {
+    if (this.#attachments === null) throw missing('db.attachments', 'attachments');
+    return this.#attachments;
   }
 
   /**

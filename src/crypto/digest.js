@@ -19,5 +19,7 @@ const hashOf = (data) => crypto.hash('sha256', JSON.stringify(data), 'base64url'
 // src/header.js headerText): `hashText(JSON.stringify(x)) === hashOf(x)`.
 const hashText = (text) => crypto.hash('sha256', text, 'base64url');
 const sha256 = async (data) => crypto.hash('sha256', JSON.stringify(data), 'hex');
+// SHA-256 of bytes as hex: what names an attachment's blob.
+const hashBytes = async (bytes) => crypto.hash('sha256', bytes, 'hex');
 
-module.exports = { sha256, hashOf, hashText };
+module.exports = { sha256, hashOf, hashText, hashBytes };

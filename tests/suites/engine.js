@@ -193,6 +193,44 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
+  await t.test(
+    'blobs: bytes by digest — put, get as a copy, has, list in digest order, remove; a put again is the same',
+    async () => {
+      const { db, done } = await open();
+      try {
+        if (db.capabilities.blobs !== true) {
+          assert.strictEqual(db.blobs, undefined, 'no blobs store where the capability says none');
+          return;
+        }
+        const a = 'a'.repeat(64);
+        const b = 'b'.repeat(64);
+        assert.strictEqual(await db.blobs.get(a), null);
+        assert.strictEqual(await db.blobs.has(a), false);
+        assert.deepStrictEqual(await db.blobs.list(), []);
+        const bytes = new Uint8Array([1, 2, 3, 250, 0, 7]);
+        await db.blobs.put(b, bytes);
+        await db.blobs.put(a, new Uint8Array(70_000).fill(9));
+        bytes[0] = 99;
+        const got = await db.blobs.get(b);
+        assert.ok(got instanceof Uint8Array);
+        assert.deepStrictEqual([...got], [1, 2, 3, 250, 0, 7], 'a copy: the caller’s later change is not in the store');
+        got[1] = 42;
+        assert.deepStrictEqual([...(await db.blobs.get(b))], [1, 2, 3, 250, 0, 7], 'a copy out too');
+        assert.strictEqual((await db.blobs.get(a)).length, 70_000);
+        assert.strictEqual(await db.blobs.has(a), true);
+        assert.deepStrictEqual(await db.blobs.list(), [a, b]);
+        await db.blobs.put(b, new Uint8Array([1, 2, 3, 250, 0, 7]));
+        assert.deepStrictEqual(await db.blobs.list(), [a, b], 'the same digest once');
+        await db.blobs.remove(a);
+        await db.blobs.remove('c'.repeat(64));
+        assert.deepStrictEqual(await db.blobs.list(), [b]);
+        assert.strictEqual(await db.blobs.get(a), null);
+      } finally {
+        await done();
+      }
+    },
+  );
+
   await t.test('copies: a tag’s copies by id, listed in id order, dropped whole', async () => {
     const { db, done } = await open();
     try {
