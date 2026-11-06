@@ -223,7 +223,8 @@ const runSignatureTests = async (t, assert, createStorage) => {
       strict.on('error', () => {});
       const strictRefused = [];
       strict.sync.on('refused', (event) => strictRefused.push(event));
-      const unit = strict.sync.unit({ access: 'public' });
+      // A require host asks for proof of the key by default; this link is a hand-made pusher (the proof is its own test).
+      const unit = strict.sync.unit({ access: 'public', prove: false });
       await assert.rejects(() => new MemoryLink(unit).call('syncom/hello', { node: 'peer', version: 1 }), {
         code: 403,
         reason: 'UNSIGNED',

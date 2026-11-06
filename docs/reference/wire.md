@@ -1,9 +1,9 @@
 # Wire format
 
 What travels between two nodes and what lies on disk, byte by byte: the op
-and its nineteen slots, the payload of every type, what a signature covers,
-the per-stream chain, the log and record files, the four procedures and the
-presence event, the bounds a node holds a peer to, and what may change
+and its twenty slots, the payload of every type, what a signature covers,
+the per-stream chain, the log and record files, the procedures and the
+events, the bounds a node holds a peer to, and what may change
 without breaking a peer.
 Every example on this page was run against the package as it is
 (`@alexify/syncom/all` over `memory()`); node ids, signatures and digests
@@ -112,7 +112,7 @@ engine reads it, so a short name never names another origin's run; a full
 name of the op's own is read alike. A `remove`'s add stamp is the `ts`
 of the `add` this node had seen, per origin.
 
-### Packed: the nineteen slots
+### Packed: the twenty slots
 
 A push and a `changes` page carry ops packed — one positional array per
 op, the type as its code, `null` for an absent field, no key names
@@ -127,6 +127,7 @@ repeated per op:
 | 5 | `id` | 11 | `vector` | 17 | `nonce` |
 | 6 | `scope` | 12 | `from` | 18 | `msg` |
 | | | | | 19 | `prev` |
+| | | | | 20 | `scrubbed` (`1`) |
 
 The ops above, packed (`packOps` in `src/sync/wire.js`; `unpackOps` is the way
 back, and takes a row of fewer than five slots as nothing):
@@ -142,9 +143,13 @@ back, and takes a row of fewer than five slots as nothing):
 
 Slots were appended in this order — `v` was the thirteenth, `actor` the
 fourteenth, the signature's three the fifteenth to seventeenth, `msg` the
-eighteenth, `prev` the nineteenth — and are never reordered: a reader of
-fewer slots ignores the rest, a reader of more takes an absent slot as
-`null`. The log itself keeps the keyed form; packing is for the wire.
+eighteenth, `prev` the nineteenth, `scrubbed` the twentieth — and are never
+reordered: a reader of fewer slots ignores the rest, a reader of more takes
+an absent slot as `null`. `scrubbed` is `1` on an op whose payload was taken
+— by a purge, by its sender's `beforeSend`, by a host's `authorizeWrite` —
+and `null` otherwise: a scrubbed op is a header alone, applied nowhere,
+logged and relayed as one (a `purge` carries nothing a scrub could take and
+applies as it is). The log itself keeps the keyed form; packing is for the wire.
 
 ## What a signature covers
 
@@ -429,8 +434,14 @@ naming the check.
 
 ```
 → { node, version: 1, vector, scopes, token?, schema, kinds }
-← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof? }
+← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof?, challenge?, revoked? }
 ```
+
+`challenge` is there when the host asks for a proof of the key (`unit({ prove })`,
+on by default under `signatures: 'require'`): 32 random bytes as base64url,
+to be signed under the caller's key and answered with `prove` before
+anything else is taken or handed. `revoked` names the scopes the host took
+back from this node (`sync.revoke`): asked for again, they are not granted.
 
 `vector` is the caller's whole version vector; `scopes` the scopes it
 asks to be held to (`['*']` for all); `token` its registered credential,
@@ -447,7 +458,7 @@ its open.
 host's `vector` holds more of one of the caller's own streams (`node`,
 `node@scope`, `node@~`) than the caller's `vector` says — a directory
 restored from an older copy. It is the newest op of each such stream the
-host's log still retains, packed in the [nineteen slots](#packed-the-nineteen-slots):
+host's log still retains, packed in the [twenty slots](#packed-the-twenty-slots):
 the caller's own op at the seq the host claims, signed by the caller's key.
 The caller moves a stream past the host's (`REWOUND`) only when that op is
 well formed, its origin, stream and seq are the claim's and its signature
@@ -472,8 +483,15 @@ op of it names as `prev`. The answer, from the run above:
 
 ```
 → { ops: [packed…] }
-← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations }
+← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations, refused }
 ```
+
+`refused` names the ops the host's `authorizeWrite` said no to — `{ origin,
+seq, scope, id, current }`, `current` the record as the host holds it (null
+for none): each is logged there as a scrub leaves it (skipped, scrubbed) and
+relayed as a no-op, so the stream has no gap, and the pusher sets itself
+straight (`WRITE_REFUSED`: a revert of its own op, or the record forgotten
+where the host holds nothing).
 
 `vector` carries the keys the page touched, not the host's whole vector.
 An op outside the scopes hello granted is refused before anything reads it
@@ -492,7 +510,38 @@ counted and not forwarded.
 | 413 | `OPS_PER_PUSH` / `BYTES_PER_PUSH` | Over `unit({ limits })` |
 | 429 | `OPS_PER_SECOND` | The peer's token bucket is empty |
 | 403 | `READ_ONLY` | The unit takes no pushes (`allow.push` false) |
+| 403 | `UNPROVEN` | The host asked for a proof of the key and has none yet |
 | 503 | `READ_ONLY` | A hub that cannot write and forwards nothing — push to another |
+
+### `prove`
+
+```
+→ { sig }
+← { proven: true }
+```
+
+The `challenge` hello answered, signed under the caller's key as
+`Ed25519( JSON([1, "prove", challenge, hostNodeId, callerNodeId]) )`, base64url.
+Until it is answered `push`, `snapshot` and `changes` are 403 `UNPROVEN`; a
+signature over another message or under another key is 403 `BAD_PROOF`, a call
+without one (or without a challenge pending) 400 `BAD_PROOF`. Every hello is a
+new challenge.
+
+### `query` and `count`
+
+```
+→ { entity, query?, order?: [field | { field, desc }], limit?, offset?, scopes? }   (query)
+← { rows: [{ id, …fields }] }
+→ { entity, query?, scopes? }                                                        (count)
+← { count }
+```
+
+A thin client's read of the host's records through the query plugin
+(`unit({ query: true })`; 403 `QUERY_DISABLED` otherwise): the rows are the
+cursor's — a Mango `query`, the sort keys in order, the window — narrowed to
+the caller's scopes (as the host scopes a record) and capped by
+`limits.rowsPerQuery` (500); a scoped `count` reads the rows (as many as the
+cap allows). An entity or a query the cursor refuses is 400 `BAD_QUERY`.
 
 ### `snapshot`
 
@@ -536,6 +585,18 @@ entries passed), a subscription with no cursor is told to bootstrap, and a
 position the log no longer has — another log's, trimmed past — ends the
 feed with `bootstrap` too.
 
+### The revoke event
+
+```
+host → dialer   syncom/revoke { scopes: ['…'] }
+```
+
+`sync.revoke(node, scopes)` on the host: the peer's live feeds end, this
+event reaches it at once, its grant is narrower from here on, and its next
+hello says `revoked`. The dialer narrows its registry entry, reports
+`REVOKED`, runs `onRevoke` — without the hook it forgets every record of
+those scopes (`forget(id)`: no op) — and opens its feed again.
+
 ### The presence event
 
 `syncom/presence` is a fire-and-forget event in both directions — the
@@ -571,7 +632,7 @@ value    { "v": 1, "node": "<the appender's node id>", "ops": [packed…], "scop
 headers  { "by": "<the appender's token, one per process>" }
 ```
 
-`ops` are the [nineteen slots](#packed-the-nineteen-slots), at most the
+`ops` are the [twenty slots](#packed-the-twenty-slots), at most the
 appender's `pageSize` (500) an entry, in the order the appender accepted
 them; `scopes` rides on an inbox entry alone — the scopes the forwarding
 hub granted the client, what the landing hub bounds the ops to. A `mark`
@@ -626,7 +687,7 @@ a snapshot buys nothing an op could not:
 
 `hello` carries `version: 1` both ways, and a host answers another version
 with 400 `PROTOCOL`. Version 1 is the wire as the first publication will
-have it: the fifteen types and the nineteen slots above, the header under
+have it: the fifteen types and the twenty slots above, the header under
 its version number `1` with `prev` in it, the log file with its hash, the
 index with every field it is written with, the `enc1:` ciphertext bound to
 its file name, the presence format `p: 1`. Nothing reads a shape from

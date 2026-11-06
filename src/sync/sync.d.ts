@@ -6,7 +6,18 @@
 // what it reports are declared here. Without the plugin `storage.sync` is
 // `PLUGIN_MISSING`.
 
-import type { Plugin, Storage, SyncOptions, SyncLink, Node, SchemaInfo, VersionVector } from '../../index.js';
+import type {
+  Plugin,
+  Storage,
+  SyncOptions,
+  SyncLink,
+  Node,
+  SchemaInfo,
+  VersionVector,
+  SyncOp,
+  PeerRef,
+  RecordData,
+} from '../../index.js';
 
 export type { Plugin, Storage, SyncOptions, SyncLink, Node, SchemaInfo, VersionVector };
 
@@ -92,6 +103,27 @@ export interface SyncUnitOptions {
    * with 403 `READ_ONLY`, for `snapshot` or `changes` with 403 `NOT_SERVED`.
    */
   allow?: { push?: boolean; changes?: boolean; snapshot?: boolean };
+  /**
+   * The host's rule on what a peer may write, asked of every pushed op before it is applied, with the record as it
+   * is here (`current`, null for none) and as the op would leave it (`after`): `false` refuses the op — logged as a
+   * scrub leaves it (skipped, scrubbed), relayed as a no-op, no gap in its stream — and names it in the push's
+   * answer (`refused`), with `current`, for the pusher to set itself straight (`WRITE_REFUSED`, a revert of its
+   * own). A throw fails the page: the pusher offers it again.
+   */
+  authorizeWrite?: (context: {
+    op: SyncOp;
+    peer: PeerRef | null;
+    current: RecordData | null;
+    after: RecordData | null;
+  }) => boolean | Promise<boolean>;
+  /**
+   * Ask every peer to prove it holds the key that is its node id before anything is taken or handed to it: hello
+   * answers a `challenge`, the peer signs it (`syncom/prove`), and until then push, snapshot and changes are 403
+   * `UNPROVEN`. On by default under `sync.signatures: 'require'`; needs the signing plugin.
+   */
+  prove?: boolean;
+  /** Serve `query` and `count` — a thin client's read of this host's records through the query plugin, in its scopes. */
+  query?: boolean;
 }
 
 export interface SyncLimits {
@@ -100,6 +132,8 @@ export interface SyncLimits {
   bytesPerPush?: number;
   /** A token bucket per peer, refilled at this rate and holding one second's worth. */
   opsPerSecond?: number;
+  /** The rows one `query` answers at most, and a scoped `count` reads (500 by default). */
+  rowsPerQuery?: number;
 }
 
 export interface SyncProcedure {
@@ -114,6 +148,11 @@ export interface SyncUnit {
   push: SyncProcedure;
   snapshot: SyncProcedure;
   changes: SyncProcedure;
+  /** The challenge hello handed a peer, signed under its key. */
+  prove: SyncProcedure;
+  /** `unit({ query: true })`: a query over an entity, its rows in the peer's scopes; a count. */
+  query?: SyncProcedure;
+  count?: SyncProcedure;
   /** The inbound events (wrpc's `on` block): `presence`, a peer's presence update, relayed to its scope's room. */
   on: { presence: SyncProcedure };
 }
@@ -163,6 +202,7 @@ export interface SyncEvents {
     node: string | null;
     reason:
       | 'scope'
+      | 'rule'
       | 'forged'
       | 'unsigned'
       | 'equivocation'
@@ -190,6 +230,8 @@ export interface SyncEvents {
   connect: (event: { url: string }) => void;
   /** Hosting side: a peer greeted this node and was authorized. */
   hello: (event: { node: string; scopes: string[]; schema: SchemaInfo | null }) => void;
+  /** Hosting side: `revoke(node, scopes)` took scopes back from a peer. */
+  revoke: (event: { node: string; scopes: string[] }) => void;
 }
 
 export interface NodeData {
@@ -238,6 +280,12 @@ export interface SyncManager {
   awaitInitialReplication(options?: { signal?: AbortSignal | null }): Promise<void>;
   /** Resolves once the newest op this node made for the record is acknowledged by every enabled node it goes to; at once when it made none. */
   awaitDocumentPushed(id: string, options?: { signal?: AbortSignal | null }): Promise<void>;
+  /**
+   * Hosting side: takes `scopes` back from the peer `node` on every unit of this manager — its live feeds end, it
+   * is told at once (`syncom/revoke`), its grant is narrower from here on and its next hello says so (`revoked`).
+   * A grant of everything (`'*'`) is not narrowed by a scope: revoke what hello granted.
+   */
+  revoke(node: string, scopes: string[]): void;
   /** The shared log as this hub stands to it (`sync.sharedLog`), or null without one. */
   shared(): SharedStats | null;
   /**

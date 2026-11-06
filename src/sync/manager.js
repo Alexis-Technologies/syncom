@@ -33,6 +33,7 @@ const { NodeRegistry } = require('./registry.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT } = require('../shape.js');
+const { scrubOp } = require('../header.js');
 const { SIGNER, REWIND, DB } = require('../symbols.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
@@ -51,11 +52,16 @@ const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
 
-// The hooks a manager accepts (`createDatabase({ sync: { hooks } })`). There is no
-// hook on what leaves for a peer: seqs run contiguously per origin and
-// scope, so an op withheld from one peer is a gap that stops every later
-// op of that stream at it — per-peer visibility is what scopes are for.
-const SYNC_HOOKS = ['beforeConnect', 'beforeBootstrap'];
+// The hooks a manager accepts (`createDatabase({ sync: { hooks } })`).
+// `beforeSend({ op, peer })` sees every op about to go to a peer: `false`
+// sends it scrubbed — the header alone, a no-op where it lands — never
+// withheld, since seqs run contiguously per origin and scope and a missing op
+// would stop every later op of its stream at the peer. `onRevoke({ url, node,
+// scopes })` runs when a host takes scopes back; without it the records of
+// those scopes are forgotten here.
+const SYNC_HOOKS = ['beforeConnect', 'beforeBootstrap', 'beforeSend', 'onRevoke'];
+// What a proof of this node's key signs: the host's challenge, bound to both node ids.
+const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', challenge, host, node]);
 // What #connect's chain carries when beforeConnect said no.
 const NOT_DIALLED = Symbol('syncom.notDialled');
 // `addNode({ direction })`: what a link carries. `'both'` (the default) pushes and subscribes; `'pull'` only
@@ -106,6 +112,9 @@ class SyncManager extends Emitter {
   // Who waits for a state of the peers (`awaitInSync`, `awaitInitialReplication`, `awaitDocumentPushed`): each a
   // check run whenever a peer moves, resolved once it holds.
   #waiters = new Set();
+  // Hosting side: the live sessions by node (what the units greeted) and the scopes taken back from each node.
+  #sessions = new Map();
+  #revocations = new Map();
 
   constructor(storage, options = {}) {
     super({ maxListeners: options?.maxListeners });
@@ -525,6 +534,10 @@ class SyncManager extends Emitter {
               this.#storage.logger.warn({ event: 'sync.presence.receive', url: peer.node.url, err: error });
             });
           },
+          // The host took scopes back: what it granted shrinks, what it held of them is forgotten here.
+          'syncom/revoke': (event) => {
+            this.#revoked(peer, event?.scopes).catch((error) => this.#fail(peer, error));
+          },
           open: () => {
             peer.connected = true;
           },
@@ -639,6 +652,10 @@ class SyncManager extends Emitter {
     peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch, kinds: kindsOf(answer.kinds) };
     peer.ref.node = answer.node;
     node.remote = { id: answer.node, epoch: answer.epoch, schema };
+    // The host asks for proof of this node's key before it takes or hands anything: the challenge signed.
+    if (typeof answer.challenge === 'string') await this.#prove(peer, answer);
+    // Scopes the host took back since this node last greeted it.
+    if (Array.isArray(answer.revoked) && answer.revoked.length > 0) await this.#revoked(peer, answer.revoked, false);
     // Before anything is pushed: a rewound node moves its streams past what
     // the host holds, then takes the host's state back in a bootstrap.
     const rewound = await this.#rewind(peer, answer);
@@ -724,6 +741,64 @@ class SyncManager extends Emitter {
     const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, a second instance or a false claim`;
     this.#fail(peer, new SyncomError('REWOUND', message, { local, remote, adopted }));
     return op !== null;
+  }
+
+  // The host's challenge signed under this node's key — the key that is its id — and answered: without the
+  // signing plugin there is nothing to sign with, and the host would refuse every call (UNPROVEN).
+  async #prove(peer, answer) {
+    const signer = this.#storage[SIGNER];
+    if (signer === null) {
+      const message = `${peer.node.url} asks for proof of this node's key, and this node has none (the signing plugin)`;
+      throw new SyncomError('UNPROVEN', message, { url: peer.node.url, node: answer.node });
+    }
+    const sig = await signer.signMessage(proveMessage(answer.challenge, answer.node, this.#storage.nodeId));
+    await peer.link.call('syncom/prove', { sig });
+  }
+
+  // The host took scopes back (`syncom/revoke`, or hello's `revoked`): the registry entry narrows and is saved,
+  // `REVOKED` is reported, the `onRevoke` hook runs — without one, every record of those scopes is forgotten
+  // here (never an op: the host would refuse it) — and the feed is opened again under the new grant.
+  async #revoked(peer, scopes, resubscribe = true) {
+    if (!Array.isArray(scopes) || scopes.length === 0 || peer.closed) return;
+    const { node } = peer;
+    const taken = new Set();
+    for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') taken.add(scopes[i]);
+    const kept = [];
+    for (let i = 0; i < node.scopes.length; i++) if (!taken.has(node.scopes[i])) kept.push(node.scopes[i]);
+    node.scopes = kept;
+    await this.#saveNode(node);
+    const revoked = [...taken];
+    const message = `${node.url} took back the scopes ${revoked.join(', ')}`;
+    this.#fail(peer, new SyncomError('REVOKED', message, { scopes: revoked, node: peer.remote?.id ?? null }));
+    if (this.#hooks.onRevoke !== null) {
+      await runHook(this.#hooks, 'onRevoke', { url: node.url, node: peer.remote?.id ?? null, scopes: revoked });
+    } else await this.#forgetScopes(taken);
+    if (resubscribe && !peer.closed && peer.connected && directionOf(node) !== 'push') {
+      peer.subscription?.unsubscribe?.();
+      peer.subscription = null;
+      this.#subscribe(peer);
+    }
+  }
+
+  // Every record of the scopes taken back, forgotten here: read as a peer's record is scoped, one by one.
+  async #forgetScopes(taken) {
+    const storage = this.#storage;
+    const scopeOf = this.#options.scope;
+    if (typeof scopeOf !== 'function') return;
+    const ids = await storage.list();
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      let scope;
+      try {
+        const data = await storage.get(id);
+        if (data === null) continue;
+        scope = scopeOf(id, data);
+      } catch (error) {
+        storage.logger.warn({ event: 'sync.revoke.unread', id, err: error });
+        continue;
+      }
+      if (taken.has(scope)) await storage.forget(id);
+    }
   }
 
   // Of a host's claims on this node's own streams, the ones its hello
@@ -883,7 +958,7 @@ class SyncManager extends Emitter {
     const pageSize = this.#options.pageSize ?? DEFAULT_PAGE_SIZE;
     let sent = 0;
     for (let index = 0; index < ops.length; index += pageSize) {
-      const page = ops.slice(index, index + pageSize);
+      const page = await this.#outgoing(peer, ops.slice(index, index + pageSize));
       const answer = await peer.link.call('syncom/push', { ops: packOps(page) });
       // The host answers with the keys the page touched; merged, never replaced.
       if (answer?.vector) {
@@ -895,6 +970,7 @@ class SyncManager extends Emitter {
         // their streams, which this page did not carry.
         this.#storage.logger.warn({ event: 'sync.push.gaps', url: peer.node.url, gaps: answer.gaps });
       }
+      if (Array.isArray(answer?.refused) && answer.refused.length > 0) await this.#refused(peer, answer.refused);
       sent += page.length;
     }
     peer.backoff = 0;
@@ -906,10 +982,64 @@ class SyncManager extends Emitter {
     return sent;
   }
 
+  // A page as it goes out: every op `beforeSend` says no to goes as a scrub leaves it — a copy, the log's op
+  // untouched — the header alone, a no-op where it lands and no gap in its stream.
+  async #outgoing(peer, page) {
+    if (this.#hooks.beforeSend === null) return page;
+    const out = [];
+    for (let i = 0; i < page.length; i++) {
+      const op = page[i];
+      const verdict = await runHook(this.#hooks, 'beforeSend', { op, peer: peer.ref });
+      if (verdict !== false) {
+        out.push(op);
+        continue;
+      }
+      const copy = { ...op };
+      scrubOp(copy);
+      out.push(copy);
+    }
+    return out;
+  }
+
+  // Ops the host's `authorizeWrite` refused: each reported (WRITE_REFUSED), and one of this node's own reverted
+  // — the record set to what the host holds (a new op stamped above the refused one, `actor: 'revert'`, so every
+  // node comes to the host's state), or forgotten here where the host holds nothing (no op: there is nothing to
+  // bring the others to). A revert the host refuses too is reported, never reverted again.
+  async #refused(peer, refused) {
+    const storage = this.#storage;
+    for (let i = 0; i < refused.length; i++) {
+      const { origin, seq, scope, id, current } = refused[i];
+      const own = origin === storage.nodeId && typeof id === 'string';
+      const held = own
+        ? storage.log.entryOf(typeof scope === 'string' ? `${origin}@${scope}` : origin, seq)
+        : undefined;
+      const revert = own && held?.op.actor !== 'revert';
+      const what = revert
+        ? current === null || current === undefined
+          ? '; forgotten here'
+          : '; reverted to what it holds'
+        : '';
+      const message = `${peer.node.url} refused ${origin}:${seq} on ${id}${what}`;
+      this.#fail(peer, new SyncomError('WRITE_REFUSED', message, { origin, seq, id, current: current ?? null, own }));
+      if (!revert) continue;
+      try {
+        if (current === null || current === undefined) await storage.forget(id);
+        else await storage.set(id, current, { actor: 'revert' });
+      } catch (error) {
+        storage.logger.warn({ event: 'sync.revert.failed', url: peer.node.url, id, err: error });
+      }
+    }
+  }
+
   #subscribe(peer) {
     const { node, link } = peer;
     const feed = ++peer.feed;
-    peer.subscription = link.subscribe(
+    // The end of a feed opened before this one (cut by the host, say) must not take this one's handle off the peer.
+    let handle = null;
+    const ended = () => {
+      if (peer.subscription === handle) peer.subscription = null;
+    };
+    handle = link.subscribe(
       'syncom/changes',
       { scopes: node.scopes },
       {
@@ -922,7 +1052,7 @@ class SyncManager extends Emitter {
             .catch((error) => this.#pageFailed(peer, feed, error));
         },
         onError: (error) => {
-          peer.subscription = null;
+          ended();
           if (peer.closed) return;
           // 428 "say hello first": the host forgot us — on wrpc a reconnect
           // is a new server-side client, and its restored subscription
@@ -938,11 +1068,10 @@ class SyncManager extends Emitter {
           }
           this.#fail(peer, error);
         },
-        onEnd: () => {
-          peer.subscription = null;
-        },
+        onEnd: ended,
       },
     );
+    peer.subscription = handle;
   }
 
   // A page that could not be applied is a break in the stream, not a page to
@@ -1300,12 +1429,42 @@ class SyncManager extends Emitter {
       feeds: this.#feeds,
       drift: (schema, peer) => this.#drift(schema, peer),
       shared: this.#shared,
+      sessions: this.#sessions,
+      revoked: this.#revocations,
+      scopeOf: (id, data) => (typeof this.#options.scope === 'function' ? this.#options.scope(id, data) : GLOBAL_SCOPE),
     });
   }
 
   /** The shared log as this hub stands to it — its cursors, the relay's watermark, the counts — or null without one. */
   shared() {
     return this.#shared === null ? null : this.#shared.stats();
+  }
+
+  /**
+   * Hosting side: takes `scopes` back from the peer `node` on every unit of this manager — its live feeds end,
+   * it is told at once (`syncom/revoke`), its grant is narrower from here on and its next hello says so
+   * (`revoked`). A grant of everything (`'*'`) cannot be narrowed by a scope: revoke what hello granted.
+   */
+  revoke(node, scopes) {
+    if (typeof node !== 'string' || node.length === 0) {
+      throw new TypeError('revoke(node, scopes): node must be a string');
+    }
+    if (!Array.isArray(scopes) || scopes.length === 0) {
+      throw new TypeError('revoke(node, scopes): scopes must be a non-empty array');
+    }
+    for (let i = 0; i < scopes.length; i++) {
+      if (typeof scopes[i] !== 'string') throw new TypeError('revoke(node, scopes): scopes must be strings');
+    }
+    let held = this.#revocations.get(node);
+    if (held === undefined) this.#revocations.set(node, (held = new Set()));
+    for (let i = 0; i < scopes.length; i++) held.add(scopes[i]);
+    const sessions = this.#sessions.get(node);
+    if (sessions !== undefined) {
+      for (const session of sessions) session.revoke(scopes);
+    }
+    // Every live feed looks again: one of the node's ends.
+    for (const wake of [...this.#wakers]) wake();
+    notify(this, this.#storage.logger, 'revoke', { node, scopes: scopes.slice() });
   }
 }
 

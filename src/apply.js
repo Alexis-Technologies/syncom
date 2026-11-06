@@ -46,7 +46,13 @@ const VERIFY_CHUNK = 64;
 // fingerprints of the ops admitted, `prints` of the ones accepted, by stream
 // and seq, what this log holds once they are appended. `bound` is the scopes
 // of the peer that pushed the page, on a host: the records it may write.
-const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = null, bound = null } = {}) => {
+// `authorize`, on a host: `({ op, peer, current, after }) => boolean`, asked
+// of every op before it is applied — false refuses it (logged skipped and
+// scrubbed, relayed as a no-op, named in `refused` for the pusher).
+const openBatch = (
+  core,
+  { via = null, scopes = null, peer = null, adoptFrom = null, bound = null, authorize = null } = {},
+) => {
   const at = Date.now();
   return {
     core,
@@ -55,6 +61,8 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     scopes,
     adoptFrom,
     bound,
+    authorize,
+    refused: null,
     // The seqs this batch moved, by stream; every other is the log's, read
     // one key at a time (`seqIn`) — a hub's vector, thousands of streams,
     // was copied whole for every page.
@@ -452,6 +460,24 @@ const reportLost = (batch, op, entry, lost) => {
   }
 };
 
+// What a record reads as for a hook: its data while alive, else null.
+const visibleOf = (entry) => (entry && isAlive(entry) ? entry.data : null);
+
+// `authorizeWrite` said no: the op scrubbed, skipped, and reported with the record as it is here.
+const refused = async (batch, op, current) => {
+  const { core } = batch;
+  const after = applyOp(current, op, core.limits).entry;
+  const verdict = await batch.authorize({ op, peer: batch.peer, current: visibleOf(current), after: visibleOf(after) });
+  if (verdict !== false) return false;
+  core.otel.recordRejected('rule');
+  scrubOp(op);
+  (batch.stripped ??= new Set()).add(op);
+  skip(batch, op);
+  const scope = op.scope ?? null;
+  (batch.refused ??= []).push({ origin: op.origin, seq: op.seq, scope, id: op.id, current: visibleOf(current) });
+  return true;
+};
+
 // One admitted op, applied to the record it names.
 const applyOne = async (batch, op) => {
   const { core } = batch;
@@ -474,6 +500,13 @@ const applyOne = async (batch, op) => {
     core.emit('schema', { kind: 'ahead', op, held: true });
     return;
   }
+  // An op scrubbed before it came — withheld by its sender's `beforeSend`, refused by a host's `authorizeWrite`,
+  // landed on a purged record — is a header alone: logged and relayed as one (skipped, scrubbed), applied
+  // nowhere, a gap for no one. A purge carries nothing a scrub could take: it applies as it is.
+  if (op.scrubbed === true && op.type !== 'purge') {
+    (batch.stripped ??= new Set()).add(op);
+    return void skip(batch, op);
+  }
   const current = await currentOf(batch, op);
   if (current === undefined) return;
   // What lands on a record purged before it is logged and relayed as a scrub
@@ -484,7 +517,12 @@ const applyOne = async (batch, op) => {
   if (current?.meta?.purged != null && op.type !== 'purge' && op.type !== 'merge') {
     scrubOp(op);
     (batch.stripped ??= new Set()).add(op);
+    return void skip(batch, op);
   }
+  // The host's rule on what a peer may write, asked before anything else may apply the op: refused, the op is
+  // logged as a scrub leaves it — skipped and scrubbed, a no-op for every node behind this one, no gap in its
+  // stream — and named in the answer, with the record as it stands here, for the pusher to set itself straight.
+  if (batch.authorize !== null && (await refused(batch, op, current))) return;
   if (current?.encrypted) {
     // Sealed here for this node alone: the op is logged and relayed, never
     // applied — flagged skipped, so neither a replay nor a fold of the log
@@ -634,6 +672,8 @@ const applyRemote = async (core, ops, options) => {
     outOfScope: batch.outOfScope,
     equivocations: batch.equivocations,
   };
+  // What a host's rule refused, for the pusher: there only when something was.
+  if (batch.refused !== null) result.refused = batch.refused;
   await persist(batch);
   await announce(batch, result);
   return result;

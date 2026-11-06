@@ -104,13 +104,17 @@ const opOf = (header, payload, rest) => {
 // What a scrub takes from an op, in place: its payload and the nonce that
 // salted its digest. The header, the digest and the signature stay — a
 // scrubbed op still verifies (src/log.js #scrub, and src/apply.js for an op
-// that lands on a purged record).
+// that lands on a purged record) — and the op says it was scrubbed
+// (`scrubbed`, the 20th slot on the wire, in the log line's rest): a no-op
+// wherever it lands, never malformed, so a withheld or refused op travels
+// as a header and leaves no gap.
 const scrubOp = (op) => {
   delete op.data;
   delete op.meta;
   delete op.key;
   delete op.value;
   delete op.nonce;
+  op.scrubbed = true;
 };
 
 // The op's payload digested under a fresh nonce, once: an op that has its

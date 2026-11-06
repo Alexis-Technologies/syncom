@@ -179,11 +179,13 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   and an op that lands on a record purged BEFORE it is stripped (`scrubOp`, src/header.js) and
   appended `scrubbed` — never logged or relayed with its payload. Never log a payload for a
   purged id through another path.
-- **`packOps` is 19 positional slots, both halves together.** `v` (13),
+- **`packOps` is 20 positional slots, both halves together.** `v` (13),
   `actor` (14), `sig`, `digest` and `nonce` (15–17), `msg` (18, a
   transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed
   header), `prev` (19, the fingerprint of the op before it in its stream, in
-  the signed header) were appended; a reader
+  the signed header), `scrubbed` (20: `1` on an op whose payload was taken — `scrubOp` in src/header.js sets it;
+  `applyOne` logs and relays such an op skipped and scrubbed, applies nothing, a `purge` excepted — never
+  malformed, so a withheld or refused op travels as a header and leaves no gap) were appended; a reader
   of fewer slots ignores the rest, a reader of more takes an absent slot as
   null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
@@ -569,9 +571,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   go through `#hook()` inside the mutation queue, and `#run` refuses a write
   while one is running — a write from a hook would wait for the hook that
   waits for it. Hook calls live in `src/commit.js`, `src/bootstrap.js`
-  (`core.hook`), `get`, `src/apply.js`, `#connect` and `#bootstrap` only; there is deliberately no hook on the ops
-  that leave for a peer (a withheld op is a gap that stops that stream —
-  scopes are the per-peer filter). Only the hooks that run inside the
+  (`core.hook`), `get`, `src/apply.js`, `#connect`, `#bootstrap` and `#outgoing` only; the hook on the ops that
+  leave for a peer (`beforeSend`, src/sync/manager.js) never withholds one — a missing op is a gap that stops that
+  stream — it sends a scrubbed copy (slot 20), and the host's `authorizeWrite` refuses the same way; scopes are
+  the per-peer filter. Only the hooks that run inside the
   mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
   queues. A collection's events (`Collection#hear`, fed by `Catalog.subscribe` inside the landing) are queued

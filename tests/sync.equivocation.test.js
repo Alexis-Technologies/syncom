@@ -323,12 +323,22 @@ test('The per-stream hash chain', async (t) => {
   await t.test('packOps carries prev in slot 19; a row of 18 slots reads it as absent', () => {
     const op = { origin: 'n1', seq: 2, ts: 5, type: 'write', id: 'r', data: { a: 1 }, prev: STRANGER };
     const [row] = packOps([op]);
-    assert.strictEqual(row.length, 19);
+    // Twenty slots: prev is the 19th, whether the op was scrubbed the 20th (null for an op whole).
+    assert.strictEqual(row.length, 20);
     assert.strictEqual(row[18], op.prev);
+    assert.strictEqual(row[19], null);
     assert.deepStrictEqual(unpackOps([row]), [op]);
     const older = { ...op };
     delete older.prev;
     assert.deepStrictEqual(unpackOps([row.slice(0, 18)]), [older]);
     assert.strictEqual(packOps([older])[0][18], null);
+    // A scrubbed op travels as its header, marked: a row of 19 slots reads it as whole.
+    const scrubbed = { origin: 'n1', seq: 3, ts: 6, type: 'write', id: 'r', prev: STRANGER, scrubbed: true };
+    const [bare] = packOps([scrubbed]);
+    assert.strictEqual(bare[19], 1);
+    assert.deepStrictEqual(unpackOps([bare]), [scrubbed]);
+    const unmarked = { ...scrubbed };
+    delete unmarked.scrubbed;
+    assert.deepStrictEqual(unpackOps([bare.slice(0, 19)]), [unmarked]);
   });
 });

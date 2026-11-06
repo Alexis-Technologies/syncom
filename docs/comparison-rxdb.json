@@ -2685,9 +2685,10 @@
           "source": "src/sync/hosting.js; tests/sync.scopes.test.js:97"
         },
         "revoke": {
-          "mark": "❌",
-          "text": "no revocation: the peer keeps what it received",
-          "source": "docs/guide/sync.md#scopes"
+          "mark": "✅",
+          "text": "`sync.revoke(node, scopes)`: the peer's feeds end, `syncom/revoke` reaches it, its next hello grants less; the peer forgets the records of those scopes (`forget(id)`, no op) unless `onRevoke` decides otherwise",
+          "source": "src/sync/manager.js (revoke, #revoked); src/sync/hosting.js (remember); tests/sync.rules.test.js",
+          "detail": "A grant of everything ('*') is not narrowed by a scope: revoke what hello granted."
         },
         "oneWay": {
           "mark": "✅",
@@ -2755,9 +2756,10 @@
           "source": "src/sync/hosting.js; docs/guide/sync.md#protocol"
         },
         "remoteQuery": {
-          "mark": "❌",
-          "text": "none: a client replicates its scopes and queries locally",
-          "source": "src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`unit({ query: true })`: `syncom/query` and `syncom/count` — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, capped by `limits.rowsPerQuery`; live results = ask again on `changes`",
+          "source": "src/sync/hosting.js (query, count); tests/sync.rules.test.js; docs/reference/wire.md#query-and-count",
+          "detail": "A REST face is wrpc's (its express/fastify adapters over the same procedures)."
         },
         "serverStorage": {
           "mark": "",
@@ -2838,10 +2840,9 @@
           "source": "src/sync/hosting.js; src/sync/manager.js; docs/guide/wrpc.md#hosting-a-node"
         },
         "peerValidation": {
-          "mark": "⚠️",
-          "text": "host `authorize`; dialer `beforeConnect`, `beforeBootstrap`; key possession not proven",
-          "source": "src/sync/hosting.js; docs/guide/hooks.md#sync-hooks; docs/guide/sync.md#signatures",
-          "detail": "Under `'require'` a host refuses a `hello` whose node id is no key (403 `UNSIGNED`); a peer greeting with someone else's key then fails every push as `forged`."
+          "mark": "✅",
+          "text": "host `authorize`, `unit({ prove })` — a challenge at hello signed under the key that is the peer's id, 403 `UNPROVEN` until then; dialer `beforeConnect`, `beforeBootstrap`",
+          "source": "src/sync/hosting.js (prove); src/sync/manager.js (#prove); tests/sync.rules.test.js"
         },
         "access": {
           "mark": "✅",
@@ -2850,10 +2851,9 @@
           "source": "src/sync/hosting.js; src/apply.js (outOfBounds); docs/guide/sync.md#scopes"
         },
         "writeRules": {
-          "mark": "⚠️",
-          "text": "ops outside granted scopes refused, by the op's scope and its record's; `beforeApply({ op, peer })` can skip one",
-          "note": "A finer rule than scopes lives in `beforeApply`: a skip is local (the op is still logged and relayed), a throw refuses the whole page.",
-          "source": "src/sync/hosting.js; src/apply.js; tests/sync.scopes.test.js"
+          "mark": "✅",
+          "text": "`unit({ authorizeWrite({ op, peer, current, after }) })`: a refused op is scrubbed (a no-op everywhere behind the host, no gap), named in the push's answer, and the pusher reverts (`WRITE_REFUSED`); scopes bound what a peer writes beside it",
+          "source": "src/sync/hosting.js; src/apply.js; tests/sync.rules.test.js; docs/guide/sync.md#hosting"
         },
         "serverValidation": {
           "mark": "✅",
@@ -2862,10 +2862,10 @@
           "detail": "A peer's op is never rewritten by the validator: the verdict alone decides, and an invalid op is skipped and reported (see the next row for where it goes)."
         },
         "serverAuth": {
-          "mark": "⚠️",
-          "text": "out-of-scope (by the op or its record), unsigned and malformed ops stop at the host; one its validator or `beforeApply` skips is relayed",
-          "note": "Checked with three nodes: an op the middle node's validator or `beforeApply` skipped still reached the node behind it, because a withheld op would leave a gap in its origin's stream; every node re-checks it. A throwing `beforeApply` refuses the whole page instead, and the sender offers it again later.",
-          "source": "src/apply.js:116-129,253-272; src/sync/hosting.js; docs/guide/hooks.md#skipping-a-peers-op"
+          "mark": "✅",
+          "text": "a refused op reaches no node behind the host as a write: it goes on as a scrubbed header (no-op), the pusher is told and reverts; out-of-scope, unsigned and malformed ops stop at the host",
+          "source": "src/apply.js (refused, scrubbed); src/sync/manager.js (#refused); tests/sync.rules.test.js",
+          "note": "A node's `beforeApply` skip is still local (the op is logged and relayed); `authorizeWrite` is the rule that binds everyone behind the host."
         },
         "limits": {
           "mark": "✅",
@@ -2927,9 +2927,10 @@
           "detail": "A peer's op is judged, never rewritten."
         },
         "outHook": {
-          "mark": "❌",
-          "text": "none, by design: a withheld op is a gap; scopes decide what leaves",
-          "source": "docs/guide/hooks.md#sync-hooks"
+          "mark": "✅",
+          "text": "`sync.hooks.beforeSend({ op, peer })`: `false` sends the op scrubbed — its header alone, a no-op where it lands, no gap in the stream",
+          "source": "src/sync/manager.js (#outgoing); src/sync/wire.js (slot 20); tests/sync.rules.test.js",
+          "detail": "An op is never dropped on its way out: seqs run contiguously per stream, so a withheld op would stop every later one at the peer."
         },
         "readHooks": {
           "mark": "⚠️",

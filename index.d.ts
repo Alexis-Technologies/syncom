@@ -453,6 +453,8 @@ export interface SyncOp {
   nonce?: string;
   /** The message of the transaction (or patch batch) the op was made in, at most 1 024 characters; in the signed header. */
   msg?: string;
+  /** The payload was scrubbed — by a purge, a `beforeSend` that said no, an `authorizeWrite` that refused: the op is a no-op wherever it lands. */
+  scrubbed?: true;
   /**
    * The fingerprint (SHA-256 of the header, hex) of the op before it in its
    * stream — `origin@scope`, or the `@~` stream of `merge`/`advance`; absent
@@ -613,6 +615,9 @@ export type SyncomErrorCode =
   | 'LEASE_LOST'
   | 'FOLLOW_LOST'
   | 'SHARED_LOG_FAILED'
+  | 'REVOKED'
+  | 'UNPROVEN'
+  | 'WRITE_REFUSED'
   | 'TARGET_NOT_EMPTY'
   | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
@@ -1215,6 +1220,18 @@ export interface SyncHooks {
    * every later op of that stream; per-peer visibility is what scopes do.
    */
   beforeBootstrap?: (peer: BootstrapContext) => void | boolean | Promise<void | boolean>;
+  /**
+   * Before an op goes to a peer (a push, a relay). Return `false` to send it scrubbed — the header alone, a no-op
+   * where it lands, no gap in its stream (an op withheld would stop every later op of the stream at the peer).
+   * The log's op is untouched: the scrub is the copy that leaves.
+   */
+  beforeSend?: (context: { op: SyncOp; peer: PeerRef }) => void | boolean | Promise<void | boolean>;
+  /**
+   * A host took scopes back from this node (`REVOKED`): the registry entry is narrower already, the feed is opened
+   * again under the new grant after this. Without the hook every record of those scopes is forgotten here
+   * (`forget(id)`: no op — the host would refuse one).
+   */
+  onRevoke?: (context: { url: string; node: string | null; scopes: string[] }) => void | Promise<void>;
 }
 
 export interface SyncOptions {
@@ -2024,6 +2041,8 @@ export interface ApplyRemoteResult {
    * logged nor relayed.
    */
   equivocations: number;
+  /** Ops a host's `authorizeWrite` refused — scrubbed and skipped here, named for the pusher with the record as it is; there only when something was. */
+  refused?: Array<{ origin: string; seq: number; scope: string | null; id: string; current: RecordData | null }>;
 }
 
 /** The events a Storage emits; listeners are contained. */
@@ -2530,6 +2549,13 @@ export interface Database {
   set(id: string, data: object, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: DeleteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
+  /**
+   * Forgets a record HERE, with no op: its file, pieces and catalog row removed, every entry of it in this node's
+   * log scrubbed and flagged skipped (a replay applies none again; the stream keeps its headers, so no peer sees a
+   * gap). Nothing reaches a peer — what a node does with the records of a scope a host took back. A later op of the
+   * record from a peer makes it again.
+   */
+  forget(id: string): Promise<void>;
   purge(id: string, options?: WriteOptions): Promise<void>;
   /**
    * Sets the listed fields (a `set` op) — or runs the operators (`UpdateOperators`), each by the kind of
@@ -2645,6 +2671,13 @@ export interface Database {
       peer?: PeerRef | null;
       adoptFrom?: string | null;
       bound?: readonly string[] | null;
+      /** A host's rule on what the peer may write (see `SyncUnitOptions.authorizeWrite`). */
+      authorize?: (context: {
+        op: SyncOp;
+        peer: PeerRef | null;
+        current: RecordData | null;
+        after: RecordData | null;
+      }) => boolean | Promise<boolean>;
     },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: PeerRef | null; from?: string }): Promise<SyncOp | null>;

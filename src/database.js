@@ -2268,6 +2268,23 @@ class Database extends Emitter {
   }
 
   /**
+   * Forgets a record HERE, with no op: its file and pieces removed, its
+   * catalog row with them, every entry of it in this node's log scrubbed and
+   * flagged skipped (a replay applies none of them again; the stream keeps
+   * its headers, so no peer sees a gap). Nothing reaches a peer: what a node
+   * does with the records of a scope a host took back (`REVOKED`), where a
+   * `delete` would be an op the host refuses. A later op of the record from
+   * a peer makes it again. Idempotent.
+   */
+  async forget(id) {
+    if (!isRecordId(id)) throw typed('INVALID_ID', `forget(): ${String(id)} is not a record id`);
+    await this.#run(() => this.#landing(() => this.#entries.remove(id)));
+    await this.#log.scrub([id], { skip: true });
+    this.#records.delete(id);
+    this.#emitUpdate(id, null, {}, null, null);
+  }
+
+  /**
    * Forgets a record for good: a `purge` op (which no later write revives)
    * and a scrub of every entry of the id from this node's log — peers do
    * the same when it reaches them. The chain holds hashes only. Idempotent.

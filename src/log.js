@@ -192,6 +192,8 @@ class OpLog {
       this.#entries.push(entry);
       if (entry.seq >= this.#next) this.#next = entry.seq + 1;
       if (entry.op) {
+        // A scrubbed entry's op says so (a line written before the op carried the mark: the flag alone).
+        if (entry.scrubbed === true) entry.op.scrubbed = true;
         vectorAdvance(this.#vector, entry.op);
         this.#observe(entry.op);
         this.#indexEntry(entry);
@@ -968,22 +970,24 @@ class OpLog {
    * a backend with no rename. Takes one id or an array of them: a file
    * holding entries of several is rewritten once.
    */
-  scrub(ids) {
+  scrub(ids, { skip = false } = {}) {
     const list = typeof ids === 'string' ? [ids] : ids;
     return this.#serialize(() => {
       const otel = this.#otel;
-      if (!otel.enabled) return this.#scrub(list);
+      if (!otel.enabled) return this.#scrub(list, skip);
       return traced(
         otel,
         'syncom.log.scrub',
         {},
-        () => this.#scrub(list),
+        () => this.#scrub(list, skip),
         (fresh) => ({ 'syncom.log.scrubbed': fresh }),
       );
     });
   }
 
-  async #scrub(ids) {
+  // `skip`: the entries are flagged `skipped` too — never applied here again, by a replay or a fold
+  // (`forget(id)`: the record is gone from this node, its ops stay in the stream as headers).
+  async #scrub(ids, skip = false) {
     // Every entry of each id (from the index, not a walk), for the files to
     // rewrite; the ones still holding a payload, for the count. A rewrite
     // that failed last time left the files behind memory: the id stays
@@ -1004,12 +1008,14 @@ class OpLog {
       for (const seq of seqs) {
         const entry = this.#entryAt(seq);
         if (!entry) continue;
+        const skipping = skip && entry.skipped !== true;
+        if (skipping) entry.skipped = true;
         if (!entry.scrubbed) {
           scrubOp(entry.op);
           entry.scrubbed = true;
           fresh++;
           taken.push(seq);
-        } else if (torn) taken.push(seq);
+        } else if (torn || skipping) taken.push(seq);
       }
     }
     if (taken.length === 0) return 0;

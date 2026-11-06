@@ -8,7 +8,7 @@
 // last at the seq before it in its stream (`prev`).
 
 const createSigner = async () => {
-  const { generateSigningKeys } = require('../../src/signing/ed25519.js');
+  const { generateSigningKeys, sign: signText } = require('../../src/signing/ed25519.js');
   const { signOp } = require('../../src/signing/sign.js');
   const { link } = require('../../src/commit.js');
   const { opKey } = require('../../src/vector.js');
@@ -20,7 +20,9 @@ const createSigner = async () => {
     made.set(`${signed.seq} ${opKey(signed)}`, fps[0]);
     return signOp(signed, keys.privateKey);
   };
-  return { id: keys.id, sign };
+  // A message signed under the same key: what a proof of the key is (`syncom/prove`).
+  const signMessage = (message) => signText(message, keys.privateKey);
+  return { id: keys.id, sign, signMessage };
 };
 
 // The signature changed: a forgery.

@@ -78,6 +78,25 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   skipped, a skipped entry is a gap for good. The loops begin a turn after `start()` (setImmediate), so a listener
   attached right after the open hears the first read's failure. A read's 410/400 means the position is not the
   log's — the codes wrpc's brokers and `mongoSharedLog` answer; a log of another shape must answer them too.
+- **A rule never withholds an op; it scrubs it.** `beforeSend` on the dialer (`#outgoing`, a copy of the op) and
+  `authorizeWrite` on the host (`refused` in src/apply.js, before `beforeApply`) both end in `scrubOp`: the header
+  with `scrubbed: true` (slot 20) goes on — logged skipped and scrubbed, relayed, applied nowhere — so no stream has
+  a gap. The host names what it refused in the push's answer (`refused`, with the record as it holds it) and the
+  dialer sets itself straight (`#refused`: `set` to the host's record with `actor: 'revert'`, `forget` where the
+  host holds nothing; a revert refused is reported, never reverted again — `entryOf` tells one by its actor).
+  `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, snapshot and
+  changes (403 `UNPROVEN`) until `syncom/prove` carries its signature under the peer's key — `[1, 'prove',
+challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no signing
+  plugin: `UNPROVEN` reported, nothing pushed). `sync.revoke(node, scopes)` lives on the manager, never on the unit
+  (a function on the unit would be a procedure on the wire): the sessions a unit greeted are the manager's Map by
+  node (`remember`), a revoke narrows their grant, counts their `generation` up (a feed of an older generation
+  ends at its next wake; one opened after serves the new grant) and tells the client through `server.sendTo`;
+  hello narrows what a revoked node asks for and answers `revoked`. The dialer narrows its registry entry, reports
+  `REVOKED`, runs `onRevoke` or forgets the records of those scopes (`storage.forget`: the file and the row gone,
+  the log's entries scrubbed and flagged skipped — never an op, the host would refuse it) and subscribes again (a
+  feed's end never takes a newer handle off the peer: `#subscribe` compares). `query`/`count` are opt-in
+  (`unit({ query: true })`), read through `storage[CURSOR]`, narrow the rows by the host's scope function and cap
+  them by `limits.rowsPerQuery` — a thin client's door, never a write's.
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a

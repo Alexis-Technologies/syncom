@@ -64,6 +64,7 @@ expectType<SyncUnit>(
 storage.sync.on('refused', (event) => {
   expectType<
     | 'scope'
+    | 'rule'
     | 'forged'
     | 'unsigned'
     | 'equivocation'

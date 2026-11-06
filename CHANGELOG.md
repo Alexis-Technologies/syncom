@@ -86,6 +86,20 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
 
 ### Added
 
+- **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
+  `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
+  would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the
+  wire says so), relayed as a no-op — no stream has a gap — and the pusher reverts its own op to what the
+  host holds (`WRITE_REFUSED`), or forgets the record where the host holds nothing. `sync.hooks.beforeSend`
+  sends an op the dialer withholds the same way: its header alone. `unit({ prove })` (on under
+  `signatures: 'require'`) asks every peer to prove it holds the key that is its id — a `challenge` at
+  hello, `syncom/prove` with its signature, 403 `UNPROVEN` until then — and the dialer proves by itself.
+  `sync.revoke(node, scopes)` takes scopes back from a peer: its feeds end, `syncom/revoke` reaches it, its
+  next hello grants less; the peer narrows its registry entry, reports `REVOKED`, runs `sync.hooks.onRevoke`
+  or forgets the records of those scopes — `db.forget(id)`: a record gone here with no op, its log entries
+  scrubbed and flagged skipped. `unit({ query: true })` serves `query` and `count` to thin clients: a Mango
+  query over an entity through the query plugin, the rows in the peer's scopes, capped by
+  `limits.rowsPerQuery`.
 - **One-way links, a host's `allow`, the idle page and the three awaits, register conflicts told.**
   `addNode({ direction })`: `'pull'` subscribes alone (nothing of this node goes to the peer, `sync()` pushes
   nothing to it, retention does not wait for its acknowledgement), `'push'` pushes alone (no feed, no bootstrap),

@@ -33,6 +33,9 @@ const SYNC_INTROSPECTION = Object.freeze({
     push: Object.freeze({}),
     snapshot: Object.freeze({}),
     changes: Object.freeze({ kind: 'subscription' }),
+    prove: Object.freeze({}),
+    query: Object.freeze({}),
+    count: Object.freeze({}),
   }),
 });
 

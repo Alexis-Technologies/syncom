@@ -36,5 +36,8 @@ export const SYNC_INTROSPECTION: {
     readonly push: {};
     readonly snapshot: {};
     readonly changes: { readonly kind: 'subscription' };
+    readonly prove: {};
+    readonly query: {};
+    readonly count: {};
   };
 };

@@ -490,6 +490,8 @@ which one a node plays on a given link is just who opened the connection.
 | `push` | dialer → host | Ops the host lacks, by its vector |
 | `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live; an empty page marked `idle` once the feed is read to its end — the dialer's `caughtUp`, what `awaitInSync()` waits for |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
+| `prove` | dialer → host | The challenge hello handed the dialer, signed under its key — before anything else, where the host asks (`unit({ prove })`) |
+| `query`, `count` | dialer → host | A thin client's read of the host's records in its scopes (`unit({ query: true })`) |
 
 ```mermaid
 sequenceDiagram
@@ -516,7 +518,12 @@ requiring signatures, for a node id that is no key (`UNSIGNED`). `push`,
 subscription reaches a new server-side client: the dialer greets again. A
 refused hello is reported through the dialer's `error` event and kept as
 `peers()[i].lastError`; the host is greeted again when the link reconnects,
-or after `enableNode(url, false)` and `true`.
+or after `enableNode(url, false)` and `true`. A host that asks for a proof of
+the key answers hello with a `challenge` and refuses every other call with 403
+(`UNPROVEN`) until `prove` carries its signature (`BAD_PROOF` for one that
+does not check); a unit that does not serve a procedure refuses it with 403
+(`READ_ONLY` for a push, `NOT_SERVED` for a snapshot or a feed,
+`QUERY_DISABLED` for a query).
 
 A push carries the dialer's own writes **and** what it received from its other
 peers, so ops travel across the mesh hop by hop. The version vector stops them
@@ -683,6 +690,8 @@ storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer; error.code: a string below, or a host's numeric refusal
+storage.sync.revoke(node, ['B']);  // hosting side: take scopes back from a peer — its feeds end, it is told, its next hello grants less
+storage.sync.on('revoke', ({ node, scopes }) => {});
 storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: a peer's ops refused — 'scope' | 'forged' | 'unsigned' | 'equivocation'
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
@@ -772,6 +781,9 @@ const unit = storage.sync.unit({
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
 | `limits` | `{ opsPerPush: 10000 }` | Per-peer push limits: `opsPerPush` (10 000 unless given; `Infinity` for none), `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
 | `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
+| `authorizeWrite({ op, peer, current, after })` | — | The host's rule on what a peer may write, asked of every pushed op before it is applied, with the record as it is here and as the op would leave it: `false` refuses the op — logged as a scrub leaves it, relayed as a no-op, no gap — and the push's answer names it (`refused`), so the pusher sets itself straight (`WRITE_REFUSED`: its own op reverted to what the host holds, or the record forgotten where the host holds nothing). A throw fails the page |
+| `prove` | `true` under `signatures: 'require'` | Ask every peer to prove it holds the key that is its node id: hello answers a `challenge`, the peer signs it (`syncom/prove`, the dialer does so by itself), and until then push, snapshot and changes are 403 `UNPROVEN` (a bad signature 403 `BAD_PROOF`). Needs the signing plugin |
+| `query` | `false` | Serve `query` and `count`: a thin client's read of this host's records through the query plugin — a Mango query, sort keys, a window — in its scopes, capped by `limits.rowsPerQuery` (500). See [Wire format](../reference/wire#query-and-count) |
 | `allow` | `{ push: true, changes: true, snapshot: true }` | Which procedures this unit serves: a peer asking for `push` where it is off is refused with 403 (`reason` `'READ_ONLY'`), for `snapshot` or `changes` with 403 (`'NOT_SERVED'`) — a read-only mirror, a write-only sink, each a unit of its own |
 | `presence` | `{ timeout: 30000, rate: 20, max: 1024 }` | The unit's inbound event `on.presence` — a peer's [presence](./presence) update, its own node's and of a scope it asked for, at most `rate` a second, signed under `'require'` — relayed to the scope's room; the host keeps the newest state per node (`max` per scope, for `timeout` ms) and hands them to a newcomer at hello |
 

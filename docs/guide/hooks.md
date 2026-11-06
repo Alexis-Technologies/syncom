@@ -181,11 +181,17 @@ a slow read hook holds no write.
 | `beforeConnect(node)` | Before a registered node is dialled — at `start()`, `addNode()` while started, or `enableNode()`. `node` is a copy of the registry entry | `false` leaves it registered but not dialled | Reported through the manager's `error` event, with `error.url` |
 | `beforeBootstrap({ url, node })` | When a host's log cannot resume this node and its whole state is about to be joined | `false` refuses: the peer stays connected for pushes but nothing is received from it until the next handshake asks again | Reported through `error` |
 
-There is deliberately no hook on the ops that leave for a peer. Seqs run
-contiguously per origin and scope, so an op withheld from one peer is a gap
-that stops every later op of that stream at it. Per-peer visibility is what
-[scopes](./sync#scopes) are for: a scope is its own stream, and a node only
-receives the scopes it asked for.
+| `beforeSend({ op, peer })` | Before an op goes to a peer — a push, a relay | `false` sends it **scrubbed**: the header alone, a no-op where it lands, no gap in its stream (the log's op is untouched) | Reported through `error`; the push fails and is tried again |
+| `onRevoke({ url, node, scopes })` | A host took scopes back from this node (`REVOKED`); the registry entry is narrower already, the feed is opened again under the new grant after the hook | — | Reported through `error` |
+
+No hook ever withholds an op: seqs run contiguously per origin and scope, so
+an op missing at one peer is a gap that stops every later op of that stream
+at it. `beforeSend` sends the header instead — the op is logged and relayed
+everywhere as a no-op (`scrubbed`) — and a host's
+[`authorizeWrite`](./sync#hosting) refuses the same way. Per-peer visibility
+is what [scopes](./sync#scopes) are for: a scope is its own stream, and a
+node only receives the scopes it asked for. Without `onRevoke`, the records
+of a revoked scope are forgotten (`forget(id)`: gone here, no op).
 
 ```js
 const storage = await createDatabase({

@@ -434,7 +434,9 @@ const ENTRIES = [
   // raised by name.
   // 167.1 with one-way links, a host's `allow`, the idle page and the awaits, register conflicts (sync-parity plan,
   // S1; 2026-11-06). 167.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 167.5 },
+  // 169.6 with the host's rules and the dialer's (authorizeWrite, beforeSend, prove, revoke, query/count, forget;
+  // sync-parity plan, S1; 2026-11-06). 170, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 170 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -546,7 +548,10 @@ const ENTRIES = [
   // 22.5 with the review's sync fixes: proof for own streams, the hash chain's heads, presence refusals reported,
   // a bootstrap's pages checked (BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
   // 23.0 with sets shared between versions (the core's ops.js it bundles). 23.5, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23.5 },
+  // 25.4 with the shared log (src/sync/shared.js), one-way links, the awaits, a host's rules — authorizeWrite,
+  // prove, revoke, query/count — and the dialer's beforeSend and revert (sync-parity plan, S0–S1; 2026-11-06).
+  // 25.5, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 25.5 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

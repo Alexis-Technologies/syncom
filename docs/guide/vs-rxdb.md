@@ -28,7 +28,7 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 - **RxDB is the broader toolkit.** It has storages for more runtimes (Deno KV, FoundationDB,
   localStorage), replication plugins for nine backends and handlers that sync with one you already
   run, attachments, several tabs writing one database, a backup writer, conditional ops that replay
-  on every replica, and packages for Vue, Angular and signals. In 15 rows RxDB has something where
+  on every replica, and packages for Vue, Angular and signals. In 13 rows RxDB has something where
   syncom has nothing; the rows are not equal in weight, so read the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
@@ -38,7 +38,7 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
   included; the host limits, validates and reports. Its storage engines — memory, IndexedDB, SQLite
   and MongoDB in the MIT package, every one over the same contract, a database moved between them
   with `copyEngine()`, an engine served from a worker — are where RxDB sells its premium storages.
-  In 23 rows syncom has something where RxDB has nothing: signatures, a tamper-evident log,
+  In 24 rows syncom has something where RxDB has nothing: signatures, a tamper-evident log,
   collaborative text, multi-record transactions, unique keys, multi-entry and combined indexes,
   projection, keyset streaming and paging, text search inside a query, OpenTelemetry, stats among
   them. The write API — bulk writes, `modify()`, the update operators, writes by query — sorted
@@ -498,7 +498,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Partial replication</strong></td></tr>
 <tr><td>Partial replication</td><td>✅ per-record scopes; the host bounds a peer's reads and writes by the record's scope</td><td>⚠️ one replication per scope, filtered by your backend; RxServer <code>queryModifier</code></td></tr>
 <tr><td>Scoped realtime stream</td><td>✅ one subscription serves the granted scopes; other scopes' ops are skipped</td><td>⚠️ one stream per replication, scoped by your backend</td></tr>
-<tr><td>Access lost after sync</td><td>❌ no revocation: the peer keeps what it received</td><td>❌ no signal: the client keeps its copy; RxServer then refuses its pushes</td></tr>
+<tr><td>Access lost after sync</td><td>✅ <code>sync.revoke(node, scopes)</code>: the peer's feeds end, <code>syncom/revoke</code> reaches it, its next hello grants less; the peer forgets the records of those scopes (<code>forget(id)</code>, no op) unless <code>onRevoke</code> decides otherwise</td><td>❌ no signal: the client keeps its copy; RxServer then refuses its pushes</td></tr>
 <tr><td>Pull-only or push-only</td><td>✅ <code>addNode({ direction: 'pull' | 'push' | 'both' })</code>: a pull-only link subscribes alone (nothing of the node goes out, retention does not wait for the peer), a push-only link pushes alone; the host's <code>unit({ allow })</code> serves push, snapshot and changes each on or off</td><td>✅ omit <code>push</code> or <code>pull</code>; pull-only stores no per-document meta</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Deletes and attachments</strong></td></tr>
 <tr><td>Deletes over replication</td><td>✅ a <code>delete</code> op leaves a tombstone on every node; a <code>purge</code> op erases</td><td>✅ <code>_deleted: true</code> with the whole document; the backend must keep it</td></tr>
@@ -514,7 +514,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Where the server runs</td><td>✅ wherever a wrpc router runs: Node servers, a browser <code>PeerHost</code></td><td>⚠️ Node, through the Express adapter; Deno, Bun and Electron claimed, untested</td></tr>
 <tr><td>HTTP framework adapters</td><td>✅ any wrpc host (MIT): its own <code>Server</code>, <code>uws</code>, <code>fastify</code>, <code>express</code></td><td>⚠️ Express free (SSPL); Fastify and Koa are Premium (Pro Plus)</td></tr>
 <tr><td>What the server serves</td><td><code>hello</code>, <code>push</code>, <code>snapshot</code>, <code>changes</code> (a resumable subscription)</td><td>per collection <code>pull</code>, <code>push</code>, <code>pullStream</code> (SSE); REST <code>query</code>, <code>get</code>, <code>set</code>, <code>delete</code></td></tr>
-<tr><td>Queries for thin clients</td><td>❌ none: a client replicates its scopes and queries locally</td><td>✅ RxServer REST endpoint and <code>client-rest</code>; live results over SSE</td></tr>
+<tr><td>Queries for thin clients</td><td>✅ <code>unit({ query: true })</code>: <code>syncom/query</code> and <code>syncom/count</code> — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, capped by <code>limits.rowsPerQuery</code>; live results = ask again on <code>changes</code></td><td>✅ RxServer REST endpoint and <code>client-rest</code>; live results over SSE</td></tr>
 <tr><td>Server-side storage</td><td>a full syncom node over any engine: node:fs, SQLite (<code>sqliteEngine</code>) or MongoDB (<code>mongoEngine</code>, one writer by lease, read-only followers over change streams); several hub processes over one shared log (<code>mongoSharedLog</code>, or a wrpc broker's)</td><td>any RxStorage of the server's RxDatabase: memory, MongoDB, FoundationDB…</td></tr>
 </tbody>
 </table>
@@ -550,20 +550,20 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Tamper-evident history</td><td>✅ hash-linked chain of what this node applied, unsigned (optional)<sup>52</sup></td><td>❌ none; <code>_rev</code> is a height plus the writer's instance token</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Access control on the serving side</strong></td></tr>
 <tr><td>Authentication where data is served</td><td>✅ <code>unit({ authorize })</code> gates <code>hello</code>; <code>access: 'session'</code> refuses everyone by default<sup>53</sup></td><td>✅ RxServer <code>authHandler(headers)</code>, re-run before each streamed event<sup>54</sup></td></tr>
-<tr><td>Peer validation (P2P)</td><td>⚠️ host <code>authorize</code>; dialer <code>beforeConnect</code>, <code>beforeBootstrap</code>; key possession not proven</td><td>✅ <code>isPeerValid(peer)</code>; the Nostr handler verifies each peer's public key<sup>55</sup></td></tr>
+<tr><td>Peer validation (P2P)</td><td>✅ host <code>authorize</code>, <code>unit({ prove })</code> — a challenge at hello signed under the key that is the peer's id, 403 <code>UNPROVEN</code> until then; dialer <code>beforeConnect</code>, <code>beforeBootstrap</code></td><td>✅ <code>isPeerValid(peer)</code>; the Nostr handler verifies each peer's public key<sup>55</sup></td></tr>
 <tr><td>Per-client read filtering</td><td>✅ per-record scopes (<code>sync.scope</code>); a peer reads only the scopes <code>hello</code> granted<sup>56</sup></td><td>✅ RxServer <code>queryModifier(authData, query)</code>; <code>serverOnlyFields</code> hidden from clients</td></tr>
-<tr><td>Per-client write rules</td><td>⚠️ ops outside granted scopes refused, by the op's scope and its record's; <code>beforeApply({ op, peer })</code> can skip one<sup>57</sup></td><td>✅ RxServer <code>changeValidator(authData, change)</code>: one refused row is 403 for the push</td></tr>
-<tr><td>Server re-validates a client's write</td><td>✅ the host runs the entity validators on every peer op (<code>OP_INVALID</code>)</td><td>⚠️ only if the server's storage is wrapped in a <code>validate-*</code> plugin<sup>58</sup></td></tr>
-<tr><td>A server can reject a write before it spreads</td><td>⚠️ out-of-scope (by the op or its record), unsigned and malformed ops stop at the host; one its validator or <code>beforeApply</code> skips is relayed<sup>59</sup></td><td>✅ RxServer is the master: a refused push reaches no client<sup>60</sup></td></tr>
+<tr><td>Per-client write rules</td><td>✅ <code>unit({ authorizeWrite({ op, peer, current, after }) })</code>: a refused op is scrubbed (a no-op everywhere behind the host, no gap), named in the push's answer, and the pusher reverts (<code>WRITE_REFUSED</code>); scopes bound what a peer writes beside it</td><td>✅ RxServer <code>changeValidator(authData, change)</code>: one refused row is 403 for the push</td></tr>
+<tr><td>Server re-validates a client's write</td><td>✅ the host runs the entity validators on every peer op (<code>OP_INVALID</code>)</td><td>⚠️ only if the server's storage is wrapped in a <code>validate-*</code> plugin<sup>57</sup></td></tr>
+<tr><td>A server can reject a write before it spreads</td><td>✅ a refused op reaches no node behind the host as a write: it goes on as a scrubbed header (no-op), the pusher is told and reverts; out-of-scope, unsigned and malformed ops stop at the host<sup>58</sup></td><td>✅ RxServer is the master: a refused push reaches no client<sup>59</sup></td></tr>
 <tr><td>Rate and size limits</td><td>✅ <code>unit({ limits })</code>: <code>opsPerPush</code>, <code>bytesPerPush</code> (413), <code>opsPerSecond</code> (429)</td><td>❌ none in RxServer; <code>$regex</code> queries refused against ReDoS</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Erasure, history and audit</strong></td></tr>
-<tr><td>Purge: the payload leaves history</td><td>✅ <code>purge(id)</code>: a <code>purge</code> op that wins at any stamp, then a scrub of the op log<sup>61</sup></td><td>⚠️ <code>cleanup</code> plugin drops tombstones after <code>minimumDeletedTime</code> (31 days)<sup>62</sup></td></tr>
-<tr><td>Erasure across replicas</td><td>✅ the purge op replicates; every peer that takes it scrubs its own log<sup>63</sup></td><td>❌ cleanup is local; a delete replicates as a tombstone with the full data</td></tr>
-<tr><td>History / time travel</td><td>✅ <code>history(id)</code>, <code>get(id, { at })</code>, <code>diff</code>/<code>restore</code>, tags of the whole storage</td><td>⚠️ latest revision only; the <code>crdt</code> plugin keeps every op in the document<sup>64</sup></td></tr>
-<tr><td>Who made a change</td><td>✅ every op names its origin key and an <code>actor</code>, kept in the log<sup>65</sup></td><td>❌ none; <code>crdt</code> ops carry the writer's storage token and a time</td></tr>
+<tr><td>Purge: the payload leaves history</td><td>✅ <code>purge(id)</code>: a <code>purge</code> op that wins at any stamp, then a scrub of the op log<sup>60</sup></td><td>⚠️ <code>cleanup</code> plugin drops tombstones after <code>minimumDeletedTime</code> (31 days)<sup>61</sup></td></tr>
+<tr><td>Erasure across replicas</td><td>✅ the purge op replicates; every peer that takes it scrubs its own log<sup>62</sup></td><td>❌ cleanup is local; a delete replicates as a tombstone with the full data</td></tr>
+<tr><td>History / time travel</td><td>✅ <code>history(id)</code>, <code>get(id, { at })</code>, <code>diff</code>/<code>restore</code>, tags of the whole storage</td><td>⚠️ latest revision only; the <code>crdt</code> plugin keeps every op in the document<sup>63</sup></td></tr>
+<tr><td>Who made a change</td><td>✅ every op names its origin key and an <code>actor</code>, kept in the log<sup>64</sup></td><td>❌ none; <code>crdt</code> ops carry the writer's storage token and a time</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Input hardening</strong></td></tr>
 <tr><td>Prototype pollution</td><td>✅ own keys only; <code>__proto__</code> is never a field</td><td>✅ mingo and dot-prop refuse <code>__proto__</code> paths</td></tr>
-<tr><td>Malformed data from a peer or backend</td><td>✅ <code>wellFormed</code> before anything is read; counted <code>malformed</code>, never logged or relayed</td><td>⚠️ only with a <code>validate-*</code> wrapper: the invalid document is dropped (<code>RC_PULL</code>)<sup>66</sup></td></tr>
+<tr><td>Malformed data from a peer or backend</td><td>✅ <code>wellFormed</code> before anything is read; counted <code>malformed</code>, never logged or relayed</td><td>⚠️ only with a <code>validate-*</code> wrapper: the invalid document is dropped (<code>RC_PULL</code>)<sup>65</sup></td></tr>
 <tr><td>Clock-skew guard</td><td>✅ stamps over <code>sync.maxSkew</code> (24 h) ahead refused (<code>SKEW</code>), never observed</td><td>— no peer clocks: conflicts compare document states</td></tr>
 </tbody>
 </table>
@@ -586,16 +586,16 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Hooks and events</strong></td></tr>
 <tr><td>Write hooks / middleware</td><td>✅ <code>beforeWrite</code> replaces data or refuses, <code>afterWrite</code>; one function per name</td><td>✅ pre/post <code>insert</code>/<code>save</code>/<code>remove</code>, plus <code>postCreate</code>; many, series or parallel</td></tr>
 <tr><td>Hooks on replicated changes</td><td>✅ <code>beforeApply</code> skips or aborts per op, <code>afterApply</code>, <code>beforeBootstrap</code></td><td>⚠️ <code>pull.modifier</code> per replication; collection hooks skip pulled documents</td></tr>
-<tr><td>Filter outgoing changes</td><td>❌ none, by design: a withheld op is a gap; scopes decide what leaves</td><td>✅ <code>push.modifier</code> transforms a document or drops it (<code>null</code>)</td></tr>
-<tr><td>Read hooks</td><td>⚠️ <code>beforeRead</code> / <code>afterRead</code> wrap <code>get()</code>; queries and snapshots read raw<sup>67</sup></td><td>❌ none; <code>postCreate</code> runs when a document object is built</td></tr>
+<tr><td>Filter outgoing changes</td><td>✅ <code>sync.hooks.beforeSend({ op, peer })</code>: <code>false</code> sends the op scrubbed — its header alone, a no-op where it lands, no gap in the stream</td><td>✅ <code>push.modifier</code> transforms a document or drops it (<code>null</code>)</td></tr>
+<tr><td>Read hooks</td><td>⚠️ <code>beforeRead</code> / <code>afterRead</code> wrap <code>get()</code>; queries and snapshots read raw<sup>66</sup></td><td>❌ none; <code>postCreate</code> runs when a document object is built</td></tr>
 <tr><td>Refusal and error events</td><td>✅ <code>error</code> with a code per refused peer op; <code>conflict</code>; host <code>refused</code>, <code>hello</code></td><td>✅ replication <code>error$</code> (<code>RC_PULL</code>, <code>RC_PUSH</code>), <code>conflict$</code>; rejected local writes throw</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Extensibility and operations</strong></td></tr>
-<tr><td>Plugin system</td><td>✅ <code>createDatabase({ plugins })</code>, per instance, nothing global: the kinds (<code>/text</code>, <code>/tree</code>) and the blocks (<code>/signing</code>, <code>/chain</code>, <code>/sync</code>, <code>/schema</code>, <code>/query</code>, …); a missing one is <code>PLUGIN_MISSING</code></td><td>✅ <code>addRxPlugin()</code>: prototypes, overwritables and 24 plugin hooks<sup>68</sup></td></tr>
+<tr><td>Plugin system</td><td>✅ <code>createDatabase({ plugins })</code>, per instance, nothing global: the kinds (<code>/text</code>, <code>/tree</code>) and the blocks (<code>/signing</code>, <code>/chain</code>, <code>/sync</code>, <code>/schema</code>, <code>/query</code>, …); a missing one is <code>PLUGIN_MISSING</code></td><td>✅ <code>addRxPlugin()</code>: prototypes, overwritables and 24 plugin hooks<sup>67</sup></td></tr>
 <tr><td>Typed errors</td><td>✅ <code>SyncomError.code</code>: 44 codes, plus 3 on <code>TypeError</code>s; full messages</td><td>✅ <code>RxError.code</code>: 215 codes; the message text only with <code>dev-mode</code></td></tr>
 <tr><td>Logging</td><td>✅ <code>createDatabase({ logger })</code>: a Console, a pino-shaped logger or <code>false</code>; named events</td><td>⚠️ Premium <code>logger</code> storage wrapper (Pro Plus); the core logs nothing</td></tr>
 <tr><td>OpenTelemetry</td><td>✅ spans and metrics through an injected API; no OpenTelemetry dependency</td><td>❌ none</td></tr>
 <tr><td>Health and stats</td><td>✅ <code>stats()</code>, <code>peers()</code>, <code>hosted()</code>, observable gauges</td><td>❌ no stats API; replication states have <code>active$</code> and <code>awaitInSync()</code></td></tr>
-<tr><td>Personal data in diagnostics</td><td>✅ no id, origin, scope or key as a metric label; <code>includeIdentity: false</code> for spans</td><td>⚠️ error messages embed their parameters: documents, pushed rows, password hashes<sup>69</sup></td></tr>
+<tr><td>Personal data in diagnostics</td><td>✅ no id, origin, scope or key as a metric label; <code>includeIdentity: false</code> for spans</td><td>⚠️ error messages embed their parameters: documents, pushed rows, password hashes<sup>68</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>UI bindings</strong></td></tr>
 <tr><td>React</td><td>✅ <code>/store</code>: <code>useSyncExternalStore(store.subscribe, store.getSnapshot)</code> over a query, a record or a presence</td><td>✅ <code>rxdb/plugins/react</code>: <code>RxDatabaseProvider</code>, <code>useRxQuery</code>, <code>useLiveRxQuery</code>, <code>useRxDocument</code>…</td></tr>
 <tr><td>Vue</td><td>⚠️ a documented three-line <code>shallowRef</code> over <code>/store</code>; no package of its own</td><td>✅ <code>rxdb/plugins/reactivity-vue</code>: shallow refs through the <code>$$</code> accessors</td></tr>
@@ -604,8 +604,8 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Signals and custom reactivity</td><td>⚠️ Solid's <code>from(store)</code> over <code>/store</code>; another signal library wraps <code>subscribe</code> the same way</td><td>✅ <code>reactivity</code> option: Preact signals plugin, or your own factory; no Solid adapter</td></tr>
 <tr><td>TanStack DB</td><td>❌ none</td><td>⚠️ <code>@tanstack/rxdb-db-collection</code>, published by TanStack (0.1.111)</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Developer tooling</strong></td></tr>
-<tr><td>Development mode</td><td>— no separate mode: argument checks and full error messages always on</td><td>✅ <code>rxdb/plugins/dev-mode</code>: readable errors, deep-freeze, schema and query checks<sup>70</sup></td></tr>
-<tr><td>Test helpers</td><td>⚠️ <code>memory()</code> for in-memory stores; contract suites stay in the repo</td><td>✅ memory storage; <code>rxdb/plugins/test-utils</code> (fixtures, replication test suite); <code>using</code> closes databases<sup>71</sup></td></tr>
+<tr><td>Development mode</td><td>— no separate mode: argument checks and full error messages always on</td><td>✅ <code>rxdb/plugins/dev-mode</code>: readable errors, deep-freeze, schema and query checks<sup>69</sup></td></tr>
+<tr><td>Test helpers</td><td>⚠️ <code>memory()</code> for in-memory stores; contract suites stay in the repo</td><td>✅ memory storage; <code>rxdb/plugins/test-utils</code> (fixtures, replication test suite); <code>using</code> closes databases<sup>70</sup></td></tr>
 <tr><td>Own test suite and CI</td><td>1,849 <code>node:test</code> tests; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux</td><td>74 test files per storage; Linux, Windows, browsers, Bun, Deno, 11 example apps; no coverage gate</td></tr>
 <tr><td>Documentation</td><td>21 pages, about 41,500 words, with an API reference</td><td>271 pages, about 463,000 words: 98 articles, 46 landing pages</td></tr>
 <tr><td>Example apps</td><td>⚠️ two Node.js scripts (<code>examples/main.js</code>, <code>domain.js</code>), linted but not run</td><td>✅ 13 example apps; 11 run in CI: Angular, React, React Native, Electron, Tauri, Vue, Svelte…</td></tr>
@@ -628,21 +628,21 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 </thead>
 <tbody>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Releases and maintenance</strong></td></tr>
-<tr><td>Breaking major releases</td><td>none yet: 0.0.1, never published</td><td>10 majors from 8.0 (2018) to 17.0 (2026); three in 2022<sup>72</sup></td></tr>
+<tr><td>Breaking major releases</td><td>none yet: 0.0.1, never published</td><td>10 majors from 8.0 (2018) to 17.0 (2026); three in 2022<sup>71</sup></td></tr>
 <tr><td>Minor release cadence</td><td>no release yet; cut by hand from a checklist</td><td>about monthly: 17.0 to 17.6 between March and October 2026</td></tr>
-<tr><td>Free-tier changes over releases</td><td>— no paid tier (MIT)</td><td>⚠️ Premium since 12.0 (2022); Worker storage moved in at 14.0; collection cap since 16.0<sup>73</sup></td></tr>
+<tr><td>Free-tier changes over releases</td><td>— no paid tier (MIT)</td><td>⚠️ Premium since 12.0 (2022); Worker storage moved in at 14.0; collection cap since 16.0<sup>72</sup></td></tr>
 <tr><td>Named production users</td><td>none yet (unreleased)</td><td>10 testimonials (Readwise, Nutrien, Venice.ai, …); one case study</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Support and ecosystem</strong></td></tr>
-<tr><td>Commercial support</td><td>❌ none offered</td><td>⚠️ paid: €180 one-hour consulting; Enterprise SLA, 24-hour first response<sup>74</sup></td></tr>
+<tr><td>Commercial support</td><td>❌ none offered</td><td>⚠️ paid: €180 one-hour consulting; Enterprise SLA, 24-hour first response<sup>73</sup></td></tr>
 <tr><td>Community help</td><td>GitHub repository; no chat or forum</td><td>Discord, GitHub; a bug report needs a PR with a failing test</td></tr>
 <tr><td>Third-party plugins</td><td>none (pre-release)</td><td>8 listed, e.g. <code>rxdb-hooks</code>, <code>rxdb-flexsearch</code>, <code>rxdb-supabase</code></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Adoption and trust</strong></td></tr>
 <tr><td>Adoption signals</td><td>pre-release, not on npm yet</td><td>23,412 GitHub stars; 63,815 npm downloads in the week to 2026-10-18</td></tr>
-<tr><td>Import from other databases</td><td>⚠️ <code>importJSON(db, { records: [{ id, data }] }, { mode: 'insert' })</code> takes any JSON of ids and data; no per-database importer or guide</td><td>⚠️ migration guides only; <code>importJSON()</code> takes an RxDB dump of the same schema<sup>75</sup></td></tr>
-<tr><td>Published benchmarks</td><td>✅ nine libraries, nine scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>76</sup></td></tr>
+<tr><td>Import from other databases</td><td>⚠️ <code>importJSON(db, { records: [{ id, data }] }, { mode: 'insert' })</code> takes any JSON of ids and data; no per-database importer or guide</td><td>⚠️ migration guides only; <code>importJSON()</code> takes an RxDB dump of the same schema<sup>74</sup></td></tr>
+<tr><td>Published benchmarks</td><td>✅ nine libraries, nine scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>75</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>AI and coding agents</strong></td></tr>
-<tr><td>WebMCP agent tools</td><td>❌ none</td><td>✅ <code>rxdb/plugins/webmcp</code>: query, count, changes, insert, upsert, delete tools per collection; <code>readOnly</code><sup>77</sup></td></tr>
-<tr><td>Docs for coding agents</td><td>✅ <code>llms.txt</code> on the docs site; <code>CLAUDE.md</code> in the repository</td><td>✅ <code>llms.txt</code> plus three topic files; <code>ERROR-MESSAGES.md</code>, <code>CLAUDE.md</code>, <code>AGENTS.md</code> in the package<sup>78</sup></td></tr>
+<tr><td>WebMCP agent tools</td><td>❌ none</td><td>✅ <code>rxdb/plugins/webmcp</code>: query, count, changes, insert, upsert, delete tools per collection; <code>readOnly</code><sup>76</sup></td></tr>
+<tr><td>Docs for coding agents</td><td>✅ <code>llms.txt</code> on the docs site; <code>CLAUDE.md</code> in the repository</td><td>✅ <code>llms.txt</code> plus three topic files; <code>ERROR-MESSAGES.md</code>, <code>CLAUDE.md</code>, <code>AGENTS.md</code> in the package<sup>77</sup></td></tr>
 </tbody>
 </table>
 
@@ -706,28 +706,27 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 54. Defaults are open: with no <code>authHandler</code> every request is admitted, and the Express adapter's default CORS reflects any request origin with credentials. The documented <code>validUntil</code> is never read. The server listens on localhost unless told otherwise. The <code>replication-websocket</code> server has no auth at all.
 55. Once valid, a peer reads and writes every document of the collection.
 56. The peer names its scopes, and naming none means everything: <code>authorize</code> must check <code>hello.scopes</code>.
-57. A finer rule than scopes lives in <code>beforeApply</code>: a skip is local (the op is still logged and relayed), a throw refuses the whole page.
-58. Collection hooks do not run on replicated writes, and a 422 throws after the valid rows of the batch were written.
-59. Checked with three nodes: an op the middle node's validator or <code>beforeApply</code> skipped still reached the node behind it, because a withheld op would leave a gap in its origin's stream; every node re-checks it. A throwing <code>beforeApply</code> refuses the whole page instead, and the sender offers it again later.
-60. Over WebRTC there is no master: each peer's storage decides alone.
-61. The chain keeps an unsalted SHA-256 of every version this node wrote or applied, so whoever holds the directory can confirm a guessed record; until the next catalog save, <code>index/catalog.json</code> may still hold its indexed fields.
-62. A removed document keeps all its data in the tombstone until then, and forever without the plugin; <code>cleanup(0)</code> forces it once replications are in sync.
-63. A peer that never comes back keeps what it had.
-64. Op compaction is not implemented, so a <code>crdt</code> document carries every past value, in its tombstone too.
-65. <code>actor</code> is the writer's signed claim; a host holds it to what <code>authorize</code> established in <code>beforeApply</code>.
-66. Without a wrapper a pulled document with wrong types and extra fields is stored as sent (checked by running).
-67. An <code>afterRead</code> redaction does not reach <code>select()</code> rows, so it is not a read access control.
-68. Plugins are process-wide and cannot be removed.
-69. Checked by running: a wrong password's <code>DB1</code> carries both the given and the stored password hash.
-70. Without it an error carries only its code. With it, the storage must be wrapped in a schema validator (<code>DVM1</code>), and in browsers it adds a tracking iframe (see Calls to the vendor).
-71. The testing page's multi-tab simulation needs <code>ignoreDuplicate: true</code>, which throws <code>DB9</code> unless dev-mode is on, and the 13-collection limit counts every database a test run leaves open.
-72. Majors 13, 14, 16 and 17 each told users of some or all storages to move their stored data with the <code>migration-storage</code> plugin or to re-sync it from the backend.
-73. The open-source cap on open collections was 16 in 16.0 and is 13 since 17.0. Two features went the other way: <code>migration-storage</code> (15.0) and the Vue and Preact signals plugins (17.0) became free.
-74. The Pro and Pro Plus agreement says 'No Technical Support'; free users get GitHub and Discord, and a bug report is expected as a pull request with a failing test.
-75. No converter ships: the Realm, PouchDB, Dexie, LokiJS, NeDB, GUN and other guides read the old store and call <code>bulkInsert</code>/<code>bulkUpsert</code> by hand.
-76. Most measured storages are Premium (OPFS, IndexedDB, SQLite, Filesystem); the free localStorage storage that most guides use is not measured.
-77. WebMCP is an experimental browser API; where <code>navigator.modelContext</code> is missing the docs point to the <code>@mcp-b/global</code> polyfill.
-78. In the 17.6.0 tarball all 215 entries of ERROR-MESSAGES.md are headed <code>## undefined</code>, and COL23 states a limit of 16 collections where the code enforces 13.
+57. Collection hooks do not run on replicated writes, and a 422 throws after the valid rows of the batch were written.
+58. A node's <code>beforeApply</code> skip is still local (the op is logged and relayed); <code>authorizeWrite</code> is the rule that binds everyone behind the host.
+59. Over WebRTC there is no master: each peer's storage decides alone.
+60. The chain keeps an unsalted SHA-256 of every version this node wrote or applied, so whoever holds the directory can confirm a guessed record; until the next catalog save, <code>index/catalog.json</code> may still hold its indexed fields.
+61. A removed document keeps all its data in the tombstone until then, and forever without the plugin; <code>cleanup(0)</code> forces it once replications are in sync.
+62. A peer that never comes back keeps what it had.
+63. Op compaction is not implemented, so a <code>crdt</code> document carries every past value, in its tombstone too.
+64. <code>actor</code> is the writer's signed claim; a host holds it to what <code>authorize</code> established in <code>beforeApply</code>.
+65. Without a wrapper a pulled document with wrong types and extra fields is stored as sent (checked by running).
+66. An <code>afterRead</code> redaction does not reach <code>select()</code> rows, so it is not a read access control.
+67. Plugins are process-wide and cannot be removed.
+68. Checked by running: a wrong password's <code>DB1</code> carries both the given and the stored password hash.
+69. Without it an error carries only its code. With it, the storage must be wrapped in a schema validator (<code>DVM1</code>), and in browsers it adds a tracking iframe (see Calls to the vendor).
+70. The testing page's multi-tab simulation needs <code>ignoreDuplicate: true</code>, which throws <code>DB9</code> unless dev-mode is on, and the 13-collection limit counts every database a test run leaves open.
+71. Majors 13, 14, 16 and 17 each told users of some or all storages to move their stored data with the <code>migration-storage</code> plugin or to re-sync it from the backend.
+72. The open-source cap on open collections was 16 in 16.0 and is 13 since 17.0. Two features went the other way: <code>migration-storage</code> (15.0) and the Vue and Preact signals plugins (17.0) became free.
+73. The Pro and Pro Plus agreement says 'No Technical Support'; free users get GitHub and Discord, and a bug report is expected as a pull request with a failing test.
+74. No converter ships: the Realm, PouchDB, Dexie, LokiJS, NeDB, GUN and other guides read the old store and call <code>bulkInsert</code>/<code>bulkUpsert</code> by hand.
+75. Most measured storages are Premium (OPFS, IndexedDB, SQLite, Filesystem); the free localStorage storage that most guides use is not measured.
+76. WebMCP is an experimental browser API; where <code>navigator.modelContext</code> is missing the docs point to the <code>@mcp-b/global</code> polyfill.
+77. In the 17.6.0 tarball all 215 entries of ERROR-MESSAGES.md are headed <code>## undefined</code>, and COL23 states a limit of 16 collections where the code enforces 13.
 
 <!-- comparison:end -->
 
