@@ -35,10 +35,11 @@
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
-const { isPlainObject, isRecordId, canonical } = require('../shape.js');
+const { isPlainObject, isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 const { Emitter } = require('../emitter.js');
+const { same } = require('./same.js');
 
 const NAMESPACE = 'connector';
 const DEFAULT_BATCH = 100;
@@ -51,9 +52,6 @@ const NOOP = () => {};
 
 const isDatabase = (value) =>
   value !== null && typeof value === 'object' && typeof value.transact === 'function' && typeof value.on === 'function';
-
-// Two readings the same: by their canonical JSON, the collection's mark left out.
-const same = (a, b) => canonical(a) === canonical(b);
 
 // A record's data as a backend sees it: without the collection's mark.
 const plain = (data) => {

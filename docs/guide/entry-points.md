@@ -132,7 +132,9 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 | `/dump` | 6.6 KB | `/pipeline` | 3.1 KB |
 | `/connector` | 7.0 KB | `/connector/couchdb` | 1.4 KB |
 | `/connector/graphql` | 0.8 KB | `/connector/mongodb` | 0.9 KB |
-| `/connector/supabase` | 1.2 KB | | |
+| `/connector/supabase` | 1.2 KB | `/connector/firestore` | 1.3 KB |
+| `/connector/appwrite` | 1.4 KB | `/connector/gdrive` | 2.1 KB |
+| `/connector/onedrive` | 1.9 KB | | |
 | `/cleanup` | 3.0 KB | `/engines` | 9.9 KB |
 | `/idb` | 4.9 KB | `/search` | 1.1 KB |
 | `/order` | 1.0 KB | `/contracts` | 1.0 KB |

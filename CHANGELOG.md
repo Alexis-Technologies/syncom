@@ -103,6 +103,13 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   MongoDB (`_rev`, `_deleted`, `_updated` the adapter's fields, a change stream the signal), the vendor's client for
   Supabase (PostgREST with the modified column as the compare-and-set, Realtime the signal). A conflict is answered
   as the backend holds the document; nothing of a backend's SDK ships, each adapter weighs under 2 KB.
+- **Connector adapters: `/connector/firestore`, `/connector/appwrite`, `/connector/gdrive`, `/connector/onedrive`.**
+  Firestore over the injected modular SDK (the server stamp and a tombstone the adapter's fields, a cursor after
+  the checkpoint, one transaction a push, `onSnapshot` the signal); Appwrite over the injected `Databases`, `Query`
+  and client (`$updatedAt` the position, a boolean attribute the tombstone, a read then a write the push — Appwrite
+  has no compare-and-set, said in the docs — Realtime the signal); Google Drive and OneDrive as one JSON file of
+  the collection in the user's drive through an injected `fetch` and token, the file's ETag the compare-and-set
+  (a 412 read again and tried once more), a probe of the ETag the stream (`poll`).
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

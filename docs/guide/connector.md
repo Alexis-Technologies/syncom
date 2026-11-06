@@ -200,4 +200,94 @@ primary key and the modified value last seen — PostgREST's compare-and-set, no
 Realtime's `postgres_changes` on the table (`channel`, `syncom:<table>`; `stream: false` for none, and a client
 without channels has none), every change a `RESYNC`. `stampOf(id)` says what the adapter holds.
 
-The adapters to come — Firestore, Appwrite, Google Drive, OneDrive — take the same shape.
+### Firestore
+
+```js
+const sdk = require('firebase/firestore');
+const { firestore } = require('@alexify/syncom/connector/firestore');
+
+const database = sdk.getFirestore(app);
+replicate(db, {
+  name: 'firestore',
+  collection: 'Task',
+  ...firestore({ sdk, database, collection: sdk.collection(database, 'tasks') }),
+});
+```
+
+The modular SDK is handed in whole as `sdk` — the adapter calls its `query`, `orderBy`, `limit`, `startAfter`,
+`documentId`, `getDocs`, `doc`, `runTransaction`, `serverTimestamp`, `Timestamp` and `onSnapshot`, and ships none of
+them. Every document carries two fields of the adapter's: the stamp the server sets on every write (`stampField`,
+`serverTimestamp`) and a tombstone (`deletedField`, `_deleted`), so a pull sees a deletion. A pull is the documents
+ordered by the stamp, then by id, after the checkpoint `{ at, id }` — one cursor, no second query for the documents
+stamped at the same instant; a document whose stamp is still pending (a write of the SDK's own cache not yet on the
+server) is left to the next pull, and `waitForPendingWrites` is awaited first where the SDK has it. A push is one
+transaction: every row's document read, compared with what the row assumed, written where it is the same and
+answered as a conflict where it is not — the transaction's own reads and writes, so a write that lands between them
+makes Firestore run the transaction again, and the second run sees it. The stream is `onSnapshot` over the newest
+document, every change the server confirmed a `RESYNC` (`stream: false` for none).
+
+### Appwrite
+
+```js
+const { Client, Databases, Query } = require('appwrite');
+const { appwrite } = require('@alexify/syncom/connector/appwrite');
+
+const client = new Client().setEndpoint(endpoint).setProject(project);
+replicate(db, {
+  name: 'appwrite',
+  collection: 'Task',
+  ...appwrite({ client, databases: new Databases(client), Query, databaseId: 'main', collectionId: 'tasks' }),
+});
+```
+
+One collection through the injected SDK: `databases` (its `Databases` service), `Query` (its builder) and, for the
+stream, `client` (its `subscribe`; `client: null` or `stream: false` for none). A document's `$updatedAt` is the
+position — a pull is the documents updated after the checkpoint `{ updatedAt, id }`, those at the same instant by
+`$id` — and a tombstone is a boolean attribute of the collection's (`deletedField`, `deleted`), so a pull sees a
+deletion: add it to the collection's attributes. A push reads the rows' documents in one query and compares each
+with what its row assumed: a row never there is `createDocument` (a 409 the conflict, the document read back), a row
+the same is `updateDocument` (a 404 a deletion), a row that differs a conflict answered as the document stands.
+Appwrite has no compare-and-set write, so a write landing between the read and the update is overwritten — the same
+window RxDB's plugin has; where two clients write one document at once, let the backend of record be one with a
+conditional write. The stream is Realtime's channel of the collection's documents, every event a `RESYNC`.
+
+### Google Drive
+
+```js
+const { gdrive } = require('@alexify/syncom/connector/gdrive');
+
+replicate(db, {
+  name: 'drive',
+  collection: 'Task',
+  ...gdrive({ token: accessToken, name: 'tasks.json', poll: 30_000 }),
+});
+```
+
+One JSON file of the collection in the user's Drive — the application data folder by default (the
+`drive.appdata` scope; `folder` a folder's id instead), found by `name` or taken by `fileId` — through `fetch` and the
+OAuth `token` (or `headers` carrying the authorization). The file holds every document with the position of its
+newest write: a pull answers those after the checkpoint, in that order, and downloads the file only when its ETag
+moved; a push writes the file whole under `If-Match` — the compare-and-set — and a 412 (another device wrote first)
+reads it again and judges the rows anew, a few times, before it fails. The ETag comes from the v2 metadata (v3
+answers none), the text from `alt=media`, the write from the media upload, and the file is made at the first push. The
+stream, where `poll` is set, probes the ETag every `poll` ms and says `RESYNC` when it moved; without it a live
+connector pulls every `retryTime`. A file that is no collection file is refused, never overwritten; `fileId()` and
+`positionOf(id)` say what the adapter holds. There is no lock file and no file per document: one ETag decides, and a
+collection stays one upload.
+
+### OneDrive
+
+```js
+const { onedrive } = require('@alexify/syncom/connector/onedrive');
+
+replicate(db, {
+  name: 'onedrive',
+  collection: 'Task',
+  ...onedrive({ token: accessToken, path: 'syncom/tasks.json', poll: 30_000 }),
+});
+```
+
+The same file through Microsoft Graph with a `Files.ReadWrite` token: the item at `root:/<path>` gives the eTag,
+`/content` the text, and `PUT root:/<path>:/content` under `If-Match` writes it in place or makes it — a simple
+upload, so the collection file stays under Graph's 4 MB (`drive` names another drive than `me/drive`). Everything
+else — the positions, the retries on a 412, the probe for the stream, `positionOf` — is the Google Drive adapter's.

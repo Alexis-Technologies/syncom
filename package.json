@@ -187,6 +187,22 @@
       "types": "./src/connector/supabase.d.ts",
       "default": "./src/connector/supabase.js"
     },
+    "./connector/firestore": {
+      "types": "./src/connector/firestore.d.ts",
+      "default": "./src/connector/firestore.js"
+    },
+    "./connector/appwrite": {
+      "types": "./src/connector/appwrite.d.ts",
+      "default": "./src/connector/appwrite.js"
+    },
+    "./connector/gdrive": {
+      "types": "./src/connector/gdrive.d.ts",
+      "default": "./src/connector/gdrive.js"
+    },
+    "./connector/onedrive": {
+      "types": "./src/connector/onedrive.d.ts",
+      "default": "./src/connector/onedrive.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

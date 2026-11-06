@@ -188,6 +188,10 @@ test('every runtime export is declared in the types', () => {
   check('src/connector/graphql.js', 'src/connector/graphql.d.ts');
   check('src/connector/mongodb.js', 'src/connector/mongodb.d.ts');
   check('src/connector/supabase.js', 'src/connector/supabase.d.ts');
+  check('src/connector/firestore.js', 'src/connector/firestore.d.ts');
+  check('src/connector/appwrite.js', 'src/connector/appwrite.d.ts');
+  check('src/connector/gdrive.js', 'src/connector/gdrive.d.ts');
+  check('src/connector/onedrive.js', 'src/connector/onedrive.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

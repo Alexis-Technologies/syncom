@@ -1,7 +1,7 @@
 'use strict';
 
-// The adapters beside the connector — CouchDB, GraphQL, MongoDB, Supabase —
-// each over a fake of its backend: one scenario for every one. A local write
+// The adapters beside the connector — CouchDB, GraphQL, MongoDB, Supabase,
+// Firestore, Appwrite, Google Drive, OneDrive — each over a fake of its backend: one scenario for every one. A local write
 // reaches the backend without the collection's mark, the backend's write
 // reaches the collection, a change made behind the adapter's back is a
 // conflict the backend wins, a deletion goes both ways, and a connector
@@ -15,10 +15,18 @@ const { couchdb } = require('../src/connector/couchdb.js');
 const { graphql } = require('../src/connector/graphql.js');
 const { mongodb } = require('../src/connector/mongodb.js');
 const { supabase } = require('../src/connector/supabase.js');
+const { firestore } = require('../src/connector/firestore.js');
+const { appwrite } = require('../src/connector/appwrite.js');
+const { gdrive } = require('../src/connector/gdrive.js');
+const { onedrive } = require('../src/connector/onedrive.js');
+const { jsonFile, RETRIES } = require('../src/connector/jsonfile.js');
 const { createFakeCouch } = require('./utils/fake-couch.js');
 const { createFakeGraphQL } = require('./utils/fake-graphql.js');
 const { createFakeMongo } = require('./utils/fake-mongo.js');
 const { createFakeSupabase } = require('./utils/fake-supabase.js');
+const { createFakeFirestore } = require('./utils/fake-firestore.js');
+const { createFakeAppwrite, AppwriteException } = require('./utils/fake-appwrite.js');
+const { createFakeDrive, createFakeGraph } = require('./utils/fake-drive.js');
 const { waitUntil } = require('./utils/mesh.js');
 
 const schema = { entities: { Task: {} } };
@@ -312,6 +320,390 @@ test('Connector adapters', async (t) => {
           assert.strictEqual(typeof adapter.stampOf('b1'), 'string');
         },
       );
+    },
+  );
+  await t.test(
+    'Firestore: the server stamp and the tombstone the adapter’s fields, a cursor after the checkpoint, one transaction a push, onSnapshot the signal',
+    async (t2) => {
+      const fake = createFakeFirestore();
+      const options = () => ({ sdk: fake.sdk, database: fake.database, collection: fake.collection });
+      await scenario(t2, 'over the modular SDK', {
+        handlers: () => firestore(options()),
+        write: (id, data, o) => fake.write(id, data, o),
+        read: (id) => fake.read(id),
+      });
+      await t2.test(
+        'the options are checked; without onSnapshot no stream; a pending stamp waits; a transaction run again begins afresh',
+        async () => {
+          assert.throws(() => firestore({}), { name: 'TypeError', message: /sdk/ });
+          assert.throws(() => firestore({ ...options(), sdk: { ...fake.sdk, getDocs: 1 } }), {
+            name: 'TypeError',
+            message: /getDocs/,
+          });
+          assert.throws(() => firestore({ ...options(), sdk: { ...fake.sdk, Timestamp: {} } }), {
+            name: 'TypeError',
+            message: /Timestamp/,
+          });
+          assert.throws(() => firestore({ sdk: fake.sdk, collection: fake.collection }), {
+            name: 'TypeError',
+            message: /database/,
+          });
+          assert.throws(() => firestore({ sdk: fake.sdk, database: fake.database }), {
+            name: 'TypeError',
+            message: /collection/,
+          });
+          assert.throws(() => firestore({ ...options(), stampField: '' }), {
+            name: 'TypeError',
+            message: /stampField/,
+          });
+          assert.throws(() => firestore({ ...options(), deletedField: 7 }), {
+            name: 'TypeError',
+            message: /deletedField/,
+          });
+          assert.throws(() => firestore({ ...options(), stream: 'yes' }), { name: 'TypeError', message: /stream/ });
+          const { onSnapshot, waitForPendingWrites, ...lean } = fake.sdk;
+          assert.throws(() => firestore({ ...options(), sdk: lean }), { name: 'TypeError', message: /onSnapshot/ });
+          assert.strictEqual(firestore({ ...options(), sdk: lean, stream: false }).pull.stream, undefined);
+          // A pending stamp (the SDK's own write not yet on the server) is left to the next pull.
+          const own = createFakeFirestore();
+          own.write('p1', { title: 'pending' }, { pending: true });
+          own.write('p2', { title: 'landed' });
+          const adapter = firestore({ sdk: own.sdk, database: own.database, collection: own.collection });
+          const page = await adapter.pull.handler(null, 10);
+          assert.deepStrictEqual(page.documents, [{ id: 'p2', data: { title: 'landed' } }]);
+          assert.strictEqual(page.checkpoint.id, 'p2');
+          assert.strictEqual(own.pendingWaits, 1);
+          assert.deepStrictEqual(await adapter.pull.handler(page.checkpoint, 10), {
+            documents: [],
+            checkpoint: page.checkpoint,
+          });
+          // A document written between a transaction's reads and its commit: Firestore runs it again, and the second run sees it.
+          own.race = () => own.write('p2', { title: 'changed meanwhile' });
+          own.attempts = 0;
+          let conflicts = await adapter.push.handler([
+            { id: 'p2', data: { title: 'mine' }, deleted: false, assumed: { title: 'landed' } },
+          ]);
+          assert.strictEqual(own.attempts, 2);
+          assert.deepStrictEqual(conflicts, [{ id: 'p2', data: { title: 'changed meanwhile' } }]);
+          assert.deepStrictEqual(own.read('p2'), { title: 'changed meanwhile' });
+          // A row that assumes nothing of a document that is there is a conflict; one that assumes nothing of a tombstone is written.
+          own.write('p3', { title: 'there' });
+          own.write('p4', null, { deleted: true });
+          conflicts = await adapter.push.handler([
+            { id: 'p3', data: { title: 'new' }, deleted: false, assumed: null },
+            { id: 'p4', data: { title: 'back' }, deleted: false, assumed: null },
+          ]);
+          assert.deepStrictEqual(conflicts, [{ id: 'p3', data: { title: 'there' } }]);
+          assert.deepStrictEqual(own.read('p4'), { title: 'back' });
+          // The stream says RESYNC for a confirmed change, and nothing after it is stopped.
+          const signals = [];
+          const stop = adapter.pull.stream((signal) => signals.push(signal));
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          own.write('p5', { title: 'live' });
+          assert.ok(signals.length >= 2 && signals.every((s) => s === 'RESYNC'));
+          stop();
+          const count = signals.length;
+          own.write('p6', { title: 'after' });
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          assert.strictEqual(signals.length, count);
+        },
+      );
+    },
+  );
+
+  await t.test(
+    'Appwrite: $updatedAt the position, a boolean attribute the tombstone, a read then a write the push, Realtime the signal',
+    async (t2) => {
+      const fake = createFakeAppwrite();
+      const options = () => ({
+        client: fake.client,
+        databases: fake.databases,
+        Query: fake.Query,
+        databaseId: 'db',
+        collectionId: 'tasks',
+      });
+      await scenario(t2, 'over the Databases service', {
+        handlers: () => appwrite(options()),
+        write: (id, data, o) => fake.write(id, data, o),
+        read: (id) => fake.read(id),
+      });
+      await t2.test(
+        'the options are checked; without a client no stream; made or taken away between the read and the write is a conflict; another failure is thrown',
+        async () => {
+          assert.throws(() => appwrite({}), { name: 'TypeError', message: /databases/ });
+          assert.throws(() => appwrite({ ...options(), databases: { ...fake.databases, getDocument: 1 } }), {
+            name: 'TypeError',
+            message: /getDocument/,
+          });
+          assert.throws(() => appwrite({ ...options(), Query: undefined }), { name: 'TypeError', message: /Query/ });
+          assert.throws(() => appwrite({ ...options(), Query: { ...fake.Query, or: 1 } }), {
+            name: 'TypeError',
+            message: /Query\.or/,
+          });
+          assert.throws(() => appwrite({ ...options(), databaseId: '' }), { name: 'TypeError', message: /databaseId/ });
+          assert.throws(() => appwrite({ ...options(), collectionId: undefined }), {
+            name: 'TypeError',
+            message: /collectionId/,
+          });
+          assert.throws(() => appwrite({ ...options(), deletedField: 3 }), {
+            name: 'TypeError',
+            message: /deletedField/,
+          });
+          assert.throws(() => appwrite({ ...options(), stream: 1 }), { name: 'TypeError', message: /stream/ });
+          assert.throws(() => appwrite({ ...options(), client: {} }), { name: 'TypeError', message: /subscribe/ });
+          assert.strictEqual(appwrite({ ...options(), client: null }).pull.stream, undefined);
+          assert.strictEqual(appwrite({ ...options(), stream: false }).pull.stream, undefined);
+          const own = createFakeAppwrite();
+          const adapter = appwrite({ ...options(), client: own.client, databases: own.databases });
+          // Made between the read and the create: 409, the document as it stands.
+          own.race = () => own.write('a1', { title: 'first' });
+          let conflicts = await adapter.push.handler([
+            { id: 'a1', data: { title: 'mine' }, deleted: false, assumed: null },
+          ]);
+          assert.deepStrictEqual(conflicts, [{ id: 'a1', data: { title: 'first' } }]);
+          // Taken away between the read and the update: 404, a deletion.
+          own.race = () => own.remove('a1');
+          conflicts = await adapter.push.handler([
+            { id: 'a1', data: { title: 'mine' }, deleted: false, assumed: { title: 'first' } },
+          ]);
+          assert.deepStrictEqual(conflicts, [{ id: 'a1', deleted: true }]);
+          // A row that assumes nothing of a tombstone is written; one that assumes nothing of a document there is a conflict.
+          own.write('a2', null, { deleted: true });
+          own.write('a3', { title: 'there' });
+          conflicts = await adapter.push.handler([
+            { id: 'a2', data: { title: 'back' }, deleted: false, assumed: null },
+            { id: 'a3', data: { title: 'new' }, deleted: false, assumed: null },
+          ]);
+          assert.deepStrictEqual(conflicts, [{ id: 'a3', data: { title: 'there' } }]);
+          assert.deepStrictEqual(own.read('a2'), { title: 'back' });
+          // A pull: the documents in the order they were updated, then nothing after the checkpoint.
+          const page = await adapter.pull.handler(null, 10);
+          assert.deepStrictEqual(
+            page.documents.map((d) => d.id),
+            ['a3', 'a2'],
+          );
+          assert.deepStrictEqual(page.checkpoint, { updatedAt: own.docs.get('a2').$updatedAt, id: 'a2' });
+          assert.deepStrictEqual(await adapter.pull.handler(page.checkpoint, 10), {
+            documents: [],
+            checkpoint: page.checkpoint,
+          });
+          // Another failure is the connector's to retry.
+          const erring = appwrite({
+            ...options(),
+            client: null,
+            databases: {
+              ...own.databases,
+              updateDocument: async () => {
+                throw new AppwriteException(500, 'boom');
+              },
+            },
+          });
+          await assert.rejects(
+            () =>
+              erring.push.handler([{ id: 'a3', data: { title: 'x' }, deleted: false, assumed: { title: 'there' } }]),
+            {
+              name: 'AppwriteException',
+              code: 500,
+            },
+          );
+        },
+      );
+    },
+  );
+
+  await t.test(
+    'Google Drive: one JSON file of the collection in the application data folder, its ETag the compare-and-set, probed for the stream',
+    async (t2) => {
+      const drive = createFakeDrive();
+      await scenario(t2, 'over the Drive API', {
+        handlers: () => gdrive({ fetch: drive.fetch, token: 't', name: 'tasks.json', poll: 10 }),
+        write: (id, data, o) => drive.write(id, data, o),
+        read: (id) => drive.read(id),
+      });
+      await t2.test(
+        'the options are checked; no file is none, made at the first push; by fileId no search; the ETag from the header alone; a failing request is an error with its status',
+        async () => {
+          assert.throws(() => gdrive({ fetch: 1, name: 'x' }), { name: 'TypeError', message: /Google Drive: fetch/ });
+          assert.throws(() => gdrive({ fetch: drive.fetch }), { name: 'TypeError', message: /name or fileId/ });
+          assert.throws(() => gdrive({ fetch: drive.fetch, name: 'x', token: 5 }), {
+            name: 'TypeError',
+            message: /token/,
+          });
+          const fresh = createFakeDrive({ name: "it's.json" });
+          const adapter = gdrive({ fetch: fresh.fetch, headers: { authorization: 'Bearer h' }, name: "it's.json" });
+          assert.strictEqual(adapter.pull.stream, undefined);
+          assert.deepStrictEqual(await adapter.pull.handler(null, 10), { documents: [], checkpoint: 0 });
+          assert.strictEqual(adapter.fileId(), null);
+          assert.deepStrictEqual(
+            await adapter.push.handler([{ id: 'd1', data: { a: 1 }, deleted: false, assumed: null }]),
+            [],
+          );
+          assert.match(adapter.fileId(), /^f\d+$/);
+          assert.deepStrictEqual(fresh.read('d1'), { a: 1 });
+          assert.strictEqual(adapter.positionOf('d1'), 1);
+          const byId = gdrive({ fetch: fresh.fetch, token: 't', fileId: adapter.fileId() });
+          fresh.calls.length = 0;
+          assert.deepStrictEqual((await byId.pull.handler(0, 10)).documents, [{ id: 'd1', data: { a: 1 } }]);
+          assert.ok(!fresh.calls.includes('GET /drive/v3/files'));
+          fresh.etagInHeader = true;
+          fresh.write('d2', { b: 2 });
+          assert.deepStrictEqual((await byId.pull.handler(1, 10)).documents, [{ id: 'd2', data: { b: 2 } }]);
+          assert.deepStrictEqual(
+            await byId.push.handler([{ id: 'd2', data: { b: 3 }, deleted: false, assumed: { b: 2 } }]),
+            [],
+          );
+          assert.deepStrictEqual(fresh.read('d2'), { b: 3 });
+          const down = gdrive({ fetch: async () => ({ ok: false, status: 503, text: async () => 'busy' }), name: 'x' });
+          await assert.rejects(() => down.pull.handler(null, 10), {
+            status: 503,
+            message: /Google Drive files\.list answered 503: busy/,
+          });
+        },
+      );
+    },
+  );
+
+  await t.test(
+    'OneDrive: one JSON file of the collection in the drive through Graph, its eTag the compare-and-set',
+    async (t2) => {
+      const graph = createFakeGraph();
+      await scenario(t2, 'over Microsoft Graph', {
+        handlers: () => onedrive({ fetch: graph.fetch, token: 't', path: 'syncom/tasks.json', poll: 10 }),
+        write: (id, data, o) => graph.write(id, data, o),
+        read: (id) => graph.read(id),
+      });
+      await t2.test(
+        'the options are checked; no file is none, made at the first push; a failing request is an error with its status',
+        async () => {
+          assert.throws(() => onedrive({ fetch: 1, path: 'x' }), { name: 'TypeError', message: /OneDrive: fetch/ });
+          assert.throws(() => onedrive({ fetch: graph.fetch }), { name: 'TypeError', message: /path/ });
+          assert.throws(() => onedrive({ fetch: graph.fetch, path: 'x', token: 5 }), {
+            name: 'TypeError',
+            message: /token/,
+          });
+          const fresh = createFakeGraph({ path: 'a b/c.json' });
+          const adapter = onedrive({
+            fetch: fresh.fetch,
+            headers: { authorization: 'Bearer h' },
+            path: 'a b/c.json',
+            drive: '/me/drive/',
+          });
+          assert.strictEqual(adapter.pull.stream, undefined);
+          assert.deepStrictEqual(await adapter.pull.handler(null, 10), { documents: [], checkpoint: 0 });
+          assert.deepStrictEqual(
+            await adapter.push.handler([{ id: 'd1', data: { a: 1 }, deleted: false, assumed: null }]),
+            [],
+          );
+          assert.deepStrictEqual(fresh.read('d1'), { a: 1 });
+          assert.strictEqual(adapter.positionOf('d1'), 1);
+          const down = onedrive({
+            fetch: async () => ({ ok: false, status: 503, text: async () => 'busy' }),
+            path: 'x',
+          });
+          await assert.rejects(() => down.pull.handler(null, 10), {
+            status: 503,
+            message: /OneDrive item answered 503: busy/,
+          });
+        },
+      );
+    },
+  );
+
+  await t.test(
+    'a collection file: a file that is no collection is refused, never overwritten; a 412 is tried RETRIES times; no probe, no stream',
+    async () => {
+      assert.throws(() => jsonFile({}), { name: 'TypeError', message: /load/ });
+      assert.throws(() => jsonFile({ load() {}, save() {} }, { poll: -1 }), { name: 'TypeError', message: /poll/ });
+      const broken = jsonFile({
+        load: async () => ({ etag: '"1"', text: 'not json' }),
+        save: async () => ({ etag: '"2"' }),
+      });
+      await assert.rejects(() => broken.pull.handler(null, 10), { message: /not JSON/ });
+      const shaped = jsonFile({
+        load: async () => ({ etag: '"1"', text: '[1]' }),
+        save: async () => ({ etag: '"2"' }),
+      });
+      await assert.rejects(() => shaped.push.handler([{ id: 'x', data: {}, deleted: false, assumed: null }]), {
+        message: /collection file/,
+      });
+      let saves = 0;
+      const contended = jsonFile({
+        load: async () => null,
+        save: async () => {
+          saves++;
+          const error = new Error('412');
+          error.status = 412;
+          throw error;
+        },
+      });
+      await assert.rejects(() => contended.push.handler([{ id: 'x', data: { a: 1 }, deleted: false, assumed: null }]), {
+        status: 412,
+      });
+      assert.strictEqual(saves, RETRIES + 1);
+      const other = jsonFile({
+        load: async () => null,
+        save: async () => {
+          throw new Error('boom');
+        },
+      });
+      await assert.rejects(() => other.push.handler([{ id: 'x', data: { a: 1 }, deleted: false, assumed: null }]), {
+        message: 'boom',
+      });
+      assert.strictEqual(
+        jsonFile({ load: async () => null, save: async () => ({ etag: null }) }, { poll: 10 }).pull.stream,
+        undefined,
+      );
+      // Nothing to write: nothing saved; a probe that fails is the next probe's business.
+      let probes = 0;
+      const store = {
+        load: async () => null,
+        save: async () => {
+          throw new Error('never');
+        },
+        probe: async () => {
+          probes++;
+          throw new Error('down');
+        },
+      };
+      const idle = jsonFile(store, { poll: 5 });
+      assert.deepStrictEqual(
+        await idle.push.handler([{ id: 'x', data: { a: 1 }, deleted: false, assumed: { a: 0 } }]),
+        [{ id: 'x', deleted: true }],
+      );
+      const signals = [];
+      const stop = idle.pull.stream((s) => signals.push(s));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      stop();
+      assert.ok(probes >= 2);
+      assert.deepStrictEqual(signals, []);
+      // A probe that moved says RESYNC; one that did not is quiet, and the pull reads nothing again.
+      let etag = '"a"';
+      let loads = 0;
+      const text = JSON.stringify({ seq: 1, docs: { y: { n: 1, data: { b: 1 } } } });
+      const live = jsonFile(
+        {
+          load: async () => {
+            loads++;
+            return { etag, text };
+          },
+          save: async () => ({ etag }),
+          probe: async () => etag,
+        },
+        { poll: 5 },
+      );
+      assert.deepStrictEqual((await live.pull.handler(null, 10)).documents, [{ id: 'y', data: { b: 1 } }]);
+      await live.pull.handler(1, 10);
+      assert.strictEqual(loads, 1);
+      const seen = [];
+      const off = live.pull.stream((s) => seen.push(s));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.deepStrictEqual(seen, []);
+      etag = '"b"';
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      off();
+      assert.ok(seen.length >= 1);
+      assert.strictEqual(live.positionOf('y'), 1);
+      assert.strictEqual(live.positionOf('z'), undefined);
     },
   );
 });

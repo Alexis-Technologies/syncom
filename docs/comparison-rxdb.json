@@ -2534,9 +2534,9 @@
           "source": "src/connector/couchdb.js; docs/guide/connector.md#couchdb; tests/connector.adapters.test.js"
         },
         "firestore": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/firestore`: the injected modular SDK — the server stamp and a tombstone the adapter's fields, one cursor after the checkpoint, one transaction a push whose own reads decide a conflict, `onSnapshot` the signal",
+          "source": "src/connector/firestore.js; docs/guide/connector.md#firestore; tests/connector.adapters.test.js"
         },
         "supabase": {
           "mark": "✅",
@@ -2544,9 +2544,9 @@
           "source": "src/connector/supabase.js; docs/guide/connector.md#supabase; tests/connector.adapters.test.js"
         },
         "appwrite": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/appwrite`: the injected `Databases`, `Query` and client — `$updatedAt` the position, a boolean attribute the tombstone, a read then a write the push (Appwrite has no compare-and-set: said), Realtime the signal; Node and the browser alike",
+          "source": "src/connector/appwrite.js; docs/guide/connector.md#appwrite; tests/connector.adapters.test.js"
         },
         "mongodb": {
           "mark": "✅",
@@ -2560,14 +2560,14 @@
           "detail": "The log is the hubs' bus and the clients' cursor space; a subject per document (RxDB's replication-nats) is a different shape — a client that speaks NATS itself is the `/connector` recipe (S2)."
         },
         "gdrive": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/gdrive`: one JSON file of the collection in the application data folder through an injected `fetch` — the ETag the compare-and-set (a 412 read again), a probe of the ETag the stream; no lock file",
+          "source": "src/connector/gdrive.js; src/connector/jsonfile.js; docs/guide/connector.md#google-drive; tests/connector.adapters.test.js"
         },
         "onedrive": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/onedrive`: the same file over Microsoft Graph — `root:/<path>` for the eTag, `PUT …:/content` under `If-Match`",
+          "source": "src/connector/onedrive.js; src/connector/jsonfile.js; docs/guide/connector.md#onedrive; tests/connector.adapters.test.js"
         },
         "conflictDetect": {
           "mark": "—",
