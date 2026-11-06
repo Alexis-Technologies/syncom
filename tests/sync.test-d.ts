@@ -28,6 +28,15 @@ expectType<boolean>(sync.started);
 expectType<Promise<void>>(sync.enableNode('ws://a', false));
 expectType<Promise<Array<{ url: string; pushed: number }>>>(sync.sync());
 expectType<number>(sync.peers()[0].pending);
+expectType<boolean>(sync.peers()[0].caughtUp);
+expectType<'both' | 'pull' | 'push'>(sync.peers()[0].direction);
+expectType<Promise<void>>(sync.addNode({ url: 'ws://a', direction: 'pull' }));
+expectError(sync.addNode({ url: 'ws://a', direction: 'sideways' }));
+expectType<Promise<void>>(sync.awaitInSync());
+expectType<Promise<void>>(sync.awaitInitialReplication({ signal: new AbortController().signal }));
+expectType<Promise<void>>(sync.awaitDocumentPushed('id'));
+expectType<SyncUnit>(sync.unit({ allow: { push: false } }));
+expectError(sync.unit({ allow: { hello: false } }));
 // The shared log as this hub stands to it, or null without one.
 expectType<SharedStats | null>(sync.shared());
 const shared = sync.shared()!;

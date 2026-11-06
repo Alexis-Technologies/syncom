@@ -2590,9 +2590,9 @@
           "source": "docs/guide/sync.md#clocks"
         },
         "conflictEvents": {
-          "mark": "⚠️",
-          "text": "unique-key clashes only (`conflict`); a lost concurrent write is silent",
-          "source": "src/apply.js:213-231; docs/guide/hooks.md"
+          "mark": "✅",
+          "text": "`conflict` of kind `unique` (a key shared by two records) and kind `register` (a peer's field write stamped below the one held: the op, the winner, the loser)",
+          "source": "src/apply.js; src/ops.js (applyFields); tests/sync.direction.test.js; docs/guide/hooks.md#events"
         },
         "serverCompare": {
           "mark": "—",
@@ -2690,9 +2690,9 @@
           "source": "docs/guide/sync.md#scopes"
         },
         "oneWay": {
-          "mark": "❌",
-          "text": "every link pushes and subscribes; scopes bound both directions alike",
-          "source": "src/sync/manager.js; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`addNode({ direction: 'pull' | 'push' | 'both' })`: a pull-only link subscribes alone (nothing of the node goes out, retention does not wait for the peer), a push-only link pushes alone; the host's `unit({ allow })` serves push, snapshot and changes each on or off",
+          "source": "src/sync/manager.js; src/sync/hosting.js; tests/sync.direction.test.js; docs/guide/sync.md#the-registry"
         },
         "deletes": {
           "mark": "✅",
@@ -2711,10 +2711,10 @@
           "source": "src/sync/manager.js 218-235"
         },
         "awaitSync": {
-          "mark": "⚠️",
-          "text": "`sync(url?)` resolves once pushed; nothing awaits the inbound side",
-          "source": "src/sync/manager.js; index.d.ts (SyncManager.sync)",
-          "detail": "`storage.sync.toPromise('sync')` resolves on the next push or received page."
+          "mark": "✅",
+          "text": "`awaitInitialReplication()`, `awaitInSync()`, `awaitDocumentPushed(id)` — the host's feed says when it is read to its end (an idle page), `peers()[i].caughtUp`",
+          "source": "src/sync/manager.js; src/sync/hosting.js; tests/sync.direction.test.js",
+          "detail": "In sync means: every enabled node greeted, nothing left to push to it, its feed read to its end; a signal cuts a wait short."
         },
         "resync": {
           "mark": "✅",

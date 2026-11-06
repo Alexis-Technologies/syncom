@@ -55,7 +55,11 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   the seq of the last entry examined (in scope or not); when a wake brings
   nothing for the peer, the cursor moves there without a page. `lastEventId`
   is `next - 1` and runs ahead of the entries while an append is in flight —
-  a feed that jumped there lost the batch in flight (it was tried).
+  a feed that jumped there lost the batch in flight (it was tried). The one empty page a feed sends is the
+  IDLE page — `{ ops: [], eventId, idle: true }`, labelled with that cursor (`<epoch>.0` when nothing was read),
+  once per lull, before the wait — which is the dialer's `caughtUp` (`awaitInSync`); a feed over a shared log
+  sends it after `IDLE_AFTER` ms of nothing. A page that failed on the dialer bumps `peer.feed` at once
+  (`#pageFailed`), stuck or not, so an idle page queued behind it never moves the cursor past it.
 - **The shared log is a bus, never a second log.** What a hub appends to the topic (src/sync/shared.js) is what its
   own log already holds — every op it accepted, per `#fanOut`, except what came FROM the topic (`via.shared`) — and
   what it applies from the topic goes through `applyRemote` like a push (`via`/`peer` the appending hub, `bound`

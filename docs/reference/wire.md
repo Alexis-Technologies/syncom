@@ -491,6 +491,8 @@ counted and not forwarded.
 | 428 | `HELLO_FIRST` | No hello on this connection — the ordinary course of a reconnect |
 | 413 | `OPS_PER_PUSH` / `BYTES_PER_PUSH` | Over `unit({ limits })` |
 | 429 | `OPS_PER_SECOND` | The peer's token bucket is empty |
+| 403 | `READ_ONLY` | The unit takes no pushes (`allow.push` false) |
+| 503 | `READ_ONLY` | A hub that cannot write and forwards nothing — push to another |
 
 ### `snapshot`
 
@@ -521,7 +523,11 @@ A subscription. Each page is labelled with the host's log position through
 wrpc's `tracked` shape (`Symbol.for('wrpc.tracked')`, `{ id, data }`), so a
 resume from the last id replays exactly what was missed; the ops are the
 host's log from the cursor on, in the scopes asked for, less the
-subscriber's own and what came from it. `{ bootstrap: true }` ends the
+subscriber's own and what came from it. Once the feed is read to its end
+the host sends one empty page marked `{ ops: [], eventId, idle: true }`,
+labelled with the position (the log's first, `<epoch>.0`, when nothing was
+read yet), and again after every page with ops: the dialer's `caughtUp`.
+`{ bootstrap: true }` ends the
 feed when the cursor cannot be resumed — another epoch, or compacted past
 it — and the dialer pages `snapshot` instead. Over a [shared log](#the-shared-log)
 the position is the log's entry id, one page per entry (its ops narrowed to

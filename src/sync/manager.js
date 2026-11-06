@@ -58,6 +58,11 @@ const MAX_RECOVER_BACKOFF = 60_000;
 const SYNC_HOOKS = ['beforeConnect', 'beforeBootstrap'];
 // What #connect's chain carries when beforeConnect said no.
 const NOT_DIALLED = Symbol('syncom.notDialled');
+// `addNode({ direction })`: what a link carries. `'both'` (the default) pushes and subscribes; `'pull'` only
+// subscribes — nothing of this node goes to the peer, and the peer is not waited for by retention; `'push'`
+// only pushes — no feed, no bootstrap.
+const DIRECTIONS = new Set(['both', 'pull', 'push']);
+const directionOf = (node) => (DIRECTIONS.has(node.direction) ? node.direction : 'both');
 
 // Node registry entries are keyed by url; the file name is the url itself,
 // percent-encoded — unlike the old `<host>.json`, two peers on one host or a
@@ -98,6 +103,9 @@ class SyncManager extends Emitter {
   // The log shared with the other hubs (src/sync/shared.js), or null.
   #sharedOptions = null;
   #shared = null;
+  // Who waits for a state of the peers (`awaitInSync`, `awaitInitialReplication`, `awaitDocumentPushed`): each a
+  // check run whenever a peer moves, resolved once it holds.
+  #waiters = new Set();
 
   constructor(storage, options = {}) {
     super({ maxListeners: options?.maxListeners });
@@ -158,7 +166,7 @@ class SyncManager extends Emitter {
   // Registry
 
   async addNode(nodeData) {
-    const { url, token, scopes } = nodeData ?? {};
+    const { url, token, scopes, direction = 'both' } = nodeData ?? {};
     if (typeof url !== 'string' || url.length === 0) throw new TypeError('Node URL is required');
     if (this.#nodes.has(url)) throw new SyncomError('NODE_EXISTS', `Node with URL ${url} already exists`, { url });
     if (scopes !== undefined) {
@@ -167,10 +175,12 @@ class SyncManager extends Emitter {
         if (typeof scopes[i] !== 'string') throw new TypeError('Node scopes must be an array of strings');
       }
     }
+    if (!DIRECTIONS.has(direction)) throw new TypeError("Node direction must be 'both', 'pull' or 'push'");
     const node = {
       url,
       token,
       scopes: scopes ?? [GLOBAL_SCOPE],
+      direction,
       enabled: true,
       lastSync: null,
       cursor: null,
@@ -233,6 +243,7 @@ class SyncManager extends Emitter {
       if (this.#owns(key, seq) && !(acked[key] >= seq)) acked[key] = seq;
     }
     node.acked = acked;
+    this.#settle();
   }
 
   // An entry of this node's own that an enabled registered node in its
@@ -244,11 +255,116 @@ class SyncManager extends Emitter {
     const { op } = entry;
     if (op.origin !== this.#storage.nodeId) return false;
     for (const node of this.#nodes.values()) {
-      if (!node.enabled || !opInScope(op, node.scopes)) continue;
+      if (!node.enabled || directionOf(node) === 'pull' || !opInScope(op, node.scopes)) continue;
       if (op.from !== undefined && op.from === node.remote?.id) continue;
       if (!((node.acked?.[opKey(op)] ?? 0) >= op.seq)) return true;
     }
     return false;
+  }
+
+  // ---------------------------------------------------------------------
+  // Waiting for the peers
+
+  // Every waiter's check, run once more: what moved may be what one waited for.
+  #settle() {
+    if (this.#waiters.size === 0) return;
+    for (const waiter of [...this.#waiters]) {
+      if (!waiter.check()) continue;
+      this.#waiters.delete(waiter);
+      waiter.resolve();
+    }
+  }
+
+  // A promise that resolves once `check()` holds — now, or at a later settle; `signal` cuts it short.
+  #await(check, signal) {
+    if (check()) return Promise.resolve();
+    if (signal?.aborted) return Promise.reject(signal.reason ?? new Error('aborted'));
+    return new Promise((resolve, reject) => {
+      const waiter = { check, resolve };
+      this.#waiters.add(waiter);
+      signal?.addEventListener?.(
+        'abort',
+        () => {
+          if (!this.#waiters.delete(waiter)) return;
+          reject(signal.reason ?? new Error('aborted'));
+        },
+        { once: true },
+      );
+    });
+  }
+
+  // The dialed peer of an enabled node, or null where there is none to wait for: the dial failed (the next
+  // `sync()` dials again), or the node was never dialed (`start()` not called).
+  #peerOf(node) {
+    const peer = this.#peers.get(node.url);
+    return peer !== undefined && !peer.failed ? peer : null;
+  }
+
+  // Whether this node holds everything its peer told it of and the peer everything of this node's: the link up and
+  // greeted, nothing to push (no outbox, no push in flight, not behind) and — where it subscribes — the host's
+  // feed read to its end (an idle page since the last one with ops). A node without a peer is not waited for.
+  #inSyncWith(node) {
+    const peer = this.#peerOf(node);
+    if (peer === null) return true;
+    if (!peer.connected || !peer.remote || peer.bootstrapping) return false;
+    const direction = directionOf(node);
+    if (direction !== 'pull' && (peer.outbox.length > 0 || peer.inflight || peer.behind)) return false;
+    if (direction !== 'push' && !peer.caughtUp) return false;
+    return true;
+  }
+
+  /**
+   * Resolves once every enabled node is in sync with this one: each link up and greeted, nothing left to push
+   * to it, and its feed read to its end (the host's idle page). A node that is disabled, or whose dial failed,
+   * is not waited for. `signal` cuts the wait short (rejects with its reason).
+   */
+  awaitInSync({ signal = null } = {}) {
+    return this.#await(() => {
+      for (const node of this.#nodes.values()) if (node.enabled && !this.#inSyncWith(node)) return false;
+      return true;
+    }, signal);
+  }
+
+  /**
+   * Resolves once every enabled node has been in sync with this one at least once since it was dialed: the
+   * first handshake done and the first lull of its feed seen (or a bootstrap joined) — what a client waits for
+   * before it reads.
+   */
+  awaitInitialReplication({ signal = null } = {}) {
+    return this.#await(() => {
+      for (const node of this.#nodes.values()) {
+        if (!node.enabled) continue;
+        const peer = this.#peerOf(node);
+        if (peer !== null && !peer.initial) return false;
+      }
+      return true;
+    }, signal);
+  }
+
+  /**
+   * Resolves once the newest op this node made for the record `id` is acknowledged by every enabled node it
+   * goes to (a node of the op's scope that takes pushes) — at once when this node made none.
+   */
+  awaitDocumentPushed(id, { signal = null } = {}) {
+    if (typeof id !== 'string') throw new TypeError('awaitDocumentPushed(id): id must be a string');
+    const own = this.#storage.nodeId;
+    let newest = null;
+    const entries = this.#storage.log.entriesOf(id);
+    for (let i = entries.length - 1; i >= 0; i--) {
+      if (entries[i].op.origin === own) {
+        newest = entries[i].op;
+        break;
+      }
+    }
+    if (newest === null) return Promise.resolve();
+    const key = opKey(newest);
+    return this.#await(() => {
+      for (const node of this.#nodes.values()) {
+        if (!node.enabled || directionOf(node) === 'pull' || !opInScope(newest, node.scopes)) continue;
+        if (!((node.acked?.[key] ?? 0) >= newest.seq)) return false;
+      }
+      return true;
+    }, signal);
   }
 
   // ---------------------------------------------------------------------
@@ -324,6 +440,8 @@ class SyncManager extends Emitter {
         behind: peer.behind,
         stuck: peer.stuck,
         lastError: peer.lastError,
+        direction: directionOf(peer.node),
+        caughtUp: peer.caughtUp,
       });
     }
     return out;
@@ -377,6 +495,10 @@ class SyncManager extends Emitter {
       // Streams of this node's own the host claimed more of at the last
       // hello, without proof: nothing of them goes to it (see #rewind).
       rewound: null,
+      // The host's feed read to its end since the last page with ops (its idle page), and whether this link
+      // was ever in sync — what `awaitInSync` and `awaitInitialReplication` wait for.
+      caughtUp: false,
+      initial: false,
     };
     this.#peers.set(node.url, peer);
     Promise.resolve()
@@ -409,6 +531,7 @@ class SyncManager extends Emitter {
           close: () => {
             peer.connected = false;
             peer.subscription = null;
+            peer.caughtUp = false;
             notify(this, this.#storage.logger, 'peer', { url: node.url, connected: false });
           },
           reconnect: () => {
@@ -438,6 +561,7 @@ class SyncManager extends Emitter {
     if (!peer) return;
     peer.closed = true;
     this.#peers.delete(url);
+    this.#settle();
     if (peer.link) {
       if (peer.handlers) {
         const events = Object.keys(peer.handlers);
@@ -525,17 +649,28 @@ class SyncManager extends Emitter {
     this.#drift(schema, { url: node.url, node: answer.node });
     // Greeted: the host learns this node's presence, and relays it.
     this.#sendPresence(peer);
-    try {
-      await this.#push(peer, 'handshake');
-      peer.behind = false;
-    } catch (error) {
-      // Reported by the caller; what the host lacks waits for #recover. The
-      // inbound half does not wait on it: the feed opens (but for a rewound
-      // node, which bootstraps first), and its pages are the sign of life
-      // the recovery pushes at.
-      this.#fallBehind(peer, null);
-      if (resubscribe && !rewound && !peer.subscription && !peer.closed) this.#subscribe(peer);
-      throw error;
+    const direction = directionOf(node);
+    // A pull-only link carries nothing of this node's; a push-only one takes no feed and joins no snapshot.
+    const pulls = direction !== 'push';
+    if (direction !== 'pull') {
+      try {
+        await this.#push(peer, 'handshake');
+        peer.behind = false;
+      } catch (error) {
+        // Reported by the caller; what the host lacks waits for #recover. The
+        // inbound half does not wait on it: the feed opens (but for a rewound
+        // node, which bootstraps first), and its pages are the sign of life
+        // the recovery pushes at.
+        this.#fallBehind(peer, null);
+        if (pulls && resubscribe && !rewound && !peer.subscription && !peer.closed) this.#subscribe(peer);
+        throw error;
+      }
+    }
+    if (!pulls) {
+      // Pushed once: a push-only link has been in sync.
+      peer.initial = true;
+      this.#settle();
+      return;
     }
     // The state the lost ops made is in the host's: joined back, and the
     // bootstrap subscribes from where its first page was taken.
@@ -628,6 +763,7 @@ class SyncManager extends Emitter {
         return await task();
       } finally {
         peer.inflight = false;
+        this.#settle();
       }
     });
     peer.pushing = run.catch(() => {});
@@ -656,6 +792,7 @@ class SyncManager extends Emitter {
       () => {
         peer.recovering = false;
         peer.behind = false;
+        this.#settle();
       },
       (error) => {
         peer.recovering = false;
@@ -665,6 +802,7 @@ class SyncManager extends Emitter {
   }
 
   #push(peer, reason) {
+    if (directionOf(peer.node) === 'pull') return Promise.resolve(0);
     return this.#serializePush(peer, () => this.#pushFromLog(peer, reason));
   }
 
@@ -818,6 +956,9 @@ class SyncManager extends Emitter {
     peer.failures++;
     peer.subscription?.unsubscribe?.();
     peer.subscription = null;
+    // The pages queued behind the failed one are the old feed's — an idle page among them would move the cursor
+    // past it — and are dropped whether or not a feed is opened again (a stuck peer opens none).
+    peer.feed++;
     const stuck = peer.failures >= MAX_PAGE_RETRIES;
     const message = `Page after ${peer.node.cursor ?? 'the start'} failed (${error?.message ?? error})`;
     const reported = new SyncomError(stuck ? 'STUCK' : 'PAGE_FAILED', message, {
@@ -846,12 +987,22 @@ class SyncManager extends Emitter {
       return;
     }
     const ops = unpackOps(value.ops);
+    // The host's feed read to its end: an idle page says so, and the link is in sync (`awaitInSync`) — unless
+    // the link went down meanwhile (a page delivered before the close, run after it: the feed moved on without us).
+    if (value.idle === true) {
+      peer.caughtUp = peer.connected;
+      peer.initial = true;
+      if (eventId) peer.node.cursor = eventId;
+      this.#settle();
+      return;
+    }
     // A page of nothing but this node's own echoes: the position moved, the
     // cursor follows in memory, and that is all.
     if (ops.length === 0) {
       if (eventId) peer.node.cursor = eventId;
       return;
     }
+    peer.caughtUp = false;
     // The host's own `advance` ops, received on its feed, move this node's
     // vector (their merges came down the same feed); nothing else does.
     const result = await this.#storage.applyRemote(ops, {
@@ -975,6 +1126,7 @@ class SyncManager extends Emitter {
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'bootstrap', { url: node.url, records: total });
     if (!peer.closed) this.#subscribe(peer);
+    this.#settle();
     return { pages, records: total };
   }
 
@@ -1018,7 +1170,7 @@ class SyncManager extends Emitter {
     const key = opKey(op);
     const scope = op.scope ?? GLOBAL_SCOPE;
     for (const peer of this.#peers.values()) {
-      if (peer.ref === via || !peer.remote || !peer.connected) continue;
+      if (peer.ref === via || !peer.remote || !peer.connected || directionOf(peer.node) === 'pull') continue;
       if (peer.behind) {
         // Nothing is queued for a peer that is behind: the vector-based push
         // that recovers it carries this op with everything else it lacks.

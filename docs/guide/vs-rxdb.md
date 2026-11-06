@@ -28,7 +28,7 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 - **RxDB is the broader toolkit.** It has storages for more runtimes (Deno KV, FoundationDB,
   localStorage), replication plugins for nine backends and handlers that sync with one you already
   run, attachments, several tabs writing one database, a backup writer, conditional ops that replay
-  on every replica, and packages for Vue, Angular and signals. In 17 rows RxDB has something where
+  on every replica, and packages for Vue, Angular and signals. In 15 rows RxDB has something where
   syncom has nothing; the rows are not equal in weight, so read the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
@@ -479,7 +479,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Conflict resolution</td><td>built in: per-field LWW by <code>(ts, origin)</code>, per-origin counter sums, OR-sets</td><td><code>conflictHandler.resolve</code> on the client; the default keeps the master's document<sup>44</sup></td></tr>
 <tr><td>Custom merge logic</td><td>❌ none: the rules are fixed; <code>beforeApply</code> can only skip an op</td><td>✅ any function per collection; the <code>crdt</code> plugin brings its own</td></tr>
 <tr><td>Where conflicts are settled</td><td>on every node, by the same deterministic rules</td><td>on the client (fork); the server only detects</td></tr>
-<tr><td>Conflicts reported</td><td>⚠️ unique-key clashes only (<code>conflict</code>); a lost concurrent write is silent</td><td>✅ <code>conflict$</code>: each conflict the server reported, with the handler's output</td></tr>
+<tr><td>Conflicts reported</td><td>✅ <code>conflict</code> of kind <code>unique</code> (a key shared by two records) and kind <code>register</code> (a peer's field write stamped below the one held: the op, the winner, the loser)</td><td>✅ <code>conflict$</code>: each conflict the server reported, with the handler's output</td></tr>
 <tr><td>Atomic compare on the server</td><td>— nothing to compare: ops commute</td><td>⚠️ per plugin: atomic on RxDB storages, CouchDB, Supabase, MongoDB; not Firestore, Appwrite</td></tr>
 <tr><td>Causality tracking</td><td>version vectors for delivery; per-field stamps; no causal context per record</td><td>none across replicas: a compare-and-set against the master's last state</td></tr>
 <tr><td>Role of peer clocks</td><td>decide concurrent register writes; a clock never falls behind what it saw</td><td>unused by the protocol; backend checkpoints and LWW handlers bring their own</td></tr>
@@ -499,13 +499,13 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Partial replication</td><td>✅ per-record scopes; the host bounds a peer's reads and writes by the record's scope</td><td>⚠️ one replication per scope, filtered by your backend; RxServer <code>queryModifier</code></td></tr>
 <tr><td>Scoped realtime stream</td><td>✅ one subscription serves the granted scopes; other scopes' ops are skipped</td><td>⚠️ one stream per replication, scoped by your backend</td></tr>
 <tr><td>Access lost after sync</td><td>❌ no revocation: the peer keeps what it received</td><td>❌ no signal: the client keeps its copy; RxServer then refuses its pushes</td></tr>
-<tr><td>Pull-only or push-only</td><td>❌ every link pushes and subscribes; scopes bound both directions alike</td><td>✅ omit <code>push</code> or <code>pull</code>; pull-only stores no per-document meta</td></tr>
+<tr><td>Pull-only or push-only</td><td>✅ <code>addNode({ direction: 'pull' | 'push' | 'both' })</code>: a pull-only link subscribes alone (nothing of the node goes out, retention does not wait for the peer), a push-only link pushes alone; the host's <code>unit({ allow })</code> serves push, snapshot and changes each on or off</td><td>✅ omit <code>push</code> or <code>pull</code>; pull-only stores no per-document meta</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Deletes and attachments</strong></td></tr>
 <tr><td>Deletes over replication</td><td>✅ a <code>delete</code> op leaves a tombstone on every node; a <code>purge</code> op erases</td><td>✅ <code>_deleted: true</code> with the whole document; the backend must keep it</td></tr>
 <tr><td>Attachments over replication</td><td>❌ none: records are JSON, with no binary type</td><td>⚠️ in the protocol; only Google Drive and OneDrive carry them intact<sup>46</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Control and observability</strong></td></tr>
 <tr><td>Start, pause, stop</td><td>✅ <code>sync.start()</code>/<code>stop()</code> for all peers; <code>enableNode(url, false)</code> per peer</td><td>✅ per replication <code>start()</code>, <code>pause()</code>, <code>cancel()</code>, <code>remove()</code>; <code>live: false</code> runs once</td></tr>
-<tr><td>Waiting until in sync</td><td>⚠️ <code>sync(url?)</code> resolves once pushed; nothing awaits the inbound side</td><td>✅ <code>awaitInitialReplication()</code>, <code>awaitInSync()</code>, <code>awaitDocumentPushed(doc)</code></td></tr>
+<tr><td>Waiting until in sync</td><td>✅ <code>awaitInitialReplication()</code>, <code>awaitInSync()</code>, <code>awaitDocumentPushed(id)</code> — the host's feed says when it is read to its end (an idle page), <code>peers()[i].caughtUp</code></td><td>✅ <code>awaitInitialReplication()</code>, <code>awaitInSync()</code>, <code>awaitDocumentPushed(doc)</code></td></tr>
 <tr><td>Forcing a re-sync</td><td>✅ <code>sync()</code> pushes what peers lack; <code>enableNode</code> off and on greets again</td><td>✅ <code>reSync()</code> runs a checkpoint pull; <code>emitEvent()</code> feeds the stream by hand</td></tr>
 <tr><td>Replication status and events</td><td>✅ <code>peers()</code>: connected, cursor, pending, behind, stuck, lastError; <code>hosted()</code>; events</td><td>✅ <code>received$</code>, <code>sent$</code>, <code>error$</code>, <code>active$</code>, <code>canceled$</code>, <code>conflict$</code> per replication</td></tr>
 <tr><td>Replication with several tabs</td><td>⚠️ one tab owns the storage and its sync; others get <code>LOCKED</code> or wait</td><td>✅ only the elected leader tab replicates (<code>waitForLeadership: true</code>); others see its writes<sup>47</sup></td></tr>

@@ -432,6 +432,26 @@ const reportConflicts = async (batch, op, entry) => {
   }
 };
 
+// A peer's register write stamped below the one this node holds for the
+// field: both writes were made without seeing the other (`prepareOp` stamps
+// above everything a node holds, so a lower stamp proves concurrency), and
+// last writer wins — the loser is told, with both sides, to whoever listens.
+const reportLost = (batch, op, entry, lost) => {
+  const { core } = batch;
+  for (let i = 0; i < lost.length; i++) {
+    const { field, held, value } = lost[i];
+    core.otel.recordConflict('register');
+    core.emit('conflict', {
+      kind: 'register',
+      id: op.id,
+      field,
+      op,
+      winner: { ts: held[0], origin: held[1], value: entry.data[field] },
+      loser: { ts: op.ts, origin: op.origin, value },
+    });
+  }
+};
+
 // One admitted op, applied to the record it names.
 const applyOne = async (batch, op) => {
   const { core } = batch;
@@ -480,7 +500,11 @@ const applyOne = async (batch, op) => {
   const verdict = await core.hook('beforeApply', { op, via: batch.via, peer: batch.peer, current: visible });
   if (verdict === false) return void skip(batch, op);
   core.clock.observe(op.ts);
-  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
+  // The register writes of the op that lost to a newer stamp held here: reported as conflicts while
+  // something listens (the local path never loses — a write is stamped above what the node holds).
+  const lost = core.listening('conflict') ? [] : null;
+  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits, lost);
+  if (lost !== null && lost.length > 0) reportLost(batch, op, entry, lost);
   if (rejected.length > 0) {
     if (onlyKinds(rejected)) refuseKind(batch, op, rejected);
     else {

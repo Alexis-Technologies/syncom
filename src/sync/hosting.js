@@ -31,6 +31,42 @@ const PASS_EVERY = 64;
 // A feed whose read of the shared log failed waits this long before it reads again, doubling.
 const FEED_BACKOFF = 1000;
 const MAX_FEED_BACKOFF = 60_000;
+// A feed over a shared log that read nothing for this long tells its peer it is caught up (an idle page).
+const IDLE_AFTER = 50;
+const IDLE = Symbol('syncom.idle');
+// The next entry of a shared read, or IDLE after `ms` with none.
+const nextOrIdle = (pending, ms) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(IDLE), ms);
+    timer.unref?.();
+    pending.then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+
+// `unit({ allow })`: which of the three procedures this unit serves; a peer
+// asking for one it does not is refused by code (403): `push` as READ_ONLY —
+// the host takes nothing — `snapshot` and `changes` as NOT_SERVED.
+const ALLOW_KEYS = new Set(['push', 'changes', 'snapshot']);
+const normalizeAllow = (allow) => {
+  const normalized = { push: true, changes: true, snapshot: true };
+  if (allow === undefined || allow === null) return normalized;
+  if (typeof allow !== 'object') throw new TypeError('unit({ allow }): allow must be an object');
+  for (const key of Object.keys(allow)) {
+    if (!ALLOW_KEYS.has(key)) throw new TypeError(`unit({ allow }): unknown procedure '${key}'`);
+    if (allow[key] === undefined) continue;
+    if (typeof allow[key] !== 'boolean') throw new TypeError(`unit({ allow }): ${key} must be a boolean`);
+    normalized[key] = allow[key];
+  }
+  return normalized;
+};
 const encoder = new TextEncoder();
 
 // A refusal as it goes on the wire: the numeric `code` a transport carries
@@ -168,6 +204,13 @@ const refuse = (host, message, code, reason, node = null) => {
   return coded(message, code, reason);
 };
 
+// A call this unit does not serve, or cannot: counted, logged under the procedure's event, refused by code.
+const refuseCall = (host, procedure, message, code, reason, node = null) => {
+  host.otel.recordRefusal(code);
+  host.logger.warn({ event: `sync.${procedure}.refused`, code, reason, node });
+  return coded(message, code, reason);
+};
+
 const peerOf = (host, context) => {
   const state = context?.client?.data?.syncom;
   if (!state) throw refuse(host, 'Say hello first', 428, 'HELLO_FIRST');
@@ -287,6 +330,7 @@ const push = (host) => async (context, args) => {
   const { storage, limits } = host;
   const state = peerOf(host, context);
   const { node, scopes } = state;
+  if (!host.allow.push) throw refuseCall(host, 'push', 'This host takes no pushes', 403, 'READ_ONLY', node);
   const ops = unpackOps(args?.ops);
   limit(host.otel, state, args, ops, limits);
   // The scopes hello granted bound what a peer writes here, not only what
@@ -308,9 +352,8 @@ const push = (host) => async (context, args) => {
   // is told to push elsewhere.
   if (storage.readOnly) {
     if (host.shared === null || host.shared.inbox === false) {
-      host.otel.recordRefusal(503);
-      host.logger.warn({ event: 'sync.push.refused', code: 503, reason: 'READ_ONLY', node });
-      throw coded('This hub is read-only and forwards nothing: push to another', 503, 'READ_ONLY');
+      const message = 'This hub is read-only and forwards nothing: push to another';
+      throw refuseCall(host, 'push', message, 503, 'READ_ONLY', node);
     }
     const result = await host.shared.forward(granted, node, scopes);
     return { ...result, outOfScope: outOfScope + result.outOfScope };
@@ -347,14 +390,16 @@ const positioned = async (host) => {
     await shared.reached(id);
     return id;
   } catch (error) {
-    host.otel.recordRefusal(503);
-    host.logger.warn({ event: 'sync.snapshot.refused', code: 503, reason: 'SHARED_LOG', err: error });
-    throw coded(`The shared log did not answer: ${error.message}`, 503, 'SHARED_LOG');
+    host.logger.warn({ event: 'sync.snapshot.failed', err: error });
+    throw refuseCall(host, 'snapshot', `The shared log did not answer: ${error.message}`, 503, 'SHARED_LOG');
   }
 };
 
 const snapshot = (host) => async (context, args) => {
   const state = peerOf(host, context);
+  if (!host.allow.snapshot) {
+    throw refuseCall(host, 'snapshot', 'This host serves no snapshots', 403, 'NOT_SERVED', state.node);
+  }
   const cursor = args?.cursor ?? null;
   const position = host.shared !== null && cursor === null ? await positioned(host) : null;
   const page = await host.storage.snapshot({
@@ -394,11 +439,26 @@ const sharedChanges = async function* (host, context, args, subscription) {
   try {
     let passed = 0;
     let backoff = 0;
+    // Whether the last page told the peer it was caught up: told once per lull.
+    let idle = false;
     for (;;) {
       if (signal?.aborted) return;
       try {
-        for await (const entry of shared.read(cursor, signal)) {
+        const iterator = shared.read(cursor, signal)[Symbol.asyncIterator]();
+        let pending = iterator.next();
+        for (;;) {
+          // A lull in the log — nothing for IDLE_AFTER — is the peer's `caughtUp`: an empty page, labelled
+          // with the cursor, says so once; the read goes on.
+          const result = idle ? await pending : await nextOrIdle(pending, IDLE_AFTER);
           if (signal?.aborted) return;
+          if (result === IDLE) {
+            idle = true;
+            yield host.track(cursor, { ops: [], eventId: cursor, idle: true });
+            continue;
+          }
+          if (result.done) break;
+          const entry = result.value;
+          pending = iterator.next();
           backoff = 0;
           const parsed = parseEntry(entry.value);
           const ops = [];
@@ -413,6 +473,7 @@ const sharedChanges = async function* (host, context, args, subscription) {
           // every PASS_EVERY entries so a resume looks at few of these again.
           if (ops.length === 0 && ++passed < PASS_EVERY) continue;
           passed = 0;
+          idle = false;
           feed.cursor = cursor;
           yield host.track(cursor, { ops: packOps(ops), eventId: cursor });
         }
@@ -435,9 +496,10 @@ const sharedChanges = async function* (host, context, args, subscription) {
 
 const changes = (host) =>
   async function* (context, args, subscription = {}) {
-    if (host.shared !== null) return yield* sharedChanges(host, context, args, subscription);
     const { storage, feeds, wakers, pageSize } = host;
     const { node, scopes: granted } = peerOf(host, context);
+    if (!host.allow.changes) throw refuseCall(host, 'changes', 'This host serves no feed', 403, 'NOT_SERVED', node);
+    if (host.shared !== null) return yield* sharedChanges(host, context, args, subscription);
     const { lastEventId, signal } = subscription;
     const scopes = grant(args?.scopes, granted);
     let cursor = lastEventId ?? undefined;
@@ -445,6 +507,8 @@ const changes = (host) =>
     const feed = { node, scopes, since: Date.now(), cursor: cursor ?? null };
     feeds.add(feed);
     try {
+      // Whether the last page told the peer it was caught up: told once per lull.
+      let idle = false;
       for (;;) {
         if (signal?.aborted) return;
         const page = storage.log.read(cursor, { scopes, limit: pageSize });
@@ -465,6 +529,14 @@ const changes = (host) =>
             cursor = storage.log.formatId(last);
             feed.cursor = cursor;
           }
+          // Caught up: an empty page labelled with the cursor says so once
+          // before the wait (the log's first position when nothing was read
+          // yet — never `lastEventId`), so the peer knows it holds everything.
+          if (!idle) {
+            idle = true;
+            const at = cursor ?? storage.log.formatId(0);
+            yield host.track(at, { ops: [], eventId: at, idle: true });
+          }
           await waitFor(wakers, signal);
           continue;
         }
@@ -472,6 +544,7 @@ const changes = (host) =>
         for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
         cursor = storage.log.formatId(entries[entries.length - 1].seq);
         feed.cursor = cursor;
+        idle = false;
         // Labelled even when every op was the peer's own echo: the position
         // still moves, and a resume must not replay it.
         yield host.track(cursor, { ops: packOps(ops), eventId: cursor });
@@ -604,6 +677,7 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift, sha
     }
   }
   const limits = normalizeLimits(options.limits);
+  const allow = normalizeAllow(options.allow);
   if (meta !== undefined && (typeof meta !== 'object' || meta === null || Array.isArray(meta))) {
     throw new TypeError('unit({ meta }): meta must be an object');
   }
@@ -618,6 +692,7 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift, sha
     shared,
     authorize,
     limits,
+    allow,
     pageSize,
     pageBytes,
     logger: storage.logger,

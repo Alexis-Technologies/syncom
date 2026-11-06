@@ -1877,6 +1877,8 @@ export interface Node {
   url: string;
   token?: string;
   scopes: string[];
+  /** What the link carries: pushes and subscribes (`'both'`), subscribes alone (`'pull'`), pushes alone (`'push'`). */
+  direction?: 'both' | 'pull' | 'push';
   enabled: boolean;
   lastSync: number | null;
   /** Where the subscription resumes from; `null` until the first page. */
@@ -2086,14 +2088,30 @@ export interface StorageEvents {
    * A peer's op left a unique key shared by two records: `id` (the op's)
    * and `other`. Both are kept — the application decides which yields.
    */
-  conflict: (event: {
-    kind: 'unique';
-    entity: string;
-    fields: string[];
-    id: string;
-    other: string;
-    op: SyncOp;
-  }) => void;
+  conflict: (
+    event:
+      | {
+          kind: 'unique';
+          entity: string;
+          fields: string[];
+          id: string;
+          other: string;
+          op: SyncOp;
+        }
+      | {
+          /**
+           * A peer's register write (a `set`'s or `write`'s field) stamped below the one this node holds: both
+           * were made without seeing the other, and the newer stamp won. The op is applied for its other fields
+           * and logged all the same; `winner` is what the field reads as here, `loser` what the op carried.
+           */
+          kind: 'register';
+          id: string;
+          field: string;
+          op: SyncOp;
+          winner: { ts: number; origin: string; value: unknown };
+          loser: { ts: number; origin: string; value: unknown };
+        },
+  ) => void;
   /**
    * `drift`: a peer runs this node's schema version with another snapshot
    * hash — two builds of "the same" schema that disagree. Reported after

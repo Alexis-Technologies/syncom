@@ -86,6 +86,16 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
 
 ### Added
 
+- **One-way links, a host's `allow`, the idle page and the three awaits, register conflicts told.**
+  `addNode({ direction })`: `'pull'` subscribes alone (nothing of this node goes to the peer, `sync()` pushes
+  nothing to it, retention does not wait for its acknowledgement), `'push'` pushes alone (no feed, no bootstrap),
+  `'both'` as before. `unit({ allow: { push, changes, snapshot } })` serves each procedure or refuses it by code
+  (403 `READ_ONLY` for a push, 403 `NOT_SERVED` for a snapshot or a feed). A host's feed sends one empty page
+  marked `idle` once it is read to its end — `peers()[i].caughtUp` on the dialer — and `awaitInSync()`,
+  `awaitInitialReplication()` and `awaitDocumentPushed(id)` wait on it, on the pushes and on the peers'
+  acknowledgements (`{ signal }` cuts a wait short). A peer's register write stamped below the one this node
+  holds is a `conflict` of kind `register` — the op, the field, the winner and the loser — beside the `unique`
+  kind; `syncom.conflicts` counts both.
 - **A log shared by the hubs of a mesh: `createDatabase({ sync: { sharedLog } })`.** A broker's log —
   wrpc's `BrokerLog`: Redis Streams, NATS, Kafka, AMQP, the memory broker — or `mongoSharedLog()` of
   `@alexify/syncom/mongodb` (two collections of a MongoDB database, a topic's entries numbered by its head

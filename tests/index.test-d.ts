@@ -492,9 +492,15 @@ syncom.open({ schema: { entities: { Post: {} } } }).then((typed) => {
   expectError(typed.Post.select('orgId'));
 });
 storage.on('conflict', (event) => {
-  expectType<'unique'>(event.kind);
-  expectType<string[]>(event.fields);
-  expectType<string>(event.other);
+  expectType<'unique' | 'register'>(event.kind);
+  if (event.kind === 'unique') {
+    expectType<string[]>(event.fields);
+    expectType<string>(event.other);
+  } else {
+    expectType<string>(event.field);
+    expectType<unknown>(event.winner.value);
+    expectType<number>(event.loser.ts);
+  }
 });
 expectType<string | undefined>(validationError.issues[0].conflict);
 storage.on('close', () => {});

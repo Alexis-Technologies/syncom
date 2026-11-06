@@ -488,7 +488,7 @@ which one a node plays on a given link is just who opened the connection.
 | --- | --- | --- |
 | `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas, the kinds each side runs with (`kinds`) and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key). A host that holds more of the dialer's own streams than the dialer's vector says adds `proof`: the newest op of each it holds, packed like a page — see [The log](#the-log) |
 | `push` | dialer → host | Ops the host lacks, by its vector |
-| `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
+| `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live; an empty page marked `idle` once the feed is read to its end — the dialer's `caughtUp`, what `awaitInSync()` waits for |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
 
 ```mermaid
@@ -645,11 +645,19 @@ has to reach a fuller node.
 
 ```js
 await storage.sync.addNode({ url: 'wss://peer/api', token: 'secret', scopes: ['*'] });
+await storage.sync.addNode({ url: 'wss://feed/api', direction: 'pull' }); // take its ops, push none
 await storage.sync.enableNode('wss://peer/api', false); // keep, but do not dial
 await storage.sync.removeNode('wss://peer/api');
 storage.sync.listNodes();
-// [{ url, token, scopes, enabled, lastSync, cursor, remote: { id, epoch, schema }, acked }]
+// [{ url, token, scopes, direction, enabled, lastSync, cursor, remote: { id, epoch, schema }, acked }]
 ```
+
+`direction` is what the link carries: `'both'` (the default) pushes and
+subscribes; `'pull'` only subscribes — nothing of this node goes to the
+peer, `sync()` pushes nothing to it, and retention does not wait for its
+acknowledgement; `'push'` only pushes — no feed, no bootstrap, so what the
+peer holds never comes back. The host's own rules are its unit's `allow`
+([Hosting](#hosting)).
 
 Each node is a file under `<path>/remote/`, named by its percent-encoded url,
 on Node.js and in the browser alike. The `cursor` and the remote node's identity
@@ -665,8 +673,11 @@ and why a node is registered once: `addNode()` of a url already there is
 await storage.sync.start(); // dial every enabled node; automatic when `connect` is given
 await storage.sync.stop();  // close every link
 await storage.sync.sync();  // push what the peers lack right now
-storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError }]
+storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError, direction, caughtUp }]
 storage.sync.hosted();      // hosting side: [{ node, scopes, since, cursor }] — every live `changes` feed
+await storage.sync.awaitInitialReplication(); // every enabled node greeted and its feed read to its end once
+await storage.sync.awaitInSync();             // …and nothing left to push to any of them, right now
+await storage.sync.awaitDocumentPushed(id);   // this node's newest op for the record acknowledged by every node it goes to
 
 storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
@@ -761,6 +772,7 @@ const unit = storage.sync.unit({
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
 | `limits` | `{ opsPerPush: 10000 }` | Per-peer push limits: `opsPerPush` (10 000 unless given; `Infinity` for none), `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
 | `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
+| `allow` | `{ push: true, changes: true, snapshot: true }` | Which procedures this unit serves: a peer asking for `push` where it is off is refused with 403 (`reason` `'READ_ONLY'`), for `snapshot` or `changes` with 403 (`'NOT_SERVED'`) — a read-only mirror, a write-only sink, each a unit of its own |
 | `presence` | `{ timeout: 30000, rate: 20, max: 1024 }` | The unit's inbound event `on.presence` — a peer's [presence](./presence) update, its own node's and of a scope it asked for, at most `rate` a second, signed under `'require'` — relayed to the scope's room; the host keeps the newest state per node (`max` per scope, for `timeout` ms) and hands them to a newcomer at hello |
 
 `limits` are the host's own, checked in `push` — the one place that knows the

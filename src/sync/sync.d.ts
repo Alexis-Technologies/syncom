@@ -53,6 +53,9 @@ export interface PeerView {
   stuck: boolean;
   /** The last failure on the way to this peer, or null. */
   lastError: { code: string | number | null; message: string; at: number } | null;
+  direction: 'both' | 'pull' | 'push';
+  /** The host's feed read to its end since the last page with ops (its idle page) — what `awaitInSync()` waits for. */
+  caughtUp: boolean;
 }
 
 export interface SyncUnitOptions {
@@ -84,6 +87,11 @@ export interface SyncUnitOptions {
   limits?: SyncLimits;
   /** Copied onto all four procedures — what a wrpc `onRequest` hook reads as `context.procedure.meta`. */
   meta?: Record<string, unknown>;
+  /**
+   * Which procedures this unit serves (every one by default): a peer asking for `push` where it is off is refused
+   * with 403 `READ_ONLY`, for `snapshot` or `changes` with 403 `NOT_SERVED`.
+   */
+  allow?: { push?: boolean; changes?: boolean; snapshot?: boolean };
 }
 
 export interface SyncLimits {
@@ -188,6 +196,11 @@ export interface NodeData {
   url: string;
   token?: string;
   scopes?: string[];
+  /**
+   * What the link carries. `'both'` (the default) pushes and subscribes; `'pull'` only subscribes — nothing of this
+   * node goes to the peer, and retention does not wait for it; `'push'` only pushes — no feed, no bootstrap.
+   */
+  direction?: 'both' | 'pull' | 'push';
 }
 
 export interface SyncManager {
@@ -216,6 +229,15 @@ export interface SyncManager {
   peers(): PeerView[];
   /** Hosting side: every peer with a live `changes` feed here. */
   hosted(): HostedPeer[];
+  /**
+   * Resolves once every enabled node is in sync with this one: each link up and greeted, nothing left to push to it
+   * and its feed read to its end (the host's idle page); `signal` cuts the wait short.
+   */
+  awaitInSync(options?: { signal?: AbortSignal | null }): Promise<void>;
+  /** Resolves once every enabled node has been in sync at least once since it was dialed — what a client waits for before it reads. */
+  awaitInitialReplication(options?: { signal?: AbortSignal | null }): Promise<void>;
+  /** Resolves once the newest op this node made for the record is acknowledged by every enabled node it goes to; at once when it made none. */
+  awaitDocumentPushed(id: string, options?: { signal?: AbortSignal | null }): Promise<void>;
   /** The shared log as this hub stands to it (`sync.sharedLog`), or null without one. */
   shared(): SharedStats | null;
   /**

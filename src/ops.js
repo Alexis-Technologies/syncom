@@ -711,7 +711,11 @@ const applyUnset = (entry, fields, stamp, delta, plugins) => {
 
 // Sets register fields at `stamp`, honouring last-writer-wins per field. A
 // register outranks every other kind: whatever held the field goes.
-const applyFields = (entry, fields, stamp, delta, rejected, plugins, changes = null) => {
+// `lost`, when given, collects the register writes the op makes that a
+// newer stamp already held here — `{ field, held, value }`: what the apply
+// path reports as a `conflict` of kind `register` (the loser is the op; a
+// field stamped the same is the same write, not a loss).
+const applyFields = (entry, fields, stamp, delta, rejected, plugins, changes = null, lost = null) => {
   const { meta, data } = entry;
   // Own keys only: `fields` may be a JSON-parsed peer payload, where
   // "__proto__" is an ordinary own key, or an in-process object with a
@@ -720,7 +724,12 @@ const applyFields = (entry, fields, stamp, delta, rejected, plugins, changes = n
   for (const field of Object.keys(fields)) {
     if (!isPath(field)) continue;
     if (roomFor(entry, field, 'register', stamp, delta, rejected, plugins) !== null) continue;
-    if (compareClock(own(meta.clock, field), stamp) >= 0) continue;
+    const held = own(meta.clock, field);
+    const order = compareClock(held, stamp);
+    if (order >= 0) {
+      if (lost !== null && order > 0) lost.push({ field, held, value: fields[field] });
+      continue;
+    }
     if (compareClock(stamp, floorOf(meta, field)) < 0) continue;
     meta.clock[field] = stamp;
     data[field] = fields[field];
@@ -967,7 +976,7 @@ const CORE_TYPES = new Set(['purge', 'set', 'unset', 'write', 'delete', 'merge',
  * than what the entry already reflects, changes nothing. `limits` is the
  * node's `{ pendingMax, plugins }` (src/plugin.js limitsOf).
  */
-const applyOp = (previous, op, limits = null) => {
+const applyOp = (previous, op, limits = null, lost = null) => {
   const bounds = limitsOf(limits);
   const { plugins } = bounds;
   const entry = previous ? cloneEntry(previous) : createEntry();
@@ -1020,7 +1029,7 @@ const applyOp = (previous, op, limits = null) => {
     if (!isPlainObject(op.data)) malformed(null, rejected);
     else {
       if (!previous && Number.isInteger(op.v)) meta.v = op.v;
-      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes);
+      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes, lost);
     }
   } else if (op.type === 'unset') {
     if (!Array.isArray(op.value)) malformed(null, rejected);
@@ -1034,7 +1043,7 @@ const applyOp = (previous, op, limits = null) => {
       if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
       if (Number.isInteger(op.v)) meta.v = op.v;
       applyBase(entry, delta, plugins);
-      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes);
+      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes, lost);
     }
   } else if (op.type === 'delete') {
     if (compareClock(stamp, meta.base) > 0) {

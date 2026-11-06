@@ -197,7 +197,9 @@ const ENTRIES = [
   // 74.7 with the collection's events on a microtask, the unique keys in maps, one operator per field, a query's depth
   // bound (review №6, E6; 2026-11-02). 75, raised by name.
   // 75.1 with the writer's record methods, the stats fields, the error fields and the log lines of E7 (review №6, E7; 2026-11-02). 75.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 75.5 },
+  // 75.5 (over by bytes) with a peer's register write that lost told as a conflict (applyFields' `lost`, apply.js
+  // reportLost; sync-parity plan, S1; 2026-11-06). 76, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 76 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -430,7 +432,9 @@ const ENTRIES = [
   // 165.9 with the shared log (src/sync/shared.js: the relay, the consumer, a read-only hub's shadow vector and its
   // forwarded pushes; the feed and the positioned snapshot in hosting.js; sync-parity plan, S0; 2026-11-04). 166.5,
   // raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 166.5 },
+  // 167.1 with one-way links, a host's `allow`, the idle page and the awaits, register conflicts (sync-parity plan,
+  // S1; 2026-11-06). 167.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 167.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
