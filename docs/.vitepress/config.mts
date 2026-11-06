@@ -209,6 +209,7 @@ export default withMermaid({
               { text: 'Dumps and backups', link: '/guide/dump' },
               { text: 'Tombstone cleanup', link: '/guide/cleanup' },
               { text: 'Connectors', link: '/guide/connector' },
+              { text: 'Several tabs', link: '/guide/shared' },
             ],
           },
         ],

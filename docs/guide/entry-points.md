@@ -30,6 +30,7 @@ same process may run with others.
 | `@alexify/syncom/pipeline` | a handler over every change of a collection, once, in order, checkpointed — a derived collection | `createPipeline(db, { name, source, handler })` |
 | `@alexify/syncom/cleanup` | tombstone cleanup: an old, acknowledged tombstone folded whole into the `tombstones` kv namespace | `cleanup(db, options)` |
 | `@alexify/syncom/connector` | a collection kept in step with a backend of its own through `pull` and `push` handlers — the adapters beside it speak CouchDB, GraphQL, Firestore, Supabase, MongoDB, Appwrite, Google Drive, OneDrive | `replicate(db, { name, collection, pull, push })` |
+| `@alexify/syncom/shared` | several instances over one database: one leads, the others follow (read-only over the same engine) and write through it over a channel; the leader gone, a follower takes its place | `openShared({ createDatabase, path, engine, channel, election })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |
@@ -134,7 +135,7 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 | `/connector/graphql` | 0.8 KB | `/connector/mongodb` | 0.9 KB |
 | `/connector/supabase` | 1.2 KB | `/connector/firestore` | 1.3 KB |
 | `/connector/appwrite` | 1.4 KB | `/connector/gdrive` | 2.1 KB |
-| `/connector/onedrive` | 1.9 KB | | |
+| `/connector/onedrive` | 1.9 KB | `/shared` | 5.5 KB |
 | `/cleanup` | 3.0 KB | `/engines` | 9.9 KB |
 | `/idb` | 4.9 KB | `/search` | 1.1 KB |
 | `/order` | 1.0 KB | `/contracts` | 1.0 KB |

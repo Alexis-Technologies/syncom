@@ -382,6 +382,8 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `PIPELINE_FAILED` | the database's `error` event when a pipeline's handler threw (`@alexify/syncom/pipeline`): the pipeline stopped before the turn, its checkpoint stays, `start()` hands the turn over again | `name`, `eventId`, `cause` |
 | `REPLICATION_FAILED` | a connector's `error` event (`@alexify/syncom/connector`): a pull or push handler threw (`direction`), tried again after `retryTime`; `start()` on a canceled connector, `reSync()` on one not active (`direction` null) | `direction`, `name`, `cause` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
+| `NOT_LEADER` | `shared.sync`, `shared.serve()` or a write without a channel on a follower of `@alexify/syncom/shared`: replication, the served writers and a write of its own are the leader's | `path`, `what` |
+| `LEADER_LOST` | a follower's write (`@alexify/syncom/shared`) that reached no leader within `failover` ms — the leader gone and none elected in time, or a channel answering nothing readable (`method`, `attempts`, `cause`); the shared facade's `error` event when the instance elected could not open the database as the leader (`path`, `cause`) | `path`, `method`, `attempts`, `cause` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on and writes nothing more; what was logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Also what an engine's write set, log group, seal, index, kv or copies put answers when a newer lease's document sits where it would write (MongoDB's fence) | `path`, `cause` |
 | `FOLLOW_LOST` | the storage's `error` event, on a follower (`readOnly: true`): the engine's change stream ended — an error, a close — so what the writer landed meanwhile was not heard; the follower subscribes again first and then reads every record again (a record removed meanwhile loses its row) | `path`, `cause` |
 | `KEYS_INCOMPLETE` | `createDatabase()` with the `encryption` or `signing` plugin, `loadKeys()` (`@alexify/syncom/encryption`), `loadSigningKeys()` (`@alexify/syncom/signing`) when one file of a pair (RSA or signing) is missing | — |
@@ -769,6 +771,30 @@ resolve, autoStart })`: one collection kept in step with a backend of its own th
 
 Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,
 deleted, resolved })`, `error` (`REPLICATION_FAILED` with `direction`), `active` `(boolean)`.
+
+## Shared (subpath)
+
+`@alexify/syncom/shared` — `openShared({ createDatabase, path, engine, …, channel, election, grace, failover })`:
+several instances over one database, one leading and the others following and writing through it — see
+[Several tabs](../guide/shared).
+
+| Member | Notes |
+| --- | --- |
+| `db` | The current instance: the leader's `Database`, or a follower's read-only one (`CLOSED` after `close()`) |
+| `leader`, `isLeader()`, `mode`, `generation` | Whether this instance leads; how leadership is decided (`'locks'`, `'heartbeat'`, `'alone'`); how many times the instance changed |
+| `waitForLeadership({ signal }?)`, `onLeader(fn)` | Resolves when this instance leads (rejects `CLOSED`, or aborted); the `leader` event's listener, with its off |
+| `get`, `has`, `hasRecord`, `list`, `getCachedData`, `collection(name)` | The current instance's readers; everything else is `db`'s |
+| `insert`, `set`, `update`, `delete`, … every writer of the database's API | The leader's own writes; a follower's carried over the channel and answered as the leader answers them (an error made again with its code and fields), tried again while a leader comes within `failover` ms, then `LEADER_LOST`; `NOT_LEADER` on a follower without a channel |
+| `transact(fn, options?)` | The leader's transaction; on a follower a recorded one — the writers noted and carried whole (no `insert`, no read of its own writes) |
+| `live(make)` | `make(db)` subscribes over the current instance and answers what stops it; run again over the next; answers the stop for good |
+| `document(id)` | A `SharedDocument`: `data()`, `document` (the instance's), the `update` event — and once after a failover (delta `null`); `close()` |
+| `sync` | The leader's `SyncManager`; `NOT_LEADER` on a follower |
+| `serve({ access }?)` | The procedures a leader mounts for its followers (`defineRouter({ 'syncom-db': shared.serve() })`), each answering `{ ok, value }` or `{ ok, error }`; `NOT_LEADER` on a follower |
+| `close()` | The instance closed, the election left, the channel closed; the leadership waiters rejected |
+
+Events (contained): `leader`, `follower`, `rebind` `({ path, generation })`, `error` (the instance's, and `LEADER_LOST`).
+`elect({ name, locks, channel, heartbeat, misses })` is the election on its own: `{ lead, leader, mode, onLost, release }`.
+`createSharedChannel(client, { unit }?)` of `@alexify/syncom/wrpc` is the follower's channel over a `WrpcClient`.
 
 ## Cleanup (subpath)
 

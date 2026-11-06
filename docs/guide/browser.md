@@ -81,6 +81,8 @@ durable as IndexedDB gets (`durable: true` is a no-op here). `close()` is the
 backend's own: the storage never closes a backend it was handed, since two
 storages may share one.
 
+Several tabs over one database are [`@alexify/syncom/shared`](./shared): one tab leads, the others follow as read-only databases over the same engine and write through the leader.
+
 **The engine over IndexedDB** is the other way in, and the one to prefer: object
 stores instead of files, a write set in one transaction, the log as rows, a tab's
 writes heard by the others through a `BroadcastChannel`:

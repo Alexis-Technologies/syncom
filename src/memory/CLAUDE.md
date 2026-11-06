@@ -23,3 +23,8 @@ src/memory/engine.js      memoryEngine(): the engine in memory — a record as t
 - **A path outlives its instance.** `open(path)` answers the same database until `remove(path)`: a reopen through the
   same engine reads what the last instance wrote, which is how a test reopens a database in memory and how a mesh in one
   process shares one engine, a path per node. The index is saved as a copy (the log's vector is a live object).
+- **Every write set is announced.** `db.changes.subscribe(listener)` hears `{ records: ids }` — the rows put and the
+  ids removed by a write set — on a microtask after it, on every instance that listens: the writer never listens (a
+  follower alone subscribes, `createDatabase({ readOnly: true })`), so there is nothing of its own to leave out, unlike
+  the IndexedDB engine's token. `capabilities.changeStream` is true. The log's groups are not announced: a follower
+  reads records whole.

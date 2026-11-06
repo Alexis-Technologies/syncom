@@ -203,6 +203,10 @@
       "types": "./src/connector/onedrive.d.ts",
       "default": "./src/connector/onedrive.js"
     },
+    "./shared": {
+      "types": "./src/shared/shared.d.ts",
+      "default": "./src/shared/shared.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {

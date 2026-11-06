@@ -614,6 +614,8 @@ export type SyncomErrorCode =
   | 'LOCKED'
   | 'READ_ONLY'
   | 'LEASE_LOST'
+  | 'NOT_LEADER'
+  | 'LEADER_LOST'
   | 'FOLLOW_LOST'
   | 'SHARED_LOG_FAILED'
   | 'REVOKED'

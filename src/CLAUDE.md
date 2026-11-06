@@ -18,6 +18,7 @@ src/state/state.js        @alexify/syncom/state — createState(db, name): app s
 src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
 src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
 src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded whole into the tombstones kv namespace (its own CLAUDE.md)
+src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase, path, engine, channel, election }): several instances over one database, one leading, the others following and writing through it (its own CLAUDE.md)
 src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push }): a collection kept in step with a backend through two handlers, checkpointed (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires

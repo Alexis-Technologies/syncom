@@ -659,6 +659,9 @@ const ENTRIES = [
   // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).
   { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.5 },
   { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2 },
+  // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
+  // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
+  { label: 'shared — browser', entry: 'src/shared/shared.js', platform: 'browser', budget: 6 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.

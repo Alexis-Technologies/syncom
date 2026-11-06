@@ -12,7 +12,13 @@
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 
-const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true, shared: true });
+const CAPABILITIES = capabilitiesOf({
+  atomicBatch: true,
+  exclusiveCreate: true,
+  indexes: true,
+  shared: true,
+  changeStream: true,
+});
 
 // A record handed in as text that is no record: kept as the text, read as
 // INTEGRITY — what a torn file reads as under the files engine.
@@ -264,8 +270,31 @@ const openDb = (path) => {
   };
   // One write set, applied with nothing awaited in between: whole, or — a
   // write set that throws before it is applied — nothing.
+  // What a write set changed, told to the instances listening (`db.changes`: a follower over the same engine) on a
+  // microtask — the writer's landing never runs a listener. Every instance hears every write: the writer never
+  // listens (a follower alone subscribes), so there is nothing of its own to leave out.
+  const listeners = new Set();
+  const announce = (ids) => {
+    if (ids.length === 0 || listeners.size === 0) return;
+    queueMicrotask(() => {
+      for (const listener of listeners) {
+        try {
+          listener({ records: ids });
+        } catch {
+          // A listener's failure is its own.
+        }
+      }
+    });
+  };
+  const changes = {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
   const write = async (batch) => {
     if (batch.records !== undefined || batch.remove !== undefined) sortedIds = null;
+    const ids = [];
     const puts = batch.kv?.put;
     if (puts !== undefined) for (let i = 0; i < puts.length; i++) space(puts[i][0]).set(puts[i][1], String(puts[i][2]));
     const rows = batch.records;
@@ -279,18 +308,25 @@ const openDb = (path) => {
           for (let k = 0; k < made.length; k++) held.set(made[k][0], made[k][1]);
         }
         records.set(row.id, row.stored !== undefined ? row.stored : parsed(row.text));
+        ids.push(row.id);
         const dropped = row.pieces?.remove;
         if (dropped !== undefined) for (let k = 0; k < dropped.length; k++) pieces.get(row.id)?.delete(dropped[k]);
       }
     }
     const removed = batch.remove;
-    if (removed !== undefined) for (let i = 0; i < removed.length; i++) records.delete(removed[i]);
+    if (removed !== undefined) {
+      for (let i = 0; i < removed.length; i++) {
+        records.delete(removed[i]);
+        ids.push(removed[i]);
+      }
+    }
     const copied = batch.copies?.put;
     if (copied !== undefined) for (let i = 0; i < copied.length; i++) tag(copied[i][0]).set(copied[i][1], copied[i][2]);
     const removals = batch.kv?.remove;
     if (removals !== undefined) {
       for (let i = 0; i < removals.length; i++) spaces.get(removals[i][0])?.delete(removals[i][1]);
     }
+    announce(ids);
   };
   return Object.freeze({
     path,
@@ -301,6 +337,7 @@ const openDb = (path) => {
     copies: copyStore,
     catalog: catalogStore,
     log: logStore(),
+    changes,
     write,
     close: async () => {},
     /** How many records the database holds, tombstones included. */

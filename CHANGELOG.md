@@ -115,6 +115,16 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   `syncom/query`/`syncom/count` with its hello carried in the call (`hello: { node, token, scopes }` — taken as a
   hello is and kept nowhere, for a transport where one request is one client), and two hubs over a wrpc
   `MemoryBroker`'s log — each a case of `tests/wrpc.integration.test.js` and a section of the wrpc guide.
+- **Several tabs: `@alexify/syncom/shared`.** `openShared({ createDatabase, path, engine, channel, election })`
+  runs several instances over one database: one leads (a full database — it writes, dials and hosts), the others
+  follow as `readOnly` databases over the same engine, hearing the leader's writes through the engine's change
+  stream and writing through the leader over a channel (`createSharedChannel` of the wrpc subpath over a
+  SharedWorker's port; `shared.serve()` the leader's procedures). The election is Web Locks, or a heartbeat over a
+  `BroadcastChannel`; the leader gone, the next instance opens the database as the leader with the same node id
+  and log, every live thing (`live`, `document`) made again, a write in flight tried again (`LEADER_LOST` past
+  `failover` ms). A follower's `transact` is recorded and carried whole. `NOT_LEADER` for what is the leader's
+  (`sync`, `serve`). The memory engine announces every write set to the instances listening (`changes`), as the
+  IndexedDB engine does.
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

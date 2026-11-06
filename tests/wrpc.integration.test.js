@@ -31,6 +31,10 @@ const webrtc = wrpc && optional('@alexify/wrpc/webrtc');
 const sse = wrpc && optional('@alexify/wrpc/sse');
 const brokers = wrpc && optional('@alexify/wrpc/broker');
 const { PROTOCOL } = require('../src/sync/protocol.js');
+const { MessageChannel } = require('node:worker_threads');
+const { openShared, MUTATORS } = require('../src/shared/shared.js');
+const { createSharedChannel } = require('../src/wrpc/wrpc.js');
+const { createFakeLocks } = require('./utils/fake-locks.js');
 const { createChannelPair } = require('./utils/fake-channel.js');
 
 const openTemp = async (t, options = {}) => {
@@ -327,6 +331,97 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
       assert.notStrictEqual(c.sync.listNodes()[0].cursor, cursor);
       const stats = h1.sync.shared();
       assert.ok(stats.relayed >= 1 && stats.applied >= 1, JSON.stringify(stats));
+    },
+  );
+
+  await t.test(
+    'several tabs over one database through wrpc on a worker port: the leader serves its writers, a follower writes through them, a failover keeps the port',
+    async (t2) => {
+      // The leader's writers behind one router, whichever instance leads now (the SharedWorker's server stays up
+      // while the tabs come and go).
+      const tabs = new Set();
+      let served = null;
+      const leading = () => {
+        for (const tab of tabs) if (tab.leader) return tab;
+        return null;
+      };
+      const procedure = (name) => ({
+        access: 'public',
+        async handler(context, args) {
+          if (served === null) served = leading()?.serve() ?? null;
+          if (served === null) throw new Error('no leader yet');
+          return served[name].handler(context, args);
+        },
+      });
+      const procedures = {};
+      for (const name of [...MUTATORS, 'transact']) procedures[name] = procedure(name);
+      const router = wrpc.defineRouter({ 'syncom-db': procedures });
+      const server = new wrpc.Server({ router, host: '127.0.0.1', port: 0, protocol: 'http', logger: false });
+      await server.listen();
+      t2.after(() => server.close().catch(() => {}));
+      // The worker's end of every tab's channel: a `wrpc:connect` brings the port the page speaks on; attached.
+      const worker = () => {
+        const { port1, port2 } = new MessageChannel();
+        port1.addEventListener('message', (event) => {
+          if (event.data?.type === 'wrpc:connect' && event.ports?.[0]) server.rpc.attachPort(event.ports[0]);
+        });
+        port1.start();
+        t2.after(() => {
+          port1.close();
+          port2.close();
+        });
+        return port2;
+      };
+      const engine = syncom.memoryEngine();
+      const locks = createFakeLocks();
+      const open = async () => {
+        const tab = await openShared({
+          createDatabase: syncom.createDatabase,
+          engine,
+          path: 'tabs',
+          logger: false,
+          defer: 0,
+          schema: { entities: { Task: {} } },
+          election: { locks },
+          grace: 20,
+          failover: 5000,
+          channel: async () =>
+            createSharedChannel(
+              await wrpc.WrpcClient.connect('worker://leader', { worker: worker(), logger: false, heartbeat: false }),
+            ),
+        });
+        tab.on('leader', () => {
+          served = null;
+        });
+        tabs.add(tab);
+        t2.after(() => tab.close().catch(() => {}));
+        return tab;
+      };
+      const a = await open();
+      const b = await open();
+      const c = await open();
+      assert.strictEqual(a.leader, true);
+      assert.strictEqual(b.leader, false);
+      const id = await b.insert({ $type: 'Task', title: 'from a tab' });
+      assert.deepStrictEqual(await a.get(id), { $type: 'Task', title: 'from a tab' });
+      await waitUntil(() => c.hasRecord(id), { timeout: 10_000 });
+      await c.transact(async (tx) => {
+        await tx.update(id, { done: true });
+        await tx.inc(id, 'edits', 1);
+      });
+      await waitUntil(async () => (await b.get(id))?.done === true, { timeout: 10_000 });
+      assert.strictEqual((await a.get(id)).edits, 1);
+      await assert.rejects(() => b.update('missing', { x: 1 }), { code: 'NOT_FOUND' });
+      // The leader's tab closes: the next takes the lock; the follower's channel still reaches the worker's server.
+      const leadership = b.waitForLeadership();
+      tabs.delete(a);
+      await a.close();
+      served = null;
+      await leadership;
+      assert.strictEqual(b.leader, true);
+      const later = await c.insert({ $type: 'Task', title: 'after the failover' });
+      assert.deepStrictEqual(await b.get(later), { $type: 'Task', title: 'after the failover' });
+      await waitUntil(() => c.hasRecord(later), { timeout: 10_000 });
     },
   );
 

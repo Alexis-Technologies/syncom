@@ -1596,9 +1596,10 @@
           "detail": "docs/guide/browser.md names OPFS and Web Crypto but not Ed25519 specifically; which browser versions expose Ed25519 in Web Crypto was not checked here. OPFS writes use `createWritable()`."
         },
         "worker": {
-          "mark": "⚠️",
-          "text": "the engine runs in a worker (`serveEngine` there, `connectEngine(worker)` in the main thread: the I/O off the main thread, tested under worker_threads); a database shared by several tabs through a SharedWorker leader is the planned `/shared`",
-          "source": "src/engines/remote.js; tests/engines.remote.test.js; docs/guide/backends.md#an-engine-in-a-worker"
+          "mark": "✅",
+          "text": "the leader in a SharedWorker: wrpc's server attaches each tab's port on its `wrpc:connect`, the tabs follow over `createSharedChannel(connect(url, { worker }))`; run over a MessageChannel in the integration test",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js",
+          "detail": "Free; the SharedWorker's server is wrpc's."
         },
         "reactNative": {
           "mark": "❌",
@@ -1616,10 +1617,9 @@
           "source": "docs/guide/backends.md#your-own"
         },
         "electron": {
-          "mark": "❌",
-          "text": "not documented or tested; no IPC bridge",
-          "source": "docs/guide/ (no Electron page)",
-          "detail": "The main process is Node.js and a renderer is a browser, so either half may run there; nothing checks it."
+          "mark": "⚠️",
+          "text": "the same leader/follower shape with the main process leading and the renderers following over Electron's `MessageChannelMain` — the handshake is wrpc's worker transport's; no Electron example is run in this repository yet",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js"
         },
         "tauri": {
           "mark": "❌",
@@ -1632,15 +1632,15 @@
           "source": "docs/guide/"
         },
         "multiTab": {
-          "mark": "⚠️",
-          "text": "one tab writes: `createDatabase()` holds a Web Lock (a lease on MongoDB); another tab opens the same database `readOnly: true` and reads what the writer lands, hearing it through the engine's change stream (IndexedDB, MongoDB); a leader that takes the others' writes is the planned `/shared`",
-          "source": "src/lock.js; src/database.js (readOnly, #hearChange); src/idb/engine.js (changes)",
-          "note": "There are no cross-tab change events and no read-only open: the other tabs wait for the lock (`lock: 'wait'`) or route reads and writes to the owner through a `BroadcastChannel`."
+          "mark": "✅",
+          "text": "`@alexify/syncom/shared`: `openShared()` in every tab over one engine — one leads (a full database), the others follow (read-only over the same engine, the leader's writes heard through the engine's change stream) and write through it over a channel; the leader gone, a follower takes its place with the same node id and log",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js",
+          "detail": "A follower reads records whole: no `transaction` event, no `observe()` there; a recorded transaction cannot `insert`."
         },
         "leader": {
-          "mark": "⚠️",
-          "text": "no election API; `lock: 'wait'` hands the storage to the next tab",
-          "source": "src/lock.js:58-70; docs/guide/database.md#one-instance-per-directory"
+          "mark": "✅",
+          "text": "the election of `/shared`: Web Locks (`navigator.locks`) where they are, a heartbeat over a BroadcastChannel else; `waitForLeadership()`, `isLeader()`, the `leader` event; the database's own lock the last word",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js"
         },
         "storageContract": {
           "mark": "✅",
@@ -1720,8 +1720,8 @@
         },
         "remoteStorage": {
           "mark": "✅",
-          "text": "`serveEngine(engine, port)` / `connectEngine(port)` (`@alexify/syncom/engines`): the engine answered over a `MessagePort` — a worker thread, a SharedWorker, Electron's main process — every call a message; the database stays where it is opened",
-          "source": "src/engines/remote.js; tests/engines.remote.test.js"
+          "text": "`remoteEngine()`/`serveEngine()` over a MessagePort or worker (the I/O out of the main thread, one database), and `/shared` for several instances: the followers' writes over the leader's served writers (wrpc on a worker port)",
+          "source": "src/engines/remote.js; src/shared/shared.js; docs/guide/backends.md#an-engine-in-a-worker; docs/guide/shared.md; tests/engines.remote.test.js; tests/wrpc.integration.test.js"
         },
         "sharding": {
           "mark": "❌",
@@ -2729,10 +2729,9 @@
           "detail": "Events `peer`, `sync`, `bootstrap`, `error`, `refused`, `hello`, `node`; storage `change` and `apply`; OpenTelemetry spans and a replication-lag metric."
         },
         "replMultiTab": {
-          "mark": "⚠️",
-          "text": "one tab owns the storage and its sync; others get `LOCKED` or wait",
-          "source": "docs/guide/scaling.md#several-tabs; src/lock.js",
-          "detail": "A SharedWorker can share wrpc's connection (`WrpcClientProxy`), not the storage; a storage served from a worker is the planned follow-up."
+          "mark": "✅",
+          "text": "replication is the leader's alone: a follower neither dials nor hosts (`shared.sync` is `NOT_LEADER`); the next leader is the same node, with the same registry, so the peers see a reconnect",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js"
         },
         "serverProduct": {
           "mark": "✅",

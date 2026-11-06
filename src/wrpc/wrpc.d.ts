@@ -29,6 +29,17 @@ export interface WrpcLink extends SyncLink {
 
 export function createWrpcLink(client: WrpcClientLike, options?: WrpcLinkOptions): WrpcLink;
 
+/** The channel a follower of `@alexify/syncom/shared` carries its writes over: a wrpc client to the leader's router unit (`syncom-db`). */
+export interface SharedChannel {
+  call(method: string, args: unknown[]): Promise<unknown>;
+  close(): unknown;
+  readonly client: { call(method: string, args: unknown): Promise<unknown>; close(): unknown };
+}
+export function createSharedChannel(
+  client: { call(method: string, args: unknown): Promise<unknown>; close(): unknown },
+  options?: { unit?: string },
+): SharedChannel;
+
 /** What `client.use()` is fed so `client.api.syncom.changes` exists without a `load()`. */
 export const SYNC_INTROSPECTION: {
   readonly syncom: {
