@@ -28,7 +28,7 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 - **RxDB is the broader toolkit.** It has storages for more runtimes (Deno KV, FoundationDB,
   localStorage), replication plugins for nine backends and handlers that sync with one you already
   run, attachments, several tabs writing one database, a backup writer, conditional ops that replay
-  on every replica, and packages for Vue, Angular and signals. In 13 rows RxDB has something where
+  on every replica, and packages for Vue, Angular and signals. In 12 rows RxDB has something where
   syncom has nothing; the rows are not equal in weight, so read the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
@@ -446,7 +446,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Intermediate writes replicated</td><td>✅ every retained op travels, intermediate writes included</td><td>❌ latest state per document; intermediate writes collapse before a push</td></tr>
 <tr><td>Protocol version check</td><td>✅ <code>PROTOCOL</code> 1 in <code>hello</code>; another version is refused with 400</td><td>❌ none in the protocol; checkpoint and payload are the backend's</td></tr>
 <tr><td>Schema check at connect</td><td>✅ <code>hello</code> swaps <code>{ version, hash }</code>; same version, other hash emits <code>schema</code> drift</td><td>⚠️ RxServer only: schema version in the URL; older clients get 426 (<code>outdatedClient$</code>)<sup>36</sup></td></tr>
-<tr><td>Sync with an existing backend</td><td>❌ none: the far end must be a syncom node hosting <code>unit()</code></td><td>✅ any backend: pull, push and stream handlers over your own database</td></tr>
+<tr><td>Sync with an existing backend</td><td>✅ <code>replicate(db, { collection, pull, push })</code> (<code>@alexify/syncom/connector</code>): a collection kept in step with any backend through two handlers — pulled documents land as this node's writes and reach its peers, the collection's turns go out with what the backend was assumed to hold, conflicts the backend wins unless <code>resolve</code> decides</td><td>✅ any backend: pull, push and stream handlers over your own database</td></tr>
 <tr><td>Writing your own transport</td><td>✅ <code>SyncLink</code>: <code>call</code>, <code>subscribe</code> with <code>lastEventId</code>, <code>on</code>/<code>off</code>, <code>close</code>; optional <code>stream</code></td><td>✅ <code>replicateRxCollection</code>: <code>pull.handler</code>, <code>push.handler</code>, <code>pull.stream$</code> with <code>RESYNC</code></td></tr>
 <tr><td>Round trips to catch up</td><td><code>hello</code>, then one <code>push</code> per 500 ops, then one <code>changes</code> subscription</td><td>pulls until a short page; one push per 100 documents; a re-push per conflict</td></tr>
 <tr><td>Collections in one connection</td><td>✅ one link carries every collection of the storage, filtered by scope</td><td>⚠️ one replication per collection, each with its own requests and stream</td></tr>

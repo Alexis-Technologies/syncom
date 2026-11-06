@@ -55,6 +55,7 @@ const keywords = [
   'mongodb',
   'opentelemetry',
   'observability',
+  'connector',
 ].join(', ');
 
 // schema.org structured data — helps search and AI engines understand the
@@ -207,6 +208,7 @@ export default withMermaid({
               { text: 'Devtools', link: '/guide/devtools' },
               { text: 'Dumps and backups', link: '/guide/dump' },
               { text: 'Tombstone cleanup', link: '/guide/cleanup' },
+              { text: 'Connectors', link: '/guide/connector' },
             ],
           },
         ],

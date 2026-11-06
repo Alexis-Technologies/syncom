@@ -380,6 +380,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `TARGET_NOT_EMPTY` | `copyEngine()` (`@alexify/syncom/engines`) when the target engine already holds a database at `path` (`node.json`, or a record) | `path` |
 | `SCHEMA_MISMATCH` | `importJSON()` (`@alexify/syncom/dump`) of a dump made under another schema hash than this database runs, without `force` | `expected`, `given` |
 | `PIPELINE_FAILED` | the database's `error` event when a pipeline's handler threw (`@alexify/syncom/pipeline`): the pipeline stopped before the turn, its checkpoint stays, `start()` hands the turn over again | `name`, `eventId`, `cause` |
+| `REPLICATION_FAILED` | a connector's `error` event (`@alexify/syncom/connector`): a pull or push handler threw (`direction`), tried again after `retryTime`; `start()` on a canceled connector, `reSync()` on one not active (`direction` null) | `direction`, `name`, `cause` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on and writes nothing more; what was logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Also what an engine's write set, log group, seal, index, kv or copies put answers when a newer lease's document sits where it would write (MongoDB's fence) | `path`, `cause` |
 | `FOLLOW_LOST` | the storage's `error` event, on a follower (`readOnly: true`): the engine's change stream ended — an error, a close — so what the writer landed meanwhile was not heard; the follower subscribes again first and then reads every record again (a record removed meanwhile loses its row) | `path`, `cause` |
@@ -749,6 +750,25 @@ again — a turn is handled at least once, never skipped.
 
 The `transaction` event carries `eventId`, the log position of the turn's last op, which is what a pipeline keeps.
 A handler's write to the source is another turn, handed over again: derive into another collection.
+
+## Connector (subpath)
+
+`@alexify/syncom/connector` — `replicate(db, { name, collection, pull, push, live, retryTime, batchSize, modifier,
+resolve, autoStart })`: one collection kept in step with a backend of its own through two handlers — see
+[Connectors](../guide/connector).
+
+| Member | Notes |
+| --- | --- |
+| `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), a document equal to the record making no op |
+| `pull.stream(emit)` → stop | The backend's live changes: `emit({ documents, checkpoint })`, or `emit('RESYNC')`; without it a live connector pulls every `retryTime` |
+| `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it; answers the rows refused, each as the backend holds it |
+| `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise |
+| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good; pulls and pushes again |
+| `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push through; nothing waiting to go out and nothing in flight either way |
+| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }`; whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `pulls`, `pushes`, `pending`) |
+
+Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,
+deleted, resolved })`, `error` (`REPLICATION_FAILED` with `direction`), `active` `(boolean)`.
 
 ## Cleanup (subpath)
 

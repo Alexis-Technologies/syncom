@@ -29,6 +29,7 @@ same process may run with others.
 | `@alexify/syncom/dump` | a database as JSON and back: `exportJSON`/`exportPages`, `importJSON` (merge or insert), `migrateStorage` between engines | functions over a database |
 | `@alexify/syncom/pipeline` | a handler over every change of a collection, once, in order, checkpointed — a derived collection | `createPipeline(db, { name, source, handler })` |
 | `@alexify/syncom/cleanup` | tombstone cleanup: an old, acknowledged tombstone folded whole into the `tombstones` kv namespace | `cleanup(db, options)` |
+| `@alexify/syncom/connector` | a collection kept in step with a backend of its own through `pull` and `push` handlers — the adapters beside it speak CouchDB, GraphQL, Firestore, Supabase, MongoDB, Appwrite, Google Drive, OneDrive | `replicate(db, { name, collection, pull, push })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |
@@ -129,6 +130,7 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 | `/memory` | 3.3 KB | `/layered` | 1.5 KB |
 | `/local` | 2.8 KB | `/state` | 2.9 KB |
 | `/dump` | 6.6 KB | `/pipeline` | 3.1 KB |
+| `/connector` | 7.0 KB | | |
 | `/cleanup` | 3.0 KB | `/engines` | 9.9 KB |
 | `/idb` | 4.9 KB | `/search` | 1.1 KB |
 | `/order` | 1.0 KB | `/contracts` | 1.0 KB |

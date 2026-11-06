@@ -639,6 +639,15 @@ const ENTRIES = [
   // (collections plan, C4.3).
   // 6.5 measured; 7.
   { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
+  // Connectors: a collection kept in step with a backend through pull/push handlers, the checkpoint in the `connector`
+  // kv namespace (sync-parity plan, S2). The plan said 5; measured alone it brings shape.js (the id check, the canonical
+  // JSON it compares a document by) and the emitter — 7.0; 7.5, raised by name.
+  {
+    label: 'connector — browser (@alexify/syncom/connector)',
+    entry: 'src/connector/connector.js',
+    platform: 'browser',
+    budget: 7.5,
+  },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.

@@ -167,6 +167,10 @@
       "types": "./src/cleanup/cleanup.d.ts",
       "default": "./src/cleanup/cleanup.js"
     },
+    "./connector": {
+      "types": "./src/connector/connector.d.ts",
+      "default": "./src/connector/connector.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -238,7 +242,8 @@
     "sqlite",
     "mongodb",
     "opentelemetry",
-    "observability"
+    "observability",
+    "connector"
   ],
   "author": "Alex Dolid <dolid.sasha@gmail.com>",
   "license": "MIT",

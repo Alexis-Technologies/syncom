@@ -302,6 +302,8 @@ alert to key on:
 | error | `tags.unreadable` | `tags.json` unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired |
 | warn | `tags.dropped`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); a registry entry that cannot be read, skipped |
 | info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
+| info | `connector.rebuild` | a connector pushing every record of its collection once: no checkpoint to resume the push from (`name`, `records`) |
+| warn | `connector.failed`, `connector.checkpoint.unreadable`, `connector.checkpoint.failed`, `connector.document.malformed`, `connector.stream.malformed`, `connector.stream.stop` | a connector's handler threw (`name`, `direction`, `err`; also its `error` event, `REPLICATION_FAILED`; tried again after `retryTime`); its checkpoint text does not read (read as none) or could not be saved; a pulled document that is no document (`index`), left out; a stream signal that is no page; the stream's stop threw |
 | info | `database.drop`, `collection.remove`, `collection.removed`, `pipeline.rebuild` | the destructive operations said out loud: `drop()` (`path`); `collection.remove()` done (`entity`, `purge`, `removed`); `removeCollection()` (`entity`); a pipeline handing every record of its source over (`name`, `records`) |
 | debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues`, `cleanup.sweep` (`folded`, `dropped`, `skipped`, `ms`) | routine |
 

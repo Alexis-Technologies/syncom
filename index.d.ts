@@ -595,6 +595,7 @@ export type SyncomErrorCode =
   | 'IN_HOOK'
   | 'IN_TRANSACTION'
   | 'PIPELINE_FAILED'
+  | 'REPLICATION_FAILED'
   | 'NOT_FOUND'
   | 'EXISTS'
   | 'FIELD_KIND'

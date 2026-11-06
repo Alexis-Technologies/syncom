@@ -86,6 +86,16 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
 
 ### Added
 
+- **Connectors: `@alexify/syncom/connector`.** `replicate(db, { name, collection, pull, push })` keeps one
+  collection in step with a backend of its own through two handlers: `pull(checkpoint, batchSize)` — the
+  backend's documents since a position, landed as this node's writes (one transaction a page, a document
+  equal to the record making no op, so an echo is nothing), `pull.stream(emit)` for the backend's live
+  changes — and `push(rows)` — the collection's records as the turns change them, with what the backend was
+  assumed to hold, the rows it refuses answered as conflicts the backend wins unless `resolve` decides. The
+  checkpoint `{ pull, pushed }` lives in the `connector` kv namespace; a restart pulls from it and pushes
+  what the log holds since it. A handler that fails is `REPLICATION_FAILED` (`direction`) on the connector's
+  `error` event and tried again after `retryTime`. `awaitInitialReplication()`, `awaitInSync()`, `reSync()`,
+  `cancel()`, `stats()`.
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

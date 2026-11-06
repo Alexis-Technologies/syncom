@@ -142,6 +142,7 @@ const KV_NAMESPACES = Object.freeze([
   'pipeline',
   'tombstones',
   'shared',
+  'connector',
 ]);
 
 // A kv key, a tag's name, a piece's name: a text that names one thing and

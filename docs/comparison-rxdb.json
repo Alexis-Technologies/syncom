@@ -2438,9 +2438,9 @@
           "detail": "A different version is not refused: every op carries `v`, older records are lensed, newer ops applied or held (`ahead`)."
         },
         "foreignBackend": {
-          "mark": "❌",
-          "text": "none: the far end must be a syncom node hosting `unit()`",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`replicate(db, { collection, pull, push })` (`@alexify/syncom/connector`): a collection kept in step with any backend through two handlers — pulled documents land as this node's writes and reach its peers, the collection's turns go out with what the backend was assumed to hold, conflicts the backend wins unless `resolve` decides",
+          "source": "src/connector/connector.js; tests/connector.test.js; docs/guide/connector.md"
         },
         "customTransport": {
           "mark": "✅",
