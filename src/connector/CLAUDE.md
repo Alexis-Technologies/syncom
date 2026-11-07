@@ -107,7 +107,9 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   forgotten, `#forget`): past it a push probes first. The save is coalesced (`#save`: `#dirty`, one `#saveLoop` in
   flight, SAVE_GAP between writes, `#hurry`/`#flushSave` for at once — the end of a pull run, a push, a stream page,
   `cancel()`); a page's save is not awaited, so the pages of a run coalesce; a crash between a landing and its save
-  lands the page again (at least once) and makes an offline edit of that record a conflict. A handler that throws is
+  lands the page again (at least once) and makes an offline edit of that record a conflict. Every document and row is counted through the seam's writer (`#count`:
+  `syncom.connector.rows` by direction and result — pulled, applied, pushed, probed, refused, parked, conflict,
+  failed; `stats()` the same from memory). A handler that throws is
   told (`error`, `REPLICATION_FAILED` with `direction` and `retryIn`), kept
   (`errors`, the newest twenty) and tried again after a backoff (`#failed`: `retryTime · 2^n` up to `maxRetryTime`,
   ±25 % jitter, `#attempts` per direction reset by a success); nothing is skipped and no checkpoint moves past it. A

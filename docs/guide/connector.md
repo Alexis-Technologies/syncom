@@ -133,8 +133,9 @@ the first pull and the first push have succeeded — a first pull that fails kee
 and `awaitInSync()` once nothing waits to go out and nothing is in flight either way (`{ signal }` cuts a wait
 short). `cancel()` stops for good — the stream stopped, the timers cleared, what is in flight awaited, what is dirty
 saved; the database's `close()` cancels the connector the same way, so no handler is called after it. `reSync()`
-pulls and pushes again, the parked rows too. `stats()` counts the documents pulled and applied, the rows pushed, the
-conflicts, the documents and rows refused, what is pending and what is parked.
+pulls and pushes again, the parked rows too. `stats()` counts the documents pulled and applied, the rows pushed and
+probed, the conflicts, the documents and rows refused, what is pending and what is parked. With the telemetry plugin
+the same ride as `syncom.connector.rows`, by direction and result (see [Telemetry](./telemetry.md)).
 
 ## Live
 

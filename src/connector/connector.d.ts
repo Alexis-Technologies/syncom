@@ -141,6 +141,8 @@ export interface ConnectorStats {
   pulled: number;
   applied: number;
   pushed: number;
+  /** Rows pushed as a probe (`assumed: undefined`): the backend asked what it holds, nothing written. */
+  probed: number;
   conflicts: number;
   /** Documents and rows refused by name (the `refused` event). */
   refused: number;

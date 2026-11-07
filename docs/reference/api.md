@@ -779,7 +779,7 @@ through two handlers — see [Connectors](../guide/connector).
 | `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise, and when `resolve` throws |
 | `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good (the database's `close` does the same); pulls and pushes again, the parked rows too |
 | `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push succeeded (a failure keeps it waiting for the retry); nothing waiting to go out and nothing in flight either way |
-| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }` (the kv text `connector/<name>` holds them with `known`, the digest of the backend's state per record); whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`, `parked`) |
+| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }` (the kv text `connector/<name>` holds them with `known`, the digest of the backend's state per record); whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `probed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`, `parked`) |
 
 Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,
 deleted, resolved })`, `refused` `({ direction, id, reason, cause })` — a document or a row left out by name: on pull

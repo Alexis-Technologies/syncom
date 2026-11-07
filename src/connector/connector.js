@@ -208,7 +208,7 @@ class Replication extends Emitter {
   #wake = null;
   #errors = [];
   #waiters = new Set();
-  #stats = { pulled: 0, applied: 0, pushed: 0, conflicts: 0, refused: 0, pulls: 0, pushes: 0 };
+  #stats = { pulled: 0, applied: 0, pushed: 0, probed: 0, conflicts: 0, refused: 0, pulls: 0, pushes: 0 };
 
   constructor(db, options) {
     super();
@@ -305,7 +305,12 @@ class Replication extends Emitter {
     return this.#errors.slice();
   }
 
-  /** The counts: documents pulled and applied, rows pushed, conflicts met, refused, pulls and pushes made, pending, parked. */
+  // What the connector counts through the seam's writer (the disabled one without the telemetry plugin), by direction.
+  #count(direction, result, count = 1) {
+    this.#seam.otel.recordConnector(direction, result, count);
+  }
+
+  /** The counts: documents pulled and applied, rows pushed and probed, conflicts met, refused, pulls and pushes made, pending, parked. */
   stats() {
     return {
       ...this.#stats,
@@ -542,6 +547,7 @@ class Replication extends Emitter {
     if (this.#errors.length >= MAX_ERRORS) this.#errors.shift();
     this.#errors.push(error);
     const retryIn = !this.#canceled && retry !== null && direction !== null ? this.#later(direction, retry) : null;
+    if (direction !== null) this.#count(direction, 'failed');
     this.#logger.warn({ event: 'connector.failed', name: this.#name, direction, retryIn, err: error });
     const message = `Connector ${this.#name}: the ${direction} failed (${error?.message ?? error})`;
     notify(this, this.#logger, 'error', failed(direction, message, error, this.#name, retryIn));
@@ -658,6 +664,7 @@ class Replication extends Emitter {
   // why), counted, and left out — the rest of its page is not held up by it.
   #refuse(direction, id, reason, cause) {
     this.#stats.refused++;
+    this.#count(direction, 'refused');
     this.#logger.warn({ event: 'connector.document.refused', name: this.#name, direction, id, reason, err: cause });
     notify(this, this.#logger, 'refused', { direction, id, reason, cause });
   }
@@ -708,6 +715,7 @@ class Replication extends Emitter {
       docs.push(doc);
     }
     this.#stats.pulled += documents.length;
+    this.#count('pull', 'pulled', documents.length);
     const collection = this.#collection;
     const conflicts = [];
     let applied = 0;
@@ -756,9 +764,11 @@ class Replication extends Emitter {
       );
     }
     for (let i = 0; i < refusals.length; i++) this.#refuse('pull', refusals[i][0], refusals[i][1], refusals[i][2]);
+    this.#count('pull', 'conflict', conflicts.length);
     for (let i = 0; i < conflicts.length; i++) notify(this, this.#logger, 'conflict', conflicts[i]);
     if (docs.length === 0) return;
     this.#stats.applied += applied;
+    this.#count('pull', 'applied', applied);
     notify(this, this.#logger, 'received', { documents: docs.length, applied });
   }
 
@@ -1065,6 +1075,7 @@ class Replication extends Emitter {
     this.#attempts.push = 0;
     await this.#answered(rows, texts, answers);
     this.#stats.pushed += rows.length;
+    this.#count('push', 'pushed', rows.length);
     return rows;
   }
 
@@ -1096,7 +1107,12 @@ class Replication extends Emitter {
         this.#pending.delete(id);
         continue;
       }
-      rows.push({ id, data: out, deleted: data === null, assumed: this.#assumedOf(id) });
+      const assumed = this.#assumedOf(id);
+      if (assumed === undefined) {
+        this.#stats.probed++;
+        this.#count('push', 'probed');
+      }
+      rows.push({ id, data: out, deleted: data === null, assumed });
       texts.push(text);
     }
     return { rows, texts };
@@ -1176,6 +1192,7 @@ class Replication extends Emitter {
     this.#pending.delete(id);
     this.#probing.delete(id);
     this.#parked.add(id);
+    this.#count('push', 'parked');
     this.#refuse('push', id, error?.code ?? 'backend', error);
   }
 
@@ -1225,6 +1242,7 @@ class Replication extends Emitter {
       this.#learn(row.id, text);
     }
     for (let i = 0; i < refusals.length; i++) this.#refuse('push', refusals[i][0], refusals[i][1], refusals[i][2]);
+    this.#count('push', 'conflict', decided.length);
     for (let i = 0; i < decided.length; i++) notify(this, this.#logger, 'conflict', decided[i].event);
   }
 }

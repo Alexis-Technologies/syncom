@@ -32,6 +32,8 @@ src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections,
   its backtracking, and `^(a+)+$` over 27 letters held the event loop for seconds — a model's pattern never runs
   unasked. The collection's own refusals (`NOT_FOUND`, a validator's, `PLUGIN_MISSING` without the query plugin)
   come through as the SyncomErrors they are.
+  Every call is counted through the seam's writer (`syncom.mcp.calls` by verb: `ok`, `refused` — a TypeError at the
+  door — or `error`), never through a require of the telemetry plugin.
 - **`readOnly` is no writer at all.** The three writers are not made, not refused: a read-only tool set has nothing
   an agent could call to write.
 - **A sealed record is the key holder's, not the agent's.** `query` and `count` read through

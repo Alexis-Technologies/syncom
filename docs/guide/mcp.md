@@ -61,6 +61,9 @@ the collection's own call, whose refusals come through as they are: `NOT_FOUND` 
 validator's `ValidationError`, `PLUGIN_MISSING` where the database has no query plugin. `checkArgs(schema, args)`
 is the check on its own.
 
+With the telemetry plugin every call is counted — `syncom.mcp.calls`, by verb and result (`ok`, `refused` at the
+door, `error` from the collection); see [Telemetry](./telemetry.md).
+
 ## Registering the tools
 
 With the MCP SDK's server, the definitions are what `tools/list` answers and `execute` what `tools/call` runs —

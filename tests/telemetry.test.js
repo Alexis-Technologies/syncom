@@ -32,6 +32,9 @@ const { attachments } = require('../src/attachments/attachments.js');
 const { createFakeLocks } = require('./utils/fake-locks.js');
 const { createLeaderPort } = require('./utils/fake-port.js');
 const { DB } = require('../src/symbols.js');
+const { replicate } = require('../src/connector/connector.js');
+const { createFakeBackend } = require('./utils/fake-backend.js');
+const { createTools } = require('../src/mcp/mcp.js');
 
 // A real SDK, exporting into memory. Anything less would not prove that what
 // syncom emits is actually a valid span or a valid metric.
@@ -460,6 +463,72 @@ test('createTelemetry: what enables it', async (t) => {
     assert.strictEqual(stats.promotions, 1);
     assert.strictEqual(stats.forwarded, 1);
   });
+
+  await t.test(
+    "the connector and the agent's tools record their work: documents pulled and applied, rows pushed, a probe, a row refused and parked, a conflict, a failure; a tool's calls by verb",
+    async (t2) => {
+      const { meter, collect } = createMetrics();
+      const { storage } = await openTemp(t2, { telemetry: { meter }, schema: { entities: { Task: {} } } });
+      const rows = (direction, result) =>
+        labelled(collect, 'syncom.connector.rows', { 'syncom.direction': direction, 'syncom.result': result });
+      const backend = createFakeBackend();
+      backend.write('t1', { title: 'from the backend' });
+      const connect = () => {
+        const replication = replicate(storage, {
+          name: 'main',
+          collection: 'Task',
+          ...backend.handlers(),
+          retryTime: 20,
+        });
+        t2.after(() => replication.cancel().catch(() => {}));
+        return replication;
+      };
+      const replication = connect();
+      await replication.awaitInitialReplication();
+      assert.ok((await rows('pull', 'pulled')) >= 1, 'pulled');
+      assert.ok((await rows('pull', 'applied')) >= 1, 'applied');
+      // The first push fails and is tried again; then a row the backend refuses by name is parked.
+      backend.fail('push', 1);
+      await storage.Task.insert({ id: 't2', title: 'pushed' });
+      await replication.awaitInSync();
+      assert.strictEqual(await rows('push', 'failed'), 1);
+      assert.ok((await rows('push', 'pushed')) >= 1, 'pushed');
+      backend.refuse('bad', new Error('refused by name'));
+      await storage.Task.insert({ id: 'bad', title: 'refused' });
+      await replication.awaitInSync();
+      assert.strictEqual(await rows('push', 'refused'), 1);
+      assert.strictEqual(await rows('push', 'parked'), 1);
+      // The backend moved behind the connector's back: the edit here is a conflict the backend wins.
+      backend.set('t2', { title: 'changed behind' });
+      await storage.Task.update('t2', { title: 'edited here' });
+      await replication.awaitInSync();
+      assert.strictEqual(await rows('push', 'conflict'), 1);
+      const stats = replication.stats();
+      assert.ok(stats.pulled >= 1 && stats.applied >= 1 && stats.pushed >= 1, JSON.stringify(stats));
+      assert.deepStrictEqual([stats.conflicts, stats.refused, stats.parked, stats.probed], [1, 1, 1, 0]);
+      // A restart with an edit made offline: the digest is durable, the text is not — the row goes as a probe.
+      await replication.cancel();
+      await storage.Task.update('t2', { title: 'edited offline' });
+      const again = connect();
+      await again.awaitInitialReplication();
+      await again.awaitInSync();
+      assert.ok(again.stats().probed >= 1, JSON.stringify(again.stats()));
+      assert.ok((await rows('push', 'probed')) >= 1, 'probed');
+      // The agent's tools: a call that ran, one the schema refused, one the collection refused.
+      const tools = createTools(storage);
+      const named = (name) => tools.find((tool) => tool.name === name);
+      await named('Task_query').execute({});
+      await assert.rejects(named('Task_query').execute({ bogus: 1 }), { name: 'TypeError' });
+      await assert.rejects(named('Task_insert').execute({ data: { id: 't1', title: 'again' } }), { code: 'EXISTS' });
+      const calls = (verb, result) =>
+        labelled(collect, 'syncom.mcp.calls', { 'syncom.procedure': verb, 'syncom.result': result });
+      assert.deepStrictEqual(
+        [await calls('query', 'ok'), await calls('query', 'refused'), await calls('insert', 'error')],
+        [1, 1, 1],
+      );
+      assertNoIdentityLabels(await collect());
+    },
+  );
 
   await t.test('a meter missing a factory leaves metrics off, not the writer', () => {
     const otel = createTelemetry({ meter: { createCounter: () => ({ add() {} }) } });

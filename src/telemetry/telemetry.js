@@ -202,6 +202,8 @@ const createTelemetry = (telemetry) => {
   let blobBytes = null;
   let tabsCalls = null;
   let tabsFailovers = null;
+  let connectorRows = null;
+  let toolCalls = null;
   let gauges = null;
 
   if (hasMethod(meter, 'createCounter') && hasMethod(meter, 'createHistogram')) {
@@ -368,6 +370,15 @@ const createTelemetry = (telemetry) => {
       tabsFailovers = meter.createCounter('syncom.tabs.failovers', {
         unit: '{change}',
         description: 'Changes of role of a shared facade, by kind: promoted, demoted, yielded',
+      });
+      connectorRows = meter.createCounter('syncom.connector.rows', {
+        unit: '{row}',
+        description:
+          "A connector's documents and rows by direction (pull, push) and result: pulled, applied, pushed, probed, refused, parked, conflict, failed (a handler or a landing, tried again)",
+      });
+      toolCalls = meter.createCounter('syncom.mcp.calls', {
+        unit: '{call}',
+        description: "An agent's tool calls by procedure (the verb) and result: ok, refused (an argument's no), error",
       });
       // Observable: read when the SDK collects, through the callbacks
       // `gauges(read)` registers. Optional — a meter without the factory
@@ -604,6 +615,14 @@ const createTelemetry = (telemetry) => {
 
     recordFailover(kind) {
       add(tabsFailovers, 1, { 'syncom.kind': kind });
+    },
+
+    recordConnector(direction, result, count) {
+      if (count > 0) add(connectorRows, count, { 'syncom.direction': direction, 'syncom.result': result });
+    },
+
+    recordTool(verb, result) {
+      add(toolCalls, 1, { 'syncom.procedure': verb, 'syncom.result': result });
     },
 
     /**

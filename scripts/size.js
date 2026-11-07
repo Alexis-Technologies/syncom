@@ -769,7 +769,8 @@ const ENTRIES = [
   // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
   // 2.7 with `$regex` refused at the door, the `tools` allowlist, `annotations` on every tool and `changes` paged by
   // `limit` through `log.read` (review №7, E5.4; 2026-11-07). 2.75, raised by name — the plan's cap.
-  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 2.75 },
+  // 2.8 with every call counted through the seam's writer (review №7, E9.2; 2026-11-07). 3, raised by name.
+  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 3 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.

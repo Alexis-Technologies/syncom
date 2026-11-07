@@ -86,7 +86,7 @@ const forbidRegex = (value, path, depth) => {
 
 // A tool in the protocol's shape; its annotations are the verb's: the readers read-only and idempotent, a writer
 // makes (insert), overwrites (upsert) or takes away (delete), none reaches outside the database.
-const tool = (verb, name, description, inputSchema, run) =>
+const tool = (otel, verb, name, description, inputSchema, run) =>
   Object.freeze({
     name,
     description,
@@ -98,9 +98,17 @@ const tool = (verb, name, description, inputSchema, run) =>
       idempotentHint: verb !== 'insert',
       openWorldHint: false,
     },
+    // Every call counted (`syncom.mcp.calls`, by verb): ok, refused (an argument's no, a TypeError), error.
     async execute(args = {}) {
-      checkArgs(inputSchema, args);
-      return run(args);
+      try {
+        checkArgs(inputSchema, args);
+        const result = await run(args);
+        otel.recordTool(verb, 'ok');
+        return result;
+      } catch (error) {
+        otel.recordTool(verb, error instanceof TypeError ? 'refused' : 'error');
+        throw error;
+      }
     },
   });
 
@@ -239,7 +247,7 @@ const toolsOf = (db, name, collection, { verbs, limit: maxLimit, sealed, regex }
   const tools = [];
   for (let i = 0; i < defs.length; i++) {
     const [verb, description, schema, run] = defs[i];
-    if (verbs.has(verb)) tools.push(tool(verb, `${name}_${verb}`, description, schema, run));
+    if (verbs.has(verb)) tools.push(tool(seam.otel, verb, `${name}_${verb}`, description, schema, run));
   }
   return tools;
 };

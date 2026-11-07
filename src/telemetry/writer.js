@@ -81,6 +81,8 @@ const DISABLED = Object.freeze({
   recordBlob: noop,
   recordForward: noop,
   recordFailover: noop,
+  recordConnector: noop,
+  recordTool: noop,
   gauges: noop,
 });
 
@@ -126,6 +128,8 @@ const METHODS = Object.freeze([
   'recordBlob',
   'recordForward',
   'recordFailover',
+  'recordConnector',
+  'recordTool',
   'gauges',
 ]);
 

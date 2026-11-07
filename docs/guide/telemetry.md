@@ -159,6 +159,8 @@ appears on one.
 | `syncom.blob.bytes` | Counter | `By` | `syncom.direction` (as above) — the bytes stored, read, served and fetched |
 | `syncom.tabs.calls` | Counter | `{call}` | `syncom.result` (`ok` — a follower's call the leader answered, a value or a refusal / `retried` — tried again, the leader gone / `lost` — `LEADER_LOST` / `answered` — on the leader: a retry answered from what it kept) — `@alexify/syncom/shared` |
 | `syncom.tabs.failovers` | Counter | `{change}` | `syncom.kind` (`promoted` — a follower became the leader / `demoted` — a leader lost the election / `yielded` — elected, could not open, `PROMOTE_FAILED`) |
+| `syncom.connector.rows` | Counter | `{row}` | `syncom.direction` (`pull` / `push`), `syncom.result` (`pulled` — documents a pull handed over / `applied` — landed as writes / `pushed` — rows the push handler took / `probed` — rows asked of the backend as a probe (`assumed: undefined`), nothing written / `refused` — documents and rows refused by name / `parked` — rows the backend refused, set aside / `conflict` — the backend's state over an edit here, decided / `failed` — a handler or a landing failed, tried again) — `@alexify/syncom/connector` |
+| `syncom.mcp.calls` | Counter | `{call}` | `syncom.procedure` (the verb: `query` / `count` / `get` / `changes` / `wait_changes` / `insert` / `upsert` / `delete`), `syncom.result` (`ok` / `refused` — an argument the schema refuses, a `TypeError` / `error` — the collection's own refusal) — `@alexify/syncom/mcp` |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |

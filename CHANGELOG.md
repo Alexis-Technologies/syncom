@@ -101,7 +101,9 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   counted with their rows (`syncom.reads`, `syncom.reads.rows`), every blob put, read, served or fetched with its
   bytes (`syncom.blobs`, `syncom.blob.bytes`), a sweep is a span (`syncom.attachments.sweep`), and the tabs count
   their calls and their changes of role (`syncom.tabs.calls`, `syncom.tabs.failovers`; `tabs.promoted`,
-  `tabs.demoted` info lines). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
+  `tabs.demoted` info lines); a connector counts its documents and rows by direction and result (`syncom.connector.rows`:
+  pulled, applied, pushed, probed, refused, parked, conflict, failed; `stats().probed`) and an agent's tools their calls
+  by verb (`syncom.mcp.calls`). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
 - **The hosting side in three files (review №7, E11.1).** `src/sync/hosting.js` keeps hello, push, snapshot, the
   feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
   `query`, `count` and `blob`.
