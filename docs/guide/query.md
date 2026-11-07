@@ -101,15 +101,17 @@ query there is a `TypeError`.
 
 A record written `encrypted: true` ([Encryption at rest](./database#encryption-at-rest)) is stored as one
 ciphertext: the catalog holds a row for it with no fields, and no index knows it. A query still finds it — at the
-key holder. The sealed records of a collection join the candidates of every plan over it, each read and opened
-through the plugin's key and matched, ordered and windowed like the rest; the plain rows are answered as before —
-narrowed by the index, counted from its entries, covered by the catalog where the query asks for indexed fields
-alone — and only an ordered page is sorted after the read rather than taken from the index in its order. `$text`
-queries leave sealed records out: the text index never saw them. A node without the key does not hold sealed
-records (they are not replicated), so a query there sees none of them.
+key holder. The sealed records of a collection are read and opened through the plugin's key and matched, ordered and
+windowed like the rest, while the plain rows are answered as before — narrowed by the index, counted from its
+entries, covered by the catalog where the query asks for indexed fields alone, and an ordered page is still taken
+from the index in its order: the sealed records are read once and laid where they sort as the rows come, so a
+`limit(10)` reads ten plain records and the sealed ones, never the collection. `explain().sealed` says how many ride
+beside the plan. `$text` queries leave sealed records out: the text index never saw them. A node without the key
+does not hold sealed records (they are not replicated), so a query there sees none of them.
 
 The cost is the sealed records: `n` of them are `n` reads and `n` decryptions per query over the collection,
-whatever the query asks. A blind index — an equality on a sealed field narrowed by a keyed hash — is not here yet.
+whatever the query asks; the collection's own listing of them is kept per write, never rebuilt by a plain one. A
+blind index — an equality on a sealed field narrowed by a keyed hash — is not here yet.
 
 ## The plan
 
@@ -125,7 +127,7 @@ db.Task.select({ boardId: 'b1', rank: { $gte: 10 } }).order('rank').limit(4).exp
 // { scan: 'index', index: ['boardId', 'rank'], prefix: ['b1'], in: null,
 //   range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
 //   desc: false, sortedByIndex: true, covered: false, residual: false,
-//   narrow: [], estimate: 4,
+//   narrow: [], estimate: 4, sealed: 0,
 //   uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] } }
 ```
 

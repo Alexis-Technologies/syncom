@@ -2862,6 +2862,8 @@ export interface QueryPlan {
   narrow: { field: string; values: unknown[] }[];
   /** How many records the plan expects to read before the predicate: the scan's entries, the narrowest posting list, the window where sorted; null where nothing says. */
   estimate: number | null;
+  /** How many sealed records of the collection a run reads whole beside the plan (see Sealed records). */
+  sealed: number;
   /** What the query asks of its fields: an equality, a range, a sort — what an index advisor reads. */
   uses: { equalities: string[]; ranges: string[]; order: string[] };
 }

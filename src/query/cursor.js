@@ -699,15 +699,17 @@ class Cursor {
 
   /**
    * How the cursor is answered: `{ scan, index, prefix, range, desc,
-   * sortedByIndex, covered, residual }` — the index chosen (its fields) and
+   * sortedByIndex, covered, residual, sealed }` — the index chosen (its fields) and
    * how it is entered (an equality prefix, a range on the field after),
    * whether the rows come sorted by it (a window is then read as far as
    * `offset + limit`), whether only the catalog is read, whether the
-   * predicate still runs. A copy: edit it as you like.
+   * predicate still runs, how many sealed records are read whole beside the
+   * plan. A copy: edit it as you like.
    */
   explain() {
     const made = this.#plan();
-    return JSON.parse(JSON.stringify({ ...made, index: made.index === null ? null : made.index.slice() }));
+    const sealed = this.#sealed().length;
+    return JSON.parse(JSON.stringify({ ...made, index: made.index === null ? null : made.index.slice(), sealed }));
   }
 
   // The cache key of this cursor's result: what it reads and how; null with a filter (a function has
@@ -779,19 +781,21 @@ class Cursor {
     // By the plan: an index scanned in its order, the posting lists, or every record of the collection.
     const scanned = made.scan === 'index' ? scan(this.#entity, made, made.sortedByIndex ? this.#after : null) : null;
     // The collection's sealed records, where there are any: no index knows them, so they join the candidates
-    // and are read whole at the key holder while the plain rows are answered as before — nothing is sorted by an
-    // index then (a TopK sorts), and a posting list decides nothing of them.
+    // and are read whole at the key holder while the plain rows are answered as before — a posting list decides
+    // nothing of them. Where the rows come sorted by the index they are read once and merged in as the rows come
+    // (`merged`); elsewhere they join the candidates and a TopK or a sort after places them.
     const sealed = this.#sealed();
     const hasSealed = sealed.length > 0;
     const sealedSet = hasSealed ? new Set(sealed) : null;
     // Sorted by the index already (a key that holds arrays is not): enough rows is the window, read as
     // far as it and no further.
-    const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex && !hasSealed;
+    const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex;
+    const merged = byIndex && hasSealed;
     const enough = needsRows && (!ordered || byIndex) ? wanted : Infinity;
     const windowed = enough !== Infinity && !byIndex && !this.#ranked();
     let next;
     let byId = false;
-    if (scanned !== null && !windowed && !hasSealed) next = scanned.next;
+    if (scanned !== null && !windowed && (!hasSealed || merged)) next = scanned.next;
     else {
       let found =
         scanned !== null ? drained(scanned.next) : (candidates(this.#entity, this.#query) ?? ids(this.#entity));
@@ -817,6 +821,9 @@ class Cursor {
       }
     }
     const admits = (id) => {
+      // A sealed row is keyed under nothing in every sorted index: where the merge lays the sealed records, the
+      // scan's copy of one is not read again.
+      if (merged && sealedSet.has(id)) return false;
       if (narrowed === null || sealedSet?.has(id) === true) return true;
       for (let i = 0; i < narrowed.length; i++) if (!narrowed[i].has(id)) return false;
       return true;
@@ -828,13 +835,43 @@ class Cursor {
     // From after the edge of the page before, where there is one (the scan or the id seek took it already where
     // the rows come in the result's order; the check stays for a TopK).
     const edge = this.#after === null ? null : this.#edge();
-    const byOrder = edge === null ? null : compareFully(this.#order);
+    const byOrder = edge === null && !merged ? null : compareFully(this.#order);
+    const admitted = (candidate) =>
+      this.#predicate(candidate) &&
+      (this.#filter === null || this.#filter(candidate)) &&
+      (edge === null || byOrder(candidate, edge) > 0);
+    // Merged: the sealed records read once (one read of the engine), matched and sorted as the result is; each is
+    // laid before the first plain row it precedes as the rows come from the index, the rest after the last — so the
+    // window is read and no more, and the sealed records alone besides.
+    let sealedRows = null;
+    let laid = 0;
+    if (merged) {
+      sealedRows = [];
+      const found = await this.#source.loadMany(sealed);
+      for (let i = 0; i < sealed.length; i++) {
+        const record = found.get(sealed[i]) ?? null;
+        if (record === null) continue;
+        const candidate = rowOf(sealed[i], record);
+        if (admitted(candidate)) sealedRows.push(candidate);
+      }
+      sealedRows.sort(byOrder);
+    }
     const take = (candidate) => {
-      if (!this.#predicate(candidate) || (this.#filter !== null && !this.#filter(candidate))) return;
-      if (edge !== null && byOrder(candidate, edge) <= 0) return;
+      if (!admitted(candidate)) return;
+      if (sealedRows !== null) {
+        while (laid < sealedRows.length && sink.size < enough && byOrder(sealedRows[laid], candidate) <= 0) {
+          sink.push(sealedRows[laid++]);
+        }
+        if (sink.size >= enough) return;
+      }
       sink.push(candidate);
     };
     const inOrder = sink instanceof TopK || byIndex || byId;
+    // What a run answers: the sink's rows, the sealed rows not laid yet after them while the window has room.
+    const answer = () => {
+      if (sealedRows !== null) while (laid < sealedRows.length && sink.size < enough) sink.push(sealedRows[laid++]);
+      return { rows: sink.rows, sorted: inOrder };
+    };
     if (this.#covered(needsRows)) {
       for (let id = next(); id !== null && sink.size < enough; id = next()) {
         if (!admits(id)) continue;
@@ -849,7 +886,7 @@ class Cursor {
         }
         take(rowOf(id, indexed.fields));
       }
-      return { rows: sink.rows, sorted: inOrder };
+      return answer();
     }
     // A batch is as wide as what is still wanted, CONCURRENCY at most: a
     // `one()` reads one record at a time and stops at the first match, a
@@ -868,7 +905,7 @@ class Cursor {
       if (batch.length >= Math.min(CONCURRENCY, Math.max(1, enough - sink.size))) await read();
     }
     if (batch.length > 0 && sink.size < enough) await read();
-    return { rows: sink.rows, sorted: inOrder };
+    return answer();
   }
 
   #project(row) {

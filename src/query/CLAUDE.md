@@ -54,10 +54,15 @@ plan)` reads the entries between two binary searches, forward or backward; where
   the collection never rebuilds it, a collection without sealed records answers one frozen `EMPTY`) and `load`
   opens them (a copy of the data as the key here reads it, no meta to compose). `Cursor#matching` adds them to the
   candidates of every plan over the collection (`withSealed`: every id once), lets them past `narrow`'s posting
-  lists and reads them whole — in the covered loop too, where a plain row stays the catalog's — and gives up
-  `byIndex` while one is there (a TopK sorts); `count()` adds the sealed records that match (`#sealedMatches`) to
-  the index's estimate. A `$text` query never sees them (the text index did not), and a tag's source lists none.
-  The cost is the sealed records read, not the collection's rows — a blind index is not here yet.
+  lists and reads them whole — in the covered loop too, where a plain row stays the catalog's. Where the rows come
+  sorted by the index (`byIndex`) the page stays the index's (`merged`): the sealed records are read once
+  (`loadMany`), matched and sorted as the result is (`sealedRows`), laid before the first plain row each precedes
+  as `take` runs and after the last in `answer()` — the window is read and no more; a sealed row is keyed under
+  nothing in every sorted index, so `admits` drops the scan's copy of one there. Elsewhere a TopK or the sort after
+  places them. `count()` adds the sealed records that match (`#sealedMatches`) to the index's estimate; `explain()`
+  says how many ride beside the plan (`sealed`). A `$text` query never sees them (the text index did not), and a
+  tag's source lists none. The cost is the sealed records read, not the collection's rows — a blind index is not
+  here yet.
 - **A cursor is immutable, a result has one order, a live query is kept, not run.** Every builder hands
   back a new Cursor (`#clone`). A result is ordered by its keys then the id (`compareFully`; a `$text`
   query without keys keeps the index's ranking), so a page has an edge and a live result places a row

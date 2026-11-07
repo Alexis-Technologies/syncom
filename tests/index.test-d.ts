@@ -1027,6 +1027,7 @@ storage.record<Post>('id').then((record) => {
   expectType<'text' | 'index' | 'postings' | 'collection'>(made.scan);
   expectType<string[] | null>(made.index);
   expectType<boolean>(made.sortedByIndex);
+  expectType<number>(made.sealed);
   expectType<string[]>(made.uses.equalities);
   expectType<number | null>(made.estimate);
   expectType<{ field: string; values: unknown[] }[]>(made.narrow);

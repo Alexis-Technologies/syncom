@@ -7,6 +7,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
+const { SOURCE, CURSOR } = require('../src/symbols.js');
 const { waitUntil } = require('./utils/mesh.js');
 
 const ns = (rows) => rows.map((row) => row.n).sort((a, b) => a - b);
@@ -18,7 +19,7 @@ test('Sealed records in queries', async (t) => {
       path: `${t2.name}/${name}`,
       logger: false,
       defer: 0,
-      schema: { entities: { Note: { index: ['tag'] } } },
+      schema: { entities: { Note: { index: ['tag', 'n', ['tag', 'n']] } } },
     });
     t2.after(() => db.close().catch(() => {}));
     return db;
@@ -78,6 +79,103 @@ test('Sealed records in queries', async (t) => {
         code: 'ENCRYPTED',
       });
       assert.deepStrictEqual(ns(await db.Note.select({ tag: 'a' }).fetch()), [1]);
+    },
+  );
+
+  // The seam with every record read counted: a cursor made over it tells what a run cost.
+  const counting = (db) => {
+    const seam = db[SOURCE];
+    const reads = { plain: 0, sealed: 0, ids: [] };
+    const tally = (id) => {
+      reads.ids.push(id);
+      if (seam.row(id)?.encrypted === true) reads.sealed++;
+      else reads.plain++;
+    };
+    const source = {
+      ...seam,
+      load: (id) => {
+        tally(id);
+        return seam.load(id);
+      },
+      loadMany: (ids) => {
+        for (let i = 0; i < ids.length; i++) tally(ids[i]);
+        return seam.loadMany(ids);
+      },
+    };
+    return { source, reads };
+  };
+
+  await t.test(
+    'an ordered, limited cursor over an index with sealed records reads the window and the sealed records alone, in the index’s order: a page after an edge, desc, and explain() saying sortedByIndex and how many sealed were read',
+    async (t2) => {
+      const db = await open(t2, 'W');
+      for (let i = 1; i <= 40; i++) await db.insert({ $type: 'Note', tag: i % 2 ? 'odd' : 'even', n: i });
+      await db.insert({ $type: 'Note', tag: 'odd', n: 5.5 }, { encrypted: true });
+      await db.insert({ $type: 'Note', tag: 'even', n: 20.5 }, { encrypted: true });
+      await db.insert({ $type: 'Note', tag: 'odd', n: 100 }, { encrypted: true });
+      const { source, reads } = counting(db);
+      const select = (query = {}) => db[CURSOR]('Note', query, source);
+      const ns = (rows) => rows.map((row) => row.n);
+      // The first page: the plain rows come from the index in its order, the sealed records are read once and laid
+      // where they sort; ten plain records read, not forty-three.
+      const first = await select().order('n').limit(10).page();
+      assert.deepStrictEqual(ns(first.rows), [1, 2, 3, 4, 5, 5.5, 6, 7, 8, 9]);
+      assert.deepStrictEqual(reads, { ...reads, plain: 10, sealed: 3 }, 'the window and the sealed records alone');
+      // The next page after the edge: sought in the index, the sealed records judged by the edge.
+      reads.plain = 0;
+      reads.sealed = 0;
+      const second = await select().order('n').limit(10).after(first.next).fetch();
+      assert.deepStrictEqual(ns(second), [10, 11, 12, 13, 14, 15, 16, 17, 18, 19]);
+      assert.strictEqual(reads.plain, 10);
+      reads.plain = 0;
+      const third = await select()
+        .order('n')
+        .limit(10)
+        .after({ keys: [19], id: second[9].id })
+        .fetch();
+      assert.deepStrictEqual(ns(third), [20, 20.5, 21, 22, 23, 24, 25, 26, 27, 28]);
+      assert.strictEqual(reads.plain, 10);
+      // Descending: the sealed record past the index's top comes first.
+      reads.plain = 0;
+      assert.deepStrictEqual(ns(await select().desc('n').limit(5).fetch()), [100, 40, 39, 38, 37]);
+      assert.strictEqual(reads.plain, 5);
+      // A prefix on the index and a filter the index does not decide: the plain rows read are the window's.
+      reads.plain = 0;
+      assert.deepStrictEqual(ns(await select({ tag: 'odd' }).order('n').limit(4).fetch()), [1, 3, 5, 5.5]);
+      assert.strictEqual(reads.plain, 4);
+      // Covered — a projection the index holds: no plain record is read, the sealed ones alone.
+      reads.plain = 0;
+      reads.sealed = 0;
+      const covered = await select().order('n').limit(10).projection(['n']).fetch();
+      assert.deepStrictEqual(ns(covered), [1, 2, 3, 4, 5, 5.5, 6, 7, 8, 9]);
+      assert.deepStrictEqual([reads.plain, reads.sealed], [0, 3]);
+      // Every row, streamed by keyset: each once, in order.
+      const all = [];
+      for await (const row of select().order('n').stream({ batch: 7 })) all.push(row.n);
+      assert.strictEqual(all.length, 43);
+      assert.deepStrictEqual(
+        all,
+        [...all].sort((a, b) => a - b),
+      );
+      // The plan says so: sorted by the index, and how many sealed records ride beside it.
+      const explained = db.Note.select({}).order('n').limit(10).explain();
+      assert.strictEqual(explained.sortedByIndex, true);
+      assert.strictEqual(explained.sealed, 3);
+    },
+  );
+
+  await t.test(
+    'count() over a sorted index with sealed records is the index’s estimate and the sealed matches, no plain row read',
+    async (t2) => {
+      const db = await open(t2, 'C');
+      for (let i = 1; i <= 30; i++) await db.insert({ $type: 'Note', tag: 't', n: i });
+      await db.insert({ $type: 'Note', tag: 't', n: 10.5 }, { encrypted: true });
+      await db.insert({ $type: 'Note', tag: 't', n: 100 }, { encrypted: true });
+      const { source, reads } = counting(db);
+      assert.strictEqual(await db[CURSOR]('Note', { n: { $gte: 10 } }, source).count(), 21 + 2);
+      assert.deepStrictEqual([reads.plain, reads.sealed], [0, 2]);
+      assert.strictEqual(await db[CURSOR]('Note', { tag: 't' }, source).count(), 32);
+      assert.strictEqual(reads.plain, 0);
     },
   );
 
