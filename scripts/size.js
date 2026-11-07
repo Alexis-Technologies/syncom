@@ -453,7 +453,9 @@ const ENTRIES = [
   // 175.8 with the inbox under the rule, the verified forward, the dropped entries (review №7, E3.2; 2026-11-07). 176,
   // raised by name.
   // 176.5 with the $regex gate and the scoped walk (review №7, E3.3; 2026-11-07). 177, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 177 },
+  // 177.1 with the durable, shared revocations and the sessions let go of (review №7, E3.4; 2026-11-07). 177.5, raised by
+  // name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 177.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -582,7 +584,9 @@ const ENTRIES = [
   // (review №7, E3.2; 2026-11-07). 29, raised by name.
   // 29.2 with the $regex gate (safeRegex), the scoped walk with its budget and `capped`, Infinity kept (review №7,
   // E3.3; 2026-11-07). 29.5, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 29.5 },
+  // 29.8 with the sessions let go of with their sockets, the thin state taken off, the revocations durable and shared
+  // (review №7, E3.4; 2026-11-07). 30, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 30 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

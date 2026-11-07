@@ -716,6 +716,66 @@ test('Rules on the host and on the dialer', async (t) => {
     },
   );
 
+  await t.test(
+    'a session is let go of when its client’s socket closes: connections gone leave no session to tell',
+    async (t2) => {
+      const host = await createStorage(t2, 'HS2', { sync: {} });
+      const unit = host.sync.unit({ access: 'public' });
+      const links = [];
+      for (let i = 0; i < 5; i++) {
+        const link = new MemoryLink(unit);
+        await link.call('syncom/hello', { node: 'c', version: 1, scopes: ['A'] });
+        links.push(link);
+      }
+      assert.deepStrictEqual(host.sync.sessions(), [{ node: 'c', connections: 5 }]);
+      for (let i = 0; i < 4; i++) links[i].disconnect();
+      assert.deepStrictEqual(
+        host.sync.sessions(),
+        [{ node: 'c', connections: 1 }],
+        'four sockets gone, four sessions gone',
+      );
+      // A reconnect is the socket's new client greeted again: one session, not two.
+      links[4].disconnect();
+      assert.deepStrictEqual(host.sync.sessions(), []);
+      await links[4].reconnect();
+      await links[4].call('syncom/hello', { node: 'c', version: 1, scopes: ['A'] });
+      assert.deepStrictEqual(host.sync.sessions(), [{ node: 'c', connections: 1 }]);
+      // A closed link the same.
+      links[4].close();
+      assert.deepStrictEqual(host.sync.sessions(), [], 'nothing to tell: a revoke reaches no ghost');
+      host.sync.revoke('c', ['A']);
+      assert.deepStrictEqual(host.sync.sessions(), []);
+    },
+  );
+
+  await t.test(
+    'a hello carried by a read leaves nothing on the client: the next changes or push is 428 HELLO_FIRST, so every live session is one revoke reaches',
+    async (t2) => {
+      const host = await createStorage(t2, 'HS3', { schema: { entities: { Task: {} } }, sync: {} });
+      await host.insert({ $type: 'Task', n: 1 });
+      const link = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
+      const hello = { node: 'thin', version: 1 };
+      const { rows } = await link.call('syncom/query', { hello, entity: 'Task' });
+      assert.strictEqual(rows.length, 1);
+      assert.strictEqual(link.client.data.syncom, undefined, 'nothing left on the client');
+      assert.deepStrictEqual(host.sync.sessions(), [], 'no session for a read');
+      const first = (error) => error.code === 428 && error.reason === 'HELLO_FIRST';
+      await assert.rejects(
+        () =>
+          link.call('syncom/push', {
+            ops: packOps([{ origin: 'thin', seq: 1, ts: 1, type: 'write', id: 'x', data: {} }]),
+          }),
+        first,
+      );
+      await assert.rejects(() => link.call('syncom/count', { entity: 'Task' }), first, 'a read without its hello');
+      assert.deepStrictEqual(await link.call('syncom/count', { hello, entity: 'Task' }), { count: 1, capped: false });
+      assert.strictEqual(link.client.data.syncom, undefined);
+      // A hello said on the socket: a session, which a revoke reaches.
+      await link.call('syncom/hello', hello);
+      assert.deepStrictEqual(host.sync.sessions(), [{ node: 'thin', connections: 1 }]);
+    },
+  );
+
   await t.test('limits.rowsPerQuery Infinity means no cap', async (t2) => {
     const schema = { entities: { Task: { index: ['n'] } } };
     const tenantOf = (id, data) => data.tenant ?? '*';

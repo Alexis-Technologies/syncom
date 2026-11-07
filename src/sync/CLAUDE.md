@@ -122,9 +122,13 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
 challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no signing
   plugin: `UNPROVEN` reported, nothing pushed). `sync.revoke(node, scopes)` lives on the manager, never on the unit
   (a function on the unit would be a procedure on the wire): the sessions a unit greeted are the manager's Map by
-  node (`remember`), a revoke narrows their grant, counts their `generation` up (a feed of an older generation
-  ends at its next wake; one opened after serves the new grant) and tells the client through `server.sendTo`;
-  hello narrows what a revoked node asks for and answers `revoked`. The dialer narrows its registry entry, reports
+  node (`remember`; a session goes with its client's `close` — wrpc hands a reconnect a new client, so one outlived
+  by its socket would stay for good — `sync.sessions()` lists them), a revoke narrows their grant, counts their
+  `generation` up (a feed of an older generation ends at its next wake; one opened after serves the new grant) and
+  tells the client through `server.sendTo`; hello narrows what a revoked node asks for and answers `revoked`. The
+  revocations are durable — `revoked.json` of the root kv (`#loadRevoked`/`#saveRevoked`, coalesced; a read-only hub
+  saves none) — and shared: a writer over a shared log appends `{ v, node, revoke }` to the topic (`SharedHub.revoke`),
+  every hub folds it (`manager.adoptRevocation`: never appended again, `revoke` event `via: 'shared'`). The dialer narrows its registry entry, reports
   `REVOKED`, runs `onRevoke` or forgets the records of those scopes (`storage.forget`: the file and the row gone,
   the log's entries scrubbed and flagged skipped — never an op, the host would refuse it) and subscribes again (a
   feed's end never takes a newer handle off the peer: `#subscribe` compares). `query`/`count` are opt-in
@@ -136,9 +140,10 @@ challenge, host, node]`, both ids bound in — which the dialer answers before i
   budget ended it; a peer granted everything is answered `rowsPerQuery` rows at most; `Infinity` is kept as such in
   `normalizeLimits`, never deleted — a thin client's door, never a write's. Over a stateless transport (plain HTTP: one
   request, one wrpc client) no hello can come first, so a read may carry one — `args.hello`, run through `greet`
-  with `keep` false (`greeted`): the state set on the client for the call, no room joined, no session remembered, no
-  presence handed — and a host without `query` mounts no such procedure (wrpc answers Not Found, never
-  `QUERY_DISABLED`).
+  with `keep` false (`greeted`, `ephemeral`): the state set on the client for the call and taken off it after
+  (`ungreet`) — a persistent socket greeted by a read holds no state a session knows of, so its next push or
+  subscription is 428 — no room joined, no session remembered, no presence handed — and a host without `query`
+  mounts no such procedure (wrpc answers Not Found, never `QUERY_DISABLED`).
 - **Reconnect/backoff/resume belong to the link.** `SyncManager` re-runs only
   `hello` + `push` on `reconnect`; a refused restored subscription (428 "say
   hello first" — wrpc gives a reconnect a NEW server-side client) triggers a

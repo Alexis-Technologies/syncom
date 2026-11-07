@@ -66,6 +66,10 @@ const MAX_RECOVER_BACKOFF = 60_000;
 // those scopes are forgotten here.
 const SYNC_HOOKS = ['beforeConnect', 'beforeBootstrap', 'beforeSend', 'onRevoke'];
 
+// The scopes taken back from each node, kept in the root kv namespace so a restart grants them no more (SYNC-23).
+const REVOKED_FILE = 'revoked.json';
+const REVOKED_VERSION = 1;
+
 // The fields an op touches — what a revert of it brings back to the host's: a set's keys, an unset's names, the
 // field of a kind's op (`key`); null for the whole record (a write, a delete, a merge).
 const touchedBy = (op) => {
@@ -126,9 +130,13 @@ class SyncManager extends Emitter {
   // Who waits for a state of the peers (`awaitInSync`, `awaitInitialReplication`, `awaitDocumentPushed`): each a
   // check run whenever a peer moves, resolved once it holds.
   #waiters = new Set();
-  // Hosting side: the live sessions by node (what the units greeted) and the scopes taken back from each node.
+  // Hosting side: the live sessions by node (what the units greeted) and the scopes taken back from each node —
+  // the latter saved to `revoked.json` of the root kv namespace (coalesced: one save in flight, the next after it)
+  // and, over a shared log, appended to the topic for every hub to fold.
   #sessions = new Map();
   #revocations = new Map();
+  #savingRevoked = Promise.resolve();
+  #saveRevokedQueued = false;
   // The host's rule on what a peer may write (`sync.authorizeWrite`): every unit's unless it names its own, and the
   // writer's over what a follower forwarded to the inbox (src/sync/shared.js).
   #authorizeWrite = null;
@@ -164,6 +172,7 @@ class SyncManager extends Emitter {
 
   async #init() {
     this.#nodes = await this.#registry.load();
+    await this.#loadRevoked();
     // One listener for both halves: the dialing side's fan-out to its
     // links, and the hosting side's wake-up of every live `changes` feed.
     this.#onChange = (op, via, detail) => this.#fanOut(op, via, detail);
@@ -421,7 +430,83 @@ class SyncManager extends Emitter {
     for (const url of [...this.#peers.keys()]) this.#disconnect(url);
     if (this.#shared !== null) await this.#shared.stop();
     await this.#registry.drain();
+    await this.#savingRevoked;
     notify(this, this.#storage.logger, 'stop');
+  }
+
+  // The scopes taken back from each node, as the root kv holds them: `{ v: 1, nodes: { <node>: [scopes] } }`; a
+  // text that does not read is said and read as none.
+  async #loadRevoked() {
+    let parsed = null;
+    try {
+      const text = await this.#storage[DB].kv.get('', REVOKED_FILE);
+      if (text !== null) parsed = JSON.parse(text);
+    } catch (error) {
+      this.#storage.logger.warn({ event: 'sync.revoked.unreadable', err: error });
+    }
+    if (!isPlainObject(parsed) || parsed.v !== REVOKED_VERSION || !isPlainObject(parsed.nodes)) return;
+    for (const node of Object.keys(parsed.nodes)) {
+      const scopes = parsed.nodes[node];
+      if (!Array.isArray(scopes)) continue;
+      const held = new Set();
+      for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') held.add(scopes[i]);
+      if (held.size > 0) this.#revocations.set(node, held);
+    }
+  }
+
+  #saveRevoked() {
+    if (this.#storage.readOnly || this.#saveRevokedQueued) return;
+    this.#saveRevokedQueued = true;
+    this.#savingRevoked = this.#savingRevoked.then(async () => {
+      this.#saveRevokedQueued = false;
+      const nodes = {};
+      for (const [node, scopes] of this.#revocations) nodes[node] = [...scopes].sort();
+      try {
+        const text = JSON.stringify({ v: REVOKED_VERSION, nodes });
+        await this.#storage[DB].kv.put('', REVOKED_FILE, text, { atomic: true });
+      } catch (error) {
+        this.#storage.logger.warn({ event: 'sync.revoked.failed', err: error });
+      }
+    });
+  }
+
+  // A revocation taken in — this hub's own, or another hub's read from the shared log: the scopes held back from
+  // the node from here on, every live session of it told, every feed looking again, the file saved.
+  #adoptRevocation(node, scopes) {
+    let held = this.#revocations.get(node);
+    if (held === undefined) this.#revocations.set(node, (held = new Set()));
+    let news = 0;
+    for (let i = 0; i < scopes.length; i++) {
+      if (held.has(scopes[i])) continue;
+      held.add(scopes[i]);
+      news++;
+    }
+    const sessions = this.#sessions.get(node);
+    if (sessions !== undefined) {
+      for (const session of sessions) session.revoke(scopes);
+    }
+    // Every live feed looks again: one of the node's ends.
+    for (const wake of [...this.#wakers]) wake();
+    if (news > 0) this.#saveRevoked();
+    return news;
+  }
+
+  /** A revocation another hub of the shared log made (src/sync/shared.js): folded here, never appended again. */
+  adoptRevocation(node, scopes) {
+    if (typeof node !== 'string' || !Array.isArray(scopes)) return;
+    const taken = [];
+    for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') taken.push(scopes[i]);
+    if (taken.length === 0) return;
+    if (this.#adoptRevocation(node, taken) > 0) {
+      notify(this, this.#storage.logger, 'revoke', { node, scopes: taken, via: 'shared' });
+    }
+  }
+
+  /** Hosting side: the peers greeted here with a live session, and how many connections each holds. */
+  sessions() {
+    const out = [];
+    for (const [node, held] of this.#sessions) out.push({ node, connections: held.size });
+    return out;
   }
 
   /** Pushes whatever the connected peers lack right now; resolves when done. */
@@ -1559,15 +1644,9 @@ class SyncManager extends Emitter {
     for (let i = 0; i < scopes.length; i++) {
       if (typeof scopes[i] !== 'string') throw new TypeError('revoke(node, scopes): scopes must be strings');
     }
-    let held = this.#revocations.get(node);
-    if (held === undefined) this.#revocations.set(node, (held = new Set()));
-    for (let i = 0; i < scopes.length; i++) held.add(scopes[i]);
-    const sessions = this.#sessions.get(node);
-    if (sessions !== undefined) {
-      for (const session of sessions) session.revoke(scopes);
-    }
-    // Every live feed looks again: one of the node's ends.
-    for (const wake of [...this.#wakers]) wake();
+    this.#adoptRevocation(node, scopes);
+    // Over a shared log every hub takes the scopes back: the revocation goes to the topic, folded by each.
+    if (this.#shared !== null && !this.#storage.readOnly) this.#shared.revoke(node, scopes);
     notify(this, this.#storage.logger, 'revoke', { node, scopes: scopes.slice() });
   }
 }

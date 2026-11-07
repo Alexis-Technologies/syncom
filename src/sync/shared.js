@@ -129,6 +129,9 @@ const markText = (node) => JSON.stringify({ v: ENTRY_VERSION, node, mark: true }
 // What a writer did not take of an inbox entry — `[[key, seq]…]`, each op's stream key and seq — for the followers
 // to let go of the hold they keep for it.
 const droppedText = (node, dropped, inbox) => JSON.stringify({ v: ENTRY_VERSION, node, dropped, inbox });
+// A revocation (`sync.revoke`), for every hub of the log to fold: the node and the scopes taken back from it.
+const revokeText = (node, revoked, scopes) =>
+  JSON.stringify({ v: ENTRY_VERSION, node, revoke: { node: revoked, scopes } });
 
 // The scopes an inbox entry carries, as the forwarding hub granted them: strings, or null (a page for every scope).
 const scopesOf = (value) => {
@@ -150,12 +153,21 @@ const droppedOf = (value) => {
   return pairs;
 };
 
+// A revocation as an entry carries it: `{ node, scopes }`, the scopes strings; null for a shape that is none.
+const revokeOf = (value) => {
+  if (!isPlainObject(value) || typeof value.node !== 'string' || !Array.isArray(value.scopes)) return null;
+  const scopes = [];
+  for (let i = 0; i < value.scopes.length; i++) if (typeof value.scopes[i] === 'string') scopes.push(value.scopes[i]);
+  return scopes.length === 0 ? null : { node: value.node, scopes };
+};
+
 /**
  * What an entry of the shared log carries: `{ node, ops, scopes }` (the
  * appender's node id, the ops unpacked, the scopes an inbox entry was
  * forwarded under or null) — with `dropped` (`[[key, seq]…]`, `ops` empty)
- * for what a writer did not take of an inbox entry — null for a marker,
- * undefined for a text that is no entry of ours.
+ * for what a writer did not take of an inbox entry, with `revoke`
+ * (`{ node, scopes }`, `ops` empty) for scopes a hub took back from a node —
+ * null for a marker, undefined for a text that is no entry of ours.
  */
 const parseEntry = (text) => {
   if (typeof text !== 'string') return undefined;
@@ -169,6 +181,10 @@ const parseEntry = (text) => {
   if (value.mark === true) return null;
   if (Array.isArray(value.dropped)) {
     return { node: value.node, ops: [], scopes: null, dropped: droppedOf(value.dropped) };
+  }
+  if (value.revoke !== undefined) {
+    const revoke = revokeOf(value.revoke);
+    return revoke === null ? undefined : { node: value.node, ops: [], scopes: null, revoke };
   }
   if (!Array.isArray(value.ops)) return undefined;
   return { node: value.node, ops: unpackOps(value.ops), scopes: scopesOf(value.scopes) };
@@ -634,6 +650,11 @@ class SharedHub {
         if (parsed.dropped !== undefined) {
           // A writer let a follower know what it did not take of an inbox entry: the holds let go.
           if (this.#storage.readOnly) this.#release(parsed.dropped);
+        } else if (parsed.revoke !== undefined) {
+          // Another hub took scopes back from a node: every hub of the log does.
+          if (typeof this.#manager.adoptRevocation === 'function') {
+            this.#manager.adoptRevocation(parsed.revoke.node, parsed.revoke.scopes);
+          }
         } else if (this.#storage.readOnly) {
           if (name === 'inbox') return false;
           this.#shadowAdvance(parsed.ops);
@@ -900,6 +921,18 @@ class SharedHub {
     });
     this.#appending = marked.catch(NOOP);
     return marked;
+  }
+
+  /**
+   * A revocation this hub made (`sync.revoke`), appended to the topic for every other hub to fold — a hub takes
+   * the scopes back from the node wherever it is greeted. Best effort: told where the append fails, the other hubs
+   * grant what this one took back until one of them revokes too.
+   */
+  revoke(node, scopes) {
+    const text = revokeText(this.#storage.nodeId, node, scopes.slice());
+    this.#log
+      .append(this.#topic, text, { headers: { by: this.#token } })
+      .catch((error) => this.#logger.warn({ event: 'shared.revoke.failed', topic: this.#topic, node, err: error }));
   }
 
   /** Resolves once the consumer passed the entry `id`; rejects after `timeout` ms. */

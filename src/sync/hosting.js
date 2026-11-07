@@ -430,7 +430,8 @@ const greet = async (host, context, args, keep) => {
 
 // The live session of a greeted peer, by node, for `sync.revoke(node, scopes)`: told at once through the
 // server (`syncom/revoke`), its grant narrowed, its feeds ended. A session is let go of when the same client
-// greets again or another takes its place; one whose socket is gone is a no-op to tell.
+// greets again, when its socket closes (the client's `close` — wrpc hands a reconnect a new client, so a session
+// outlived by its socket would stay for good), and the node's set with its last one.
 const remember = (host, context, state) => {
   const { client, server } = context;
   let sessions = host.sessions.get(state.node);
@@ -450,6 +451,14 @@ const remember = (host, context, state) => {
     },
   };
   sessions.add(session);
+  if (typeof client?.once === 'function') {
+    client.once('close', () => {
+      const held = host.sessions.get(state.node);
+      if (held === undefined) return;
+      held.delete(session);
+      if (held.size === 0) host.sessions.delete(state.node);
+    });
+  }
 };
 
 // `prove`: the challenge hello handed this peer, signed under its key — the key that is its node id.
@@ -780,10 +789,21 @@ const cursorOf = (host, args, procedure, state) => {
 
 // The peer of a read: greeted before, or — a thin client over a stateless transport, where one request is one
 // client and no hello can come first — greeting with the call itself, `args.hello` the hello's own arguments, taken
-// as a hello is (authorize, the scopes, the revocations) and kept nowhere.
+// as a hello is (authorize, the scopes, the revocations) and kept nowhere: `ephemeral` says so, and the read takes
+// the state off the client when it is done (a persistent socket greeted by a read would otherwise push and
+// subscribe on a state no session knows of, which no revoke could reach).
 const greeted = async (host, context, args, procedure) => {
-  if (!context?.client?.data?.syncom && isPlainObject(args?.hello)) await greet(host, context, args.hello, false);
-  return peerOf(host, context, procedure);
+  let ephemeral = false;
+  if (!context?.client?.data?.syncom && isPlainObject(args?.hello)) {
+    await greet(host, context, args.hello, false);
+    ephemeral = true;
+  }
+  return { state: peerOf(host, context, procedure), ephemeral };
+};
+
+// What a read greeted for the call alone leaves: nothing.
+const ungreet = (context, ephemeral) => {
+  if (ephemeral && context?.client?.data !== undefined) delete context.client.data.syncom;
 };
 
 // A scoped read walks the cursor — in its order, `batch` rows a page — until the window is full or the read budget
@@ -819,21 +839,25 @@ const walkScoped = async (host, cursor, scopes, { limit, offset, budget }) => {
 };
 
 const query = (host) => async (context, args) => {
-  const state = await greeted(host, context, args, 'query');
-  let cursor = cursorOf(host, args, 'query', state);
-  const cap = host.limits.rowsPerQuery;
-  const limit = Number.isInteger(args.limit) && args.limit > 0 ? Math.min(args.limit, cap) : cap;
-  const offset = Number.isInteger(args.offset) && args.offset > 0 ? args.offset : 0;
-  const scopes = grant(args.scopes, state.scopes);
+  const { state, ephemeral } = await greeted(host, context, args, 'query');
   try {
-    // A grant of everything: the window is the cursor's, the cap the rows answered. A scoped peer: the cap bounds
-    // what is read, the window what goes out.
-    if (scopes !== null) return await walkScoped(host, cursor, scopes, { limit, offset, budget: cap });
-    if (limit !== Infinity) cursor = cursor.limit(limit);
-    if (offset > 0) cursor = cursor.offset(offset);
-    return { rows: await cursor.fetch(), capped: false };
-  } catch (error) {
-    throw refuseCall(host, 'query', error.message, 400, BAD_QUERY, state.node);
+    let cursor = cursorOf(host, args, 'query', state);
+    const cap = host.limits.rowsPerQuery;
+    const limit = Number.isInteger(args.limit) && args.limit > 0 ? Math.min(args.limit, cap) : cap;
+    const offset = Number.isInteger(args.offset) && args.offset > 0 ? args.offset : 0;
+    const scopes = grant(args.scopes, state.scopes);
+    try {
+      // A grant of everything: the window is the cursor's, the cap the rows answered. A scoped peer: the cap bounds
+      // what is read, the window what goes out.
+      if (scopes !== null) return await walkScoped(host, cursor, scopes, { limit, offset, budget: cap });
+      if (limit !== Infinity) cursor = cursor.limit(limit);
+      if (offset > 0) cursor = cursor.offset(offset);
+      return { rows: await cursor.fetch(), capped: false };
+    } catch (error) {
+      throw refuseCall(host, 'query', error.message, 400, BAD_QUERY, state.node);
+    }
+  } finally {
+    ungreet(context, ephemeral);
   }
 };
 
@@ -864,18 +888,22 @@ const blob = (host) => async (context, args) => {
 };
 
 const count = (host) => async (context, args) => {
-  const state = await greeted(host, context, args, 'count');
-  const cursor = cursorOf(host, args, 'count', state);
-  const scopes = grant(args.scopes, state.scopes);
+  const { state, ephemeral } = await greeted(host, context, args, 'count');
   try {
-    if (scopes === null) return { count: await cursor.count(), capped: false };
-    // A scoped count reads the rows (the catalog knows no scopes), as many as the budget allows: `capped` says
-    // when it ended the count.
-    const budget = host.limits.rowsPerQuery;
-    const { rows, capped } = await walkScoped(host, cursor, scopes, { limit: Infinity, offset: 0, budget });
-    return { count: rows.length, capped };
-  } catch (error) {
-    throw refuseCall(host, 'count', error.message, 400, BAD_QUERY, state.node);
+    const cursor = cursorOf(host, args, 'count', state);
+    const scopes = grant(args.scopes, state.scopes);
+    try {
+      if (scopes === null) return { count: await cursor.count(), capped: false };
+      // A scoped count reads the rows (the catalog knows no scopes), as many as the budget allows: `capped` says
+      // when it ended the count.
+      const budget = host.limits.rowsPerQuery;
+      const { rows, capped } = await walkScoped(host, cursor, scopes, { limit: Infinity, offset: 0, budget });
+      return { count: rows.length, capped };
+    } catch (error) {
+      throw refuseCall(host, 'count', error.message, 400, BAD_QUERY, state.node);
+    }
+  } finally {
+    ungreet(context, ephemeral);
   }
 };
 

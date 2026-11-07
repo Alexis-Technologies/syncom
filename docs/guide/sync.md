@@ -690,7 +690,7 @@ storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer; error.code: a string below, or a host's numeric refusal
-storage.sync.revoke(node, ['B']);  // hosting side: take scopes back from a peer — its feeds end, it is told, its next hello grants less
+storage.sync.revoke(node, ['B']);  // hosting side: take scopes back from a peer — its feeds end, it is told, its next hello grants less; kept across a restart, every hub's over a shared log
 storage.sync.on('revoke', ({ node, scopes }) => {});
 storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: a peer's ops refused — 'scope' | 'forged' | 'unsigned' | 'equivocation'
 storage.sync.on('start', () => {});

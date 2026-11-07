@@ -30,14 +30,15 @@ class MemoryLink extends Emitter {
     super();
     this.#unit = unit;
     this.#options = options;
-    // What wrpc's `context.client` looks like from a handler's point of view.
-    this.client = {
+    // What wrpc's `context.client` looks like from a handler's point of view: an emitter too, whose `close` the
+    // host hears when the socket goes (a session let go of with its connection).
+    this.client = Object.assign(new Emitter(), {
       id: `c${nextClientId++}`,
       data: {},
       binary: false,
       rooms: new Set(),
       join: (room) => void this.client.rooms.add(room),
-    };
+    });
     // The host's server (mesh.js): rooms and `sendTo` over the links of one host, so a handler's relay reaches the
     // other links.
     this.context = { client: this.client, server: options.server ?? null };
@@ -129,10 +130,11 @@ class MemoryLink extends Emitter {
 
   // --- the hazards -------------------------------------------------------
 
-  /** The socket died: live feeds stop, calls fail, `close` is announced. */
+  /** The socket died: live feeds stop, calls fail, `close` is announced — the host's client hears it too. */
   disconnect() {
     this.#down = true;
     for (const record of this.#subscriptions) record.controller?.abort();
+    void this.client.emit('close');
     void this.emit('close');
   }
 
@@ -154,6 +156,7 @@ class MemoryLink extends Emitter {
     this.#down = true;
     for (const record of this.#subscriptions) record.controller?.abort();
     this.#subscriptions.clear();
+    void this.client.emit('close');
   }
 }
 

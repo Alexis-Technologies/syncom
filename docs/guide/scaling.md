@@ -94,6 +94,11 @@ epoch is the log's). Without an inbox a read-only hub refuses a push with 503
 it — correct, wasteful: a mesh of writers needs no inbox (`inbox: false`),
 one writer and its followers need one.
 
+A **revocation** (`sync.revoke`) made on one hub reaches every hub of the
+log — appended to the topic, folded by each, kept by each in its
+`revoked.json` — so a client the hub took scopes back from is granted them
+on no hub, after no restart.
+
 A hub reads the log **once**, however many clients follow it: its consumer's
 read serves every `changes` feed from the entries it passed last (a ring of
 1 024), and only a feed whose cursor fell behind the ring reads the log its

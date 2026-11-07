@@ -632,10 +632,15 @@ host → dialer   syncom/revoke { scopes: ['…'] }
 ```
 
 `sync.revoke(node, scopes)` on the host: the peer's live feeds end, this
-event reaches it at once, its grant is narrower from here on, and its next
-hello says `revoked`. The dialer narrows its registry entry, reports
-`REVOKED`, runs `onRevoke` — without the hook it forgets every record of
-those scopes (`forget(id)`: no op) — and opens its feed again.
+event reaches it at once — every connection of the node's live session, a
+session going with its socket — its grant is narrower from here on, and its
+next hello says `revoked`. The host keeps what it took back in `revoked.json`
+of its root kv namespace (`{"v":1,"nodes":{"<node>":["B"]}}`), so a restart
+grants it no more, and over a [shared log](#the-shared-log) appends it to the
+topic (`{ v: 1, node, revoke: { node, scopes } }`), so every hub takes it
+back. The dialer narrows its registry entry, reports `REVOKED`, runs
+`onRevoke` — without the hook it forgets every record of those scopes
+(`forget(id)`: no op) — and opens its feed again.
 
 ### The presence event
 
@@ -677,7 +682,8 @@ appender's `pageSize` (500) an entry, in the order the appender accepted
 them; `scopes` rides on an inbox entry alone — the scopes the forwarding
 hub granted the client, what the landing hub bounds the ops to. A `mark`
 positions a snapshot: the id its append answered is the first page's
-`eventId`. `{ v: 1, node, dropped: [[key, seq]…], inbox }` names what a
+`eventId`. `{ v: 1, node, revoke: { node, scopes } }` is a revocation for
+every hub to fold (`sync.revoke`). `{ v: 1, node, dropped: [[key, seq]…], inbox }` names what a
 writer did not take of the inbox entry `inbox` — a record out of scope, a
 gap — by stream key and seq: a follower lets go of the hold it kept on the
 client's stream for it (a refused op is logged as a scrub and travels as an

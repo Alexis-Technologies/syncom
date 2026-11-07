@@ -534,6 +534,39 @@ test('Hubs over a shared log', async (t) => {
   );
 
   await t.test(
+    'revocations survive a restart and reach every hub of the log: revoked on one hub, refused at hello on another, kept across a reopen',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const h1 = await createStorage(t2, 'H1', { sync: { sharedLog: shared } });
+      const h2 = await createStorage(t2, 'H2', { sync: { sharedLog: shared } });
+      const revokes = [];
+      h2.sync.on('revoke', (event) => revokes.push(event));
+      await waitUntil(() => h2.sync.shared().running);
+      h1.sync.revoke('c', ['B']);
+      // The other hub folds it and says so; its hello grants the scope no more.
+      await waitUntil(() => revokes.length === 1, { timeout: 5000 });
+      assert.deepStrictEqual(revokes, [{ node: 'c', scopes: ['B'], via: 'shared' }]);
+      const hello = async (hub) => {
+        const probe = new MemoryLink(hub.sync.unit({ access: 'public' }));
+        return probe.call('syncom/hello', { node: 'c', version: 1, scopes: ['A', 'B'] });
+      };
+      assert.deepStrictEqual((await hello(h2)).revoked, ['B']);
+      assert.deepStrictEqual((await hello(h1)).revoked, ['B']);
+      // Reopened, both hubs still hold the scope back: the file of the root kv.
+      await h1.close();
+      await h2.close();
+      const h1again = await createStorage(t2, 'H1', { sync: { sharedLog: shared } });
+      const h2again = await createStorage(t2, 'H2', { sync: { sharedLog: shared } });
+      assert.deepStrictEqual((await hello(h1again)).revoked, ['B']);
+      assert.deepStrictEqual((await hello(h2again)).revoked, ['B']);
+      // A hub that joins the log later folds the revocation from the topic.
+      const h3 = await createStorage(t2, 'H3', { sync: { sharedLog: shared } });
+      await waitUntil(async () => ((await hello(h3)).revoked ?? []).includes('B'), { timeout: 5000 });
+      assert.deepStrictEqual(await h3.get('nothing'), null);
+    },
+  );
+
+  await t.test(
     'an entry whose apply fails on the engine is tried again, backed off, until it lands (SHARED_LOG_FAILED apply, told once); a hook that throws leaves the topic stuck after three',
     async (t2) => {
       const shared = createMemorySharedLog();

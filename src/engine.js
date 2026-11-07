@@ -9,7 +9,7 @@
 // `EngineDb`, `engine.remove(path)` takes every store of that database away.
 // A database is a set of stores over one `path`:
 //
-//   kv       small named texts beside the records — node.json, schema.json,
+//   kv       small named texts beside the records — node.json, schema.json, revoked.json,
 //            tags.json, the keys, the lock, the registry, the chain's blocks —
 //            `get/has/list/put/remove` by namespace and key; `create` where the
 //            medium can make a key exclusively (the lock prefers it)
