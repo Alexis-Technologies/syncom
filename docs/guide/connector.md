@@ -93,13 +93,32 @@ large — is answered as `{ id, error }` rather than a conflict: the row is park
 
 ## The checkpoint
 
-`{ pull, pushed }` — the backend's position pulled through, and this node's log position pushed through — lives in
-the `connector` kv namespace under the connector's name, written after each page. `start()` reads it: the backend
-is pulled from `pull`, and what the log holds since `pushed` is pushed — the records of the collection those entries
-touched, this connector's own writes left out. Where the log cannot resume from `pushed` (compacted past it, another
-epoch, a fresh connector), every record of the collection is pushed once (`connector.rebuild`), the ones just pulled
-and unchanged left out. A restart in the middle pushes a row twice at worst: the backend's compare-and-set, or the
-equality of the data, makes the second a no-op.
+One text in the `connector` kv namespace under the connector's name holds what a restart needs:
+
+```json
+{ "pull": 42, "pushed": "mw6l.17", "known": { "t1": "b-SQXlGHTSadY8-j1RK7Vt", "t2": null } }
+```
+
+`pull` is the backend's position pulled through (whatever the handler answered as a checkpoint), `pushed` this
+node's log position pushed through, and `known` the backend's state per record as last known — not the data but 22
+letters of its SHA-256 (the canonical JSON of the backend's shape; `null` for a record the backend holds nothing of;
+no entry for one gone on both sides), about 50 bytes a record. The text is saved coalesced: one write in flight and
+the next after a short gap while pages keep landing, at once at the end of a pull run, after a push, after a page of
+the stream, and on `cancel()`. Nothing is published yet, so the shape may still change.
+
+`start()` reads it: the backend is pulled from `pull` — a document judged by the digest as it would be by the state
+in memory, so this node's own echo over an offline edit is skipped — and what the log holds since `pushed` is pushed:
+the records of the collection those entries touched, this connector's own pulls left out. `pushed` is a frontier: it
+never passes a turn whose record still waits to go, so a restart pushes every pending turn again and, at worst, what
+was pushed after the oldest pending one — at least once, never lost. A record whose state is known by digest alone
+(after a restart) is pushed as a probe, `assumed: undefined` — "tell me what you hold": the handler answers it among
+the refused as the backend holds it and writes nothing; the state the digest names is assumed on the next push, any
+other is a conflict. An offline edit so lands through the compare-and-set at one extra round trip, and a backend that
+moved meanwhile is a conflict, never a silent loss. Where the log cannot resume from `pushed` (compacted past it,
+another epoch, a fresh connector), every record of the collection is asked about once (`connector.rebuild`): equal
+records are silent, differing ones conflicts, records the backend holds nothing of are made. A page landed by the
+stream whose digests were not yet written when the process died is pulled again from the saved `pull`; an edit made
+offline to such a record before the restart meets the backend's state as a conflict.
 
 ## Failures
 

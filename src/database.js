@@ -10,7 +10,7 @@
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger, taskScope, estimateStorage, persistStorage } = require('./utils.js');
-const { sha256 } = require('./crypto/digest.js');
+const { sha256, hashText } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Document } = require('./document.js');
@@ -1293,6 +1293,9 @@ class Database extends Emitter {
       },
       // The sealed records of a collection, by id: what a query reads whole at the key holder.
       sealed: (entity) => catalog.sealed(entity),
+      // SHA-256 of a text as base64url (src/crypto/digest.js hashText): what a connector names the backend's state
+      // by in its checkpoint, so that it bundles no hasher of its own.
+      digest: (text) => hashText(text),
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),

@@ -26,8 +26,13 @@ export interface PushRow<T = RecordData> {
   id: string;
   data: T | null;
   deleted: boolean;
-  /** The backend's state as this node last knew it (null: none known) — what a compare-and-set backend checks against. */
-  assumed: T | null;
+  /**
+   * The backend's state as this node last knew it (null: it holds nothing) — what a compare-and-set backend checks
+   * against. `undefined` is a probe — "tell me what you hold": the handler answers the row among the refused as the
+   * backend holds it (`{ id, data, deleted }`, a deletion for nothing) and writes nothing; the connector then pushes
+   * the row again with that state assumed, or lands a conflict.
+   */
+  assumed: T | null | undefined;
 }
 
 export interface PullHandlers<T = RecordData, C = unknown> {

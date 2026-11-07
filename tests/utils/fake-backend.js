@@ -65,7 +65,13 @@ const createFakeBackend = () => {
             const from = typeof checkpoint === 'number' ? checkpoint : 0;
             const page = changes.slice(from, from + batchSize);
             const documents = [];
-            for (const doc of page) documents.push(clone({ id: doc.id, data: doc.data, deleted: doc.deleted }));
+            for (let i = 0; i < page.length; i++) {
+              // One row per document, as a change feed answers: its newest state, where a later change is this
+              // page's or a later one's the document comes there.
+              const current = docs.get(page[i].id) ?? page[i];
+              if (current !== page[i] && changes.indexOf(current) > from + i) continue;
+              documents.push(clone({ id: current.id, data: current.data, deleted: current.deleted }));
+            }
             return { documents, checkpoint: from + page.length };
           },
           stream: (emit) => {

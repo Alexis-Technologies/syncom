@@ -34,7 +34,7 @@ const options: ReplicateOptions<Task, number> = {
   push: {
     handler: async (rows) => {
       expectType<PushRow<Task>[]>(rows);
-      expectType<Task | null>(rows[0].assumed);
+      expectType<Task | null | undefined>(rows[0].assumed);
       return [{ id: rows[0].id, data: { title: 'theirs' } }];
     },
   },

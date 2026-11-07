@@ -85,10 +85,23 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   a loop at microtask speed (it starved the event loop once). A turn heard while its id is in flight is pending
   again after the push (`#redo`), from that turn's position. Everything after the handler answered — the reads, the
   landing — runs inside one try: a failure keeps every row pending, is `#failed('push')` and tried again; `#flush()`
-  never rejects (`.catch(NOOP)` where it is not awaited). The log position taken BEFORE the rows are read is what
-  `pushed` moves to after the push: a restart pushes `log.since(pushed)` — the collection's records those entries
-  touched — or every record of the collection once where the log cannot resume (`connector.rebuild`; tombstones not
-  among them). A handler that throws is told (`error`, `REPLICATION_FAILED` with `direction` and `retryIn`), kept
+  never rejects (`.catch(NOOP)` where it is not awaited). `pushed` is a FRONTIER (`#frontier`): before the oldest
+  turn still pending, or the newest turn heard (`#last`, never `log.lastEventId` — a position reserved but not yet
+  announced would be claimed) where nothing is pending — a restart pushes `log.since(pushed)` (each id pending since
+  before its first entry there, `formatId(seq - 1)`) or every record of the collection once where the log cannot
+  resume (`connector.rebuild`: each a probe, `#probing`; tombstones not among them). Durably, `#digests` names the
+  backend's state per id (DIGEST_LENGTH of the seam's `digest` of the text; `[SOURCE].digest` is `hashText` so the
+  connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known }` (`#write`), loaded
+  into `#digests` alone: a pulled document is judged by digest where the text is not in memory (`#assumedText`), and
+  a push of such a record is a PROBE (`#assumedOf` → `assumed: undefined`): the handler answers what the backend
+  holds without writing, and `#answered` learns it where the digest names it (or, knowing nothing durably, where the
+  backend holds nothing or the row itself) and keeps the id pending for the next round — the row then goes with that
+  state assumed or says nothing — or lands a conflict. `#known` is bounded (KNOWN_MAX, the oldest not pending
+  forgotten, `#forget`): past it a push probes first. The save is coalesced (`#save`: `#dirty`, one `#saveLoop` in
+  flight, SAVE_GAP between writes, `#hurry`/`#flushSave` for at once — the end of a pull run, a push, a stream page,
+  `cancel()`); a page's save is not awaited, so the pages of a run coalesce; a crash between a landing and its save
+  lands the page again (at least once) and makes an offline edit of that record a conflict. A handler that throws is
+  told (`error`, `REPLICATION_FAILED` with `direction` and `retryIn`), kept
   (`errors`, the newest twenty) and tried again after a backoff (`#failed`: `retryTime · 2^n` up to `maxRetryTime`,
   ±25 % jitter, `#attempts` per direction reset by a success); nothing is skipped and no checkpoint moves past it. A
   pull whose checkpoint does not move while it answers full pages is asked `MAX_STALLS` times, then left to the stream.
@@ -101,8 +114,10 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   vendor's client as it is given, answers `{ pull, push }` to spread into `replicate()`'s options, and requires nothing
   (`scripts/size.js` holds each under 2 KB). What a compare-and-set needs — the revision or the stamp last seen for a
   document — lives in the adapter's memory for the connector's life: a connector started anew learns it with its
-  first pull, a push of a document never seen lands as a new one and is a conflict where one exists. A conflict is
-  answered as the backend holds the document (a deletion where it holds nothing), never guessed. A backend whose
+  first pull, a push of a document never seen lands as a new one and is a conflict where one exists. A row with
+  `assumed: undefined` is a PROBE: the adapter reads the document and answers it among the refused as the backend
+  holds it (a deletion for none), writing nothing. A conflict is answered as the backend holds the document (a
+  deletion where it holds nothing), never guessed. A backend whose
   schema is the application's (GraphQL) takes the queries and the readers as options — syncom knows no schema. Every
   adapter is tested over a fake of its backend in `tests/utils/fake-<name>.js` (`fake-couch`, `fake-graphql`,
   `fake-mongo` — the engine's, `fake-supabase`, `fake-firestore`, `fake-appwrite`, `fake-drive` — Google Drive's and

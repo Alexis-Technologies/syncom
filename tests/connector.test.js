@@ -12,6 +12,8 @@ const syncom = require('../src/all/all.js');
 const { replicate, Replication } = require('../src/connector/connector.js');
 const { createFakeBackend } = require('./utils/fake-backend.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
+const { kvNamespace } = require('../src/engine.js');
+const { DB } = require('../src/symbols.js');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const schema = { entities: { Task: {}, Note: {} } };
@@ -744,6 +746,186 @@ test('Connectors', async (t) => {
       assert.deepStrictEqual(backend.read(id), { title: 'v4|backend v4', shaped: true });
       assert.strictEqual(conflicts.length, 2);
       assert.deepStrictEqual(rows, []);
+    },
+  );
+
+  await t.test(
+    'a restart carries what the backend was assumed to hold: an offline edit lands through the compare-and-set, a backend that moved meanwhile is a conflict — the digests kept with the checkpoint',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const store = kvNamespace(a[DB].kv, 'connector');
+      const first = connect(t2, a, backend, { live: false });
+      await first.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await first.awaitInSync();
+      await first.cancel();
+      const saved = JSON.parse(await store.get('main'));
+      assert.deepStrictEqual(Object.keys(saved).sort(), ['known', 'pull', 'pushed']);
+      assert.match(saved.known[id], /^[A-Za-z0-9_-]{22}$/, 'the digest of what the backend holds, with the checkpoint');
+      // An edit while no connector runs; the pull cursor is before this node's own echo. A restart: the echo is
+      // skipped, the edit lands through the compare-and-set — no conflict, nothing lost.
+      await a.Task.update(id, { title: 'v2-local-edit' });
+      const second = connect(t2, a, backend, { live: false });
+      const conflicts = [];
+      second.on('conflict', (event) => conflicts.push(event));
+      await second.awaitInitialReplication();
+      await second.awaitInSync();
+      assert.deepStrictEqual(conflicts, []);
+      assert.deepStrictEqual(await a.get(id), { title: 'v2-local-edit', $type: 'Task' });
+      assert.deepStrictEqual(backend.read(id), { title: 'v2-local-edit' });
+      // The same with the echo consumed before the stop (the pull cursor past it).
+      await second.reSync();
+      await second.cancel();
+      await a.Task.update(id, { title: 'v3-local-edit' });
+      const third = connect(t2, a, backend, { live: false });
+      third.on('conflict', (event) => conflicts.push(event));
+      await third.awaitInitialReplication();
+      await third.awaitInSync();
+      assert.deepStrictEqual(conflicts, []);
+      assert.deepStrictEqual(backend.read(id), { title: 'v3-local-edit' });
+      await third.cancel();
+      // A backend that moved while no connector ran, under an offline edit: a conflict — the backend wins, told —
+      // never the edit pushed over it, never the backend's state laid over the edit in silence.
+      backend.set(id, { title: 'backend v4' });
+      await a.Task.update(id, { title: 'v4-local-edit' });
+      const fourth = connect(t2, a, backend, { live: false });
+      fourth.on('conflict', (event) => conflicts.push(event));
+      await fourth.awaitInitialReplication();
+      await fourth.awaitInSync();
+      assert.strictEqual(conflicts.length, 1);
+      assert.deepStrictEqual(conflicts[0].local, { title: 'v4-local-edit' });
+      assert.deepStrictEqual(conflicts[0].remote, { title: 'backend v4' });
+      assert.deepStrictEqual(await a.get(id), { title: 'backend v4', $type: 'Task' });
+      assert.deepStrictEqual(backend.read(id), { title: 'backend v4' });
+      // A record deleted on both sides leaves no digest behind.
+      await a.Task.delete(id);
+      await fourth.awaitInSync();
+      await fourth.cancel();
+      assert.deepStrictEqual(JSON.parse(await store.get('main')).known, {});
+    },
+  );
+
+  await t.test(
+    'pushed never passes a pending turn: 25 records, batch 10, the second push failing, a restart pushes the fifteen',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const first = connect(t2, a, backend, { live: false });
+      await first.awaitInitialReplication();
+      await first.cancel();
+      for (let i = 0; i < 25; i++) await a.insert({ $type: 'Task', n: i });
+      const { pull, push } = backend.handlers();
+      let calls = 0;
+      const failing = {
+        pull,
+        push: {
+          handler: (rows) => {
+            if (++calls === 2) throw new Error('backend down (push)');
+            return push.handler(rows);
+          },
+        },
+      };
+      const second = connect(t2, a, backend, { ...failing, live: false, batchSize: 10, retryTime: 60_000 });
+      const errors = [];
+      second.on('error', (error) => errors.push(error));
+      await waitUntil(() => errors.length === 1);
+      assert.strictEqual(backend.docs.size, 10, 'the first batch landed');
+      assert.strictEqual(second.stats().pending, 15);
+      // The checkpoint stands before the oldest pending turn: a restart finds the fifteen in the log.
+      assert.strictEqual(a.log.since(second.checkpoint.pushed).length, 15);
+      await second.cancel();
+      const third = connect(t2, a, backend, { live: false, batchSize: 10 });
+      await third.awaitInitialReplication();
+      await third.awaitInSync();
+      assert.strictEqual(backend.docs.size, 25);
+      assert.strictEqual(third.stats().pushed, 15, 'the fifteen, and nothing twice');
+      assert.strictEqual(a.log.since(third.checkpoint.pushed).length, 0);
+    },
+  );
+
+  await t.test(
+    'a rebuild asks the backend what it holds: equal records are silent, differing ones conflicts, unknown ones made; sealed records never go',
+    async (t2) => {
+      const backend = createFakeBackend();
+      backend.write('e1', { title: 'equal' });
+      backend.write('d1', { title: 'backend' });
+      const a = await open(t2, 'A');
+      await a.set('e1', { $type: 'Task', title: 'equal' });
+      await a.set('d1', { $type: 'Task', title: 'local' });
+      await a.set('n1', { $type: 'Task', title: 'new' });
+      const sealed = await a.insert({ $type: 'Task', title: 'secret' }, { encrypted: true });
+      // A fresh connector with both halves: the backend pulled first, then every record asked about.
+      const both = connect(t2, a, backend, { name: 'both', live: false });
+      const conflicts = [];
+      both.on('conflict', (event) => conflicts.push(event));
+      await both.awaitInitialReplication();
+      await both.awaitInSync();
+      assert.deepStrictEqual(
+        conflicts.map(({ id, local, remote }) => ({ id, local, remote })),
+        [{ id: 'd1', local: { title: 'local' }, remote: { title: 'backend' } }],
+      );
+      assert.deepStrictEqual(await a.get('d1'), { title: 'backend', $type: 'Task' });
+      assert.deepStrictEqual(backend.read('n1'), { title: 'new' });
+      assert.deepStrictEqual(backend.read('e1'), { title: 'equal' });
+      assert.strictEqual(backend.docs.get('e1').rev, 1, 'equal: nothing written');
+      assert.strictEqual(backend.docs.get('d1').rev, 1, 'the backend won: nothing written');
+      assert.strictEqual(backend.docs.has(sealed), false, 'a sealed record never goes');
+      await both.cancel();
+      // A push-only connector: every record is a probe — what the backend holds judged against the record.
+      backend.set('e2', { title: 'equal' });
+      backend.set('d2', { title: 'backend' });
+      await a.set('e2', { $type: 'Task', title: 'equal' });
+      await a.set('d2', { $type: 'Task', title: 'local' });
+      await a.set('n2', { $type: 'Task', title: 'new' });
+      const pushOnly = connect(t2, a, backend, { name: 'push-only', live: false, pull: undefined });
+      const judged = [];
+      pushOnly.on('conflict', (event) => judged.push(event));
+      await pushOnly.awaitInitialReplication();
+      await pushOnly.awaitInSync();
+      const ids = judged.map(({ id }) => id).sort();
+      assert.deepStrictEqual(ids, ['d2'], 'the differing record alone');
+      assert.deepStrictEqual(await a.get('d2'), { title: 'backend', $type: 'Task' });
+      assert.deepStrictEqual(backend.read('n2'), { title: 'new' });
+      assert.strictEqual(backend.docs.get('e2').rev, 1, 'equal: silent');
+      assert.strictEqual(backend.docs.has(sealed), false);
+      assert.strictEqual(backend.docs.size, 6);
+    },
+  );
+
+  await t.test(
+    'the checkpoint is saved coalesced — one write in flight, the next after a gap — and cancel() saves what is dirty',
+    async (t2) => {
+      const backend = createFakeBackend();
+      for (let i = 0; i < 35; i++) backend.write(`d${i}`, { n: i });
+      const a = await open(t2, 'A');
+      const kv = a[DB].kv;
+      const puts = [];
+      const put = kv.put.bind(kv);
+      // A slow store: pages land while a write is in flight.
+      kv.put = async (ns, key, value, options) => {
+        if (ns === 'connector' && key === 'main') {
+          puts.push(JSON.parse(value).pull);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return put(ns, key, value, options);
+      };
+      const store = kvNamespace(kv, 'connector');
+      const replication = connect(t2, a, backend, { live: false, batchSize: 10 });
+      await replication.awaitInitialReplication();
+      assert.strictEqual(replication.checkpoint.pull, 35);
+      assert.ok(puts.length <= 3, `four pages, ${puts.length} writes: ${puts.join(', ')}`);
+      assert.strictEqual(puts[puts.length - 1], 35, 'the last write holds the end of the run');
+      assert.strictEqual(JSON.parse(await store.get('main')).pull, 35);
+      // A run cut short by cancel(): what landed is saved before cancel() resolves.
+      for (let i = 35; i < 60; i++) backend.write(`d${i}`, { n: i });
+      const resync = replication.reSync();
+      await waitUntil(() => replication.stats().pulled > 35);
+      await replication.cancel();
+      await resync.catch(() => {});
+      const text = JSON.parse(await store.get('main'));
+      assert.strictEqual(text.pull, replication.checkpoint.pull, 'what was dirty at cancel is saved');
+      assert.ok(text.pull > 35);
     },
   );
 });
