@@ -183,6 +183,17 @@ test('every runtime export is declared in the types', () => {
   check('src/dump/dump.js', 'src/dump/dump.d.ts');
   check('src/pipeline/pipeline.js', 'src/pipeline/pipeline.d.ts');
   check('src/cleanup/cleanup.js', 'src/cleanup/cleanup.d.ts');
+  check('src/shared/shared.js', 'src/shared/shared.d.ts');
+  check('src/attachments/attachments.js', 'src/attachments/attachments.d.ts');
+  check('src/testing/testing.js', 'src/testing/testing.d.ts');
+  check('src/mcp/mcp.js', 'src/mcp/mcp.d.ts');
+  check('src/query/query.js', 'src/query/query.d.ts');
+  check('src/versions/versions.js', 'src/versions/versions.d.ts');
+  check('src/local/local.js', 'src/local/local.d.ts');
+  check('src/state/state.js', 'src/state/state.d.ts');
+  check('src/dump/dump.js', 'src/dump/dump.d.ts');
+  check('src/pipeline/pipeline.js', 'src/pipeline/pipeline.d.ts');
+  check('src/cleanup/cleanup.js', 'src/cleanup/cleanup.d.ts');
   check('src/connector/connector.js', 'src/connector/connector.d.ts');
   check('src/connector/couchdb.js', 'src/connector/couchdb.d.ts');
   check('src/connector/graphql.js', 'src/connector/graphql.d.ts');

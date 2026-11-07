@@ -505,6 +505,9 @@ storage.on('conflict', (event) => {
 expectType<string | undefined>(validationError.issues[0].conflict);
 storage.on('close', () => {});
 expectType<number>(storage.listenerCount('change'));
+expectType<Promise<void>>(storage.forget('id'));
+expectType<Promise<{ usage: number | null; quota: number | null }>>(storage.quota());
+expectType<Promise<boolean>>(storage.persist());
 expectError(storage.on('nope', () => {}));
 expectError(syncom.open({ sync: { sharedLog: {} } }));
 expectType<boolean>(syncom.isSharedLog({}));
