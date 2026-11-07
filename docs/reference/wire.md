@@ -501,10 +501,14 @@ An op outside the scopes hello granted is refused before anything reads it
 one that [equivocates](#the-per-stream-chain) is refused too
 (`equivocations`, the host's `refused` event with `reason: 'equivocation'`).
 A hub that cannot write and has a [shared log](#the-shared-log) with an
-inbox answers `forwarded: true` beside the counts: the ops in order of
-their streams went to the inbox for a hub that writes to land, `vector`
-moved past them, a duplicate or a gap by the vector the log keeps current
-counted and not forwarded.
+inbox verifies the page as a writer would (`forged`, `unsigned` counted and
+announced, never forwarded) and answers `forwarded: true` beside the counts:
+the ops in order of their streams went to the inbox for a hub that writes to
+land under its `authorizeWrite`, `vector` moved past them, a duplicate or a
+gap by the vector the log keeps current — and by what was forwarded before
+and the topic has not shown yet — counted and not forwarded. The hub's own
+vector moves once the topic shows an op; what the writer did not take of an
+inbox entry it names in the topic (`dropped`), and the hold is let go.
 
 | Code | `reason` | When |
 | --- | --- | --- |
@@ -665,7 +669,11 @@ appender's `pageSize` (500) an entry, in the order the appender accepted
 them; `scopes` rides on an inbox entry alone — the scopes the forwarding
 hub granted the client, what the landing hub bounds the ops to. A `mark`
 positions a snapshot: the id its append answered is the first page's
-`eventId`. `by` lets a hub pass its own entries without parsing them. A log
+`eventId`. `{ v: 1, node, dropped: [[key, seq]…], inbox }` names what a
+writer did not take of the inbox entry `inbox` — a record out of scope, a
+gap — by stream key and seq: a follower lets go of the hold it kept on the
+client's stream for it (a refused op is logged as a scrub and travels as an
+op). `by` lets a hub pass its own entries without parsing them. A log
 may yield a **hole** — `{ id, value: null, headers: { hole: '1' } }`, an id
 whose entry never came (`mongoSharedLog`: a crashed appender's number) —
 which a hub tells (`SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The

@@ -74,6 +74,10 @@ const INBOX_TRIM_EVERY = 64;
 // The entries of the topic the consumer passed last, kept for the feeds: a feed whose cursor is among them reads
 // from here, never from the log.
 const RING = 1024;
+// How long a read-only hub holds a client's stream at an op it forwarded, waiting for the writer to land it (the
+// topic entry moves the shadow) or drop it (a `dropped` entry): past it the hold is let go, and a push of the op
+// again is forwarded again.
+const FORWARD_TTL = 30_000;
 // How long `stop()` waits for an append in flight before it lets go of it (`sharedLog.stopWait`): what it carried
 // is above the watermark, so the next start appends it again.
 const DEFAULT_STOP_WAIT = 5000;
@@ -122,6 +126,9 @@ const entryText = (node, ops, scopes = null) => {
   return JSON.stringify(entry);
 };
 const markText = (node) => JSON.stringify({ v: ENTRY_VERSION, node, mark: true });
+// What a writer did not take of an inbox entry — `[[key, seq]…]`, each op's stream key and seq — for the followers
+// to let go of the hold they keep for it.
+const droppedText = (node, dropped, inbox) => JSON.stringify({ v: ENTRY_VERSION, node, dropped, inbox });
 
 // The scopes an inbox entry carries, as the forwarding hub granted them: strings, or null (a page for every scope).
 const scopesOf = (value) => {
@@ -131,11 +138,24 @@ const scopesOf = (value) => {
   return scopes;
 };
 
+// The pairs a `dropped` entry names: `[key, seq]`, each a stream key and a positive integer.
+const droppedOf = (value) => {
+  if (!Array.isArray(value)) return null;
+  const pairs = [];
+  for (let i = 0; i < value.length; i++) {
+    const pair = value[i];
+    if (!Array.isArray(pair) || typeof pair[0] !== 'string' || !Number.isSafeInteger(pair[1]) || pair[1] <= 0) continue;
+    pairs.push([pair[0], pair[1]]);
+  }
+  return pairs;
+};
+
 /**
  * What an entry of the shared log carries: `{ node, ops, scopes }` (the
  * appender's node id, the ops unpacked, the scopes an inbox entry was
- * forwarded under or null), null for a marker, undefined for a text that is
- * no entry of ours.
+ * forwarded under or null) — with `dropped` (`[[key, seq]…]`, `ops` empty)
+ * for what a writer did not take of an inbox entry — null for a marker,
+ * undefined for a text that is no entry of ours.
  */
 const parseEntry = (text) => {
   if (typeof text !== 'string') return undefined;
@@ -147,6 +167,9 @@ const parseEntry = (text) => {
   }
   if (!isPlainObject(value) || value.v !== ENTRY_VERSION || typeof value.node !== 'string') return undefined;
   if (value.mark === true) return null;
+  if (Array.isArray(value.dropped)) {
+    return { node: value.node, ops: [], scopes: null, dropped: droppedOf(value.dropped) };
+  }
   if (!Array.isArray(value.ops)) return undefined;
   return { node: value.node, ops: unpackOps(value.ops), scopes: scopesOf(value.scopes) };
 };
@@ -202,10 +225,13 @@ class SharedHub {
   #inboxPassed = 0;
   // A read-only hub's vector, as the topic moves it; null while this hub writes.
   #shadow = null;
+  // What a read-only hub forwarded and the topic has not shown yet: a client's stream held at it (`{ seq, at }` by
+  // stream key), let go of as the shadow passes it, a writer drops it, or FORWARD_TTL passes.
+  #forwarded = new Map();
   // A writing hub's vector as its reads reflect it: every op offered (announced, so landed), none merely reserved —
   // what a hello and a snapshot's first page answer, so a client takes as seen nothing a page could lack.
   #relayed;
-  #stats = { relayed: 0, appendFailures: 0, entries: 0, applied: 0, forwarded: 0, malformed: 0, holes: 0 };
+  #stats = { relayed: 0, appendFailures: 0, entries: 0, applied: 0, forwarded: 0, malformed: 0, holes: 0, dropped: 0 };
 
   constructor(
     manager,
@@ -605,10 +631,13 @@ class SharedHub {
         this.#stats.malformed++;
         this.#logger.warn({ event: 'shared.entry.malformed', topic, id: entry.id });
       } else if (parsed !== null) {
-        if (this.#storage.readOnly) {
+        if (parsed.dropped !== undefined) {
+          // A writer let a follower know what it did not take of an inbox entry: the holds let go.
+          if (this.#storage.readOnly) this.#release(parsed.dropped);
+        } else if (this.#storage.readOnly) {
           if (name === 'inbox') return false;
           this.#shadowAdvance(parsed.ops);
-        } else if (!(await this.#apply(name, topic, entry, parsed))) return false;
+        } else if (parsed.ops.length > 0 && !(await this.#apply(name, topic, entry, parsed))) return false;
       }
     }
     this.#cursor[name] = entry.id;
@@ -634,13 +663,18 @@ class SharedHub {
     const via = { url: null, node: parsed.node };
     if (name === 'inbox') via.inbox = true;
     else via.shared = true;
-    const bound = name === 'inbox' ? parsed.scopes : null;
+    const inbox = name === 'inbox';
+    const bound = inbox ? parsed.scopes : null;
+    const options = { via, peer: via, bound };
+    // The inbox is a client's push a follower could not land: the writer's rule rules it as it rules a push.
+    if (inbox && typeof this.#manager.authorizeWrite === 'function') options.authorize = this.#manager.authorizeWrite;
     let backoff = 0;
     for (let attempt = 1; ; attempt++) {
       try {
-        const result = await this.#storage.applyRemote(parsed.ops, { via, peer: via, bound });
+        const result = await this.#storage.applyRemote(parsed.ops, options);
         this.#stats.applied += result.applied;
         this.#retrying[name] = false;
+        if (inbox) await this.#judged(topic, entry, parsed, result);
         return true;
       } catch (error) {
         if (!this.#running) return false;
@@ -688,9 +722,56 @@ class SharedHub {
     }
   }
 
+  // What the writer would not take of an inbox entry — a rule's refusal (logged as a scrub, so it reaches the
+  // topic), a forged, an unsigned, an out-of-scope op, a gap (not logged: the stream's hold at the follower would
+  // stand until FORWARD_TTL) — told as a push tells it (`refused`, `via: 'inbox'`), and what is not in this hub's
+  // vector after the apply named in the topic (`dropped`), for the followers to let go of.
+  async #judged(topic, entry, parsed, result) {
+    const node = parsed.node;
+    const tell = (reason, count) => {
+      if (count > 0) notify(this.#manager, this.#logger, 'refused', { node, reason, count, via: 'inbox' });
+    };
+    tell('rule', result.refused === undefined ? 0 : result.refused.length);
+    tell('scope', result.outOfScope);
+    tell('forged', result.forged);
+    tell('unsigned', result.unsigned);
+    tell('equivocation', result.equivocations);
+    const { vector } = this.#storage;
+    const dropped = [];
+    for (let i = 0; i < parsed.ops.length; i++) {
+      const op = parsed.ops[i];
+      const key = opKey(op);
+      if ((Object.hasOwn(vector, key) ? vector[key] : 0) < op.seq) dropped.push([key, op.seq]);
+    }
+    if (dropped.length === 0) return;
+    this.#stats.dropped += dropped.length;
+    try {
+      const text = droppedText(this.#storage.nodeId, dropped, entry.id);
+      await this.#log.append(this.#topic, text, { headers: { by: this.#token } });
+    } catch (error) {
+      // Best effort: the followers' holds lapse by FORWARD_TTL without it.
+      this.#logger.warn({ event: 'shared.dropped.failed', topic, inbox: entry.id, err: error });
+    }
+  }
+
+  // The shadow vector moved by what the topic holds — the one way it moves — and the holds it passed let go of.
   #shadowAdvance(ops) {
     const shadow = (this.#shadow ??= { ...this.#storage.vector });
-    for (let i = 0; i < ops.length; i++) vectorAdvance(shadow, ops[i]);
+    for (let i = 0; i < ops.length; i++) {
+      vectorAdvance(shadow, ops[i]);
+      const key = opKey(ops[i]);
+      const held = this.#forwarded.get(key);
+      if (held !== undefined && held.seq <= shadow[key]) this.#forwarded.delete(key);
+    }
+  }
+
+  // The holds a writer's `dropped` entry names, let go of: the client's stream is read from the shadow again.
+  #release(dropped) {
+    for (let i = 0; i < dropped.length; i++) {
+      const [key, seq] = dropped[i];
+      const held = this.#forwarded.get(key);
+      if (held !== undefined && held.seq <= seq) this.#forwarded.delete(key);
+    }
   }
 
   // An entry of the topic passed, kept for the feeds; the oldest let go of past RING; every feed waiting woken.
@@ -839,12 +920,15 @@ class SharedHub {
   /**
    * A client's push on a hub that cannot write, forwarded to the inbox for a
    * writer to land: held to the shadow vector as a push is held to the log's
-   * — a duplicate dropped, a gap not taken — and the shadow moved past what
-   * was forwarded once it is in the inbox (a burst's next page follows at
-   * once). Answers what a push answers.
+   * — a duplicate dropped, a gap not taken — and to what was forwarded and the
+   * topic has not shown yet (a burst's next page follows at once); the shadow
+   * itself moves on topic entries alone, so a writer's refusal is never acked
+   * for good, and a hold lapses after FORWARD_TTL. Answers what a push answers.
    */
   async forward(ops, node, scopes) {
     const shadow = this.vector();
+    const now = Date.now();
+    for (const [key, held] of this.#forwarded) if (now - held.at > FORWARD_TTL) this.#forwarded.delete(key);
     const result = {
       vector: {},
       applied: 0,
@@ -867,7 +951,13 @@ class SharedHub {
         continue;
       }
       const key = opKey(op);
-      const held = Object.hasOwn(seqs, key) ? seqs[key] : Object.hasOwn(shadow, key) ? shadow[key] : 0;
+      const shown = Object.hasOwn(shadow, key) ? shadow[key] : 0;
+      const forwarded = this.#forwarded.get(key);
+      const held = Object.hasOwn(seqs, key)
+        ? seqs[key]
+        : forwarded !== undefined && forwarded.seq > shown
+          ? forwarded.seq
+          : shown;
       if (op.seq <= held) {
         result.duplicates++;
         continue;
@@ -884,7 +974,7 @@ class SharedHub {
     for (let i = 0; i < taking.length; i += this.#pageSize) {
       await this.#log.append(this.#inbox, entryText(node, taking.slice(i, i + this.#pageSize), scopes), { headers });
     }
-    for (let i = 0; i < taking.length; i++) vectorAdvance(shadow, taking[i]);
+    for (const key of Object.keys(seqs)) this.#forwarded.set(key, { seq: seqs[key], at: now });
     result.vector = seqs;
     result.applied = taking.length;
     this.#stats.forwarded += taking.length;

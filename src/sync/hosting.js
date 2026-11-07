@@ -16,8 +16,8 @@ const { packOps, unpackOps } = require('./wire.js');
 const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
-const { isKeyId, isPlainObject, isStreamName } = require('../shape.js');
-const { SIGNER, CURSOR, DB } = require('../symbols.js');
+const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js');
+const { SIGNER, CURSOR, DB, SOURCE } = require('../symbols.js');
 const { toBase64 } = require('../crypto/pem.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
@@ -452,8 +452,26 @@ const push = (host) => async (context, args) => {
       const message = 'This hub is read-only and forwards nothing: push to another';
       throw refuseCall(host, 'push', message, 503, 'READ_ONLY', node);
     }
-    const result = await host.shared.forward(granted, node, scopes);
-    return { ...result, outOfScope: outOfScope + result.outOfScope };
+    // Verified before it is forwarded, as a writer verifies a push: a forged or an unsigned op stops here, counted
+    // and announced — never a writer's to find in its inbox.
+    const { verdicts } = await storage[SOURCE].checkOps(granted);
+    const taking = [];
+    let forged = 0;
+    let unsigned = 0;
+    for (let i = 0; i < granted.length; i++) {
+      if (verdicts[i] === VERDICT.OK) taking.push(granted[i]);
+      else if (verdicts[i] === VERDICT.FORGED) forged++;
+      else unsigned++;
+    }
+    if (forged > 0) refuseOps(host, node, 'forged', forged);
+    if (unsigned > 0) refuseOps(host, node, 'unsigned', unsigned);
+    const result = await host.shared.forward(taking, node, scopes);
+    return {
+      ...result,
+      forged: result.forged + forged,
+      unsigned: result.unsigned + unsigned,
+      outOfScope: outOfScope + result.outOfScope,
+    };
   }
   // `url` is null: a host does not dial, so it has no url for the peer.
   const via = state.ref ?? { url: null, node };
@@ -896,7 +914,8 @@ const createUnit = (
   const {
     access = 'session',
     authorize = null,
-    authorizeWrite = null,
+    // The manager's rule (`sync.authorizeWrite`) unless the unit names its own.
+    authorizeWrite = manager.authorizeWrite ?? null,
     tracked = null,
     pageSize = DEFAULT_PAGE_SIZE,
     pageBytes = DEFAULT_PAGE_BYTES,

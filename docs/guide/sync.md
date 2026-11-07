@@ -781,7 +781,7 @@ const unit = storage.sync.unit({
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
 | `limits` | `{ opsPerPush: 10000 }` | Per-peer push limits: `opsPerPush` (10 000 unless given; `Infinity` for none), `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
 | `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
-| `authorizeWrite({ op, peer, current, after })` | — | The host's rule on what a peer may write, asked of every pushed op before it is applied, with the record as it is here and as the op would leave it: `false` refuses the op — logged as a scrub leaves it, relayed as a no-op, no gap — and the push's answer names it (`refused`, with the record as the host holds it and the op's `actor`), so the pusher sets itself straight (`WRITE_REFUSED`, `touched` naming the fields: its own op's fields brought back to what the host holds through the kinds' own ops — a counter by an inc, a set by a remove, a text by a splice — leaving what the host accepted since as it is; or the record forgotten where the host holds nothing; a revert refused again is reported alone). A sealed record at the host is skipped before the rule is asked. A throw fails the page |
+| `authorizeWrite({ op, peer, current, after })` | `sync.authorizeWrite` | The host's rule on what a peer may write — the manager's (`createDatabase({ sync: { authorizeWrite } })`) unless the unit names its own, and the writer's over what a follower forwarded to the shared log's inbox — asked of every pushed op before it is applied, with the record as it is here and as the op would leave it: `false` refuses the op — logged as a scrub leaves it, relayed as a no-op, no gap — and the push's answer names it (`refused`, with the record as the host holds it and the op's `actor`), so the pusher sets itself straight (`WRITE_REFUSED`, `touched` naming the fields: its own op's fields brought back to what the host holds through the kinds' own ops — a counter by an inc, a set by a remove, a text by a splice — leaving what the host accepted since as it is; or the record forgotten where the host holds nothing; a revert refused again is reported alone). A sealed record at the host is skipped before the rule is asked. A throw fails the page |
 | `prove` | `true` under `signatures: 'require'` | Ask every peer to prove it holds the key that is its node id: hello answers a `challenge`, the peer signs it (`syncom/prove`, the dialer does so by itself), and until then push, snapshot and changes are 403 `UNPROVEN` (a bad signature 403 `BAD_PROOF`). Needs the signing plugin |
 | `query` | `false` | Serve `query` and `count`: a thin client's read of this host's records through the query plugin — a Mango query, sort keys, a window — in its scopes, capped by `limits.rowsPerQuery` (500); never a [sealed record](./query#sealed-records), which is the key holder's. A client over a stateless transport (plain HTTP: one request, one client) carries its hello in the call (`hello: { node, token, scopes }`), greeted as a hello is and kept nowhere. See [Wire format](../reference/wire#query-and-count) and [Thin clients over HTTP](./wrpc#thin-clients-over-http) |
 | `allow` | `{ push: true, changes: true, snapshot: true, blob: true }` | Which procedures this unit serves: a peer asking for `push` where it is off is refused with 403 (`reason` `'READ_ONLY'`), for `blob` ([attachments](./attachments)) or `snapshot` or `changes` with 403 (`'NOT_SERVED'`) — a read-only mirror, a write-only sink, each a unit of its own |
@@ -831,10 +831,13 @@ snapshot's first page is positioned at a marker the hub appended and its
 consumer passed (`eventId`). A hub that cannot write — a follower
 (`readOnly: true`) over MongoDB, a writer whose lease was lost — hosts there
 too, and nowhere else (`sync.unit()` is `READ_ONLY` without a shared log):
-its hello answers the vector as the log moved it, and a push is held to that
-vector and forwarded to the inbox for a hub that writes to land (the answer
-says `forwarded: true`; the writer's refusals — forged, out of scope — are
-the writer's to report); it serves no snapshot (403 `READ_ONLY`: a fresh
+its hello answers the vector as the log moved it, and a push — verified as a
+writer verifies one, a forged or an unsigned op stopping there — is held to
+that vector and to what it forwarded before, and forwarded to the inbox for a
+hub that writes to land under its `authorizeWrite` (the answer says
+`forwarded: true`; the shadow moves once the topic shows the op, and what the
+writer did not take it tells in the topic, `dropped`, so the hold is let go);
+it serves no snapshot (403 `READ_ONLY`: a fresh
 client bootstraps from a hub that writes); without an inbox (`inbox: false`)
 a push is 503 (`READ_ONLY`), and a snapshot the shared log did not answer
 for — the relay behind, the marker not reached in time — is 503

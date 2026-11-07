@@ -519,6 +519,10 @@ expectAssignable<StorageOptions>({ sync: { sharedLog } });
 expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, topic: 'ops', inbox: 'ops.in' } } });
 expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, inbox: false } } });
 expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, stopWait: 200 } } });
+expectAssignable<StorageOptions>({
+  sync: { authorizeWrite: ({ op, current, after }) => op.type !== 'delete' || (current !== null && after === null) },
+});
+expectError(syncom.open({ sync: { authorizeWrite: 'no' } }));
 storage.on('change', (op, via, detail) => {
   expectType<number | null>(detail.seq);
 });

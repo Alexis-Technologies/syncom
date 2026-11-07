@@ -1,5 +1,6 @@
 import { expectError, expectType } from 'tsd';
 import { sync as syncPlugin, SyncManager, isSyncLink } from '../src/sync/sync.js';
+import type { SyncUnitOptions } from '../src/sync/sync.js';
 import type { Plugin, SyncApi, SyncUnit, HostedPeer, Node, SchemaInfo, SharedStats } from '../src/sync/sync.js';
 import { open } from '../index.js';
 
@@ -7,6 +8,7 @@ expectType<Plugin<SyncApi>>(syncPlugin);
 expectType<boolean>(isSyncLink({}));
 const storage = await open({ plugins: [syncPlugin] });
 expectType<SyncManager>(storage.sync);
+expectType<SyncUnitOptions['authorizeWrite'] | null>(storage.sync.authorizeWrite);
 // What a REWOUND host may move of this node's own streams: on proof, or on its word.
 expectType<SyncManager>((await open({ plugins: [syncPlugin], sync: { rewind: 'adopt' } })).sync);
 expectError(open({ plugins: [syncPlugin], sync: { rewind: 'trust' } }));

@@ -75,11 +75,18 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   cursor — with the vector its reads reflect (`#relayed`: moved by every op offered, never `log.vector`, whose
   reserved positions are not on any page; `vector()` answers it at hello too). A read-only hub
   (`storage.readOnly`: a follower, a lost lease) applies nothing and relays nothing: it shadows the vector from
-  the topic read whole (`vector()`), answers it at hello, holds a push to it and forwards the page to the inbox —
-  the shadow moved only once the append landed, so a failed forward is pushed again — serves no snapshot (403
+  the topic read whole (`vector()`), answers it at hello, verifies a push as a writer would (the seam's `checkOps`:
+  forged and unsigned ops stop there, counted and announced), holds it to the shadow AND to what it forwarded before
+  (`#forwarded`, by stream key, `FORWARD_TTL`) and forwards the page to the inbox — the shadow moves on topic
+  entries alone (`#shadowAdvance`, which lets a hold go as it passes it), never on a forward, so a writer's refusal
+  is never acked for good — serves no snapshot (403
   `READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
   bootstraps from a hub that writes) and stops reading the inbox (the next writer takes it from the saved cursor,
-  which only a writer saves). The relay's WATERMARK (`#appendedSeq`, saved as `appended`) is the last log position every
+  which only a writer saves). The writer rules the inbox as it rules a push — `#apply` passes the manager's
+  `authorizeWrite` (`sync.authorizeWrite`, every unit's default) as `authorize`, a refusal logged as a scrub and
+  relayed — tells each kind of refusal (`refused`, `via: 'inbox'`), and names what it did not take at all (not in
+  its vector after the apply: out of scope, a gap, forged) in a `dropped` topic entry (`#judged`), which a follower
+  reads to let its holds go (`#release`). The relay's WATERMARK (`#appendedSeq`, saved as `appended`) is the last log position every
   op at or below which is in the topic: every op is offered with its position (the `change` event's `seq`), a batch
   that landed covers its positions (`#cover`), an op read from the topic covers its own, and the watermark moves
   only over a contiguous run of them (`#advance`) — never to `lastEventId`, which runs ahead of ops still landing
@@ -98,7 +105,8 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   attached right after the open hears the first read's failure. A read's 410/400 means the position is not the
   log's — the codes wrpc's brokers and `mongoSharedLog` answer; a log of another shape must answer them too.
 - **A rule never withholds an op; it scrubs it.** `beforeSend` on the dialer (`#outgoing`, a copy of the op) and
-  `authorizeWrite` on the host (`refused` in src/apply.js, before `beforeApply`) both end in `scrubOp`: the header
+  `authorizeWrite` on the host (`refused` in src/apply.js, before `beforeApply`; the manager's rule — `sync.authorizeWrite`
+  — is every unit's unless it names its own, and the writer's over the inbox) both end in `scrubOp`: the header
   with `scrubbed: true` (slot 20) goes on — logged skipped and scrubbed, relayed, applied nowhere — so no stream has
   a gap. The host names what it refused in the push's answer (`refused`, with the record as it holds it) and the
   dialer sets itself straight (`#refused`: the fields the op touched — `touchedBy`: a set's keys, an unset's names,

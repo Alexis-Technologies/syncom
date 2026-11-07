@@ -19,7 +19,7 @@ const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH, ABSENT 
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
-const { applyBatch } = require('./apply.js');
+const { applyBatch, checkPage } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
 const { applyOp, isAlive, kindOf, kindsOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
@@ -1294,6 +1294,10 @@ class Database extends Emitter {
       },
       // The sealed records of a collection, by id: what a query reads whole at the key holder.
       sealed: (entity) => catalog.sealed(entity),
+      // A page of a peer's ops checked as a push checks them — well-formed, signed as `sync.signatures` asks, under the
+      // key that is the origin — without applying one: `{ verdicts }` by position (VERDICT.OK, UNSIGNED, FORGED). What
+      // a hub that cannot write asks before it forwards a page to the inbox.
+      checkOps: (ops) => checkPage({ core: this.#core, signatures: this.#signatures }, ops),
       // The record brought to what a host holds of it (the dialer's revert of a refused op): the fields named —
       // every one for null — made to read as `target` (the host's data, flat) reads, through the kinds' patches, so
       // a counter moves by an inc, a set by adds and removes, a text by its diff — never a register written over

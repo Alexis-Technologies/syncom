@@ -129,12 +129,20 @@ class SyncManager extends Emitter {
   // Hosting side: the live sessions by node (what the units greeted) and the scopes taken back from each node.
   #sessions = new Map();
   #revocations = new Map();
+  // The host's rule on what a peer may write (`sync.authorizeWrite`): every unit's unless it names its own, and the
+  // writer's over what a follower forwarded to the inbox (src/sync/shared.js).
+  #authorizeWrite = null;
 
   constructor(storage, options = {}) {
     super({ maxListeners: options?.maxListeners });
     this.#storage = storage;
     this.#options = options ?? {};
     this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
+    const { authorizeWrite = null } = this.#options;
+    if (authorizeWrite !== null && typeof authorizeWrite !== 'function') {
+      throw new TypeError('sync.authorizeWrite must be a function');
+    }
+    this.#authorizeWrite = authorizeWrite;
     const { maxOutbox } = this.#options;
     if (maxOutbox !== undefined && !(Number.isInteger(maxOutbox) && maxOutbox > 0)) {
       throw new TypeError('sync.maxOutbox must be a positive integer');
@@ -1499,6 +1507,11 @@ class SyncManager extends Emitter {
    * hello)` gates a peer by whatever the transport presented. Built in
    * src/sync/hosting.js from what both halves share.
    */
+  /** The host's rule on what a peer may write (`createDatabase({ sync: { authorizeWrite } })`), or null. */
+  get authorizeWrite() {
+    return this.#authorizeWrite;
+  }
+
   unit(options = {}) {
     // A follower's log and vector are as of its open: a feed served from them
     // would never move, so without a shared log it hosts no more than it dials

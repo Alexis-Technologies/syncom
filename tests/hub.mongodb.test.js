@@ -14,6 +14,7 @@ const { mongoEngine, mongoSharedLog } = require('../src/mongodb/mongodb.js');
 const { createFakeMongo } = require('./utils/fake-mongo.js');
 const { MemoryLink } = require('./utils/memory-link.js');
 const { waitUntil } = require('./utils/mesh.js');
+const { createSigner, forge } = require('./utils/signed.js');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const base = { logger: false, defer: 0 };
@@ -277,6 +278,183 @@ test('A writer and a follower hub over one MongoDB database', async (t) => {
       const inbox = await log().head('syncom.inbox');
       assert.ok(inbox.first >= 64, `trimmed past what the writer landed (first ${inbox.first})`);
       assert.strictEqual((await log().head('syncom')).first, 1, 'the topic is left as it is');
+    },
+  );
+
+  // A writer and a follower over one fake MongoDB, sharing its log; `sync` is spread into both.
+  const pair = async (t2, sync = {}) => {
+    const client = createFakeMongo();
+    const log = () => mongoSharedLog({ client, poll: 20 });
+    const writer = await syncom.createDatabase({
+      ...base,
+      path: 'hub',
+      engine: mongoEngine({ client }),
+      sync: { ...sync, sharedLog: log() },
+    });
+    t2.after(() => writer.close().catch(() => {}));
+    const follower = await syncom.createDatabase({
+      ...base,
+      path: 'hub',
+      engine: mongoEngine({ client }),
+      readOnly: true,
+      sync: { ...sync, sharedLog: log() },
+    });
+    t2.after(() => follower.close().catch(() => {}));
+    const probe = async (node = 'probe', hello = {}) => {
+      const link = new MemoryLink(follower.sync.unit({ access: 'public' }));
+      const answer = await link.call('syncom/hello', { node, version: 1, ...hello });
+      return { link, answer };
+    };
+    return { client, log, writer, follower, probe };
+  };
+  const op = (seq, id, data, more = {}) => ({
+    origin: 'probe',
+    seq,
+    ts: Date.now() + seq,
+    type: 'write',
+    id,
+    data,
+    ...more,
+  });
+
+  await t.test(
+    'authorizeWrite rules the inbox too: a push forwarded by a follower is refused by the writer’s rule, logged as a scrub, told',
+    async (t2) => {
+      const authorizeWrite = ({ op: pushed }) => !(pushed.type === 'write' && pushed.data?.forbidden === true);
+      const { writer, follower, probe } = await pair(t2, { authorizeWrite });
+      const refused = [];
+      writer.sync.on('refused', (event) => refused.push(event));
+      const { link } = await probe();
+      const answer = await link.call('syncom/push', {
+        ops: packOps([op(1, 'ok1', { n: 1 }), op(2, 'bad', { forbidden: true })]),
+      });
+      assert.strictEqual(answer.forwarded, true);
+      assert.strictEqual(answer.applied, 2, 'forwarded both: the rule is the writer’s');
+      await waitUntil(() => writer.hasRecord('ok1'), { timeout: 5000 });
+      await waitUntil(() => refused.some((event) => event.via === 'inbox' && event.reason === 'rule'), {
+        timeout: 5000,
+      });
+      assert.deepStrictEqual(
+        refused.filter((event) => event.via === 'inbox'),
+        [{ node: 'probe', reason: 'rule', count: 1, via: 'inbox' }],
+      );
+      assert.strictEqual(writer.hasRecord('bad'), false);
+      const held = writer.log.entriesOf('bad');
+      assert.strictEqual(held.length, 1, 'logged as a scrub leaves it: no gap in the stream');
+      assert.strictEqual(held[0].skipped, true);
+      assert.strictEqual(held[0].scrubbed, true);
+      // The scrub reaches the topic: the follower's shadow moves past it, nothing is dropped.
+      await waitUntil(async () => (await probe('late')).answer.vector.probe === 2, { timeout: 5000 });
+      assert.strictEqual(follower.hasRecord('bad'), false);
+      // The manager's rule is every unit's: a push to the writer itself is refused the same way.
+      const direct = new MemoryLink(writer.sync.unit({ access: 'public' }));
+      await direct.call('syncom/hello', { node: 'direct', version: 1 });
+      const own = await direct.call('syncom/push', {
+        ops: packOps([{ ...op(1, 'bad2', { forbidden: true }), origin: 'direct' }]),
+      });
+      assert.strictEqual(own.refused.length, 1);
+      assert.strictEqual(writer.hasRecord('bad2'), false);
+      // A unit that names its own rule stands over the manager's.
+      const lax = new MemoryLink(writer.sync.unit({ access: 'public', authorizeWrite: () => true }));
+      await lax.call('syncom/hello', { node: 'lax', version: 1 });
+      await lax.call('syncom/push', { ops: packOps([{ ...op(1, 'bad3', { forbidden: true }), origin: 'lax' }]) });
+      assert.strictEqual(writer.hasRecord('bad3'), true);
+      await assert.rejects(
+        () => syncom.createDatabase({ ...base, path: 'x', engine: syncom.memoryEngine(), sync: { authorizeWrite: 7 } }),
+        { name: 'TypeError' },
+      );
+    },
+  );
+
+  await t.test(
+    'a follower verifies what it forwards: a forged op is refused at the follower, never forwarded',
+    async (t2) => {
+      const { writer, follower } = await pair(t2, { signatures: 'require' });
+      const refused = [];
+      follower.sync.on('refused', (event) => refused.push(event));
+      const signer = await createSigner();
+      // The proof of the key is another rule's (SEC-4): off here, so the signatures alone are under test.
+      const link = new MemoryLink(follower.sync.unit({ access: 'public', prove: false }));
+      await link.call('syncom/hello', { node: signer.id, version: 1 });
+      const good = await signer.sign({ seq: 1, ts: Date.now(), type: 'write', id: 'g1', data: { n: 1 } });
+      const forged = forge(await signer.sign({ seq: 2, ts: Date.now() + 1, type: 'write', id: 'f2', data: { n: 2 } }));
+      const unsigned = { origin: signer.id, seq: 3, ts: Date.now() + 2, type: 'write', id: 'u3', data: { n: 3 } };
+      const answer = await link.call('syncom/push', { ops: packOps([good, forged, unsigned]) });
+      assert.strictEqual(answer.forwarded, true);
+      assert.strictEqual(answer.applied, 1, 'the signed op alone went to the inbox');
+      assert.strictEqual(answer.forged, 1);
+      assert.strictEqual(answer.unsigned, 1);
+      assert.deepStrictEqual(refused.map((event) => [event.reason, event.count]).sort(), [
+        ['forged', 1],
+        ['unsigned', 1],
+      ]);
+      await waitUntil(() => writer.hasRecord('g1'), { timeout: 5000 });
+      assert.strictEqual(writer.hasRecord('f2'), false);
+      assert.strictEqual(writer.hasRecord('u3'), false);
+      assert.strictEqual(writer.sync.shared().applied, 1, 'the writer found one op in the inbox');
+    },
+  );
+
+  await t.test(
+    'a forwarded op the writer did not take is told in the topic (dropped) and the follower’s hold on the stream let go; the client’s genuine op is forwarded then',
+    async (t2) => {
+      const scope = (id, data) => data.$type ?? '*';
+      const { client, writer, follower, probe } = await pair(t2, { scope });
+      const refused = [];
+      writer.sync.on('refused', (event) => refused.push(event));
+      const { link } = await probe('probe', { scopes: ['A'] });
+      // Declared in scope A, the record scopes to B: the writer refuses it as out of scope — not logged, a gap.
+      const first = await link.call('syncom/push', { ops: packOps([op(1, 'out', { $type: 'B' }, { scope: 'A' })]) });
+      assert.strictEqual(first.applied, 1, 'forwarded: the follower cannot read the record');
+      await waitUntil(() => refused.some((event) => event.via === 'inbox' && event.reason === 'scope'), {
+        timeout: 5000,
+      });
+      assert.strictEqual(writer.hasRecord('out'), false);
+      // The writer told the topic, the follower let go: its shadow never moved past the op.
+      const entries = client.db('syncom').collection('shared');
+      const droppedEntries = async () =>
+        (await entries.find({ topic: 'syncom' }).toArray()).filter(
+          (doc) => typeof doc.v === 'string' && doc.v.includes('"dropped"'),
+        );
+      await waitUntil(async () => (await droppedEntries()).length >= 1, { timeout: 5000 });
+      const [told] = await droppedEntries();
+      const parsed = JSON.parse(told.v);
+      assert.deepStrictEqual(parsed.dropped, [['probe@A', 1]]);
+      assert.match(parsed.inbox, /^[a-z0-9]+\.\d+$/);
+      assert.strictEqual(writer.sync.shared().dropped, 1);
+      await waitUntil(async () => follower.sync.shared().entries >= 1);
+      const { answer } = await probe('again', { scopes: ['A'] });
+      assert.strictEqual(answer.vector['probe@A'], undefined, 'the shadow holds nothing of the dropped op');
+      // The client's genuine op at that seq is forwarded, and lands.
+      const second = await link.call('syncom/push', { ops: packOps([op(1, 'in', { $type: 'A' }, { scope: 'A' })]) });
+      assert.strictEqual(second.applied, 1, 'not a duplicate: the hold was let go');
+      await waitUntil(() => writer.hasRecord('in'), { timeout: 5000 });
+      assert.deepStrictEqual(await writer.get('in'), { $type: 'A' });
+    },
+  );
+
+  await t.test(
+    'a follower’s shadow moves on topic entries alone; a forwarded op is held until it lands',
+    async (t2) => {
+      const { writer, follower, probe } = await pair(t2);
+      const seeded = await writer.insert({ n: 0 });
+      await waitUntil(() => follower.sync.shared().entries >= 1);
+      // The writer's consumer stopped: the inbox is read by nobody.
+      await writer.sync.stop();
+      const { link } = await probe();
+      const first = await link.call('syncom/push', { ops: packOps([op(1, 'p1', { n: 1 })]) });
+      assert.strictEqual(first.applied, 1);
+      assert.deepStrictEqual(first.vector, { probe: 1 }, 'the answer says the op went in');
+      assert.strictEqual((await probe('other')).answer.vector.probe, undefined, 'the shadow moves on the topic alone');
+      // Held: the same op again is a duplicate, the next one follows at once.
+      const again = await link.call('syncom/push', { ops: packOps([op(1, 'p1', { n: 1 }), op(2, 'p2', { n: 2 })]) });
+      assert.strictEqual(again.duplicates, 1);
+      assert.strictEqual(again.applied, 1);
+      // The writer lands the inbox: the topic shows the ops, the shadow moves past them.
+      await writer.sync.start();
+      await waitUntil(() => writer.hasRecord('p2'), { timeout: 5000 });
+      await waitUntil(async () => (await probe('late')).answer.vector.probe === 2, { timeout: 5000 });
+      assert.strictEqual(follower.hasRecord(seeded), true);
     },
   );
 

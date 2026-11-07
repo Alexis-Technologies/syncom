@@ -1310,6 +1310,18 @@ export interface SyncOptions {
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
   /**
+   * The host's rule on what a peer may write — every unit's unless the unit names its own (`unit({ authorizeWrite })`),
+   * and the writer's over what a follower forwarded to the shared log's inbox: asked of every pushed op before it is
+   * applied, with the record as it is here (`current`, null for none) and as the op would leave it (`after`); `false`
+   * refuses the op — logged as a scrub leaves it, relayed as a no-op, named in the push's answer. A throw fails the page.
+   */
+  authorizeWrite?: (context: {
+    op: SyncOp;
+    peer: PeerRef | null;
+    current: RecordData | null;
+    after: RecordData | null;
+  }) => boolean | Promise<boolean>;
+  /**
    * A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`: Redis Streams, NATS, Kafka, AMQP, the
    * memory broker) or `mongoSharedLog()` — so a client resumes on any hub: every op this node accepts is appended to
    * the topic, what the other hubs appended is applied from it, and `changes` is served from it (a client's cursor is a

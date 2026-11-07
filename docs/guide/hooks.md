@@ -266,7 +266,7 @@ the intended scale.
 | `bootstrap` | `({ url, records })` | A host's whole state was joined |
 | `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw, a page that failed (`PAGE_FAILED`, `STUCK`), a host that holds more of this node's ops than its log (`REWOUND`) or lacks ones its log no longer holds (`UNDELIVERABLE`) |
 | `hello` | `({ node, scopes, schema })` | Hosting side: a peer greeted this node and was authorized |
-| `refused` | `({ node, reason, count })` | Hosting side: a push carried ops this node would not take — `'scope'` (outside the peer's scopes), `'forged'`, `'unsigned'` |
+| `refused` | `({ node, reason, count, via? })` | Hosting side: a push carried ops this node would not take — `'scope'` (outside the peer's scopes), `'forged'`, `'unsigned'`, `'equivocation'`, `'rule'` (`authorizeWrite` said no); `via: 'inbox'` where the ops came through a follower's forward over the shared log, judged by the writer |
 
 ## `HookError`
 

@@ -248,6 +248,8 @@ export interface NodeData {
 export interface SyncManager {
   readonly storage: Storage;
   readonly started: boolean;
+  /** The host's rule on what a peer may write (`createDatabase({ sync: { authorizeWrite } })`), every unit's default and the writer's over the inbox; null for none. */
+  readonly authorizeWrite: SyncUnitOptions['authorizeWrite'] | null;
   /** Ops queued for peers over every dialed peer — what the outbox gauge reads. */
   pendingOps(): number;
   on<E extends keyof SyncEvents>(event: E, listener: SyncEvents[E]): void;

@@ -450,7 +450,9 @@ const ENTRIES = [
   // 2026-11-07). 175, raised by name.
   // 175.1 with the revert by what the op touched, through the kinds' patches (review №7, E3.1; 2026-11-07). 175.5,
   // raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 175.5 },
+  // 175.8 with the inbox under the rule, the verified forward, the dropped entries (review №7, E3.2; 2026-11-07). 176,
+  // raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 176 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -575,7 +577,9 @@ const ENTRIES = [
   // E2.1; 2026-11-07). 27.5, raised by name.
   // 27.6 with the relayed vector and the ordered marker, a hole told, the inbox trimmed, the feeds served from the
   // consumer's ring (review №7, E2.2–E2.4; 2026-11-07). 28, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 28 },
+  // 28.5 with the inbox under the writer's rule, the follower's verified forward and held shadow, the dropped entries
+  // (review №7, E3.2; 2026-11-07). 29, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 29 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

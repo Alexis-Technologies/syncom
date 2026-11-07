@@ -722,4 +722,4 @@ const applyBatch = (core, ops, options = {}) => {
   return tracedApply(core, ops, options);
 };
 
-module.exports = { applyBatch };
+module.exports = { applyBatch, checkPage };

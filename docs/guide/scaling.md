@@ -75,11 +75,17 @@ defineRouter({ syncom: follower.sync.unit({ access: 'session', authorize }) });
 A **read-only hub** — a follower, or a writer whose lease was lost — hosts
 over the shared log and nowhere else: its hello answers the vector as the log
 moved it (a shadow the topic keeps current), its feed comes from the log, and
-a client's push is held to that vector and forwarded to the **inbox**, which
-a hub that writes consumes, lands and relays to the topic (the push answers
-`forwarded: true` with the vector moved past what went in; what the writer
-then refuses — a forged op, a record out of scope — the writer reports, and
-the next hello sets the client straight). It serves no **snapshot** (403
+a client's push — verified first, as a writer verifies one: a forged or an
+unsigned op stops at the follower, counted and told — is held to that vector
+and to what the follower forwarded before, and forwarded to the **inbox**,
+which a hub that writes consumes under its `authorizeWrite`, lands and relays
+to the topic (the push answers `forwarded: true` with the vector moved past
+what went in; the shadow itself moves once the topic shows the op). What the
+writer refuses by rule is logged as a scrub and reaches the topic like any
+op; what it does not take at all — a record out of scope, a gap — it tells
+the followers in the topic (`dropped`) and the `refused` event (`via:
+'inbox'`), so the hold is let go, the next hello sets the client straight,
+and a genuine op at that position is forwarded then. It serves no **snapshot** (403
 `READ_ONLY`): its shadow runs ahead of its engine, and a page of it could lack
 what the vector claims — so the load balancer's rule is that a client with no
 cursor lands on a hub that writes, and follows on any hub from then on (the
