@@ -9,6 +9,7 @@ import type {
   SharedCollection,
   SharedAttachments,
   SharedLocal,
+  SharedStats,
 } from '../src/shared/shared.js';
 import { createDatabase } from '../index.js';
 import { memoryEngine } from '../src/memory/memory.js';
@@ -81,6 +82,10 @@ election.request();
 off();
 election.release();
 expectType<string>(shared.token);
+const counts: SharedStats = shared.stats();
+expectType<boolean>(counts.leader);
+expectType<number>(counts.forwarded);
+expectType<number>(counts.promotions);
 const tab = await openShared({ createDatabase, engine: memoryEngine(), path: 'data', election: { follower: true } });
 expectType<'locks' | 'heartbeat' | 'follower' | 'alone'>(tab.mode);
 expectType<string>(shared.serve().set.access);

@@ -2,15 +2,22 @@
 // SHA-256 and named on the record as a register that replicates; the bytes fetched from a peer on demand.
 // `createDatabase({ plugins: [attachments()] })` hands the core `db.attachments`.
 
-import type { Plugin, AttachmentStore, AttachmentEntry, Attachment, AttachmentSweep } from '../../index.js';
-export type { Plugin, AttachmentStore, AttachmentEntry, Attachment, AttachmentSweep };
+import type {
+  Plugin,
+  AttachmentStore,
+  AttachmentEntry,
+  Attachment,
+  AttachmentSweep,
+  AttachmentStats,
+} from '../../index.js';
+export type { Plugin, AttachmentStore, AttachmentEntry, Attachment, AttachmentSweep, AttachmentStats };
 
 export interface AttachmentsOptions {
   /** Store the bytes compressed through CompressionStream (`encoding` on the register); none by default. */
   compression?: 'gzip' | 'deflate' | null;
 }
 
-/** The plugin: `db.attachments` (`put`, `get`, `has`, `list`, `remove`, `sweep`). */
+/** The plugin: `db.attachments` (`put`, `get`, `has`, `list`, `remove`, `sweep`, `stats`). */
 export function attachments(options?: AttachmentsOptions): Plugin;
 /** The field the names live under on a record: `_attachments`. */
 export const FIELD: '_attachments';

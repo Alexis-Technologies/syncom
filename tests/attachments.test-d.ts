@@ -1,6 +1,6 @@
 import { expectType } from 'tsd';
 import { attachments, FIELD } from '../src/attachments/attachments.js';
-import type { Attachment, AttachmentEntry, AttachmentSweep } from '../src/attachments/attachments.js';
+import type { Attachment, AttachmentEntry, AttachmentSweep, AttachmentStats } from '../src/attachments/attachments.js';
 import { createDatabase } from '../src/all/all.js';
 
 const db = await createDatabase({ path: 'data', plugins: [attachments({ compression: 'gzip' })] });
@@ -17,6 +17,9 @@ const swept = await db.attachments.sweep({ dryRun: true, tags: false });
 expectType<AttachmentSweep>(swept);
 expectType<number>(swept.removed);
 expectType<string>(db.attachments.field('notes.txt'));
+const counts: AttachmentStats = db.attachments.stats();
+expectType<number>(counts.puts);
+expectType<number>(counts.pending);
 expectType<Uint8Array>((await db.attachments.prepare('a', new Uint8Array(1))).stored);
 expectType<'_attachments'>(FIELD);
 expectType<Uint8Array>(await db.sync.fetchBlob('a'.repeat(64)));

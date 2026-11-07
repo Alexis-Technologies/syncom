@@ -93,6 +93,15 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   `rotateAtRest` takes a backend (`{ fsi, filesEngine }`), fences the source (`moved.json`, `MOVED`) and marks a
   copy in flight (`copy.json`). `attachments.sweep({ dryRun, tags })` collects the bytes nothing names; `put` on a
   sealed record is `ENCRYPTED`; `BLOB_NOT_FOUND`'s field is `attachment`.
+- **The sync blocks, the tabs and the blobs are observed (review №7, E9).** With the telemetry plugin the shared
+  log counts its ops (`syncom.shared.ops`: relayed, applied, forwarded, dropped), its entries (`syncom.shared.entries`:
+  passed, malformed, hole, failed, retried, stuck) and the lag of a topic entry to its apply (`syncom.shared.lag`); a
+  host's refusal says why (`syncom.hello.refused` carries `syncom.reason` beside the code), a revoke is counted by
+  where it came from (`syncom.revoke`, `syncom.via`) and is an info line (`sync.revoke`), a thin client's reads are
+  counted with their rows (`syncom.reads`, `syncom.reads.rows`), every blob put, read, served or fetched with its
+  bytes (`syncom.blobs`, `syncom.blob.bytes`), a sweep is a span (`syncom.attachments.sweep`), and the tabs count
+  their calls and their changes of role (`syncom.tabs.calls`, `syncom.tabs.failovers`; `tabs.promoted`,
+  `tabs.demoted` info lines). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
 - **The hosting side in three files (review №7, E11.1).** `src/sync/hosting.js` keeps hello, push, snapshot, the
   feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
   `query`, `count` and `blob`.

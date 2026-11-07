@@ -3123,6 +3123,19 @@ export interface AttachmentStore {
    * flight names is kept, every other blob removed (`dryRun` counts alone). `READ_ONLY` on a follower.
    */
   sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
+  /** The counts: puts, gets (the bytes read whole), the gets that fetched from a peer, the mismatches, the misses, the sweeps, the puts in flight. */
+  stats(): AttachmentStats;
+}
+
+/** What `db.attachments.stats()` answers. */
+export interface AttachmentStats {
+  puts: number;
+  gets: number;
+  fetched: number;
+  mismatches: number;
+  missing: number;
+  sweeps: number;
+  pending: number;
 }
 
 /** What `db.attachments.sweep()` answers: the blobs the store held, the digests marked, the blobs removed, the puts in flight. */

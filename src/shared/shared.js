@@ -435,6 +435,9 @@ class Shared extends Emitter {
   #local = null;
   #lives = new Set();
   #waiters = [];
+  // The counts `stats()` answers: the calls forwarded, tried again, lost, answered from what the leader kept; the dials;
+  // the changes of role.
+  #stats = { forwarded: 0, retried: 0, lost: 0, answered: 0, dials: 0, promotions: 0, demotions: 0, yields: 0 };
 
   constructor(options) {
     super();
@@ -509,6 +512,18 @@ class Shared extends Emitter {
 
   #logger() {
     return this.#db?.logger ?? QUIET;
+  }
+
+  // The telemetry writer of the current instance (`db.telemetry`: the contained one, every method on it) where it is
+  // on, else null: what the facade counts its forwards and its changes of role through — nothing of the core required.
+  #otel() {
+    const writer = this.#db?.telemetry;
+    return writer !== null && typeof writer === 'object' && writer.enabled === true ? writer : null;
+  }
+
+  /** The role, the generation, the election's mode and the counts: the calls forwarded, tried again, lost, answered from what the leader kept (a retry it saw), the dials, the changes of role. */
+  stats() {
+    return { leader: this.#leader, generation: this.#generation, mode: this.#election.mode, ...this.#stats };
   }
 
   #check() {
@@ -587,9 +602,14 @@ class Shared extends Emitter {
       this.#leader = true;
       this.#channel = null;
       this.#attempts = 0;
-      if (!first) this.#generation++;
+      if (!first) {
+        this.#generation++;
+        this.#stats.promotions++;
+        this.#otel()?.recordFailover('promoted');
+      }
       this.#relay(writer);
       if (!first) this.#rebind();
+      this.#logger().info({ event: 'tabs.promoted', path: this.#path, generation: this.#generation, first });
       notify(this, this.#logger(), 'leader', { path: this.#path, generation: this.#generation });
       const waiters = this.#waiters;
       this.#waiters = [];
@@ -605,6 +625,8 @@ class Shared extends Emitter {
         { path: this.#path, attempt, cause: error },
       );
       this.#logger().error({ event: 'tabs.promote.failed', path: this.#path, attempt, err: error });
+      this.#stats.yields++;
+      this.#otel()?.recordFailover('yielded');
       this.#election.yield();
       notify(this, this.#logger(), 'error', failed);
       if (!this.#closed) {
@@ -638,6 +660,9 @@ class Shared extends Emitter {
     }
     if (this.#closed) return;
     this.#generation++;
+    this.#stats.demotions++;
+    this.#otel()?.recordFailover('demoted');
+    this.#logger().info({ event: 'tabs.demoted', path: this.#path, generation: this.#generation });
     this.#rebind();
     await old.close().catch(NOOP);
   }
@@ -797,7 +822,10 @@ class Shared extends Emitter {
   #channelOf() {
     if (this.#channel !== null) return Promise.resolve(this.#channel);
     this.#dialing ??= Promise.resolve()
-      .then(() => this.#dial({ path: this.#path, generation: this.#generation }))
+      .then(() => {
+        this.#stats.dials++;
+        return this.#dial({ path: this.#path, generation: this.#generation });
+      })
       .then((channel) => {
         this.#channel = channel;
         return channel;
@@ -831,6 +859,10 @@ class Shared extends Emitter {
     for (let attempt = 0; ; attempt++) {
       this.#check();
       if (this.#leader) return Reflect.apply(this.#db[name], this.#db, args);
+      if (attempt > 0) {
+        this.#stats.retried++;
+        this.#otel()?.recordForward('retried');
+      }
       let channel = null;
       try {
         channel = await this.#channelOf();
@@ -852,10 +884,13 @@ class Shared extends Emitter {
         }
         if (answer !== null) {
           try {
-            return unwrap(answer, name);
+            const value = unwrap(answer, name);
+            this.#answered();
+            return value;
           } catch (error) {
             const code = error?.code;
             if (code === 'CALL_UNKNOWN') {
+              this.#lost();
               throw new SyncomError(
                 'LEADER_LOST',
                 `${name}() was tried again at a leader that never saw it: the leader changed, the first may have landed`,
@@ -863,7 +898,10 @@ class Shared extends Emitter {
               );
             }
             // The instance that answered follows now, or is closing: the leader is another, dialed again.
-            if (code !== 'NOT_LEADER' && code !== 'LEADER_LOST' && code !== 'CLOSED') throw error;
+            if (code !== 'NOT_LEADER' && code !== 'LEADER_LOST' && code !== 'CLOSED') {
+              this.#answered();
+              throw error;
+            }
             cause = error;
           }
         }
@@ -871,6 +909,7 @@ class Shared extends Emitter {
       // The leader went: the channel dropped, a new one dialed once a leader answers.
       await this.#dropChannel();
       if (Date.now() >= deadline) {
+        this.#lost();
         throw new SyncomError(
           'LEADER_LOST',
           `${name}() reached no leader of ${this.#path} within ${this.#failover} ms`,
@@ -879,6 +918,17 @@ class Shared extends Emitter {
       }
       await sleep(Math.min(LOCKED_STEP * (attempt + 1), 1000));
     }
+  }
+
+  // A call the leader answered (a value or its refusal), and one lost to a change of leader.
+  #answered() {
+    this.#stats.forwarded++;
+    this.#otel()?.recordForward('ok');
+  }
+
+  #lost() {
+    this.#stats.lost++;
+    this.#otel()?.recordForward('lost');
   }
 
   /**
@@ -939,7 +989,11 @@ class Shared extends Emitter {
         return { ok: false, error: describe(new TypeError(`${method}: a call is { id, args, retry? }`)) };
       }
       const held = answers.get(call.token)?.get(call.id);
-      if (held !== undefined) return held;
+      if (held !== undefined) {
+        this.#stats.answered++;
+        this.#otel()?.recordForward('answered');
+        return held;
+      }
       if (this.#closed || !this.#leader) {
         return { ok: false, error: describe(notLeader(this.#path, 'a forwarded write')) };
       }

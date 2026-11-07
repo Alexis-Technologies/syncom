@@ -187,7 +187,7 @@ class SyncManager extends Emitter {
     if (this.#sharedOptions !== null) {
       const kv = this.#storage[DB].kv;
       const pageSize = this.#options.pageSize ?? DEFAULT_PAGE_SIZE;
-      this.#shared = new SharedHub(this, this.#storage, this.#sharedOptions, { kv, pageSize });
+      this.#shared = new SharedHub(this, this.#storage, this.#sharedOptions, { kv, pageSize, otel: this.#otel });
       await this.#shared.start();
     }
     if (autoStart && typeof connect === 'function') await this.start();
@@ -498,6 +498,8 @@ class SyncManager extends Emitter {
     for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') taken.push(scopes[i]);
     if (taken.length === 0) return;
     if (this.#adoptRevocation(node, taken) > 0) {
+      this.#otel.recordRevoke('shared');
+      this.#storage.logger.info({ event: 'sync.revoke', node, scopes: taken, via: 'shared' });
       notify(this, this.#storage.logger, 'revoke', { node, scopes: taken, via: 'shared' });
     }
   }
@@ -1431,6 +1433,7 @@ class SyncManager extends Emitter {
       }
       if ((await hashBytes(bytes)) !== digest) {
         this.#storage.logger.warn({ event: 'sync.blob.mismatch', url: peer.node.url, node: peer.ref.node, digest });
+        this.#otel.recordBlob('fetched', 'mismatch', 0);
         continue;
       }
       const store = this.#storage[DB]?.blobs;
@@ -1442,8 +1445,10 @@ class SyncManager extends Emitter {
           this.#storage.logger.warn({ event: 'sync.blob.keep.failed', digest, err: error });
         }
       }
+      if (this.#otel.enabled) this.#otel.recordBlob('fetched', 'ok', bytes.length);
       return bytes;
     }
+    this.#otel.recordBlob('fetched', 'missing', 0);
     const fields = { digest, asked, cause };
     if (named) {
       fields.id = id;
@@ -1688,6 +1693,8 @@ class SyncManager extends Emitter {
     this.#adoptRevocation(node, scopes);
     // Over a shared log every hub takes the scopes back: the revocation goes to the topic, folded by each.
     if (this.#shared !== null && !this.#storage.readOnly) this.#shared.revoke(node, scopes);
+    this.#otel.recordRevoke('local');
+    this.#storage.logger.info({ event: 'sync.revoke', node, scopes: scopes.slice(), via: 'local' });
     notify(this, this.#storage.logger, 'revoke', { node, scopes: scopes.slice() });
   }
 }

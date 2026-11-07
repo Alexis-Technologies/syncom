@@ -195,6 +195,7 @@ const failed = (reason, message, fields) => new SyncomError('SHARED_LOG_FAILED',
 
 class SharedHub {
   #manager;
+  #otel;
   #storage;
   #logger;
   #log;
@@ -253,9 +254,10 @@ class SharedHub {
     manager,
     storage,
     { log, topic, inbox, stopWait = DEFAULT_STOP_WAIT },
-    { kv, pageSize = DEFAULT_PAGE_SIZE },
+    { kv, pageSize = DEFAULT_PAGE_SIZE, otel },
   ) {
     this.#manager = manager;
+    this.#otel = otel;
     this.#storage = storage;
     this.#logger = storage.logger;
     this.#log = log;
@@ -468,6 +470,7 @@ class SharedHub {
     this.#backoff = 0;
     this.#told = false;
     this.#stats.relayed += items.length;
+    if (this.#otel.enabled) this.#otel.recordShared('relayed', items.length);
     for (let i = 0; i < items.length; i++) if (items[i].seq !== null) this.#cover(items[i].seq);
   }
 
@@ -516,6 +519,7 @@ class SharedHub {
   #fallBehind(error) {
     this.#behind = true;
     this.#stats.appendFailures++;
+    this.#otel.recordSharedEntry('failed');
     if (!this.#told) {
       this.#told = true;
       this.#logger.warn({ event: 'shared.append.failed', topic: this.#topic, err: error });
@@ -564,6 +568,7 @@ class SharedHub {
           this.#backoff = 0;
           this.#told = false;
           this.#stats.relayed += ops.length;
+          if (this.#otel.enabled) this.#otel.recordShared('relayed', ops.length);
           this.#reached(last);
         } catch (error) {
           this.#fallBehind(error);
@@ -630,6 +635,7 @@ class SharedHub {
     // in no one's hands but the appender's, whose recovery appends it again when it comes back — and passed.
     if (entry.value === null) {
       this.#stats.holes++;
+      this.#otel.recordSharedEntry('hole');
       this.#logger.warn({ event: 'shared.hole', topic, id: entry.id });
       const message = `The shared log ${topic} has a hole at ${entry.id}: an appender's entry never came`;
       notify(this.#manager, this.#logger, 'error', failed('hole', message, { topic, cursor: entry.id }));
@@ -645,6 +651,7 @@ class SharedHub {
       const parsed = parseEntry(entry.value);
       if (parsed === undefined) {
         this.#stats.malformed++;
+        this.#otel.recordSharedEntry('malformed');
         this.#logger.warn({ event: 'shared.entry.malformed', topic, id: entry.id });
       } else if (parsed !== null) {
         if (parsed.dropped !== undefined) {
@@ -662,6 +669,7 @@ class SharedHub {
       }
     }
     this.#cursor[name] = entry.id;
+    this.#otel.recordSharedEntry('passed');
     this.#passed(entry.id);
     if (name === 'topic') this.#ringPush(entry);
     this.#saveCursor();
@@ -695,6 +703,12 @@ class SharedHub {
         const result = await this.#storage.applyRemote(parsed.ops, options);
         this.#stats.applied += result.applied;
         this.#retrying[name] = false;
+        if (this.#otel.enabled) {
+          this.#otel.recordShared('applied', result.applied);
+          let newest = 0;
+          for (let i = 0; i < parsed.ops.length; i++) if (parsed.ops[i].ts > newest) newest = parsed.ops[i].ts;
+          this.#otel.recordSharedLag(Math.max(0, Date.now() - newest));
+        }
         if (inbox) await this.#judged(topic, entry, parsed, result);
         return true;
       } catch (error) {
@@ -708,6 +722,7 @@ class SharedHub {
         // Closed under the apply: the loop ends with the hub.
         if (error?.code === 'CLOSED') return false;
         this.#logger.warn({ event: 'shared.entry.failed', topic, id: entry.id, attempt, err: error });
+        this.#otel.recordSharedEntry('retried');
         // A rule's refusal is the same at every try — a hook that throws, a bug (a TypeError): three times and the
         // topic is stuck, for someone to look at. The engine's is not — the medium down, a lease late, a group the
         // log refused: tried again, backed off, until it lands; told once per run.
@@ -715,6 +730,7 @@ class SharedHub {
         if (deterministic) {
           if (attempt >= MAX_APPLY_RETRIES) {
             this.#stuck[name] = true;
+            this.#otel.recordSharedEntry('stuck');
             const message = `An entry of the shared log ${topic} (${entry.id}) failed to apply ${attempt} times: nothing past it is taken until sync.stop() and start()`;
             notify(
               this.#manager,
@@ -766,6 +782,7 @@ class SharedHub {
     }
     if (dropped.length === 0) return;
     this.#stats.dropped += dropped.length;
+    this.#otel.recordShared('dropped', dropped.length);
     try {
       const text = droppedText(this.#storage.nodeId, dropped, entry.id);
       await this.#log.append(this.#topic, text, { headers: { by: this.#token } });
@@ -1011,6 +1028,7 @@ class SharedHub {
     result.vector = seqs;
     result.applied = taking.length;
     this.#stats.forwarded += taking.length;
+    this.#otel.recordShared('forwarded', taking.length);
     return result;
   }
 }

@@ -26,6 +26,12 @@ const { createTelemetry } = require('../src/telemetry/telemetry.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 const { MemoryLink } = require('./utils/memory-link.js');
+const { createMemorySharedLog } = require('./utils/shared-log.js');
+const { openShared } = require('../src/shared/shared.js');
+const { attachments } = require('../src/attachments/attachments.js');
+const { createFakeLocks } = require('./utils/fake-locks.js');
+const { createLeaderPort } = require('./utils/fake-port.js');
+const { DB } = require('../src/symbols.js');
 
 // A real SDK, exporting into memory. Anything less would not prove that what
 // syncom emits is actually a valid span or a valid metric.
@@ -79,6 +85,15 @@ const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date
 
 const sum = (dataPoints, predicate = () => true) =>
   dataPoints.filter(predicate).reduce((total, point) => total + (point.value.sum ?? point.value), 0);
+// The total of a metric's points carrying every label given (a histogram's sum, a counter's value), read from the
+// newest batch collected: an earlier flush's copy of the metric holds the points of its time alone.
+const labelled = async (collect, name, labels) => {
+  let metric = null;
+  for (const candidate of await collect()) if (candidate.descriptor.name === name) metric = candidate;
+  return sum(metric?.dataPoints ?? [], (point) =>
+    Object.entries(labels).every(([key, value]) => point.attributes[key] === value),
+  );
+};
 
 const point = (dataPoints, attributes) =>
   dataPoints.find((candidate) =>
@@ -258,6 +273,193 @@ test('createTelemetry: what enables it', async (t) => {
       await collect();
     },
   );
+
+  await t.test(
+    "the shared log, a revoke, the reads and the blobs record their work: ops relayed and applied with their lag, entries passed, a refusal by reason, a thin client's query and count, a blob served and fetched, a sweep as a span",
+    async (t2) => {
+      const { meter, points, collect } = createMetrics();
+      const { tracer, spans } = createTracing();
+      const engine = syncom.memoryEngine();
+      const schema = { entities: { Task: {} } };
+      const createStorage = async (t3, name, options = {}) => {
+        const storage = await syncom.createDatabase({
+          engine,
+          path: `${t3.name}/${name}`,
+          logger: false,
+          defer: 0,
+          schema,
+          plugins: [attachments()],
+          ...options,
+        });
+        t3.after(() => storage.close().catch(() => {}));
+        return storage;
+      };
+      const sharedLog = createMemorySharedLog();
+      const hub = { sync: { sharedLog } };
+      // Two hubs over one log; the meter on H1 and C1 (the counters merge; no gauge is read here).
+      const mesh = await createMesh(
+        t2,
+        ['H1', 'H2', 'C1', 'C2'],
+        [
+          ['C1', 'H1'],
+          ['C2', 'H2'],
+        ],
+        createStorage,
+        {
+          nodes: { H1: { ...hub, telemetry: { meter } }, H2: hub, C1: { telemetry: { tracer, meter } } },
+        },
+      );
+      const [h1, h2, c1, c2] = ['H1', 'H2', 'C1', 'C2'].map((name) => mesh.get(name));
+      await waitUntil(() => [c1, c2].every((s) => s.sync.peers()[0]?.subscribed));
+      const first = await c1.insert({ $type: 'Task', title: 'from C1' });
+      await c2.insert({ $type: 'Task', title: 'from C2' });
+      await settle([h1, h2, c1, c2]);
+      assert.deepStrictEqual((await h1.get(first)).title, 'from C1');
+      // H1 relayed C1's op to the topic and applied C2's from it; every entry passed, the lag sampled.
+      assert.ok((await labelled(collect, 'syncom.shared.ops', { 'syncom.result': 'relayed' })) >= 1, 'relayed');
+      assert.ok((await labelled(collect, 'syncom.shared.ops', { 'syncom.result': 'applied' })) >= 1, 'applied');
+      assert.ok((await labelled(collect, 'syncom.shared.entries', { 'syncom.result': 'passed' })) >= 2, 'passed');
+      assert.ok((await points('syncom.shared.lag'))[0].value.count >= 1, 'the lag sampled');
+      // A revoke here, and one folded from the other hub.
+      h1.sync.revoke('nobody', ['x']);
+      h2.sync.revoke('nobody-else', ['y']);
+      await waitUntil(async () => (await labelled(collect, 'syncom.revoke', { 'syncom.via': 'shared' })) === 1);
+      assert.strictEqual(await labelled(collect, 'syncom.revoke', { 'syncom.via': 'local' }), 1);
+      // A thin client's reads, and a $regex refused by reason.
+      const link = new MemoryLink(h1.sync.unit({ access: 'public', query: true }));
+      await link.call('syncom/hello', { node: 'thin', version: 1 });
+      const { rows } = await link.call('syncom/query', { entity: 'Task' });
+      assert.strictEqual(rows.length, 2);
+      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task' }), { count: 2, capped: false });
+      await assert.rejects(link.call('syncom/query', { entity: 'Task', query: { title: { $regex: 'C' } } }), {
+        code: 400,
+      });
+      assert.strictEqual(
+        await labelled(collect, 'syncom.reads', { 'syncom.procedure': 'query', 'syncom.result': 'ok' }),
+        1,
+      );
+      assert.strictEqual(
+        await labelled(collect, 'syncom.reads', { 'syncom.procedure': 'count', 'syncom.result': 'ok' }),
+        1,
+      );
+      assert.strictEqual(await labelled(collect, 'syncom.reads.rows', { 'syncom.procedure': 'query' }), 2);
+      assert.strictEqual(
+        await labelled(collect, 'syncom.hello.refused', { 'syncom.code': '400', 'syncom.reason': 'REGEX' }),
+        1,
+      );
+      // A blob put on H1, served to the thin client by the record that names it, fetched by C1 on its read.
+      const bytes = new TextEncoder().encode('the bytes of a file');
+      const entry = await h1.attachments.put(first, 'f.txt', bytes, { type: 'text/plain' });
+      await settle([h1, h2, c1, c2]);
+      const served = await link.call('syncom/blob', { digest: entry.digest, id: first, name: 'f.txt' });
+      assert.strictEqual(served.size, bytes.length);
+      const got = await c1.attachments.get(first, 'f.txt');
+      assert.strictEqual(got.length, bytes.length);
+      // Served twice: to the thin client, and to C1's fetch.
+      for (const [direction, expected] of [
+        ['put', 1],
+        ['served', 2],
+        ['fetched', 1],
+        ['get', 1],
+      ]) {
+        const labels = { 'syncom.direction': direction, 'syncom.result': 'ok' };
+        assert.strictEqual(await labelled(collect, 'syncom.blobs', labels), expected, direction);
+        const total = await labelled(collect, 'syncom.blob.bytes', { 'syncom.direction': direction });
+        assert.strictEqual(total, bytes.length * expected, `${direction} bytes`);
+      }
+      // The store's bytes swapped under the register: a mismatch, counted.
+      await c1[DB].blobs.put(entry.digest, new Uint8Array(3));
+      await assert.rejects(c1.attachments.get(first, 'f.txt'), { code: 'BLOB_MISMATCH' });
+      assert.strictEqual(
+        await labelled(collect, 'syncom.blobs', { 'syncom.direction': 'get', 'syncom.result': 'mismatch' }),
+        1,
+      );
+      assert.deepStrictEqual(c1.attachments.stats(), {
+        puts: 0,
+        gets: 1,
+        fetched: 1,
+        mismatches: 1,
+        missing: 0,
+        sweeps: 0,
+        pending: 0,
+      });
+      assert.strictEqual(h1.attachments.stats().puts, 1);
+      // A sweep is a span with its counts.
+      const swept = await c1.attachments.sweep({ dryRun: true });
+      const sweep = spans().find((span) => span.name === 'syncom.attachments.sweep');
+      assert.ok(sweep, 'a span of the sweep');
+      assert.strictEqual(sweep.attributes['syncom.attachments.blobs'], swept.blobs);
+      assert.strictEqual(sweep.attributes['syncom.attachments.marked'], swept.marked);
+      assert.strictEqual(sweep.attributes['syncom.attachments.removed'], 0);
+      assert.strictEqual(c1.attachments.stats().sweeps, 1);
+      assertNoIdentityLabels(await collect());
+    },
+  );
+
+  await t.test('the tabs record their forwards and their changes of role, and stats() counts them', async (t2) => {
+    const { meter, collect } = createMetrics();
+    const engine = syncom.memoryEngine();
+    const locks = createFakeLocks();
+    const port = createLeaderPort();
+    const open = async () => {
+      const shared = await openShared({
+        createDatabase: syncom.createDatabase,
+        engine,
+        path: 'tabs',
+        logger: false,
+        defer: 0,
+        schema: { entities: { Task: {} } },
+        channel: port.dial,
+        election: { locks },
+        grace: 20,
+        failover: 3000,
+        telemetry: { meter },
+      });
+      const mount = () => port.mount(shared.serve());
+      if (shared.leader) mount();
+      shared.on('leader', mount);
+      t2.after(() => shared.close().catch(() => {}));
+      return shared;
+    };
+    const a = await open();
+    const b = await open();
+    assert.strictEqual(a.leader, true);
+    assert.strictEqual(b.leader, false);
+    // A follower's write, carried to the leader and answered.
+    await b.set('t1', { title: 'from B' });
+    assert.deepStrictEqual(await a.get('t1'), { title: 'from B' });
+    assert.strictEqual(await labelled(collect, 'syncom.tabs.calls', { 'syncom.result': 'ok' }), 1);
+    // A retry the leader saw: answered from what it kept, not run again.
+    const procedures = a.serve();
+    const call = { id: `${b.token}:99`, args: ['t2', { title: 'once' }], retry: false };
+    const once = await procedures.set.handler({}, call);
+    assert.deepStrictEqual(await procedures.set.handler({}, { ...call, retry: true }), once);
+    assert.strictEqual(await labelled(collect, 'syncom.tabs.calls', { 'syncom.result': 'answered' }), 1);
+    assert.strictEqual(a.stats().answered, 1);
+    assert.deepStrictEqual(b.stats(), {
+      leader: false,
+      generation: 0,
+      mode: 'locks',
+      forwarded: 1,
+      retried: 0,
+      lost: 0,
+      answered: 0,
+      dials: 1,
+      promotions: 0,
+      demotions: 0,
+      yields: 0,
+    });
+    // The leader goes: B is promoted, a failover counted.
+    port.mount(null);
+    await a.close();
+    await b.waitForLeadership({ signal: AbortSignal.timeout(5000) });
+    assert.strictEqual(await labelled(collect, 'syncom.tabs.failovers', { 'syncom.kind': 'promoted' }), 1);
+    const stats = b.stats();
+    assert.strictEqual(stats.leader, true);
+    assert.strictEqual(stats.generation, 1);
+    assert.strictEqual(stats.promotions, 1);
+    assert.strictEqual(stats.forwarded, 1);
+  });
 
   await t.test('a meter missing a factory leaves metrics off, not the writer', () => {
     const otel = createTelemetry({ meter: { createCounter: () => ({ add() {} }) } });

@@ -73,6 +73,7 @@ export type {
   LocalStore,
   AttachmentEntry,
   AttachmentSweep,
+  AttachmentStats,
   Attachment,
   AttachmentStore,
   DeleteOptions,

@@ -27,6 +27,7 @@ const { SyncomError, typed } = require('../errors.js');
 const { isDigest, checkBlobBytes, MAX_BLOB_BYTES } = require('../blobs.js');
 const { SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
+const { traced } = require('../telemetry/writer.js');
 
 const FIELD = '_attachments';
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
@@ -122,12 +123,24 @@ class Attachments {
   #warned = new Set();
   // The digests of the puts in flight — between the blob's put and the register's landing — and how many each.
   #pending = new Map();
+  // The counts `stats()` answers.
+  #stats = { puts: 0, gets: 0, fetched: 0, mismatches: 0, missing: 0, sweeps: 0 };
   constructor(storage, db, encoding, logger) {
     this.#storage = storage;
     this.#db = db;
     this.#blobs = db.blobs;
     this.#encoding = encoding;
     this.#logger = logger;
+  }
+
+  // The telemetry writer on the seam (the disabled one without the plugin): what the store counts its work through.
+  #otel() {
+    return this.#storage[SOURCE].otel;
+  }
+
+  /** The counts: puts, gets (the bytes read whole), the gets that fetched from a peer, the mismatches, the misses, the sweeps, the puts in flight. */
+  stats() {
+    return { ...this.#stats, pending: this.#pending.size };
   }
 
   // The attachment's name rides as `attachment`: a field named `name` would be the error's own.
@@ -198,6 +211,9 @@ class Attachments {
       if (left === 0) this.#pending.delete(entry.digest);
       else this.#pending.set(entry.digest, left);
     }
+    this.#stats.puts++;
+    const otel = this.#otel();
+    if (otel.enabled) otel.recordBlob('put', 'ok', stored.length);
     return entry;
   }
 
@@ -211,6 +227,17 @@ class Attachments {
   async sweep({ dryRun = false, tags = true } = {}) {
     const seam = this.#storage[SOURCE];
     seam.guard('a sweep');
+    const run = () => this.#sweep(seam, dryRun, tags);
+    const { otel } = seam;
+    if (!otel.enabled) return run();
+    return traced(otel, 'syncom.attachments.sweep', {}, run, (result) => ({
+      'syncom.attachments.blobs': result.blobs,
+      'syncom.attachments.marked': result.marked,
+      'syncom.attachments.removed': result.removed,
+    }));
+  }
+
+  async #sweep(seam, dryRun, tags) {
     const started = Date.now();
     const marked = new Set();
     // The live records, a page at a time: a row that is gone names nothing.
@@ -268,6 +295,7 @@ class Attachments {
       removed++;
     }
     const result = { blobs: digests.length, marked: marked.size, removed, pending: this.#pending.size };
+    this.#stats.sweeps++;
     this.#logger.info({ event: 'attachments.sweep', ...result, dryRun, ms: Date.now() - started });
     return result;
   }
@@ -285,10 +313,14 @@ class Attachments {
     if (stored === null) {
       if (fetch !== true) throw this.#missing(id, name, entry.digest);
       stored = await this.#fetch(entry.digest, id, name);
+      this.#stats.fetched++;
     }
     const bytes = entry.encoding === undefined ? stored : await inflate(stored, entry.encoding, entry.length);
     if (bytes === null) throw this.#mismatch(id, name, entry.digest, 'inflated');
     if (bytes.length !== entry.length) throw this.#mismatch(id, name, entry.digest, 'length');
+    this.#stats.gets++;
+    const otel = this.#otel();
+    if (otel.enabled) otel.recordBlob('get', 'ok', bytes.length);
     const out = { bytes, type: entry.type, length: entry.length, digest: entry.digest };
     if (entry.encoding !== undefined) out.encoding = entry.encoding;
     return out;
@@ -327,6 +359,8 @@ class Attachments {
   }
 
   #mismatch(id, name, digest, reason) {
+    this.#stats.mismatches++;
+    this.#otel().recordBlob('get', 'mismatch', 0);
     return new SyncomError(
       'BLOB_MISMATCH',
       `The bytes of attachment ${name} of ${id} (${digest}) are not what the register says (${reason})`,
@@ -335,6 +369,8 @@ class Attachments {
   }
 
   #missing(id, name, digest) {
+    this.#stats.missing++;
+    this.#otel().recordBlob('get', 'missing', 0);
     return new SyncomError('BLOB_NOT_FOUND', `The bytes of attachment ${name} of ${id} (${digest}) are not here`, {
       id,
       attachment: name,

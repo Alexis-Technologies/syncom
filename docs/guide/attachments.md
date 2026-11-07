@@ -100,6 +100,13 @@ const { blobs, marked, removed } = await db.attachments.sweep({ dryRun: true });
 await db.attachments.sweep(); // removes what nothing names
 ```
 
+`db.attachments.stats()` counts the puts, the gets (the bytes read whole), the
+gets that fetched from a peer, the mismatches, the misses, the sweeps and the
+puts in flight. With the telemetry plugin a sweep is a span
+(`syncom.attachments.sweep`) and every blob put, read, served to a peer or
+fetched from one is counted with its bytes (`syncom.blobs`, `syncom.blob.bytes`)
+— see [Telemetry](./telemetry.md).
+
 ## Compression
 
 ```js

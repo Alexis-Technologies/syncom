@@ -134,10 +134,10 @@ const limit = (otel, state, args, ops, limits) => {
   }
 };
 
-// A refusal before the handler: counted by code; 428 is the normal course
+// A refusal before the handler: counted by code and reason; 428 is the normal course
 // of a wrpc reconnect (a new server-side client) and only counted.
 const refuse = (host, message, code, reason, node = null) => {
-  host.otel.recordRefusal(code);
+  host.otel.recordRefusal(code, reason);
   if (code !== 428) host.logger.warn({ event: 'sync.hello.refused', code, reason, node });
   return coded(message, code, reason);
 };
@@ -155,7 +155,7 @@ const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', chal
 
 // A call this unit does not serve, or cannot: counted, logged under the procedure's event, refused by code.
 const refuseCall = (host, procedure, message, code, reason, node = null) => {
-  host.otel.recordRefusal(code);
+  host.otel.recordRefusal(code, reason);
   host.logger.warn({ event: `sync.${procedure}.refused`, code, reason, node });
   return coded(message, code, reason);
 };

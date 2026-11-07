@@ -266,10 +266,30 @@ export interface Shared {
   transact<T>(fn: (tx: SharedTransaction) => T | Promise<T>, options?: Record<string, unknown>): Promise<T>;
   /** The procedures a leader mounts for its followers (`access` `'session'` by default); `NOT_LEADER` on a follower. */
   serve(options?: { access?: string }): Record<string, ServedProcedure>;
+  /** The role, the generation, the election's mode and the counts: the calls forwarded to the leader, tried again, lost (`LEADER_LOST`), answered from what the leader kept (a retry it saw), the dials, the changes of role. */
+  stats(): SharedStats;
   close(): Promise<void>;
   on<E extends keyof SharedEvents>(event: E, listener: SharedEvents[E]): this;
   once<E extends keyof SharedEvents>(event: E, listener: SharedEvents[E]): this;
   off<E extends keyof SharedEvents>(event: E, listener: SharedEvents[E]): this;
+}
+
+/** `shared.stats()`: the role, the generation, the election's mode and the counts. */
+export interface SharedStats {
+  leader: boolean;
+  generation: number;
+  mode: 'locks' | 'heartbeat' | 'follower' | 'alone';
+  /** Calls carried to a leader and answered (a value or its refusal); tried again; lost to a change of leader (`LEADER_LOST`); on a leader, retries answered from what it kept. */
+  forwarded: number;
+  retried: number;
+  lost: number;
+  answered: number;
+  /** Channels dialed to a leader. */
+  dials: number;
+  /** Promoted at a failover (never the first lead), demoted (the election lost), yielded (`PROMOTE_FAILED`). */
+  promotions: number;
+  demotions: number;
+  yields: number;
 }
 
 export function openShared<S extends Schema = Schema>(options: SharedOptions<S>): Promise<Shared>;

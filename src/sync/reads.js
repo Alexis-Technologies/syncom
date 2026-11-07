@@ -164,10 +164,16 @@ const query = (host) => async (context, args) => {
     try {
       // A grant of everything: the window is the cursor's, the cap the rows answered. A scoped peer: the cap bounds
       // what is read, the window what goes out.
-      if (scopes !== null) return await walkScoped(host, cursor, scopes, { limit, offset, budget: cap });
+      if (scopes !== null) {
+        const answer = await walkScoped(host, cursor, scopes, { limit, offset, budget: cap });
+        host.otel.recordRead('query', answer.capped ? 'capped' : 'ok', answer.rows.length);
+        return answer;
+      }
       if (limit !== Infinity) cursor = cursor.limit(limit);
       if (offset > 0) cursor = cursor.offset(offset);
-      return { rows: await cursor.fetch(), capped: false };
+      const rows = await cursor.fetch();
+      host.otel.recordRead('query', 'ok', rows.length);
+      return { rows, capped: false };
     } catch (error) {
       throw refuseCall(host, 'query', error.message, 400, BAD_QUERY, state.node);
     }
@@ -221,6 +227,7 @@ const blob = (host) => async (context, args) => {
   const store = host.storage[DB]?.blobs;
   const bytes = store === undefined ? null : await store.get(digest);
   if (bytes === null) throw notFound();
+  host.otel.recordBlob('served', 'ok', bytes.length);
   const client = context?.client;
   if (client && client.binary !== false && typeof client.createStream === 'function') {
     const stream = client.createStream('syncom/blob', bytes.length);
@@ -239,11 +246,16 @@ const count = (host) => async (context, args) => {
     const cursor = cursorOf(host, args, 'count', state);
     const scopes = grant(args.scopes, state.scopes);
     try {
-      if (scopes === null) return { count: await cursor.count(), capped: false };
+      if (scopes === null) {
+        const total = await cursor.count();
+        host.otel.recordRead('count', 'ok', total);
+        return { count: total, capped: false };
+      }
       // A scoped count reads the rows (the catalog knows no scopes), as many as the budget allows: `capped` says
       // when it ended the count.
       const budget = host.limits.rowsPerQuery;
       const { rows, capped } = await walkScoped(host, cursor, scopes, { limit: Infinity, offset: 0, budget });
+      host.otel.recordRead('count', capped ? 'capped' : 'ok', rows.length);
       return { count: rows.length, capped };
     } catch (error) {
       throw refuseCall(host, 'count', error.message, 400, BAD_QUERY, state.node);

@@ -8,7 +8,7 @@ Bytes beside a record: in the engine's blobs store by digest, named on the recor
 src/attachments/attachments.js @alexify/syncom/attachments — attachments({ compression }): the plugin, db.attachments (put, get, has, list, remove)
                           over the engine's blobs store and the record's `_attachments/<name>` register; the bytes fetched through
                           sync.fetchBlob where this node lacks them; prepare() and field() for a follower of /shared; sweep(), the
-                          mark-and-sweep over the store — requires errors.js, blobs.js, symbols.js, crypto/digest.js only
+                          mark-and-sweep over the store (a span); stats() — requires errors.js, blobs.js, symbols.js, crypto/digest.js, telemetry/writer.js only
 ```
 
 ## Rules

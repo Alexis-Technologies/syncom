@@ -239,3 +239,11 @@ transaction one. The leader keeps the answers of the last 256 calls of each
 of 64 followers (the deduplication of a retry) in memory. A follower that
 puts an attachment opens a second handle of the engine for the blobs store
 (closed with the facade). Nothing of a follower touches the log.
+
+`shared.stats()` counts what the facade did: the calls forwarded to the leader
+and answered, tried again, lost (`LEADER_LOST`), the retries a leader answered
+from what it kept, the dials, and the changes of role (promoted at a failover,
+demoted, yielded). With the telemetry plugin the same ride as
+`syncom.tabs.calls` and `syncom.tabs.failovers`, and a promotion or a demotion
+is an info line (`tabs.promoted`, `tabs.demoted`) — see
+[Telemetry](./telemetry.md).

@@ -192,6 +192,16 @@ const createTelemetry = (telemetry) => {
   let cleanupTombstones = null;
   let dumpPages = null;
   let insertsNamed = null;
+  let sharedOps = null;
+  let sharedEntries = null;
+  let sharedLag = null;
+  let revokes = null;
+  let reads = null;
+  let readRows = null;
+  let blobs = null;
+  let blobBytes = null;
+  let tabsCalls = null;
+  let tabsFailovers = null;
   let gauges = null;
 
   if (hasMethod(meter, 'createCounter') && hasMethod(meter, 'createHistogram')) {
@@ -313,6 +323,51 @@ const createTelemetry = (telemetry) => {
       insertsNamed = meter.createCounter('syncom.insert.named', {
         unit: '{insert}',
         description: 'Inserts under an id the data named, by result: ok, exists',
+      });
+      sharedOps = meter.createCounter('syncom.shared.ops', {
+        unit: '{op}',
+        description:
+          'Ops through the shared log, by result: relayed (appended to the topic), applied (from the topic or the inbox), forwarded (to the inbox), dropped (an inbox op the writer did not take)',
+      });
+      sharedEntries = meter.createCounter('syncom.shared.entries', {
+        unit: '{entry}',
+        description:
+          'Entries of the shared log, by result: passed, malformed, hole, failed (an append), retried (an apply tried again), stuck',
+      });
+      sharedLag = meter.createHistogram('syncom.shared.lag', {
+        unit: 'ms',
+        description: 'From the newest op of a topic entry (its stamp) to its apply here',
+      });
+      revokes = meter.createCounter('syncom.revoke', {
+        unit: '{revoke}',
+        description:
+          'Scopes taken back from a node, by via: local (sync.revoke here), shared (folded from the shared log)',
+      });
+      reads = meter.createCounter('syncom.reads', {
+        unit: '{call}',
+        description:
+          "A thin client's reads served, by procedure (query, count) and result (ok, capped: the read budget ended the walk)",
+      });
+      readRows = meter.createHistogram('syncom.reads.rows', {
+        unit: '{row}',
+        description: 'Rows a query answered, or a count counted, by procedure',
+      });
+      blobs = meter.createCounter('syncom.blobs', {
+        unit: '{blob}',
+        description: 'Blobs by direction (put, get, served, fetched) and result (ok, mismatch, missing)',
+      });
+      blobBytes = meter.createCounter('syncom.blob.bytes', {
+        unit: 'By',
+        description: 'Bytes of the blobs put, read, served to a peer and fetched from one, by direction',
+      });
+      tabsCalls = meter.createCounter('syncom.tabs.calls', {
+        unit: '{call}',
+        description:
+          "A follower's calls to the leader (@alexify/syncom/shared), by result: ok, retried, lost, answered (a retry the leader answered from what it kept)",
+      });
+      tabsFailovers = meter.createCounter('syncom.tabs.failovers', {
+        unit: '{change}',
+        description: 'Changes of role of a shared facade, by kind: promoted, demoted, yielded',
       });
       // Observable: read when the SDK collects, through the callbacks
       // `gauges(read)` registers. Optional — a meter without the factory
@@ -470,8 +525,8 @@ const createTelemetry = (telemetry) => {
       record(engineWrite, elapsed, { 'syncom.engine': name, 'syncom.ok': ok });
     },
 
-    recordRefusal(code) {
-      add(refused, 1, { 'syncom.code': String(code) });
+    recordRefusal(code, reason) {
+      add(refused, 1, { 'syncom.code': String(code), 'syncom.reason': String(reason ?? 'unknown') });
     },
 
     recordPresenceRefused(reason, count) {
@@ -514,6 +569,41 @@ const createTelemetry = (telemetry) => {
 
     recordInsertNamed(result) {
       add(insertsNamed, 1, { 'syncom.result': result });
+    },
+
+    recordShared(result, count) {
+      if (count > 0) add(sharedOps, count, { 'syncom.result': result });
+    },
+
+    recordSharedEntry(result) {
+      add(sharedEntries, 1, { 'syncom.result': result });
+    },
+
+    // The entry's newest op's stamp (the origin's clock) to its apply: skew and the bus's transit, a trend.
+    recordSharedLag(ms) {
+      record(sharedLag, ms);
+    },
+
+    recordRevoke(via) {
+      add(revokes, 1, { 'syncom.via': via });
+    },
+
+    recordRead(procedure, result, rows) {
+      add(reads, 1, { 'syncom.procedure': procedure, 'syncom.result': result });
+      record(readRows, rows, { 'syncom.procedure': procedure });
+    },
+
+    recordBlob(direction, result, bytes) {
+      add(blobs, 1, { 'syncom.direction': direction, 'syncom.result': result });
+      if (bytes > 0) add(blobBytes, bytes, { 'syncom.direction': direction });
+    },
+
+    recordForward(result) {
+      add(tabsCalls, 1, { 'syncom.result': result });
+    },
+
+    recordFailover(kind) {
+      add(tabsFailovers, 1, { 'syncom.kind': kind });
     },
 
     /**

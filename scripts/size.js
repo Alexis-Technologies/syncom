@@ -473,7 +473,9 @@ const ENTRIES = [
   // 175, raised by name.
   // 179.3 with both tracks of review №7 merged (the sync track and the blobs/at-rest track; 2026-11-07). 179.5, raised by
   // name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 179.5 },
+  // 180.4 with the sync blocks, the tabs and the blobs observed — the writer's methods and the shared log's, the host's
+  // and the manager's call sites (review №7, E9; 2026-11-07). 181, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 181 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -629,11 +631,13 @@ const ENTRIES = [
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
+  // 4.8 with ten instruments more — the shared log's ops, entries and lag, the revokes, the reads and their rows, the blobs
+  // and their bytes, the tabs' calls and failovers — and a refusal's reason (review №7, E9; 2026-11-07). 5, raised by name.
   {
     label: 'telemetry — browser (@alexify/syncom/telemetry)',
     entry: 'src/telemetry/telemetry.js',
     platform: 'browser',
-    budget: 4.5,
+    budget: 5,
   },
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
@@ -684,7 +688,9 @@ const ENTRIES = [
     // 40.1 with the write path's `expect: ABSENT` and the immutables it bundles (review №6, E2). 40.5, raised by name.
     // 40.5 (over by bytes) with the cursor and the catalog it bundles grown through E5 (review №6, E5.6; 2026-11-02). 41,
     // raised by name.
-    budget: 41,
+    // 41.1 with the writer's methods for the sync blocks, the tabs and the blobs it bundles with the core's write path
+    // (review №7, E9; 2026-11-07). 41.5, raised by name.
+    budget: 41.5,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
@@ -728,11 +734,13 @@ const ENTRIES = [
   // JavaScript SHA-256 along (hashText), 4.1 measured (sync-parity plan, S4). 4.5, raised by name.
   // 4.5 (at the limit) with the register validated, the bytes checked against it, sweep() and prepare() (review №7,
   // E7.1–E7.6; 2026-11-07). 5, raised by name.
+  // 5.6 with stats(), every blob counted with its bytes and the sweep as a span — the writer contract (telemetry/writer.js)
+  // bundled for `traced` (review №7, E9; 2026-11-07). 5.75, raised by name.
   {
     label: 'attachments — browser (@alexify/syncom/attachments)',
     entry: 'src/attachments/attachments.js',
     platform: 'browser',
-    budget: 5,
+    budget: 5.75,
   },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).

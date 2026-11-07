@@ -93,6 +93,7 @@ wrpc's spans around the actual calls.
 | `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op made (each a `syncom.commit` child) and appended as one transaction | `syncom.ops.count`, `syncom.ops.applied` |
 | `syncom.transact` | `transact()`: `fn` run, every op made (each a `syncom.commit` child), the group appended | `syncom.ops.count` |
 | `syncom.cleanup.sweep` | one sweep of the tombstone cleanup (`run()`, or the timer's): what it folded, dropped and skipped | `syncom.cleanup.folded`, `syncom.cleanup.dropped`, `syncom.cleanup.skipped` |
+| `syncom.attachments.sweep` | one `db.attachments.sweep()`: the store listed, the live registers and the tags' copies marked, the rest removed (`dryRun` removes none) | `syncom.attachments.blobs`, `syncom.attachments.marked`, `syncom.attachments.removed` |
 
 † off the span when `includeIdentity` is false (so is `syncom.scope`).
 
@@ -136,7 +137,7 @@ appears on one.
 | `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
 | `syncom.lock.wait` | Histogram | `ms` | — (what `createDatabase()` spent taking the directory lock) |
 | `syncom.engine.write` | Histogram | `ms` | `syncom.engine` (the engine's name), `syncom.ok` — a write set of the engine, from the call to its return |
-| `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `409` / `428`) — calls a hosted unit refused before the handler |
+| `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `404` / `409` / `428` / `503`), `syncom.reason` (the wire's: `HELLO_FIRST`, `SCOPES`, `UNPROVEN`, `BAD_PROOF`, `READ_ONLY`, `NOT_SERVED`, `QUERY_DISABLED`, `BAD_QUERY`, `REGEX`, `BAD_DIGEST`, `BLOB_NOT_FOUND`, `SHARED_LOG`… — the reasons of [the wire reference](../reference/wire.md)) — calls a hosted unit refused before the handler, by code and by why |
 | `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
 | `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
 | `syncom.query.cache` | Counter | `{query}` | `syncom.result` (`hit` — the result read from the cache, nothing read / `miss` — a run) — every `fetch()` of a cursor with a key |
@@ -148,6 +149,16 @@ appears on one.
 | `syncom.cleanup.tombstones` | Counter | `{tombstone}` | `syncom.result` (`folded` / `dropped`) — what a cleanup sweep took |
 | `syncom.dump.pages` | Counter | `{page}` | `syncom.kind` (`export` / `import`) — the pages of `exportPages()`/`exportJSON()` and `importJSON()` |
 | `syncom.insert.named` | Counter | `{insert}` | `syncom.result` (`ok` / `exists` — a live record held the id) — an insert under an id the data named, through the database or a transaction |
+| `syncom.shared.ops` | Counter | `{op}` | `syncom.result` (`relayed` — appended to the topic by this hub / `applied` — from the topic or the inbox / `forwarded` — a read-only hub's push to the inbox / `dropped` — an inbox op the writer did not take, named in a `dropped` entry) — the shared log's ops (`sync.sharedLog`) |
+| `syncom.shared.entries` | Counter | `{entry}` | `syncom.result` (`passed` — read and passed / `malformed` — did not read / `hole` — a number whose entry never came / `failed` — an append failed, the relay fell behind / `retried` — an apply tried again / `stuck` — a rule's refusal three times) |
+| `syncom.shared.lag` | Histogram | `ms` | — (the newest op of a topic entry, its stamp, to its apply here: the origin's clock skew and the bus's transit — a trend) |
+| `syncom.revoke` | Counter | `{revoke}` | `syncom.via` (`local` — `sync.revoke()` here / `shared` — folded from the shared log's topic, another hub's) |
+| `syncom.reads` | Counter | `{call}` | `syncom.procedure` (`query` / `count`), `syncom.result` (`ok` / `capped` — a scoped peer's walk ended by `limits.rowsPerQuery` before its window was full) — a thin client's reads served |
+| `syncom.reads.rows` | Histogram | `{row}` | `syncom.procedure` (`query` — the rows answered / `count` — the count) |
+| `syncom.blobs` | Counter | `{blob}` | `syncom.direction` (`put` — `db.attachments.put` / `get` — `db.attachments.get`, the bytes read whole / `served` — `syncom/blob` answered to a peer / `fetched` — asked of a peer by `fetchBlob`), `syncom.result` (`ok` / `mismatch` — the bytes are not what the register or the digest says / `missing` — none here, no peer has them) |
+| `syncom.blob.bytes` | Counter | `By` | `syncom.direction` (as above) — the bytes stored, read, served and fetched |
+| `syncom.tabs.calls` | Counter | `{call}` | `syncom.result` (`ok` — a follower's call the leader answered, a value or a refusal / `retried` — tried again, the leader gone / `lost` — `LEADER_LOST` / `answered` — on the leader: a retry answered from what it kept) — `@alexify/syncom/shared` |
+| `syncom.tabs.failovers` | Counter | `{change}` | `syncom.kind` (`promoted` — a follower became the leader / `demoted` — a leader lost the election / `yielded` — elected, could not open, `PROMOTE_FAILED`) |
 | `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
 | `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
 | `syncom.cache.size` | Observable gauge | `{entry}` | — |
@@ -273,6 +284,8 @@ alert to key on:
 | warn | `shared.hole`, `shared.tombstone.failed`, `shared.inbox.trim.failed` | a number the shared log handed out whose entry never came — `mongoSharedLog`'s reader (`topic`, `n`) and the hub that passed it (`topic`, `id`; also `SHARED_LOG_FAILED` `hole`); `mongoSharedLog` could not mark a failed or moved append's number a tombstone (`topic`, `n`, `err`: readers wait the gap out for it); the writer could not trim the inbox past its cursor (`topic`, `cursor`, `err`) |
 | warn | `sync.prove.refused`, `sync.query.refused`, `sync.count.refused`, `sync.blob.refused`, `sync.query.scope` | hosting side: a proof of key refused (400 `BAD_PROOF` without a challenge or a signature, 403 `BAD_PROOF` for one that does not check); a query or a count refused (403 `QUERY_DISABLED` where the unit serves none, 403 `UNPROVEN`, 400 `BAD_QUERY` for an entity, a query or an order the cursor refuses); a blob refused (403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST`, 404 `BLOB_NOT_FOUND`); the scope function threw on a row (`id`, `err`), left out |
 | warn | `sync.blob.mismatch` | dialing side: a peer answered `syncom/blob` with bytes whose SHA-256 is not the digest asked (`url`, `node`, `digest`) — dropped, the next peer asked |
+| info | `tabs.promoted`, `tabs.demoted` | an instance of `@alexify/syncom/shared` became the leader (`path`, `generation`, `first`: the first lead or a failover) or lost the election and follows again (`path`, `generation`) |
+| info | `sync.revoke` | scopes taken back from a node (`node`, `scopes`, `via`: `local` for `sync.revoke()` here, `shared` for one folded from the shared log) |
 | info | `attachments.sweep` | `db.attachments.sweep()` ran: the blobs the store held (`blobs`), the digests marked (`marked`), the blobs removed (`removed`; none under `dryRun`), the puts in flight kept (`pending`), `ms` |
 | warn | `attachments.register.invalid` | `db.attachments.list()` found a register that is no register on the record (`id`, `name`: a digest that is none, a length out of bounds, an encoding unknown — a peer wrote it), left out; once per register |
 | warn | `sync.blob.keep.failed` | dialing side: the bytes of a blob fetched from a peer (`syncom/blob`), checked by digest, could not be kept in this node's blobs store (`digest`, `err`); answered all the same, fetched again next time |
