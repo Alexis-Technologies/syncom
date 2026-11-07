@@ -863,6 +863,9 @@ syncom.open({ schema: { entities: { Post: { schema: postSchema, index: ['title']
   );
   expectType<Promise<syncom.QueryRow<Post> | null>>(typed.Post.select().order('title').one());
   expectType<Promise<number>>(typed.Post.count({ tags: { $in: ['a'] } }));
+  expectType<Promise<number>>(typed.Post.count({}, { sealed: false }));
+  expectType<syncom.Cursor<syncom.QueryRow<Post>>>(typed.Post.select({}, { sealed: false }));
+  expectError(typed.Post.select({}, { sealed: 'no' }));
   expectError(typed.Post.select({ nope: 1 }));
   expectError(typed.Post.select({ title: 5 }));
   typed.Post.select().filter((row) => {

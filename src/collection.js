@@ -367,14 +367,18 @@ class Collection extends Emitter {
     return this.#storage.get(id, options);
   }
 
-  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. */
-  select(query) {
-    return this.#storage[CURSOR](this.#name, query);
+  /**
+   * A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. The collection's
+   * sealed records are read, at the key holder, unless `{ sealed: false }` asks for the plain rows alone.
+   */
+  select(query, options = {}) {
+    if (!isPlainObject(options)) throw new TypeError('select() takes a query and { sealed }');
+    return this.#storage[CURSOR](this.#name, query, { sealed: options.sealed !== false });
   }
 
   /** How many records of this collection match `query`. */
-  count(query) {
-    return this.select(query).count();
+  count(query, options) {
+    return this.select(query, options).count();
   }
 
   /**

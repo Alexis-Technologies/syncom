@@ -698,7 +698,7 @@ class Database extends Emitter {
       // The same write from INSIDE a task of the queue (`core.run`), where
       // `commit` would wait for itself; and whether an entry is live.
       commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
-      cursor: (source, entity, query) => this[CURSOR](entity, query, source),
+      cursor: (source, entity, query) => this[CURSOR](entity, query, { source }),
       alive: isAlive,
       // A field's kind in an entry, under this storage's registry (src/ops.js kindOf).
       kindOf: (entry, field) => kindOf(entry, field, this.#plugins),
@@ -1190,11 +1190,13 @@ class Database extends Emitter {
   }
 
   // The cursor over a source seam (this storage's by default; a tag's for a
-  // view at a tag): the query plugin's, PLUGIN_MISSING without it.
+  // view at a tag): the query plugin's, PLUGIN_MISSING without it. Sealed records are left out unless asked
+  // (`sealed: true`): the facade's collections ask — the key holder reads its own — while a host's query, an
+  // agent's tool and a connector read through the seam as it is, and no sealed record leaves the key holder by them.
   get [CURSOR]() {
-    return (entity, query, source = this[SOURCE]) => {
+    return (entity, query, { source = this[SOURCE], sealed = false } = {}) => {
       if (this.#cursor === null) throw missing('select()');
-      return this.#cursor(source, entity, query);
+      return this.#cursor(source, entity, query, { sealed: sealed === true });
     };
   }
 

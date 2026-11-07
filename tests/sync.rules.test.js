@@ -381,6 +381,41 @@ test('Rules on the host and on the dialer', async (t) => {
   );
 
   await t.test(
+    'query and count hand no sealed record to a peer: a collection with sealed records answers the plain ones alone, its count too',
+    async (t2) => {
+      const schema = { entities: { Note: { index: ['tag'] } } };
+      const host = await createStorage(t2, 'HS', { schema, sync: {} });
+      await host.insert({ $type: 'Note', tag: 'a', secret: 'plain' });
+      const sealed = await host.insert({ $type: 'Note', tag: 'b', secret: 'SEALED' }, { encrypted: true });
+      assert.strictEqual((await host.get(sealed)).secret, 'SEALED', 'the key holder reads it');
+      assert.strictEqual(await host.Note.count({}), 2, 'the facade counts it');
+      const link = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
+      await link.call('syncom/hello', { node: 'thin', version: 1 });
+      const { rows } = await link.call('syncom/query', { entity: 'Note' });
+      assert.deepStrictEqual(
+        rows.map((row) => row.secret),
+        ['plain'],
+      );
+      const ordered = await link.call('syncom/query', { entity: 'Note', order: ['tag'], limit: 10 });
+      assert.deepStrictEqual(
+        ordered.rows.map((row) => row.tag),
+        ['a'],
+      );
+      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Note' }), { count: 1 });
+      // No oracle: a query by the sealed record's field counts nothing.
+      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Note', query: { secret: 'SEALED' } }), {
+        count: 0,
+      });
+      assert.deepStrictEqual(await link.call('syncom/query', { entity: 'Note', query: { tag: 'b' } }), { rows: [] });
+      // A scoped peer the same.
+      const scoped = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
+      await scoped.call('syncom/hello', { node: 'tenant', version: 1, scopes: ['Note'] });
+      assert.strictEqual((await scoped.call('syncom/query', { entity: 'Note' })).rows.length, 1);
+      assert.deepStrictEqual(await scoped.call('syncom/count', { entity: 'Note' }), { count: 1 });
+    },
+  );
+
+  await t.test(
     'forget(id): the record is gone here with no op — a replay brings nothing back, a peer is untouched, a later op of a peer makes it again',
     async (t2) => {
       const mesh = await createMesh(t2, ['H', 'C'], [['C', 'H']], createStorage);

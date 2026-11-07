@@ -32,6 +32,8 @@ export interface ToolsOptions {
   readOnly?: boolean;
   /** The most rows a `query` answers (1000 by default and at most). */
   limit?: number;
+  /** Read the collections' sealed (`encrypted: true`) records too — left out of query, count and get by default. */
+  sealed?: boolean;
 }
 
 /** A record `changes` names: its id, and whether it is deleted now. */

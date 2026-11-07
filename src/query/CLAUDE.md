@@ -48,7 +48,7 @@ plan)` reads the entries between two binary searches, forward or backward; where
   cursor reads the window and stops (`enough`), otherwise a TopK or a sort after. `compare`/`rankOf` are
   the catalog's, shared with the cursor. `explain()` is the plan as a copy. A `$text` query keeps the
   ranking and plans nothing.
-- **A sealed record is read, never indexed.** A collection's `encrypted: true` records are rows with no fields; the
+- **A sealed record is read, never indexed — and only where asked.** A collection's `encrypted: true` records are rows with no fields; the
   seam lists them (`[SOURCE].sealed(entity)`, `Catalog.sealed`: a Set per type kept by every insert and remove of a
   sealed row, the sorted listing built from it once and kept until a sealed record comes or goes — a plain write of
   the collection never rebuilds it, a collection without sealed records answers one frozen `EMPTY`) and `load`
@@ -61,8 +61,11 @@ plan)` reads the entries between two binary searches, forward or backward; where
   nothing in every sorted index, so `admits` drops the scan's copy of one there. Elsewhere a TopK or the sort after
   places them. `count()` adds the sealed records that match (`#sealedMatches`) to the index's estimate; `explain()`
   says how many ride beside the plan (`sealed`). A `$text` query never sees them (the text index did not), and a
-  tag's source lists none. The cost is the sealed records read, not the collection's rows — a blind index is not
-  here yet.
+  tag's source lists none. The seam's `sealed` (`Cursor`'s last argument, `#withSealed`; in the cache key) says
+  whether a cursor reads them at all: the facade's collections ask, a cursor made through `[CURSOR]` for a host, an
+  agent or a connector does not — `#sealed()` is EMPTY then, `#hidden()`/`#hides()` drop a sealed candidate, a
+  live row and a populated reference. The cost is the sealed records read, not the collection's rows — a blind
+  index is not here yet.
 - **A cursor is immutable, a result has one order, a live query is kept, not run.** Every builder hands
   back a new Cursor (`#clone`). A result is ordered by its keys then the id (`compareFully`; a `$text`
   query without keys keeps the index's ranking), so a page has an edge and a live result places a row

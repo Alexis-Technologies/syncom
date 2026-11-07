@@ -32,9 +32,11 @@ await tools[0].execute({ query: { done: false }, order: ['title'], limit: 10 });
 | `<Collection>_upsert` | `id` (optional), `data` | `{ id }`: the record written whole under `id`, or under the id its data names (the entity's id field) |
 | `<Collection>_delete` | `id` | `{ id, deleted }` — `false` where there is none (nothing is written); a record of another collection is `NOT_FOUND` |
 
-`createTools(db, { collections, readOnly, limit })`: `collections` names the collections to serve (every one of
-`db.collections` by default), `readOnly` makes no writer at all, `limit` caps a query's window (1000 by default
-and at most).
+`createTools(db, { collections, readOnly, limit, sealed })`: `collections` names the collections to serve (every one
+of `db.collections` by default), `readOnly` makes no writer at all, `limit` caps a query's window (1000 by default
+and at most), and `sealed` lets the agent read the collections' [sealed records](./query#sealed-records) too — left
+out of `query`, `count` and `get` by default: an agent is a reader of the plain rows unless the application says
+otherwise.
 
 ## Checked at the door
 

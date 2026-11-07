@@ -8,9 +8,10 @@
 // `$text` (`createDatabase({ search })`) are the core's: what a query reads is kept
 // whether or not anything queries it. Without the plugin `select()` and
 // `count()` throw PLUGIN_MISSING, and so does `update(id, delta, { ifMatch })`.
-// The hook the core takes: `query` — `cursor(source, entity, query)`, the
-// cursor over a source seam, and `matches(query)`, the query as a predicate
-// over `{ id, ...record }` (what `ifMatch` is decided by).
+// The hook the core takes: `query` — `cursor(source, entity, query, { sealed })`, the
+// cursor over a source seam (the collection's sealed records read where `sealed`, left
+// out otherwise), and `matches(query)`, the query as a predicate over `{ id, ...record }`
+// (what `ifMatch` is decided by).
 
 const { Cursor, compileQuery } = require('./cursor.js');
 const { QueryCache } = require('./cache.js');
@@ -23,8 +24,8 @@ const query = Object.freeze({
     const cache = new QueryCache();
     return {
       query: {
-        cursor: (source, entity, criteria) =>
-          new Cursor(source, entity, criteria, null, typeof source.generation === 'function' ? cache : null),
+        cursor: (source, entity, criteria, { sealed = false } = {}) =>
+          new Cursor(source, entity, criteria, null, typeof source.generation === 'function' ? cache : null, sealed),
         matches: (criteria) => compileQuery(criteria),
         // What `stats().query` answers: the cache's entries and the rows they hold, the live runs kept.
         stats: () => ({ cache: { entries: cache.size, rows: cache.held }, live: cache.living }),

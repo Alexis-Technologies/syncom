@@ -148,8 +148,13 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   pipe and `toSignal()`, RxJS's `from()`; Angular and Preact signals recipes in the frameworks guide.
 - **Sealed records in queries.** A collection's `encrypted: true` records are read whole at the key holder and
   matched, ordered, windowed and counted like the rest — they join the candidates of every plan over the collection
-  (no index knows them: they alone are read, the plain rows answered from the index and the catalog as before, and
-  an ordered page is sorted after the read; `$text` leaves them out).
+  (no index knows them: they alone are read, the plain rows answered from the index and the catalog as before; an
+  ordered page over an index stays the index's, the sealed records read once and laid where they sort, and
+  `explain().sealed` says how many; `$text` leaves them out). The facade's collections read them
+  (`select(query, { sealed: false })` leaves them out); a cursor made through the `[CURSOR]` seam leaves them out
+  unless asked (`{ sealed: true }`), so a host's `query`/`count`, an agent's tools (`createTools(db, { sealed })`
+  opts in) and a connector never hand a sealed record out of the key holder (review №7, E1). The catalog keeps the
+  sealed listing per put instead of rebuilding it after every write.
 - **Quota.** `db.quota()` (`{ usage, quota }`: the browser's Storage API estimate, a file system's free space) and
   `db.persist()`; a log append refused for want of room is `QUOTA` (the platform's error as `cause`) and a record
   file that could not be written for it `UNPERSISTED` with `quota: true`.

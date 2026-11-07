@@ -22,7 +22,7 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
 src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase, path, engine, channel, election }): several instances over one database, one leading, the others following and writing through it (its own CLAUDE.md)
 src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push }): a collection kept in step with a backend through two handlers, checkpointed (its own CLAUDE.md)
 src/testing/testing.js    @alexify/syncom/testing — MemoryLink, createMesh, settle, waitUntil, withDatabase, memoryEngine: what a test over syncom stands on; the repository's tests run on it through tests/utils (its own CLAUDE.md)
-src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit }): the tools an agent calls over a database in the Model Context Protocol's shape, every argument checked against the tool's inputSchema (its own CLAUDE.md)
+src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit, sealed }): the tools an agent calls over a database in the Model Context Protocol's shape, every argument checked against the tool's inputSchema (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents/toObservable: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
@@ -555,7 +555,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
   write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
   (a cursor's writes), `guard` (a local write) — every member a `#run` of the queue or a refusal of it; a new member
-  goes through the queue the same way.
+  goes through the queue the same way. `[CURSOR](entity, query, { source, sealed })` leaves the collection's sealed
+  records out unless `sealed` — the facade's collections ask (`Collection.select(query, { sealed = true })`), a
+  host's `query`/`count`, an agent's tools and a connector read the seam as it is: a sealed record never leaves the
+  key holder by a read through it (SEC-7).
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the

@@ -555,7 +555,8 @@ A thin client's read of the host's records through the query plugin
 rows are the cursor's — a Mango `query`, the sort keys in order, the window —
 narrowed to the caller's scopes (as the host scopes a record) and capped by
 `limits.rowsPerQuery` (500); a scoped `count` reads the rows (as many as the
-cap allows). An entity or a query the cursor refuses is 400 `BAD_QUERY`. A
+cap allows). A sealed (`encrypted: true`) record is never among the rows nor in
+a count: it is the key holder's alone. An entity or a query the cursor refuses is 400 `BAD_QUERY`. A
 caller that said no hello is 428 `HELLO_FIRST` — unless the call carries one:
 `hello` is the [hello](#hello)'s own arguments, taken as a hello is
 (`authorize`, the scopes, the revocations; `UNPROVEN` under `prove`) and kept

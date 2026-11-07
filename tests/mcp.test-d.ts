@@ -4,7 +4,7 @@ import type { AgentTool, ToolChanges } from '../src/mcp/mcp.js';
 import { createDatabase } from '../src/all/all.js';
 
 const db = await createDatabase({ path: 'data', schema: { entities: { Task: { index: ['done'] } } } });
-const tools = createTools(db, { collections: ['Task'], readOnly: true, limit: 50 });
+const tools = createTools(db, { collections: ['Task'], readOnly: true, limit: 50, sealed: false });
 expectType<AgentTool[]>(tools);
 const [query] = tools;
 expectType<string>(query.name);

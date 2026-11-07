@@ -671,6 +671,7 @@ const cursorOf = (host, args, procedure, state) => {
   if (!isPlainObject(query)) throw refuseCall(host, procedure, 'query must be an object', 400, BAD_QUERY, state.node);
   let cursor;
   try {
+    // Through the seam as it is: the collection's sealed records are the key holder's and never a peer's.
     cursor = host.storage[CURSOR](args.entity, query);
     if (Array.isArray(args.order)) {
       for (let i = 0; i < args.order.length; i++) {

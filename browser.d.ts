@@ -68,6 +68,7 @@ export type {
   Page,
   QueryPlan,
   PageToken,
+  SelectOptions,
   CollectionEvents,
   LocalStore,
   AttachmentEntry,

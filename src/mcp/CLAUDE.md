@@ -5,7 +5,7 @@ The tools an agent calls over a database, in the shape of the Model Context Prot
 ## Layout
 
 ```
-src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit }): per collection query, count, get, changes,
+src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit, sealed }): per collection query, count, get, changes,
                           wait_changes, insert, upsert, delete as { name, description, inputSchema, execute }; checkArgs — requires
                           symbols.js only
 ```
@@ -26,6 +26,10 @@ src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections,
   the SyncomErrors they are.
 - **`readOnly` is no writer at all.** The three writers are not made, not refused: a read-only tool set has nothing
   an agent could call to write.
+- **A sealed record is the key holder's, not the agent's.** `query` and `count` read through
+  `collection.select(query, { sealed })` and `get` asks the catalog's row first: a collection's `encrypted: true`
+  records are left out unless `createTools(db, { sealed: true })` — an agent, often another party's model, reads the
+  plain rows by default (SEC-7).
 - **Changes are the log's, filtered by the catalog.** `changes` without `since` answers the `eventId` to start from
   (`db.log.lastEventId`); with one, the records of the collection the log touched since (`db.log.since`, an id once,
   `deleted` from the catalog's row — the `[SOURCE]` seam's `row(id).type`, as the pipeline decides membership) and

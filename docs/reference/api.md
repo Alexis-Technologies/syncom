@@ -222,7 +222,7 @@ takes; both from the entity's Standard Schema or the schema's `Shapes`,
 | `modify(id, fn, options?)` | `fn` over a copy of the record inside the queue; what it leaves is written as the difference (`null` deletes) |
 | `delete(id, { actor, data }?)` | A tombstone; `data` written into the record as it dies (one op) |
 | `remove({ purge, actor }?)` | Every record of the collection as it was when the call began — tombstones, or purges scrubbed from the log — 500 a page, a page a turn of the queue; `{ removed }`. Takes `{ purge, actor }` and nothing else: `remove({ status: 'old' })` is a `TypeError`, the matches of a query go through `select(query).delete()` |
-| `select(query?)`, `count(query?)`, `distinct(field, query?)`, `countBy(field, query?)` | The `query` plugin's (`PLUGIN_MISSING` without it): a cursor, below |
+| `select(query?, { sealed }?)`, `count(query?, { sealed }?)`, `distinct(field, query?)`, `countBy(field, query?)` | The `query` plugin's (`PLUGIN_MISSING` without it): a cursor, below; the collection's [sealed records](../guide/query#sealed-records) read at the key holder unless `sealed: false` |
 | `on(event, fn)`, `once`, `off`, `clear` | The collection's events, told on a microtask after the landing of a record of its own — `change` `({ id, action })` and `insert`, `update`, `remove` `({ id })`, `action` what the catalog decided (a record joining the collection an `insert`, one leaving it — deleted, purged, encrypted, of another collection now — a `remove`, several ops of one turn one `update`); the catalog's subscription goes with the last listener |
 | `methods` / `statics` (the definition's) | Bound, non-enumerable: `methods` on every `Document` of the collection, `statics` on the collection (`db.Post.recent()`); a static named like a collection member is a `TypeError` at the definition |
 
@@ -834,12 +834,12 @@ A timeout of `settle()` or `waitUntil()` is a plain `Error` (a test's failure, n
 
 ## Agent tools (subpath)
 
-`@alexify/syncom/mcp` — `createTools(db, { collections, readOnly, limit })`: the tools an agent calls over a database,
+`@alexify/syncom/mcp` — `createTools(db, { collections, readOnly, limit, sealed })`: the tools an agent calls over a database,
 in the Model Context Protocol's shape — see [Agent tools](../guide/mcp).
 
 | Member | Notes |
 | --- | --- |
-| `createTools(db, options?)` → `AgentTool[]` | A set per collection (every one of `db.collections`, or `collections` by name): `<Collection>_query`, `_count`, `_get`, `_changes`, `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly`; `limit` caps a query's window (1000 by default and at most); a TypeError for a name that is no collection |
+| `createTools(db, options?)` → `AgentTool[]` | A set per collection (every one of `db.collections`, or `collections` by name): `<Collection>_query`, `_count`, `_get`, `_changes`, `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly`; `limit` caps a query's window (1000 by default and at most); the collections' sealed records left out of `_query`, `_count` and `_get` unless `sealed`; a TypeError for a name that is no collection |
 | `tool.name`, `tool.description`, `tool.inputSchema` | The definition as `tools/list` answers it — `inputSchema` is JSON Schema, every object closed (`additionalProperties: false`) |
 | `tool.execute(args?)` → `Promise<json>` | `checkArgs(inputSchema, args)` first — a wrong type, a member not named, a required one missing, a window past the cap is a `TypeError` naming the member — then the collection's call; its own refusals (`NOT_FOUND`, a validator's, `PLUGIN_MISSING` without the query plugin) come through as they are |
 | `_query { query, order, limit, offset }` → `{ rows }` | A Mango query over the collection, `order` the fields (`'-field'` descending), `limit` (100 by default) and `offset` |

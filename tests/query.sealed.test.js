@@ -114,7 +114,7 @@ test('Sealed records in queries', async (t) => {
       await db.insert({ $type: 'Note', tag: 'even', n: 20.5 }, { encrypted: true });
       await db.insert({ $type: 'Note', tag: 'odd', n: 100 }, { encrypted: true });
       const { source, reads } = counting(db);
-      const select = (query = {}) => db[CURSOR]('Note', query, source);
+      const select = (query = {}) => db[CURSOR]('Note', query, { source, sealed: true });
       const ns = (rows) => rows.map((row) => row.n);
       // The first page: the plain rows come from the index in its order, the sealed records are read once and laid
       // where they sort; ten plain records read, not forty-three.
@@ -172,10 +172,66 @@ test('Sealed records in queries', async (t) => {
       await db.insert({ $type: 'Note', tag: 't', n: 10.5 }, { encrypted: true });
       await db.insert({ $type: 'Note', tag: 't', n: 100 }, { encrypted: true });
       const { source, reads } = counting(db);
-      assert.strictEqual(await db[CURSOR]('Note', { n: { $gte: 10 } }, source).count(), 21 + 2);
+      assert.strictEqual(await db[CURSOR]('Note', { n: { $gte: 10 } }, { source, sealed: true }).count(), 21 + 2);
       assert.deepStrictEqual([reads.plain, reads.sealed], [0, 2]);
-      assert.strictEqual(await db[CURSOR]('Note', { tag: 't' }, source).count(), 32);
+      assert.strictEqual(await db[CURSOR]('Note', { tag: 't' }, { source, sealed: true }).count(), 32);
       assert.strictEqual(reads.plain, 0);
+    },
+  );
+
+  await t.test(
+    'a cursor made through the seam leaves sealed records out unless asked: the facade’s collections ask; a host’s query and count, and a live run through the seam, do not',
+    async (t2) => {
+      const db = await open(t2, 'S');
+      const p1 = await db.insert({ $type: 'Note', tag: 'a', n: 1 });
+      const s2 = await db.insert({ $type: 'Note', tag: 'a', n: 2, ref: p1 }, { encrypted: true });
+      await db.insert({ $type: 'Note', tag: 'a', n: 3, ref: s2 });
+      const ns = (rows) => rows.map((row) => row.n).sort((a, b) => a - b);
+      // The seam's default: no sealed record — not in a run, an ordered page, a count, a covered projection.
+      assert.deepStrictEqual(ns(await db[CURSOR]('Note', {}).fetch()), [1, 3]);
+      assert.deepStrictEqual(ns(await db[CURSOR]('Note', { tag: 'a' }).order('n').limit(5).fetch()), [1, 3]);
+      assert.deepStrictEqual(ns(await db[CURSOR]('Note', {}).projection(['n']).fetch()), [1, 3]);
+      assert.strictEqual(await db[CURSOR]('Note', {}).count(), 2);
+      assert.strictEqual(await db[CURSOR]('Note', { n: { $gte: 2 } }).count(), 1);
+      assert.strictEqual(await db[CURSOR]('Note', { tag: 'a' }).count(), 2);
+      assert.strictEqual(db[CURSOR]('Note', {}).explain().sealed, 0);
+      // Asked for: the key holder reads them.
+      assert.deepStrictEqual(ns(await db[CURSOR]('Note', {}, { sealed: true }).fetch()), [1, 2, 3]);
+      assert.strictEqual(await db[CURSOR]('Note', {}, { sealed: true }).count(), 3);
+      assert.strictEqual(db[CURSOR]('Note', {}, { sealed: true }).explain().sealed, 1);
+      // The facade's collections ask by default, and may not.
+      assert.deepStrictEqual(ns(await db.Note.select({}).fetch()), [1, 2, 3]);
+      assert.strictEqual(await db.Note.count({}), 3);
+      assert.deepStrictEqual(ns(await db.Note.select({}, { sealed: false }).fetch()), [1, 3]);
+      assert.strictEqual(await db.Note.count({}, { sealed: false }), 2);
+      assert.throws(() => db.Note.select({}, 7), { name: 'TypeError' });
+      // A live run through the seam: a sealed record coming or going is not heard as a row.
+      const seen = [];
+      const stop = db[CURSOR]('Note', { tag: 'a' }).watch((rows) => seen.push(ns(rows)));
+      t2.after(() => stop());
+      await waitUntil(() => seen.length >= 1);
+      assert.deepStrictEqual(seen.at(-1), [1, 3]);
+      await db.insert({ $type: 'Note', tag: 'a', n: 4 }, { encrypted: true });
+      await db.insert({ $type: 'Note', tag: 'a', n: 5 });
+      await waitUntil(() => seen.at(-1).length === 3, { timeout: 5000 });
+      assert.deepStrictEqual(seen.at(-1), [1, 3, 5]);
+      // A reference to a sealed record populated through the seam reads as nothing there; the facade reads it.
+      const dbRefs = await syncom.createDatabase({
+        engine: syncom.memoryEngine(),
+        path: `${t2.name}/refs`,
+        logger: false,
+        defer: 0,
+        schema: { entities: { Note: { refs: { ref: 'Note' } } } },
+      });
+      t2.after(() => dbRefs.close().catch(() => {}));
+      const sealedRef = await dbRefs.insert({ $type: 'Note', n: 1 }, { encrypted: true });
+      const plainRef = await dbRefs.insert({ $type: 'Note', n: 2 });
+      const holder = await dbRefs.insert({ $type: 'Note', n: 3, ref: sealedRef, other: plainRef });
+      const [viaSeam] = await dbRefs[CURSOR]('Note', { n: 3 }).populate(['ref']).fetch();
+      assert.strictEqual(viaSeam.ref, null);
+      const [viaFacade] = await dbRefs.Note.select({ n: 3 }).populate(['ref']).fetch();
+      assert.strictEqual(viaFacade.ref.n, 1);
+      assert.strictEqual(viaFacade.id, holder);
     },
   );
 

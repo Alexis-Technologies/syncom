@@ -109,6 +109,11 @@ from the index in its order: the sealed records are read once and laid where the
 beside the plan. `$text` queries leave sealed records out: the text index never saw them. A node without the key
 does not hold sealed records (they are not replicated), so a query there sees none of them.
 
+A sealed record is the key holder's: `collection.select(query)` and `count(query)` read them, and
+`select(query, { sealed: false })` asks for the plain rows alone; a read that leaves the node — a host's
+[`query`/`count`](./sync#the-host) for a thin client, an agent's [tools](./mcp) (unless
+`createTools(db, { sealed: true })`), a [connector](./connector) — never carries one.
+
 The cost is the sealed records: `n` of them are `n` reads and `n` decryptions per query over the collection,
 whatever the query asks; the collection's own listing of them is kept per write, never rebuilt by a plain one. A
 blind index — an equality on a sealed field narrowed by a keyed hash — is not here yet.

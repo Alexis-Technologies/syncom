@@ -2868,6 +2868,11 @@ export interface QueryPlan {
   uses: { equalities: string[]; ranges: string[]; order: string[] };
 }
 
+/** What `collection.select()` takes beside the query: whether the collection's sealed records are read (true by default at the facade). */
+export interface SelectOptions {
+  sealed?: boolean;
+}
+
 /** Where a page ends: the last row's order keys and its id — what `after()` takes. Opaque; JSON. */
 export interface PageToken {
   readonly keys: readonly unknown[];
@@ -3149,9 +3154,12 @@ export interface SyncomCollection<R = RecordData, I = R> {
    */
   remove(options?: WriteOptions & { purge?: boolean }): Promise<{ removed: number }>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
-  /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
-  select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
-  count(query?: MangoQuery<R>): Promise<number>;
+  /**
+   * A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. The
+   * collection's sealed (`encrypted: true`) records are read at the key holder unless `{ sealed: false }`.
+   */
+  select(query?: MangoQuery<R>, options?: SelectOptions): Cursor<QueryRow<R>>;
+  count(query?: MangoQuery<R>, options?: SelectOptions): Promise<number>;
   /** The live records of `ids` that are this collection's, as a Map by id — one read of the engine for the ones not cached; an id absent, gone or foreign is left out. */
   findByIds(ids: readonly string[]): Promise<Map<string, R>>;
   /** The distinct values of `field` among the records matching `query`, in the sort order. */

@@ -1,7 +1,7 @@
 'use strict';
 
 // @alexify/syncom/mcp — the tools an agent calls over a database, in the shape of the Model Context Protocol:
-// `createTools(db, { collections, readOnly, limit })` answers `[{ name, description, inputSchema, execute }]`, a set
+// `createTools(db, { collections, readOnly, limit, sealed })` answers `[{ name, description, inputSchema, execute }]`, a set
 // per collection — query, count, get, changes, wait_changes, and insert, upsert, delete unless `readOnly` — JSON in,
 // JSON out. Registering them is the caller's: an MCP server's `tools/list` answers the definitions and its
 // `tools/call` runs `execute`, WebMCP's `navigator.modelContext.registerTool(tool)` takes one as it is; no SDK is
@@ -80,10 +80,13 @@ const QUERY = {
 const ID = { type: 'string', description: 'The record id' };
 const SINCE = { type: 'string', description: 'The eventId a `changes` call answered' };
 
-const toolsOf = (db, name, collection, { readOnly, limit: maxLimit }) => {
+const toolsOf = (db, name, collection, { readOnly, limit: maxLimit, sealed }) => {
   const seam = db[SOURCE];
+  // A sealed record is the key holder's: the agent reads none unless `sealed` asks (the cursor through the seam
+  // leaves them out; `get` the same by the catalog's row).
+  const hidden = (id) => !sealed && seam.row(id)?.encrypted === true;
   const select = ({ query = {}, order = [], limit = Math.min(DEFAULT_LIMIT, maxLimit), offset = 0 }) => {
-    let cursor = collection.select(query);
+    let cursor = collection.select(query, { sealed });
     for (let i = 0; i < order.length; i++) {
       const field = order[i];
       cursor = field.startsWith('-') ? cursor.desc(field.slice(1)) : cursor.order(field);
@@ -142,11 +145,11 @@ const toolsOf = (db, name, collection, { readOnly, limit: maxLimit }) => {
       `How many records of ${name} match a query`,
       object({ query: QUERY }),
       async ({ query = {} }) => ({
-        count: await collection.count(query),
+        count: await collection.count(query, { sealed }),
       }),
     ),
     tool(`${name}_get`, `One record of ${name} by id, or null`, object({ id: ID }, ['id']), async ({ id }) => ({
-      record: await collection.get(id),
+      record: hidden(id) ? null : await collection.get(id),
     })),
     tool(
       `${name}_changes`,
@@ -202,16 +205,18 @@ const toolsOf = (db, name, collection, { readOnly, limit: maxLimit }) => {
 /**
  * The tools over `db`'s collections — every one by default, `collections` names some — as `{ name, description,
  * inputSchema, execute }`: query, count, get, changes, wait_changes per collection, and insert, upsert, delete
- * unless `readOnly`. `limit` caps a query's window (1000 by default).
+ * unless `readOnly`. `limit` caps a query's window (1000 by default). The collection's sealed records are left out
+ * of query, count and get unless `sealed` — an agent is a reader of the plain rows by default.
  */
 const createTools = (db, options = {}) => {
   if (db === null || typeof db !== 'object' || typeof db.log?.since !== 'function' || db.collections === undefined) {
     throw new TypeError('createTools() takes a database');
   }
-  const { collections = null, readOnly = false, limit = MAX_LIMIT } = options;
+  const { collections = null, readOnly = false, limit = MAX_LIMIT, sealed = false } = options;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
     throw new TypeError(`createTools(): limit is 1 to ${MAX_LIMIT}`);
   }
+  if (typeof sealed !== 'boolean') throw new TypeError('createTools(): sealed is a boolean');
   const all = db.collections;
   const names = collections === null ? Object.keys(all) : collections;
   if (!Array.isArray(names)) throw new TypeError('createTools(): collections is an array of names');
@@ -219,7 +224,7 @@ const createTools = (db, options = {}) => {
   for (let i = 0; i < names.length; i++) {
     const collection = all[names[i]];
     if (collection === undefined) throw new TypeError(`createTools(): no collection ${names[i]}`);
-    const made = toolsOf(db, names[i], collection, { readOnly: readOnly === true, limit });
+    const made = toolsOf(db, names[i], collection, { readOnly: readOnly === true, limit, sealed });
     for (let j = 0; j < made.length; j++) tools.push(made[j]);
   }
   return tools;

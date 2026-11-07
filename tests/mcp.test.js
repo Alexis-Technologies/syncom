@@ -120,6 +120,35 @@ test('@alexify/syncom/mcp', async (t) => {
   );
 
   await t.test(
+    'sealed records are left out of query, count and get unless createTools(db, { sealed: true })',
+    async (t2) => {
+      const db = await open(t2);
+      const plain = await db.insert({ $type: 'Task', title: 'plain', done: false });
+      const sealed = await db.insert({ $type: 'Task', title: 'SEALED', done: false }, { encrypted: true });
+      const tools = named(createTools(db, { collections: ['Task'] }));
+      assert.deepStrictEqual(
+        (await tools.Task_query.execute()).rows.map((row) => row.id),
+        [plain],
+      );
+      assert.deepStrictEqual((await tools.Task_query.execute({ query: { title: 'SEALED' } })).rows, []);
+      assert.deepStrictEqual(await tools.Task_count.execute(), { count: 1 });
+      assert.deepStrictEqual(await tools.Task_count.execute({ query: { done: false } }), { count: 1 });
+      assert.deepStrictEqual(await tools.Task_get.execute({ id: sealed }), { record: null });
+      assert.deepStrictEqual(await tools.Task_get.execute({ id: plain }), {
+        record: { title: 'plain', done: false, $type: 'Task' },
+      });
+      // Asked for: the agent is a reader at the key holder.
+      const asked = named(createTools(db, { collections: ['Task'], sealed: true }));
+      assert.strictEqual((await asked.Task_query.execute()).rows.length, 2);
+      assert.deepStrictEqual(await asked.Task_count.execute(), { count: 2 });
+      assert.deepStrictEqual(await asked.Task_get.execute({ id: sealed }), {
+        record: { title: 'SEALED', done: false, $type: 'Task' },
+      });
+      assert.throws(() => createTools(db, { sealed: 1 }), { name: 'TypeError' });
+    },
+  );
+
+  await t.test(
     'every argument is checked against the tool’s inputSchema before anything runs: a wrong type, a member not named, a required one missing, a window past the cap',
     async (t2) => {
       const db = await open(t2);

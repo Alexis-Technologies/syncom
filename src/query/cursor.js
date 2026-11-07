@@ -413,13 +413,17 @@ class Cursor {
   #plannedAt = 0;
   // The query cache (./cache.js) of the database, null at a tag's source.
   #cache;
+  // Whether the collection's sealed records are read (the key holder's own cursor) or left out (a cursor made
+  // through the seam for a host, an agent, a connector): the seam's `sealed`.
+  #withSealed;
 
-  constructor(source, entity, query = {}, predicate = null, cache = null) {
+  constructor(source, entity, query = {}, predicate = null, cache = null, sealed = false) {
     this.#source = source;
     this.#entity = entity;
     this.#query = query;
     this.#predicate = predicate ?? compileQuery(query);
     this.#cache = cache;
+    this.#withSealed = sealed === true;
     if (predicate === null && query.$text !== undefined && !source.searches(entity)) {
       throw new TypeError(`select(): $text needs search fields on ${entity} (schema.entities.${entity}.search)`);
     }
@@ -427,7 +431,7 @@ class Cursor {
 
   // A cursor like this one, to build on: the predicate is shared (compiled once), the rest copied.
   #clone() {
-    const copy = new Cursor(this.#source, this.#entity, this.#query, this.#predicate, this.#cache);
+    const copy = new Cursor(this.#source, this.#entity, this.#query, this.#predicate, this.#cache, this.#withSealed);
     copy.#order = this.#order.slice();
     copy.#limit = this.#limit;
     copy.#offset = this.#offset;
@@ -645,9 +649,10 @@ class Cursor {
         else want(value);
       }
       const found = await this.#source.loadMany(ids);
-      // The record the id names — of the declared collection; another collection's record is not it.
+      // The record the id names — of the declared collection; another collection's record is not it, nor a sealed
+      // one where the cursor leaves them out.
       const record = (value) => {
-        if (typeof value !== 'string') return null;
+        if (typeof value !== 'string' || this.#hides(value)) return null;
         const data = found.get(value) ?? null;
         return data === null || data.$type !== entity ? null : { ...data, id: value };
       };
@@ -712,8 +717,8 @@ class Cursor {
     return JSON.parse(JSON.stringify({ ...made, index: made.index === null ? null : made.index.slice(), sealed }));
   }
 
-  // The cache key of this cursor's result: what it reads and how; null with a filter (a function has
-  // no name) or without a cache (a tag's source).
+  // The cache key of this cursor's result: what it reads and how — the sealed records in or out too; null with a
+  // filter (a function has no name) or without a cache (a tag's source).
   #cacheKey() {
     if (this.#cache === null || this.#filter !== null) return null;
     // The definitions ride in the key: a result read under other indexes is another result. The cursor never
@@ -730,6 +735,7 @@ class Cursor {
       this.#projection,
       this.#populate,
       definitions,
+      this.#withSealed,
     ]);
     return this.#cacheKeyText;
   }
@@ -739,10 +745,24 @@ class Cursor {
     return this.#order.length === 0 && this.#query.$text !== undefined;
   }
 
-  // The sealed records of the collection, where the source knows them (a tag's source does not): read whole.
+  // The sealed records of the collection, where the source knows them (a tag's source does not) and the cursor
+  // reads them (`sealed`): read whole.
   #sealed() {
-    if (this.#ranked() || typeof this.#source.sealed !== 'function') return EMPTY;
+    if (!this.#withSealed || this.#ranked() || typeof this.#source.sealed !== 'function') return EMPTY;
     return this.#source.sealed(this.#entity);
+  }
+
+  // The sealed records a cursor made through the seam leaves out: a Set where the collection holds any, else null
+  // (a lookup per candidate only where there is something to hide).
+  #hidden() {
+    if (this.#withSealed || typeof this.#source.sealed !== 'function') return null;
+    const sealed = this.#source.sealed(this.#entity);
+    return sealed.length === 0 ? null : new Set(sealed);
+  }
+
+  // Whether `id` is a sealed record this cursor leaves out (the seam's default): the catalog's row says.
+  #hides(id) {
+    return !this.#withSealed && this.#source.row(id)?.encrypted === true;
   }
 
   // Covered: everything the cursor reads — the query's fields, the order's,
@@ -820,10 +840,13 @@ class Cursor {
         narrowed.push(set);
       }
     }
+    // The sealed records a cursor through the seam leaves out: never read, whatever lists them.
+    const hidden = this.#hidden();
     const admits = (id) => {
       // A sealed row is keyed under nothing in every sorted index: where the merge lays the sealed records, the
       // scan's copy of one is not read again.
       if (merged && sealedSet.has(id)) return false;
+      if (hidden !== null && hidden.has(id)) return false;
       if (narrowed === null || sealedSet?.has(id) === true) return true;
       for (let i = 0; i < narrowed.length; i++) if (!narrowed[i].has(id)) return false;
       return true;
@@ -1062,6 +1085,7 @@ class Cursor {
           return indexed === null || indexed.encrypted ? null : rowOf(id, indexed.fields);
         }
       : async (id) => {
+          if (this.#hides(id)) return null;
           const data = await load(id);
           return data === null ? null : rowOf(id, data);
         };

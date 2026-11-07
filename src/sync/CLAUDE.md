@@ -95,8 +95,9 @@ challenge, host, node]`, both ids bound in — which the dialer answers before i
   `REVOKED`, runs `onRevoke` or forgets the records of those scopes (`storage.forget`: the file and the row gone,
   the log's entries scrubbed and flagged skipped — never an op, the host would refuse it) and subscribes again (a
   feed's end never takes a newer handle off the peer: `#subscribe` compares). `query`/`count` are opt-in
-  (`unit({ query: true })`), read through `storage[CURSOR]`, narrow the rows by the host's scope function and cap
-  them by `limits.rowsPerQuery` — a thin client's door, never a write's. Over a stateless transport (plain HTTP: one
+  (`unit({ query: true })`), read through `storage[CURSOR]` as it is — never a sealed record, which is the key
+  holder's (SEC-7) — narrow the rows by the host's scope function and cap them by `limits.rowsPerQuery` — a thin
+  client's door, never a write's. Over a stateless transport (plain HTTP: one
   request, one wrpc client) no hello can come first, so a read may carry one — `args.hello`, run through `greet`
   with `keep` false (`greeted`): the state set on the client for the call, no room joined, no session remembered, no
   presence handed — and a host without `query` mounts no such procedure (wrpc answers Not Found, never

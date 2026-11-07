@@ -864,6 +864,7 @@ const runQueryTests = async (t, assert, createStorage) => {
         residual: false,
         narrow: [],
         estimate: 7,
+        sealed: 0,
         uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] },
       });
       fsi.reset();

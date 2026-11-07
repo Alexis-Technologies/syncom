@@ -539,7 +539,7 @@ the other records stay plain. To encrypt the directory whole, wrap the
 backend instead — `atRest()` from the same subpath, every file under one
 key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
 
-A query reads sealed records too, at the key holder: see [Sealed records](./query#sealed-records). A sealed
+A query reads sealed records too, at the key holder — and only there: a host's `query`, an agent's tools and a connector leave them out, see [Sealed records](./query#sealed-records). A sealed
 record's pair is the directory's (`keys/`): it is not rotated — a new pair is a new node. The key of a database
 **encrypted at rest** (`atRest(engine, options)`, [Engines](./backends#encrypted-at-rest)) is rotated by a copy:
 
