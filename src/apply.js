@@ -507,6 +507,8 @@ const applyOne = async (batch, op) => {
   // landed on a purged record — is a header alone: logged and relayed as one (skipped, scrubbed), applied
   // nowhere, a gap for no one. A purge carries nothing a scrub could take: it applies as it is.
   if (op.scrubbed === true && op.type !== 'purge') {
+    // The flag is the peer's word; the payload goes all the same — never logged or relayed with one.
+    scrubOp(op);
     (batch.stripped ??= new Set()).add(op);
     return void skip(batch, op);
   }

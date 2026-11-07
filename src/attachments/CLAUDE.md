@@ -18,7 +18,8 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   `unset` of the register; the bytes stay (another name, another record may share them — there is no reference count and no
   sweep yet). Nothing of a blob is an op, and a peer's op never carries bytes.
 - **Bytes are believed by digest alone.** A node that reads a register whose bytes it lacks asks the connected peers
-  (`sync.fetchBlob`, `syncom/blob`), hashes what it got and keeps it only when the hash is the digest (`sync.blob.mismatch`
+  (`sync.fetchBlob(digest, { id, name })`, `syncom/blob { digest, id, name }` — a host serves a digest a live record
+  in the peer's scopes names, src/sync/hosting.js `blobNamed`), hashes what it got and keeps it only when the hash is the digest (`sync.blob.mismatch`
   otherwise, the next peer asked); the host answers a wrpc stream where `client.binary` is not false, base64 on a text
   transport (`toBase64` of crypto/pem.js — the one base64), and 404 `BLOB_NOT_FOUND` for what it lacks; a peer's answer past
   MAX_BLOB_BYTES (64 MiB) is refused. `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a

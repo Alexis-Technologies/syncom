@@ -40,6 +40,9 @@ expectType<Promise<void>>(sync.awaitDocumentPushed('id'));
 expectType<SyncUnit>(sync.unit({ allow: { push: false } }));
 expectType<SyncUnit>(sync.unit({ query: { regex: 'safe' }, limits: { rowsPerQuery: Infinity } }));
 expectType<SyncUnit>(sync.unit({ query: true }));
+expectType<SyncUnit>(sync.unit({ allow: { blob: 'any' } }));
+expectError(sync.unit({ allow: { blob: 'maybe' } }));
+expectType<Promise<Uint8Array>>(sync.fetchBlob('a'.repeat(64), { id: 'r1', name: 'photo.bin' }));
 expectError(sync.unit({ query: { regex: 'maybe' } }));
 expectError(sync.unit({ allow: { hello: false } }));
 // The shared log as this hub stands to it, or null without one.
@@ -83,6 +86,7 @@ storage.sync.on('refused', (event) => {
     | 'PRESENCE_SCOPE'
     | 'PRESENCE_FORGED'
     | 'PRESENCE_UNSIGNED'
+    | 'PRESENCE_UNPROVEN'
   >(event.reason);
   expectType<number>(event.count);
   expectType<string | null>(event.node);

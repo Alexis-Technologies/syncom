@@ -12,6 +12,9 @@
 // src/CLAUDE.md, "packOps is 19 positional slots").
 const PROTOCOL = 1;
 const DEFAULT_PAGE_SIZE = 500;
+// The field a record names its attachments under (`_attachments/<name>`, src/attachments/attachments.js): what the
+// host's `blob` reads to serve a digest a record in the peer's scopes names.
+const ATTACHMENTS_FIELD = '_attachments';
 
 // The kind plugins a peer runs with, as hello carries them — names; a peer
 // that names none holds none.
@@ -32,4 +35,4 @@ const schemaOf = (value) => {
   return { version: value.version, hash: typeof value.hash === 'string' ? value.hash : null };
 };
 
-module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf };
+module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf };

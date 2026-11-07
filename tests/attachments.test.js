@@ -181,9 +181,18 @@ test('Attachments', async (t) => {
         code: 404,
         reason: 'BLOB_NOT_FOUND',
       });
-      const answer = await open.call('syncom/blob', { digest: entry.digest });
+      // By default a blob is served to a peer that names the record holding it (allow.blob 'named'): the digest
+      // alone is 404 there, and serves under allow.blob 'any'.
+      await assert.rejects(() => open.call('syncom/blob', { digest: entry.digest }), {
+        code: 404,
+        reason: 'BLOB_NOT_FOUND',
+      });
+      const answer = await open.call('syncom/blob', { digest: entry.digest, id, name: 'photo.bin' });
       assert.strictEqual(answer.digest, entry.digest);
       assert.strictEqual(answer.size, 5000);
+      const any = new MemoryLink(a.sync.unit({ access: 'public', allow: { blob: 'any' } }));
+      await any.call('syncom/hello', { node: 'probe-3', version: 1 });
+      assert.strictEqual((await any.call('syncom/blob', { digest: entry.digest })).size, 5000);
       // A peer answering the wrong bytes under the digest is not believed.
       await a[DB].blobs.put(entry.digest, new Uint8Array([1, 2, 3]));
       const warnings = [];

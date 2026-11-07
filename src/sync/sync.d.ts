@@ -102,7 +102,11 @@ export interface SyncUnitOptions {
    * Which procedures this unit serves (every one by default): a peer asking for `push` where it is off is refused
    * with 403 `READ_ONLY`, for `snapshot` or `changes` with 403 `NOT_SERVED`.
    */
-  allow?: { push?: boolean; changes?: boolean; snapshot?: boolean; blob?: boolean };
+  /**
+   * Which procedures this unit serves. `blob` is `'named'` (`true`; the default: a digest served to a peer that names a
+   * live record in its scopes holding it), `'any'` (by digest alone — a trusted mesh's) or `false`.
+   */
+  allow?: { push?: boolean; changes?: boolean; snapshot?: boolean; blob?: boolean | 'named' | 'any' };
   /**
    * The host's rule on what a peer may write, asked of every pushed op before it is applied, with the record as it
    * is here (`current`, null for none) and as the op would leave it (`after`): `false` refuses the op — logged as a
@@ -220,7 +224,8 @@ export interface SyncEvents {
       | 'PRESENCE_MALFORMED'
       | 'PRESENCE_SCOPE'
       | 'PRESENCE_FORGED'
-      | 'PRESENCE_UNSIGNED';
+      | 'PRESENCE_UNSIGNED'
+      | 'PRESENCE_UNPROVEN';
     count: number;
   }) => void;
   /**
@@ -298,7 +303,7 @@ export interface SyncManager {
    */
   revoke(node: string, scopes: string[]): void;
   /** The bytes of an attachment's blob asked of the connected peers by digest (`syncom/blob`), checked and kept here; `BLOB_NOT_FOUND` where none holds them. */
-  fetchBlob(digest: string): Promise<Uint8Array>;
+  fetchBlob(digest: string, named?: { id: string; name: string }): Promise<Uint8Array>;
   /** The shared log as this hub stands to it (`sync.sharedLog`), or null without one. */
   shared(): SharedStats | null;
   /**

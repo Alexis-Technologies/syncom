@@ -24,7 +24,7 @@ const { toBase64 } = require('../crypto/pem.js');
 // The scopes a hello may ask for: every op of a feed is matched against them.
 const MAX_SCOPES = 256;
 const { isUpdate: isPresenceUpdate, isEntry: isPresenceEntry, sized } = require('../presence/presence.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf } = require('./protocol.js');
 const { parseEntry, sleep } = require('./shared.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
@@ -54,19 +54,28 @@ const nextOrIdle = (pending, ms) =>
     );
   });
 
-// `unit({ allow })`: which of the three procedures this unit serves; a peer
-// asking for one it does not is refused by code (403): `push` as READ_ONLY —
-// the host takes nothing — `snapshot` and `changes` as NOT_SERVED.
+// `unit({ allow })`: which procedures this unit serves; a peer asking for one it does not is refused by code
+// (403): `push` as READ_ONLY — the host takes nothing — `snapshot`, `changes` and `blob` as NOT_SERVED. `blob` is
+// `'named'` (true: a digest served to a peer that names a record in its scopes holding it — a revoke, a purge, a
+// forget follow the record), `'any'` (by digest alone: a capability, a trusted mesh's) or false.
 const ALLOW_KEYS = new Set(['push', 'changes', 'snapshot', 'blob']);
+const BLOB_MODES = new Set([false, 'named', 'any']);
 const normalizeAllow = (allow) => {
-  const normalized = { push: true, changes: true, snapshot: true, blob: true };
+  const normalized = { push: true, changes: true, snapshot: true, blob: 'named' };
   if (allow === undefined || allow === null) return normalized;
   if (typeof allow !== 'object') throw new TypeError('unit({ allow }): allow must be an object');
   for (const key of Object.keys(allow)) {
     if (!ALLOW_KEYS.has(key)) throw new TypeError(`unit({ allow }): unknown procedure '${key}'`);
-    if (allow[key] === undefined) continue;
-    if (typeof allow[key] !== 'boolean') throw new TypeError(`unit({ allow }): ${key} must be a boolean`);
-    normalized[key] = allow[key];
+    const value = allow[key];
+    if (value === undefined) continue;
+    if (key === 'blob') {
+      const mode = value === true ? 'named' : value;
+      if (!BLOB_MODES.has(mode)) throw new TypeError("unit({ allow }): blob is false, true ('named') or 'any'");
+      normalized.blob = mode;
+      continue;
+    }
+    if (typeof value !== 'boolean') throw new TypeError(`unit({ allow }): ${key} must be a boolean`);
+    normalized[key] = value;
   }
   return normalized;
 };
@@ -395,17 +404,17 @@ const greet = async (host, context, args, keep) => {
       // Counted up by a revoke: a feed opened under an older grant ends, one opened after serves the new one.
       generation: 0,
     };
+    state.keep = keep;
     context.client.data.syncom = state;
     if (keep) {
-      if (typeof context.client.join === 'function') {
-        for (const scope of scopes) context.client.join(`syncom:${scope}`);
-      }
+      // Under `prove` the rooms and the presence wait for the proof: nothing is handed before the key is shown.
+      if (!host.prove) joinRooms(context, scopes);
       remember(host, context, state);
     }
   }
   notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
-  if (keep) handPresence(host, context, scopes);
+  if (keep && !host.prove) handPresence(host, context, scopes);
   // Over a shared log the epoch is the log's, the same on every hub, so a
   // client moved between hubs keeps its cursor; a hub that cannot write
   // answers the vector as the log moved it, not its own as of its open.
@@ -426,6 +435,12 @@ const greet = async (host, context, args, keep) => {
   if (challenge !== null) answer.challenge = challenge;
   if (revoked !== null && revoked.length > 0) answer.revoked = revoked;
   return answer;
+};
+
+// The rooms of the scopes a persistent peer asked for: where a presence update of a scope is relayed.
+const joinRooms = (context, scopes) => {
+  if (typeof context.client.join !== 'function') return;
+  for (const scope of scopes) context.client.join(`syncom:${scope}`);
 };
 
 // The live session of a greeted peer, by node, for `sync.revoke(node, scopes)`: told at once through the
@@ -480,6 +495,11 @@ const prove = (host) => async (context, args) => {
   }
   state.proven = true;
   state.challenge = null;
+  // Proven: the rooms joined and the presence handed now, what hello withheld.
+  if (state.keep === true) {
+    joinRooms(context, state.scopes);
+    handPresence(host, context, state.scopes);
+  }
   return { proven: true };
 };
 
@@ -672,7 +692,9 @@ const sharedChanges = async function* (host, context, args, subscription) {
           passed = 0;
           idle = false;
           feed.cursor = cursor;
-          yield host.track(cursor, { ops: packOps(ops), eventId: cursor });
+          // `beforeSend` rules a hosted page as it rules a push: an op it says no to goes as its header.
+          const sent = ops.length === 0 ? ops : await host.manager.sendable(ops, state.ref);
+          yield host.track(cursor, { ops: packOps(sent), eventId: cursor });
         }
         // The read ended without an abort — the log closed, a tail that ends: read again from the cursor.
       } catch (error) {
@@ -745,9 +767,11 @@ const changes = (host) =>
         cursor = storage.log.formatId(entries[entries.length - 1].seq);
         feed.cursor = cursor;
         idle = false;
+        // `beforeSend` rules a hosted page as it rules a push: an op it says no to goes as its header.
+        const sent = ops.length === 0 ? ops : await host.manager.sendable(ops, state.ref);
         // Labelled even when every op was the peer's own echo: the position
         // still moves, and a resume must not replay it.
-        yield host.track(cursor, { ops: packOps(ops), eventId: cursor });
+        yield host.track(cursor, { ops: packOps(sent), eventId: cursor });
       }
     } finally {
       feeds.delete(feed);
@@ -861,20 +885,51 @@ const query = (host) => async (context, args) => {
   }
 };
 
-// An attachment's bytes by digest (`syncom/blob`): a wrpc stream of the bytes where the transport carries one, the
-// bytes as base64 otherwise; 404 `BLOB_NOT_FOUND` where this host holds none (or has no blobs store), 403
-// `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for what is no digest.
+// An attachment's bytes (`syncom/blob { digest, id, name }`): a wrpc stream of the bytes where the transport carries
+// one, the bytes as base64 otherwise. Under `allow.blob` 'named' (the default) the call names the record and the
+// attachment: served only where a live record in the peer's scopes names the digest under that name — a record
+// forgotten, purged, sealed, out of scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing
+// of what this host holds is told; a revoke, a purge, a forget follow the record for free. Under 'any' the digest
+// alone serves (a capability: a trusted mesh's). 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for
+// what is no digest, 404 where this host holds no bytes (or has no blobs store).
 const DIGEST = /^[0-9a-f]{64}$/;
+const blobNamed = async (host, state, digest, id, name) => {
+  if (typeof id !== 'string' || typeof name !== 'string') return false;
+  const { row, load } = host.storage[SOURCE];
+  const held = row(id);
+  if (held === null || held.gone === true || held.encrypted === true) return false;
+  let data;
+  try {
+    data = await load(id);
+  } catch {
+    return false;
+  }
+  if (data === null) return false;
+  const named = data[ATTACHMENTS_FIELD];
+  const entry = isPlainObject(named) ? named[name] : undefined;
+  if (!isPlainObject(entry) || entry.digest !== digest) return false;
+  if (state.scopes === null) return true;
+  try {
+    return inScope(host.scopeOf(id, data), state.scopes);
+  } catch {
+    return false;
+  }
+};
+
 const blob = (host) => async (context, args) => {
   const state = peerOf(host, context, 'blob');
-  if (!host.allow.blob) throw refuseCall(host, 'blob', 'This host serves no blobs', 403, 'NOT_SERVED', state.node);
+  if (host.allow.blob === false) {
+    throw refuseCall(host, 'blob', 'This host serves no blobs', 403, 'NOT_SERVED', state.node);
+  }
   const digest = args?.digest;
   if (typeof digest !== 'string' || !DIGEST.test(digest)) {
     throw refuseCall(host, 'blob', 'blob needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST', state.node);
   }
+  const notFound = () => refuseCall(host, 'blob', `No blob ${digest} here`, 404, 'BLOB_NOT_FOUND', state.node);
+  if (host.allow.blob === 'named' && !(await blobNamed(host, state, digest, args.id, args.name))) throw notFound();
   const store = host.storage[DB]?.blobs;
   const bytes = store === undefined ? null : await store.get(digest);
-  if (bytes === null) throw refuseCall(host, 'blob', `No blob ${digest} here`, 404, 'BLOB_NOT_FOUND', state.node);
+  if (bytes === null) throw notFound();
   const client = context?.client;
   if (client && client.binary !== false && typeof client.createStream === 'function') {
     const stream = client.createStream('syncom/blob', bytes.length);
@@ -928,6 +983,7 @@ const PRESENCE_REASONS = Object.freeze({
   PRESENCE_SCOPE: 'scope',
   PRESENCE_FORGED: 'forged',
   PRESENCE_UNSIGNED: 'unsigned',
+  PRESENCE_UNPROVEN: 'unproven',
 });
 
 const presence = (host) => async (context, update) => {
@@ -940,6 +996,8 @@ const presence = (host) => async (context, update) => {
     notify(host.manager, host.logger, 'refused', { node, reason, count: 1 });
   };
   if (!session) return void no('HELLO');
+  // Under `prove` nothing is taken before the key is shown — a presence update neither.
+  if (host.prove && session.proven !== true) return void no('PRESENCE_UNPROVEN');
   const { node, scopes } = session;
   const { rate, timeout } = host.presence;
   const now = Date.now();

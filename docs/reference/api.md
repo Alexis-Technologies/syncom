@@ -814,7 +814,7 @@ in the engine's blobs store, named on it as the register `_attachments/<name>` â
 | `remove(id, name)` | The name off the record (an `unset`, replicated); the bytes stay in the store |
 
 `FIELD` is `'_attachments'`. The engine must have a blobs store (`capabilities.blobs`); the plugin is refused at
-`createDatabase()` otherwise. `db.sync.fetchBlob(digest)` fetches by digest alone.
+`createDatabase()` otherwise. `db.sync.fetchBlob(digest, { id, name })` is the same fetch by hand: the record and the name the host serves the digest for (by digest alone only from a host with `allow.blob: 'any'`).
 
 ## Testing (subpath)
 

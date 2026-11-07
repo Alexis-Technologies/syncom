@@ -117,10 +117,17 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   reported, never reverted again — the answer's `actor` tells one, the log compacted or not; a purge refused is
   reported alone). A sealed record at the host is skipped before the rule is asked: a sealed entry has no meta an op
   could be tried over.
-  `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, snapshot and
-  changes (403 `UNPROVEN`) until `syncom/prove` carries its signature under the peer's key — `[1, 'prove',
-challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no signing
-  plugin: `UNPROVEN` reported, nothing pushed). `sync.revoke(node, scopes)` lives on the manager, never on the unit
+  `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, snapshot,
+  changes, query, count and blob (403 `UNPROVEN`) until `syncom/prove` carries its signature under the peer's key —
+  `[1, 'prove', challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no
+  signing plugin: `UNPROVEN` reported, nothing pushed); the rooms are joined and the presence handed at the proof,
+  not at hello (`joinRooms`, `state.keep`), and an unproven presence update is `PRESENCE_UNPROVEN`. `blob` serves a
+  digest under `allow.blob` `'named'` (the default) only where a live record in the peer's scopes names it under the
+  name the call gives (`blobNamed`: the catalog's row, the seam's `load`, `ATTACHMENTS_FIELD` of protocol.js, the
+  scope function) — one 404 for every miss, so nothing is told — and by digest alone under `'any'`. A `beforeSend`
+  rules a hosted page too (`manager.sendable(ops, ref)` in `changes` and `sharedChanges`), never a snapshot page or
+  a query row (records: the scopes'). An op flagged `scrubbed` that carries a payload is scrubbed before it is
+  logged (`applyOne`): the flag is the peer's word, the payload goes all the same. `sync.revoke(node, scopes)` lives on the manager, never on the unit
   (a function on the unit would be a procedure on the wire): the sessions a unit greeted are the manager's Map by
   node (`remember`; a session goes with its client's `close` — wrpc hands a reconnect a new client, so one outlived
   by its socket would stay for good — `sync.sessions()` lists them), a revoke narrows their grant, counts their

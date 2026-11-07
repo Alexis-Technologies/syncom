@@ -154,7 +154,8 @@ class Attachments {
     if (sync === null || typeof sync.fetchBlob !== 'function') throw this.#missing(id, name, digest);
     let bytes;
     try {
-      bytes = await sync.fetchBlob(digest);
+      // Named: a host serves a blob to a peer that names a record in its scopes holding the digest.
+      bytes = await sync.fetchBlob(digest, { id, name });
     } catch (error) {
       if (error?.code !== 'BLOB_NOT_FOUND') throw error;
       throw this.#missing(id, name, digest);

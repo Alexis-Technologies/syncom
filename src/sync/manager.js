@@ -1091,12 +1091,20 @@ class SyncManager extends Emitter {
 
   // A page as it goes out: every op `beforeSend` says no to goes as a scrub leaves it — a copy, the log's op
   // untouched — the header alone, a no-op where it lands and no gap in its stream.
-  async #outgoing(peer, page) {
-    if (this.#hooks.beforeSend === null) return page;
+  #outgoing(peer, page) {
+    return this.sendable(page, peer.ref);
+  }
+
+  /**
+   * The ops as they may go to the peer `ref` names — the dialer's push, and a hosted feed's page (src/sync/hosting.js):
+   * every op `beforeSend` says no to as a scrub leaves it, a copy; the log's op untouched. The page itself without the hook.
+   */
+  async sendable(ops, ref) {
+    if (this.#hooks.beforeSend === null) return ops;
     const out = [];
-    for (let i = 0; i < page.length; i++) {
-      const op = page[i];
-      const verdict = await runHook(this.#hooks, 'beforeSend', { op, peer: peer.ref });
+    for (let i = 0; i < ops.length; i++) {
+      const op = ops[i];
+      const verdict = await runHook(this.#hooks, 'beforeSend', { op, peer: ref });
       if (verdict !== false) {
         out.push(op);
         continue;
@@ -1378,10 +1386,17 @@ class SyncManager extends Emitter {
    * bytes are checked against the digest and kept in this node's blobs store. None has them: `BLOB_NOT_FOUND`
    * (`digest`, `asked`). Past `MAX_BLOB_BYTES` a peer's answer is refused.
    */
-  async fetchBlob(digest) {
+  async fetchBlob(digest, { id, name } = {}) {
     if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
       throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
     }
+    const named = typeof id === 'string' && typeof name === 'string';
+    if ((id !== undefined || name !== undefined) && !named) {
+      throw new TypeError('fetchBlob(digest, { id, name }): the record id and the attachment name are strings');
+    }
+    // Named, a host serves the digest to a peer whose scopes hold the record naming it (allow.blob 'named', the
+    // default); by digest alone only a host with allow.blob 'any' answers.
+    const args = named ? { digest, id, name } : { digest };
     let asked = 0;
     let cause = null;
     for (const peer of this.#peers.values()) {
@@ -1389,7 +1404,7 @@ class SyncManager extends Emitter {
       asked++;
       let bytes;
       try {
-        const answer = await peer.link.call('syncom/blob', { digest });
+        const answer = await peer.link.call('syncom/blob', args);
         bytes = await this.#readBlob(peer.link, answer);
       } catch (error) {
         // Not there (404), not served (403), a transport's failure: the next peer.
@@ -1404,11 +1419,12 @@ class SyncManager extends Emitter {
       if (store !== undefined) await store.put(digest, bytes);
       return bytes;
     }
-    throw new SyncomError('BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, {
-      digest,
-      asked,
-      cause,
-    });
+    const fields = { digest, asked, cause };
+    if (named) {
+      fields.id = id;
+      fields.name = name;
+    }
+    throw new SyncomError('BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, fields);
   }
 
   // A blob as a host answers it: the bytes of a stream, or base64 in the answer itself; bounded by MAX_BLOB_BYTES.

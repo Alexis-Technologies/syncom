@@ -776,6 +776,164 @@ test('Rules on the host and on the dialer', async (t) => {
     },
   );
 
+  await t.test(
+    'under prove an unproven hello joins no room and is handed no presence; its presence update is refused (unproven)',
+    async (t2) => {
+      // A verifying host asking for the proof (`prove: true`): the presence under test is unsigned, as it may be there.
+      const host = await createStorage(t2, 'HP', { sync: {} });
+      const unit = host.sync.unit({ access: 'public', prove: true });
+      const refused = [];
+      host.sync.on('refused', (event) => refused.push(event.reason));
+      const peer = await createSigner();
+      const link = new MemoryLink(unit);
+      const hello = await link.call('syncom/hello', { node: peer.id, version: 1, scopes: ['A'] });
+      assert.strictEqual(link.client.rooms.size, 0, 'no room before the proof');
+      link.send('syncom/presence', { p: 1, scope: 'A', s: [[peer.id, 1, Date.now(), { name: 'early' }]] });
+      await waitUntil(() => refused.length >= 1);
+      assert.deepStrictEqual(refused, ['PRESENCE_UNPROVEN']);
+      // Proven: the rooms joined, the update taken.
+      const sig = peer.signMessage(JSON.stringify([1, 'prove', hello.challenge, host.nodeId, peer.id]));
+      assert.deepStrictEqual(await link.call('syncom/prove', { sig }), { proven: true });
+      assert.deepStrictEqual([...link.client.rooms], ['syncom:A']);
+      link.send('syncom/presence', { p: 1, scope: 'A', s: [[peer.id, 2, Date.now(), { name: 'late' }]] });
+      await sleep(30);
+      assert.strictEqual(refused.length, 1, 'nothing refused after the proof');
+      // A hello again is a new challenge: the rooms left to the proof again.
+      const other = new MemoryLink(unit);
+      await other.call('syncom/hello', { node: peer.id, version: 1, scopes: ['A'] });
+      assert.strictEqual(other.client.rooms.size, 0);
+    },
+  );
+
+  await t.test(
+    'a blob is served to a peer that names a record in its scopes holding the digest; a digest alone, a record out of scope, a sealed one or one forgotten is BLOB_NOT_FOUND; allow.blob any serves by digest',
+    async (t2) => {
+      const { DB } = require('../src/symbols.js');
+      const { hashBytes } = require('../src/crypto/digest.js');
+      const { FIELD } = require('../src/attachments/attachments.js');
+      const { ATTACHMENTS_FIELD } = require('../src/sync/protocol.js');
+      assert.strictEqual(FIELD, ATTACHMENTS_FIELD, 'one field name on both sides');
+      const host = await createStorage(t2, 'HB', { sync: { scope } });
+      const bytes = new Uint8Array(64).fill(7);
+      const digest = await hashBytes(bytes);
+      await host[DB].blobs.put(digest, bytes);
+      const register = { digest, type: 'application/octet-stream', length: 64 };
+      const inA = await host.insert({ $type: 'A', [`${FIELD}/f`]: register });
+      const inB = await host.insert({ $type: 'B', [`${FIELD}/f`]: register });
+      const sealed = await host.insert({ $type: 'A', [`${FIELD}/f`]: register }, { encrypted: true });
+      const link = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+      const notFound = (error) => error.code === 404 && error.reason === 'BLOB_NOT_FOUND';
+      const served = await link.call('syncom/blob', { digest, id: inA, name: 'f' });
+      assert.strictEqual(served.size, 64);
+      await assert.rejects(() => link.call('syncom/blob', { digest }), notFound, 'a digest alone');
+      await assert.rejects(() => link.call('syncom/blob', { digest, id: inB, name: 'f' }), notFound, 'out of scope');
+      await assert.rejects(() => link.call('syncom/blob', { digest, id: sealed, name: 'f' }), notFound, 'sealed');
+      await assert.rejects(() => link.call('syncom/blob', { digest, id: inA, name: 'g' }), notFound, 'another name');
+      await assert.rejects(() => link.call('syncom/blob', { digest, id: 'nope', name: 'f' }), notFound, 'no record');
+      await assert.rejects(
+        () => link.call('syncom/blob', { digest: 'e'.repeat(64), id: inA, name: 'f' }),
+        notFound,
+        'another digest than the record names',
+      );
+      await host.forget(inA);
+      await assert.rejects(() => link.call('syncom/blob', { digest, id: inA, name: 'f' }), notFound, 'forgotten');
+      // A grant of everything reads B's; `any` serves by digest alone; off refuses by code.
+      const all = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await all.call('syncom/hello', { node: 'all', version: 1 });
+      assert.strictEqual((await all.call('syncom/blob', { digest, id: inB, name: 'f' })).size, 64);
+      await assert.rejects(() => all.call('syncom/blob', { digest }), notFound);
+      const any = new MemoryLink(host.sync.unit({ access: 'public', allow: { blob: 'any' } }));
+      await any.call('syncom/hello', { node: 'trusted', version: 1 });
+      assert.strictEqual((await any.call('syncom/blob', { digest })).size, 64);
+      assert.throws(() => host.sync.unit({ allow: { blob: 'nope' } }), { name: 'TypeError' });
+      // The dialer names the record for the host: fetchBlob(digest, { id, name }) through a mesh.
+      const mesh = await createMesh(t2, ['H2', 'C'], [['C', 'H2']], createStorage, { sync: { scope } });
+      const [h2, c] = ['H2', 'C'].map((name) => mesh.get(name));
+      await h2[DB].blobs.put(digest, bytes);
+      const named = await h2.insert({ $type: 'A', [`${FIELD}/f`]: register });
+      await settle([h2, c]);
+      const fetched = await c.sync.fetchBlob(digest, { id: named, name: 'f' });
+      assert.strictEqual(fetched.length, 64);
+      await assert.rejects(() => c.sync.fetchBlob(digest), { code: 'BLOB_NOT_FOUND' });
+      await assert.rejects(() => c.sync.fetchBlob(digest, { id: named }), { name: 'TypeError' });
+    },
+  );
+
+  await t.test(
+    'an op flagged scrubbed that still carries a payload is scrubbed before it is logged or relayed',
+    async (t2) => {
+      const host = await createStorage(t2, 'HX', { sync: {} });
+      const link = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await link.call('syncom/hello', { node: 'probe', version: 1 });
+      const op = {
+        origin: 'probe',
+        seq: 1,
+        ts: Date.now(),
+        type: 'write',
+        id: 'x',
+        data: { secret: 1 },
+        scrubbed: true,
+      };
+      const answer = await link.call('syncom/push', { ops: packOps([op]) });
+      assert.strictEqual(answer.skipped, 1);
+      assert.strictEqual(host.hasRecord('x'), false);
+      const [held] = host.log.entriesOf('x');
+      assert.strictEqual(held.skipped, true);
+      assert.strictEqual(held.scrubbed, true);
+      assert.strictEqual(held.op.data, undefined, 'the payload went with the flag');
+      assert.strictEqual(held.op.scrubbed, true);
+      // Relayed as a header: a peer behind the host reads no payload either.
+      const probe = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await probe.call('syncom/hello', { node: 'behind', version: 1 });
+      const pages = [];
+      probe.subscribe(
+        'syncom/changes',
+        {},
+        { lastEventId: host.log.formatId(0), onData: (value) => pages.push(value) },
+      );
+      await waitUntil(() => pages.some((page) => page.ops?.length > 0));
+      const [row] = pages.find((page) => page.ops?.length > 0).ops;
+      assert.strictEqual(row[6], null, 'no payload on the wire');
+      assert.strictEqual(row[19], 1, 'flagged scrubbed (slot 20)');
+    },
+  );
+
+  await t.test(
+    'beforeSend runs on a hosted feed’s page too: the peer gets the header, the host’s log keeps the payload',
+    async (t2) => {
+      const beforeSend = ({ op }) => op.data?.secret !== true;
+      const mesh = await createMesh(t2, ['H', 'C'], [['C', 'H']], createStorage, {
+        nodes: { H: { sync: { hooks: { beforeSend } } } },
+      });
+      const [h, c] = ['H', 'C'].map((name) => mesh.get(name));
+      await c.sync.awaitInitialReplication();
+      const secret = await h.insert({ secret: true, n: 1 });
+      const plain = await h.insert({ n: 2 });
+      await settle([h, c]);
+      assert.deepStrictEqual(await c.get(plain), { n: 2 });
+      assert.strictEqual(c.hasRecord(secret), false, 'the header alone reached the peer');
+      const [held] = c.log.entriesOf(secret);
+      assert.strictEqual(held.skipped, true);
+      assert.strictEqual(held.scrubbed, true);
+      assert.deepStrictEqual(await h.get(secret), { secret: true, n: 1 }, 'the host keeps the payload');
+      assert.deepStrictEqual(c.vector, h.vector, 'no gap');
+      // Over a shared log the feed is the topic's: the same rule on its pages.
+      const { createMemorySharedLog } = require('./utils/shared-log.js');
+      const shared = createMemorySharedLog();
+      const hub = await createStorage(t2, 'HS', { sync: { sharedLog: shared, hooks: { beforeSend } } });
+      const unit = hub.sync.unit({ access: 'public' });
+      const client = await createStorage(t2, 'CS', { sync: { connect: () => new MemoryLink(unit) } });
+      await client.sync.addNode({ url: 'mem://HS' });
+      await client.sync.awaitInitialReplication();
+      const hidden = await hub.insert({ secret: true, n: 3 });
+      const shown = await hub.insert({ n: 4 });
+      await waitUntil(() => client.hasRecord(shown), { timeout: 5000 });
+      assert.strictEqual(client.hasRecord(hidden), false);
+      assert.strictEqual(client.log.entriesOf(hidden)[0]?.scrubbed, true);
+    },
+  );
+
   await t.test('limits.rowsPerQuery Infinity means no cap', async (t2) => {
     const schema = { entities: { Task: { index: ['n'] } } };
     const tenantOf = (id, data) => data.tenant ?? '*';

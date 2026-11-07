@@ -528,7 +528,8 @@ inbox entry it names in the topic (`dropped`), and the hold is let go.
 
 The `challenge` hello answered, signed under the caller's key as
 `Ed25519( JSON([1, "prove", challenge, hostNodeId, callerNodeId]) )`, base64url.
-Until it is answered `push`, `snapshot` and `changes` are 403 `UNPROVEN`; a
+Until it is answered `push`, `snapshot`, `changes`, `query`, `count` and `blob` are 403 `UNPROVEN`, a presence
+update is refused (`PRESENCE_UNPROVEN`), and the caller joins no room and is handed no presence; a
 signature over another message or under another key is 403 `BAD_PROOF`, a call
 without one (or without a challenge pending) 400 `BAD_PROOF`. Every hello is a
 new challenge.
@@ -536,16 +537,21 @@ new challenge.
 ### `blob`
 
 ```
-→ { digest }
+→ { digest, id, name }
 ← { id, size, digest }                 (a wrpc stream of the bytes, where the transport carries one)
 ← { digest, size, base64 }             (the bytes themselves otherwise)
 ```
 
-An attachment's bytes by their SHA-256 (hex, 64 characters): what a node that holds a record naming bytes it lacks
-asks of the peers it dials ([Attachments](../guide/attachments)). The host answers a stream on a binary-capable
-transport and base64 on a text one (SSE); the dialer checks the bytes against the digest before it keeps them. 404
-`BLOB_NOT_FOUND` where the host holds none (or has no blobs store), 403 `NOT_SERVED` where `allow.blob` is off, 400
-`BAD_DIGEST` for what is no digest, 428 `HELLO_FIRST` before a hello.
+An attachment's bytes by their SHA-256 (hex, 64 characters), named by the record `id` and the attachment `name`
+that hold them: what a node that holds a record naming bytes it lacks asks of the peers it dials
+([Attachments](../guide/attachments)). Under `allow.blob` `'named'` (the default) the host serves the digest only
+where a live record in the caller's scopes names it under that name — a record forgotten, purged, sealed, out of
+scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing of what the host holds is told, and
+a revoke, a purge, a forget follow the record; under `'any'` the digest alone serves (a capability: a trusted
+mesh's). The host answers a stream on a binary-capable transport and base64 on a text one (SSE); the dialer checks
+the bytes against the digest before it keeps them. 404 `BLOB_NOT_FOUND` where the host holds none (or has no blobs
+store), 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for what is no digest, 428 `HELLO_FIRST` before
+a hello, 403 `UNPROVEN` under `prove`.
 
 ### `query` and `count`
 
@@ -660,8 +666,8 @@ At most 1 024 entries. A host takes an update that is the peer's own
 (every entry its node), of a scope it asked for, within `rate` a second
 (20), signed under `'require'`; else refuses it — 428 `HELLO`, 429
 `PRESENCE_RATE`, 400 `PRESENCE_MALFORMED`, 403 `PRESENCE_SCOPE`,
-`PRESENCE_FORGED`, `PRESENCE_UNSIGNED` — counted, announced, never
-relayed. What passes goes to the room `syncom:<scope>` but the sender, and
+`PRESENCE_FORGED`, `PRESENCE_UNSIGNED`, `PRESENCE_UNPROVEN` (under `prove`, before the
+key is shown) — counted, announced, never relayed. What passes goes to the room `syncom:<scope>` but the sender, and
 into the host's memory of the room (`max` 1 024 states per scope, for
 `timeout` ms, 30 000), which a newcomer is sent at hello.
 

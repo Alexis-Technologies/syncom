@@ -304,7 +304,7 @@ alert to key on:
 | warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |
 | warn | `editor.unfit` | the ProseMirror schema cannot hold what the field does (a mark, a node): the document leaves it out and the next edit sends that to every peer; once per binding, without `onUnfit` |
 | warn | `sync.presence.send` | a presence update could not be sent to a peer (`url`); the next renewal tries again |
-| warn | `sync.presence.refused`, `sync.presence.receive` | a host refused a peer's presence update (`node`, `reason`: `HELLO`, `PRESENCE_RATE`, `PRESENCE_MALFORMED`, `PRESENCE_SCOPE`, `PRESENCE_FORGED`, `PRESENCE_UNSIGNED`; also a `refused` event); a host's relay could not be taken (`url`) |
+| warn | `sync.presence.refused`, `sync.presence.receive` | a host refused a peer's presence update (`node`, `reason`: `HELLO`, `PRESENCE_RATE`, `PRESENCE_MALFORMED`, `PRESENCE_SCOPE`, `PRESENCE_FORGED`, `PRESENCE_UNSIGNED`, `PRESENCE_UNPROVEN`; also a `refused` event); a host's relay could not be taken (`url`) |
 | warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
 | error | `tags.unreadable` | `tags.json` unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired |
 | warn | `tags.dropped`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); a registry entry that cannot be read, skipped |

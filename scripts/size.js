@@ -455,7 +455,9 @@ const ENTRIES = [
   // 176.5 with the $regex gate and the scoped walk (review №7, E3.3; 2026-11-07). 177, raised by name.
   // 177.1 with the durable, shared revocations and the sessions let go of (review №7, E3.4; 2026-11-07). 177.5, raised by
   // name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 177.5 },
+  // 177.6 with the blob served by record and beforeSend on hosted pages (review №7, E3.5; 2026-11-07). 178, raised by
+  // name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 178 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -586,7 +588,9 @@ const ENTRIES = [
   // E3.3; 2026-11-07). 29.5, raised by name.
   // 29.8 with the sessions let go of with their sockets, the thin state taken off, the revocations durable and shared
   // (review №7, E3.4; 2026-11-07). 30, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 30 },
+  // 30.3 with prove gating the presence, the blob served by record, beforeSend on hosted pages (review №7, E3.5;
+  // 2026-11-07). 31, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 31 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

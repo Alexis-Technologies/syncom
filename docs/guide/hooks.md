@@ -180,8 +180,7 @@ a slow read hook holds no write.
 | --- | --- | --- | --- |
 | `beforeConnect(node)` | Before a registered node is dialled — at `start()`, `addNode()` while started, or `enableNode()`. `node` is a copy of the registry entry | `false` leaves it registered but not dialled | Reported through the manager's `error` event, with `error.url` |
 | `beforeBootstrap({ url, node })` | When a host's log cannot resume this node and its whole state is about to be joined | `false` refuses: the peer stays connected for pushes but nothing is received from it until the next handshake asks again | Reported through `error` |
-
-| `beforeSend({ op, peer })` | Before an op goes to a peer — a push, a relay | `false` sends it **scrubbed**: the header alone, a no-op where it lands, no gap in its stream (the log's op is untouched) | Reported through `error`; the push fails and is tried again |
+| `beforeSend({ op, peer })` | Before an op goes to a peer — a push, a relay, a hosted `changes` page (over a shared log too) | `false` sends it **scrubbed**: the header alone, a no-op where it lands, no gap in its stream (the log's op is untouched). A snapshot page and a query answer are records, not ops: the scopes rule them | Reported through `error`; the push fails and is tried again |
 | `onRevoke({ url, node, scopes })` | A host took scopes back from this node (`REVOKED`); the registry entry is narrower already, the feed is opened again under the new grant after the hook | — | Reported through `error` |
 
 No hook ever withholds an op: seqs run contiguously per origin and scope, so

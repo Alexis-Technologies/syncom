@@ -38,14 +38,18 @@ files (`blobs/<digest>`, as base64 text — an fsi carries text), SQLite (a
 ## Over the wire
 
 The name travels with the record; the bytes do not. A node that reads a record
-naming bytes it lacks asks the peers it dials — `syncom/blob { digest }`,
+naming bytes it lacks asks the peers it dials — `syncom/blob { digest, id, name }`,
 answered as a stream where the transport carries one, as base64 otherwise —
 checks the answer against the digest (a peer answering other bytes is not
 believed: `sync.blob.mismatch`, the next peer asked), keeps the bytes in its
 own store and answers them. No peer has them: `BLOB_NOT_FOUND` (`id`, `name`,
-`digest`). `get(id, name, { fetch: false })` asks nobody. A host serves blobs
-by default; `unit({ allow: { blob: false } })` refuses the call (403
-`NOT_SERVED`). `db.sync.fetchBlob(digest)` is the same fetch by digest alone.
+`digest`). `get(id, name, { fetch: false })` asks nobody. A host serves a blob
+to a peer that names a live record in its scopes holding the digest under
+that name (`allow.blob: 'named'`, the default — so a scope taken back, a
+record purged or forgotten, a sealed record hand out no bytes, and a digest
+alone is 404); `unit({ allow: { blob: 'any' } })` serves by digest alone, a
+trusted mesh's; `{ blob: false }` refuses the call (403 `NOT_SERVED`).
+`db.sync.fetchBlob(digest, { id, name })` is the same fetch by hand.
 
 So an attachment reaches a node when that node reads it, not before: a phone
 syncing a thousand records does not download a thousand photos. Pushing bytes
