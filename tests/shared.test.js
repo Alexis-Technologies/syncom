@@ -935,6 +935,32 @@ test('Shared database', async (t) => {
     await assert.rejects(() => never.set('x', {}), { code: 'LEADER_LOST' });
   });
 
+  await t.test(
+    'the SharedWorker shape: the worker leads and serves, every tab a follower by option; tabs never lead, a new worker’s serve answers them again',
+    async (t2) => {
+      const { open, closeTab, locks } = profile(t2, { path: 'worker' });
+      const worker = await open();
+      const tab = async () => open({ election: { follower: true }, failover: 400 });
+      const [a, b] = await Promise.all([tab(), tab()]);
+      assert.strictEqual(worker.leader, true);
+      assert.deepStrictEqual([a.mode, b.mode, a.leader, b.leader], ['follower', 'follower', false, false]);
+      const id = await a.insert({ $type: 'Task', title: 'from a tab' });
+      await waitUntil(() => b.hasRecord(id));
+      assert.deepStrictEqual(await b.collection('Task').get(id), { $type: 'Task', title: 'from a tab' });
+      // The worker goes: no tab takes the lock; a write waits for a worker and is LEADER_LOST past failover.
+      await closeTab(worker);
+      await sleep(100);
+      assert.strictEqual(a.leader || b.leader, false, 'a tab never leads');
+      assert.strictEqual(locks.held('syncom:leader:worker'), false);
+      await assert.rejects(() => a.set('late', { $type: 'Task' }), { code: 'LEADER_LOST' });
+      // A new worker (the page's next version) leads and serves: the tabs' writes land again.
+      const next = await open();
+      assert.strictEqual(next.leader, true);
+      await b.set('late', { $type: 'Task', title: 'through the next worker' });
+      assert.deepStrictEqual(await next.get('late'), { $type: 'Task', title: 'through the next worker' });
+    },
+  );
+
   await t.test('over the IndexedDB engine: a follower hears the leader through the BroadcastChannel', async (t2) => {
     // Two tabs are two engine instances over one IndexedDB and one channel name: each with a token of its own.
     const Channel = createBroadcastChannels();

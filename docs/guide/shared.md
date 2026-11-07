@@ -1,8 +1,8 @@
 # Several tabs
 
-Two tabs over one IndexedDB, two windows of one Electron app over one SQLite
-file, two workers of one process over one memory engine: several instances
-over one database. `createDatabase()` is exclusive per directory
+Two tabs over one IndexedDB, two workers of one process over one memory
+engine, two instances of one service over one MongoDB: several instances over
+one database. `createDatabase()` is exclusive per directory
 ([why](./database#one-instance-per-directory)) — two instances minting the
 same sequence number is the bug the lock exists for — so one of them leads and
 the others follow. `@alexify/syncom/shared` is that arrangement, elected and
@@ -30,10 +30,12 @@ const doc = shared.document(id); // follows the instance: re-read once after a f
 ```
 
 `openShared` takes what `createDatabase` takes — the engine must be one
-several instances may open (`capabilities.shared`: IndexedDB, SQLite, the
-memory engine, MongoDB) — and `createDatabase` itself, the one of the flavour
-in use (the core's, `/all`'s): the subpath bundles nothing of the core, as
-`/branch` opens through the parent's constructor.
+several instances may open (`capabilities.shared`: the memory, IndexedDB and
+MongoDB engines; never the files engine or SQLite, whose journal and
+connection are one instance's — a follower there is refused with a
+`TypeError`) — and `createDatabase` itself, the one of the flavour in use
+(the core's, `/all`'s): the subpath bundles nothing of the core, as `/branch`
+opens through the parent's constructor.
 
 ## The leader and the followers
 
@@ -171,19 +173,28 @@ ways — the payload a call `{ id, args, retry }`; the leader answers every call
 as a value — `{ ok, value }` or `{ ok, error }` — so a refusal round-trips
 whatever the wire does with a thrown error. A transport that knows a request
 never left may say so with `sent: false` on the error it throws: the retry is
-then free of the `retry` flag. The leader mounts its writers with `shared.serve()` (one procedure per
-writer and `transact`, `access: 'session'` by default — the tabs' own, never a
+then free of the `retry` flag. The leader mounts its procedures with
+`shared.serve()` (`PROCEDURES`: one per writer, `transact`, `collection`,
+`local` and `fetchBlob`; `access: 'session'` by default — the tabs' own, never a
 router's public face), and the wrpc subpath wraps a `WrpcClient` as the
-follower's channel. In a browser the leader's server runs where every tab can
-reach it — a SharedWorker — and each tab's `connect(url, { worker })` opens a
-port to it, which the worker attaches:
+follower's channel.
+
+In a browser **the worker leads**: a SharedWorker is the one place every tab
+can reach and the one that outlives them, so it holds the election, opens the
+database as the leader and serves — and every tab is a follower by option
+(`election: { follower: true }`: it never leads), reading the engine beside the
+worker and writing through its port. Nothing crosses a realm but the wrpc
+calls; no tab's `serve()` is reached from another:
 
 ```js
-// shared-worker.js — the leader's server; whichever tab leads, its writers are behind the one router.
+// shared-worker.js — the leader: it holds the election and serves its procedures.
 import { Server, defineRouter } from '@alexify/wrpc';
-let served = null; // the leading tab's `serve()`, set by the tab over its own channel to the worker
-const procedure = (name) => ({ access: 'public', handler: (context, args) => served[name].handler(context, args) });
-const server = new Server({ router: defineRouter({ 'syncom-db': Object.fromEntries(WRITERS.map((name) => [name, procedure(name)])) }) });
+import { createDatabase } from '@alexify/syncom';
+import { idbEngine } from '@alexify/syncom/idb';
+import { openShared } from '@alexify/syncom/shared';
+
+const shared = await openShared({ createDatabase, engine: idbEngine({ name: 'app' }), path: 'app', schema, election: { locks: navigator.locks } });
+const server = new Server({ router: defineRouter({ 'syncom-db': shared.serve() }) });
 self.onconnect = (event) => {
   const [port] = event.ports;
   port.addEventListener('message', (message) => {
@@ -193,19 +204,38 @@ self.onconnect = (event) => {
 };
 ```
 
+```js
+// a tab — a follower by option: it reads the engine, and every write goes to the worker.
+const worker = new SharedWorker(new URL('./shared-worker.js', import.meta.url), { type: 'module' });
+const shared = await openShared({
+  createDatabase,
+  engine: idbEngine({ name: 'app' }),
+  path: 'app',
+  schema,
+  election: { follower: true },
+  channel: async () => createSharedChannel(await WrpcClient.connect('worker://app', { worker: worker.port })),
+});
+```
+
 The handshake — the tab posts `wrpc:connect` with a port, the worker attaches
-it — is wrpc's; where the leader itself is the worker (its `openShared` runs
-there), `served` is its own `serve()`. The same shape runs in Electron with
-the main process leading and the renderers following over
-`MessageChannelMain`. `tests/wrpc.integration.test.js` runs three tabs over
-one memory engine through wrpc on a `MessageChannel`: the leader serves, a
-follower writes through it, a failover keeps the port; `tests/shared.test.js`
-runs the facade over the memory engine and the IndexedDB engine with an
-in-process channel, and the elections on their own.
+it — is wrpc's. Where the worker is replaced (a new version of the page), its
+`openShared` holds the lock for the one database while the tabs' writes wait
+on their channel, within `failover` ms. Where several instances could each
+lead — the tabs of a page without a SharedWorker, the processes of one
+service over one MongoDB — the election is theirs (`locks`, or the
+heartbeat), and whichever leads mounts `serve()` on a server every instance
+can reach. `tests/wrpc.integration.test.js` runs three tabs over one memory
+engine through wrpc on a `MessageChannel` (the leading tab serves, a follower
+writes through it, a failover keeps the port); `tests/shared.test.js` runs the
+facade over the memory engine and the IndexedDB engine with an in-process
+channel — the worker-leads shape among them — and the elections on their own.
 
 ## What it costs
 
 A follower is a second database over the same stores: its own cache and
 catalog, built at its open and kept by the change stream. The election is one
 lock request. A forwarded write is one round trip to the leader; a recorded
-transaction one. Nothing of a follower touches the log.
+transaction one. The leader keeps the answers of the last 256 calls of each
+of 64 followers (the deduplication of a retry) in memory. A follower that
+puts an attachment opens a second handle of the engine for the blobs store
+(closed with the facade). Nothing of a follower touches the log.

@@ -74,7 +74,12 @@ name]` → `db.sync.fetchBlob`, the bytes landing in the shared store, `{ length
   way `onLead` fires at EVERY grant (never a one-shot promise), `yield()` steps aside and `request()` asks again;
   a lock stolen (`AbortError`) is `onLost`. `follower: true` never leads (`mode: 'follower'`: a tab beside a
   SharedWorker that holds the election). Neither given: `mode: 'alone'`, the instance leads at once.
-- **The wire is wrpc's.** `createSharedChannel(client)` of the wrpc subpath is the follower's channel; the leader's
-  `serve()` is a router unit (`syncom-db`); a SharedWorker attaches each tab's port on its `wrpc:connect`
-  (`rpc.attachPort(event.ports[0])`) — the handshake of wrpc's worker transport, run in
-  `tests/wrpc.integration.test.js` over a `MessageChannel`. No port, BroadcastChannel or IPC client of syncom's own.
+- **The wire is wrpc's, and the worker leads.** `createSharedChannel(client)` of the wrpc subpath is the follower's
+  channel; the leader's `serve()` is a router unit (`syncom-db`, `PROCEDURES`); a SharedWorker attaches each tab's
+  port on its `wrpc:connect` (`rpc.attachPort(event.ports[0])`) — the handshake of wrpc's worker transport, run in
+  `tests/wrpc.integration.test.js` over a `MessageChannel`. In a browser the SharedWorker holds the election and
+  serves, and every tab is `election: { follower: true }` (`mode: 'follower'`, never a leader): nothing crosses a
+  realm but the wrpc calls, no tab's `serve()` is reached from another — the shape `tests/shared.test.js` runs over
+  the in-process port. Followers open only over a `shared` engine (memory, IndexedDB, MongoDB): never the files
+  engine or SQLite, whose journal and connection are one instance's. No port, BroadcastChannel or IPC client of
+  syncom's own.
