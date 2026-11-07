@@ -27,6 +27,8 @@ const { SortedIndex, rankOf, compare, beforePosition } = require('./sorted.js');
 const FILE = 'catalog.json';
 // The key `ids()` caches the whole live list under.
 const ALL = Symbol('syncom.catalog.all');
+// The sealed listing of a collection without sealed records: one frozen array, read by every cursor over it.
+const EMPTY = Object.freeze([]);
 // 4: a folded tombstone's stamps ride on its row (`folded`, the eighth cell; @alexify/syncom/cleanup).
 // 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell); a
 //    folded tombstone lives in the `tombstones` kv namespace, whole, and its row is any tombstone's.
@@ -268,8 +270,11 @@ class Catalog {
   #loaded = false;
   #sorted = null;
   #sortedIds = new Map();
-  // A collection's sealed records, sorted, by type — cached until a record of the collection changes.
-  #sealedIds = new Map();
+  // A collection's sealed records by type — a Set, kept by every insert and remove of a sealed row — and the sorted
+  // listing a query reads: built from the set once, kept until a sealed record of the collection comes or goes (a
+  // plain write never touches it; a collection without sealed records answers the one frozen EMPTY).
+  #sealed = new Map();
+  #sealedSorted = new Map();
   #text;
   #textPending = new Map();
   #logger;
@@ -586,7 +591,6 @@ class Catalog {
 
   #bump(type) {
     this.#typeGen.set(type, ++this.#generation);
-    this.#sealedIds.delete(type);
   }
 
   /** A number that moves with every definition (`define`): what a plan, and a cached result's key, were made under. */
@@ -607,7 +611,10 @@ class Catalog {
     if (row.gone) return;
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
-    this.#sealedIds.delete(row.type);
+    if (row.encrypted) {
+      drop(this.#sealed, row.type, id);
+      this.#sealedSorted.delete(row.type);
+    }
     drop(this.#byType, row.type, id);
     this.#index(id, row, false);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
@@ -650,7 +657,10 @@ class Catalog {
     if (row.gone) return;
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
-    this.#sealedIds.delete(row.type);
+    if (row.encrypted) {
+      add(this.#sealed, row.type, id);
+      this.#sealedSorted.delete(row.type);
+    }
     add(this.#byType, row.type, id);
     this.#index(id, row, true);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
@@ -849,15 +859,16 @@ class Catalog {
 
   /**
    * The sealed (encrypted) records of a collection, sorted by id — rows with no fields, which no index knows: a
-   * query reads them whole at the key holder. Cached until a record of the collection changes. Shared: read it.
+   * query reads them whole at the key holder. The set is kept per put; the sorted listing is built from it once and
+   * stays until a sealed record of the collection comes or goes — a plain write costs it nothing. Shared: read it.
    */
   sealed(type) {
-    let sorted = this.#sealedIds.get(type);
+    const set = this.#sealed.get(type);
+    if (set === undefined) return EMPTY;
+    let sorted = this.#sealedSorted.get(type);
     if (sorted !== undefined) return sorted;
-    sorted = [];
-    for (const id of this.#byType.get(type) ?? []) if (this.#rows.get(id)?.encrypted === true) sorted.push(id);
-    sorted.sort();
-    this.#sealedIds.set(type, sorted);
+    sorted = [...set].sort();
+    this.#sealedSorted.set(type, sorted);
     return sorted;
   }
   /**

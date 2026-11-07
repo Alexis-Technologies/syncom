@@ -530,3 +530,35 @@ test('load, define and adopt build the sorted indexes once and read the same', a
   }
   assert.deepStrictEqual(scanIds(loaded, 'Post', { index: ['n', 'm'], prefix: [], range, desc: false }), expected);
 });
+
+test('the sealed listing is the catalog’s set: a plain write leaves it the same array, a sealed write rebuilds it once, and a collection without sealed records answers the shared empty one', () => {
+  const catalog = catalogOf({ entities: { Post: { index: ['orgId'] }, Tag: {} } });
+  const none = catalog.sealed('Post');
+  assert.deepStrictEqual(none, []);
+  assert.ok(Object.isFrozen(none), 'the empty listing is shared, so frozen');
+  assert.strictEqual(catalog.sealed('Tag'), none, 'one empty listing for every collection without sealed records');
+  catalog.put('p1', { type: 'Post', v: 1, data: { orgId: 'o1' } });
+  assert.strictEqual(catalog.sealed('Post'), none, 'a plain write makes no sealed record');
+  catalog.put('e2', { type: 'Post', encrypted: true });
+  catalog.put('e1', { type: 'Post', encrypted: true });
+  const sealed = catalog.sealed('Post');
+  assert.deepStrictEqual(sealed, ['e1', 'e2']);
+  assert.strictEqual(catalog.sealed('Post'), sealed, 'read again: the same array');
+  // Plain writes of the collection — an insert, an update, a delete — leave the sealed listing as it was.
+  catalog.put('p2', { type: 'Post', v: 1, data: { orgId: 'o1' } });
+  catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o2' } });
+  catalog.put('p2', null);
+  assert.strictEqual(catalog.sealed('Post'), sealed, 'plain writes leave the listing the same array');
+  // A sealed record gone: the listing is built again, once, from the set.
+  catalog.put('e1', null);
+  const rest = catalog.sealed('Post');
+  assert.deepStrictEqual(rest, ['e2']);
+  assert.strictEqual(catalog.sealed('Post'), rest);
+  // A sealed record of another collection now: it leaves one listing and joins the other.
+  catalog.put('e2', { type: 'Tag', encrypted: true });
+  assert.strictEqual(catalog.sealed('Post'), none, 'the last sealed record gone: the shared empty one');
+  assert.deepStrictEqual(catalog.sealed('Tag'), ['e2']);
+  // A load rebuilds the set with the rows.
+  catalog.put('e3', { type: 'Post', encrypted: true });
+  assert.deepStrictEqual(catalog.sealed('Post'), ['e3']);
+});

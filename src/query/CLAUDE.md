@@ -49,7 +49,9 @@ plan)` reads the entries between two binary searches, forward or backward; where
   the catalog's, shared with the cursor. `explain()` is the plan as a copy. A `$text` query keeps the
   ranking and plans nothing.
 - **A sealed record is read, never indexed.** A collection's `encrypted: true` records are rows with no fields; the
-  seam lists them (`[SOURCE].sealed(entity)`, `Catalog.sealed`: cached per type, dropped at every bump) and `load`
+  seam lists them (`[SOURCE].sealed(entity)`, `Catalog.sealed`: a Set per type kept by every insert and remove of a
+  sealed row, the sorted listing built from it once and kept until a sealed record comes or goes — a plain write of
+  the collection never rebuilds it, a collection without sealed records answers one frozen `EMPTY`) and `load`
   opens them (a copy of the data as the key here reads it, no meta to compose). `Cursor#matching` adds them to the
   candidates of every plan over the collection (`withSealed`: every id once), lets them past `narrow`'s posting
   lists and reads them whole — in the covered loop too, where a plain row stays the catalog's — and gives up
