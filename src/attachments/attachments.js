@@ -72,11 +72,17 @@ class Attachments {
     return isPlainObject(entry) && typeof entry.digest === 'string' ? entry : null;
   }
 
+  /** The register's field of a name: `_attachments/<name>` — a name checked. */
+  field(name) {
+    return `${FIELD}/${checkName(name)}`;
+  }
+
   /**
-   * Keeps `bytes` under the record as `name`: the bytes in the engine's blobs store by their digest (compressed
-   * where the plugin was told to), the name on the record. Answers `{ digest, type, length, encoding? }`.
+   * What a `put` would store and write, made without storing or writing: `{ stored, entry, field }` — the bytes as
+   * the store keeps them (compressed where the plugin was told to), the register and its field name. A follower of
+   * `@alexify/syncom/shared` puts the blob into the shared store itself and forwards the register to the leader.
    */
-  async put(id, name, bytes, { type = DEFAULT_TYPE } = {}) {
+  async prepare(name, bytes, { type = DEFAULT_TYPE } = {}) {
     checkName(name);
     if (typeof type !== 'string' || type.length === 0) {
       throw new TypeError('attachments.put(): type must be a media type');
@@ -84,10 +90,19 @@ class Attachments {
     const plain = bytesOf(bytes);
     const stored = this.#encoding === null ? plain : await compress(plain, this.#encoding);
     const digest = await hashBytes(stored);
-    await this.#blobs.put(digest, stored);
     const entry = { digest, type, length: plain.length };
     if (this.#encoding !== null) entry.encoding = this.#encoding;
-    await this.#storage.update(id, { [`${FIELD}/${name}`]: entry });
+    return { stored, entry, field: this.field(name) };
+  }
+
+  /**
+   * Keeps `bytes` under the record as `name`: the bytes in the engine's blobs store by their digest (compressed
+   * where the plugin was told to), the name on the record. Answers `{ digest, type, length, encoding? }`.
+   */
+  async put(id, name, bytes, options) {
+    const { stored, entry, field } = await this.prepare(name, bytes, options);
+    await this.#blobs.put(entry.digest, stored);
+    await this.#storage.update(id, { [field]: entry });
     return entry;
   }
 
@@ -131,8 +146,7 @@ class Attachments {
 
   /** Takes the name off the record (an `unset`: replicated); the bytes stay in the store. */
   async remove(id, name) {
-    checkName(name);
-    await this.#storage.unset(id, [`${FIELD}/${name}`]);
+    await this.#storage.unset(id, [this.field(name)]);
   }
 
   #missing(id, name, digest) {

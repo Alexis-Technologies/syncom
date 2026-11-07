@@ -2,7 +2,17 @@
 // others follow (`createDatabase({ readOnly: true })` over the same engine) and write through the leader over a
 // channel; the leader gone, a follower takes its place and every live thing is made again.
 
-import type { Collection, Database, Document, RecordData, Schema, StorageOptions } from '../../index.js';
+import type {
+  AttachmentEntry,
+  Attachment,
+  Collection,
+  Database,
+  Document,
+  LocalStore,
+  RecordData,
+  Schema,
+  StorageOptions,
+} from '../../index.js';
 import type { TextHandleMethods, TextMethods } from '../text/text.js';
 import type { TreeMethods } from '../tree/tree.js';
 import type { SyncApi } from '../sync/sync.js';
@@ -115,6 +125,83 @@ export interface ServedProcedure {
   ) => Promise<{ ok: true; value: unknown } | { ok: false; error: unknown }>;
 }
 
+/** A recorded transaction's api on a follower — and what the leader's transaction has too: the writers, no `insert`. */
+export interface SharedTransaction {
+  get<R = RecordData>(id: string): Promise<R | null>;
+  has(id: string): Promise<boolean>;
+  set(id: string, data: RecordData, options?: Record<string, unknown>): Promise<void>;
+  update(id: string, delta: RecordData, options?: Record<string, unknown>): Promise<void>;
+  swap(id: string, data: RecordData, options?: Record<string, unknown>): Promise<void>;
+  unset(id: string, fields: string[], options?: Record<string, unknown>): Promise<void>;
+  delete(id: string, options?: Record<string, unknown>): Promise<void>;
+  purge(id: string, options?: Record<string, unknown>): Promise<void>;
+  inc(id: string, field: string, by?: number, options?: Record<string, unknown>): Promise<void>;
+  add(id: string, field: string, elements: unknown, options?: Record<string, unknown>): Promise<void>;
+  remove(id: string, field: string, elements: unknown, options?: Record<string, unknown>): Promise<void>;
+  [writer: string]: (...args: any[]) => Promise<unknown>;
+}
+
+/** A bulk write's verdicts as a SharedCollection answers them on either role: the ids written, the rows refused with their errors made again. */
+export interface SharedBulkResult<T = unknown> {
+  success: string[];
+  error: Array<{ index: number; id: string | null; data: T; error: Error & { code?: string } }>;
+}
+
+/**
+ * A collection of the shared database: the readers the current instance's collection's, the writers the leader's —
+ * `insert`, `upsert` and `insertIfAbsent` answer the id on either role, a bulk its verdicts; `modify()` and
+ * `remove()` are `NOT_LEADER` on a follower.
+ */
+export interface SharedCollection<R = RecordData, I = R> {
+  readonly name: string;
+  /** The current instance's collection: its cursors, documents and events. */
+  readonly collection: Collection<R, I>;
+  get: Collection<R, I>['get'];
+  select: Collection<R, I>['select'];
+  count: Collection<R, I>['count'];
+  findByIds: Collection<R, I>['findByIds'];
+  distinct: Collection<R, I>['distinct'];
+  countBy: Collection<R, I>['countBy'];
+  document: Collection<R, I>['document'];
+  record: Collection<R, I>['record'];
+  insert(data: I, options?: Record<string, unknown>): Promise<string>;
+  upsert(data: I, options?: Record<string, unknown>): Promise<string>;
+  insertIfAbsent(data: I, options?: Record<string, unknown>): Promise<string>;
+  set(id: string, data: I, options?: Record<string, unknown>): Promise<void>;
+  update(id: string, delta: Partial<R> | Record<string, unknown>, options?: Record<string, unknown>): Promise<unknown>;
+  unset(id: string, fields: string[], options?: Record<string, unknown>): Promise<void>;
+  delete(id: string, options?: Record<string, unknown>): Promise<void>;
+  bulkInsert(rows: I[], options?: Record<string, unknown>): Promise<SharedBulkResult<I>>;
+  bulkUpsert(rows: I[], options?: Record<string, unknown>): Promise<SharedBulkResult<I>>;
+  bulkRemove(ids: string[], options?: Record<string, unknown>): Promise<SharedBulkResult<string>>;
+  modify: Collection<R, I>['modify'];
+  remove: Collection<R, I>['remove'];
+}
+
+/** The attachments of the shared database: `put` from either role (the blob into the shared store), `get` fetching through the leader. */
+export interface SharedAttachments {
+  put(
+    id: string,
+    name: string,
+    bytes: Uint8Array | ArrayBuffer | string,
+    options?: { type?: string },
+  ): Promise<AttachmentEntry>;
+  get(id: string, name: string, options?: { fetch?: boolean }): Promise<Attachment | null>;
+  has(id: string, name: string): Promise<boolean>;
+  list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
+  remove(id: string, name: string): Promise<void>;
+}
+
+/** The local documents of the shared database: reads this instance's, `set(key, value)`/`delete` the leader's; no `set(key, fn)`, no `observe`. */
+export interface SharedLocal {
+  readonly local: true;
+  get<T = unknown>(key: string): Promise<T | null>;
+  set<T>(key: string, value: T): Promise<T>;
+  delete(key: string): Promise<void>;
+  list(): Promise<string[]>;
+  scoped(prefix: string): SharedLocal;
+}
+
 export interface Shared {
   /** The current instance: the leader's `Database`, or a follower's read-only one. */
   readonly db: Database;
@@ -134,8 +221,12 @@ export interface Shared {
   /** A live thing over the current instance, made again over the next; answers what stops it for good. */
   live(make: (db: Database) => (() => void) | void | Promise<(() => void) | void>): () => void;
   document<R = RecordData>(id: string): SharedDocument<R>;
-  /** The collection named, of the current instance. */
-  collection<R = RecordData, I = R>(name: string): Collection<R, I>;
+  /** The collection named: readers the current instance's, writers the leader's (an id answered, a bulk's verdicts). */
+  collection<R = RecordData, I = R>(name: string): SharedCollection<R, I>;
+  /** The attachments (`PLUGIN_MISSING` without the plugin): `put` from either role, `get` fetching through the leader. */
+  readonly attachments: SharedAttachments;
+  /** The local documents: reads this instance's, `set`/`delete` the leader's. */
+  readonly local: SharedLocal;
   get: Database['get'];
   has: Database['has'];
   hasRecord: Database['hasRecord'];
@@ -169,7 +260,7 @@ export interface Shared {
   restore: Database['restore'];
   compact: Database['compact'];
   /** The leader's transaction; on a follower a recorded one, carried whole (no `insert`, no read of its own writes). */
-  transact: Database['transact'];
+  transact<T>(fn: (tx: SharedTransaction) => T | Promise<T>, options?: Record<string, unknown>): Promise<T>;
   /** The procedures a leader mounts for its followers (`access` `'session'` by default); `NOT_LEADER` on a follower. */
   serve(options?: { access?: string }): Record<string, ServedProcedure>;
   close(): Promise<void>;
@@ -181,7 +272,16 @@ export interface Shared {
 export function openShared<S extends Schema = Schema>(options: SharedOptions<S>): Promise<Shared>;
 export const Shared: { readonly prototype: Shared };
 export const SharedDocument: { readonly prototype: SharedDocument };
-/** The writers a follower forwards; the writers a recorded transaction may call; the readers the facade answers. */
+export const SharedCollection: { readonly prototype: SharedCollection };
+export const SharedAttachments: { readonly prototype: SharedAttachments };
+export const SharedLocal: { readonly prototype: SharedLocal };
+/**
+ * The writers a follower forwards; the writers a recorded transaction may call; the readers the facade answers; a
+ * collection's writers forwarded; every procedure `serve()` mounts (the writers, `transact`, `collection`, `local`,
+ * `fetchBlob`) — what a SharedWorker's router names.
+ */
 export const MUTATORS: readonly string[];
 export const TX_WRITERS: readonly string[];
 export const READERS: readonly string[];
+export const COLLECTION_WRITERS: readonly string[];
+export const PROCEDURES: readonly string[];

@@ -29,11 +29,13 @@ const { Emitter } = require('../emitter.js');
 const { SyncomError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 const { elect } = require('./election.js');
-const { isChannel, answerOf, unwrap, describe } = require('./channel.js');
+const { isChannel, answerOf, unwrap, describe, revive } = require('./channel.js');
 
 const START = Symbol('start');
 const WRITE = Symbol('write');
 const READ = Symbol('read');
+const CALL = Symbol('call');
+const RAW_BLOBS = Symbol('rawBlobs');
 
 // The database's writers a follower forwards; `transact` beside them, as a recorded batch.
 const MUTATORS = Object.freeze([
@@ -90,9 +92,40 @@ const TX_WRITERS = Object.freeze([
   'treeMove',
   'treeRemove',
 ]);
-// The readers the facade answers from the current instance; everything else — a collection's queries among them,
-// `shared.collection(name)` — is the current `shared.db`'s.
+// The readers the facade answers from the current instance; everything else — a collection's queries among them —
+// is the current `shared.db`'s.
 const READERS = Object.freeze(['get', 'has', 'hasRecord', 'list', 'getCachedData']);
+// A collection's writers a follower forwards (`collection` procedure: `[name, method, args]`) — the list of
+// src/collection.js COLLECTION_WRITERS, kept here so nothing of the core is bundled; `insert`, `upsert` and
+// `insertIfAbsent` answer the id (a Document does not cross a wire), a bulk its verdicts with the errors described.
+const COLLECTION_WRITERS = Object.freeze([
+  'insert',
+  'upsert',
+  'insertIfAbsent',
+  'set',
+  'update',
+  'unset',
+  'delete',
+  'bulkInsert',
+  'bulkUpsert',
+  'bulkRemove',
+]);
+const ANSWER_ID = new Set(['insert', 'upsert', 'insertIfAbsent']);
+const BULK = new Set(['bulkInsert', 'bulkUpsert', 'bulkRemove']);
+// The collection's readers a SharedCollection answers from the current instance's collection.
+const COLLECTION_READERS = Object.freeze([
+  'get',
+  'select',
+  'count',
+  'findByIds',
+  'distinct',
+  'countBy',
+  'document',
+  'record',
+]);
+const LOCAL_WRITERS = new Set(['set', 'delete']);
+// Every procedure `serve()` mounts: the writers, the recorded transaction and the three beside them.
+const PROCEDURES = Object.freeze(MUTATORS.concat(['transact', 'collection', 'local', 'fetchBlob']));
 
 const DEFAULT_GRACE = 50;
 const DEFAULT_FAILOVER = 10_000;
@@ -120,8 +153,49 @@ const callOf = (payload) => {
   return { id, token: id.slice(0, at), args, retry };
 };
 
-const notLeader = (path, what) =>
-  new SyncomError('NOT_LEADER', `${what} is the leader's: the instance at ${path} follows`, { path, what });
+const notLeader = (path, what, hint = null) =>
+  new SyncomError(
+    'NOT_LEADER',
+    `${what} is the leader's: the instance at ${path} follows${hint === null ? '' : ` — ${hint}`}`,
+    hint === null ? { path, what } : { path, what, hint },
+  );
+const noCollection = (name) => new TypeError(`collection(): no collection ${String(name)}`);
+
+// The procedures beside the writers, as the leader runs them: a collection's writer by name, a local write, a blob
+// fetched into the shared store — the arguments as the wire carries them, the answer a value that crosses it.
+const collectionWrite = async (db, [name, method, args]) => {
+  const collection = db.collections[name];
+  if (collection === undefined) throw noCollection(name);
+  if (!COLLECTION_WRITERS.includes(method)) throw new TypeError(`collection: ${String(method)} is not a writer`);
+  const out = await Reflect.apply(collection[method], collection, Array.isArray(args) ? args : []);
+  if (ANSWER_ID.has(method)) return out.id;
+  if (BULK.has(method)) {
+    const refused = [];
+    for (let i = 0; i < out.error.length; i++) refused.push({ ...out.error[i], error: describe(out.error[i].error) });
+    return { success: out.success, error: refused };
+  }
+  return out;
+};
+const localWrite = (db, [method, args]) => {
+  if (!LOCAL_WRITERS.has(method)) throw new TypeError(`local: ${String(method)} is not a writer`);
+  const [key, value] = Array.isArray(args) ? args : [];
+  if (method === 'set' && typeof value === 'function') throw new TypeError('local.set(key, fn) does not cross a wire');
+  return method === 'set' ? db.local.set(key, value) : db.local.delete(key);
+};
+const fetchBlob = async (db, [digest, id, name]) => {
+  const bytes = await db.sync.fetchBlob(digest, { id, name });
+  return { length: bytes.length };
+};
+const PROCEDURE = Object.freeze({ collection: collectionWrite, local: localWrite, fetchBlob });
+
+// A bulk's verdicts as the wire carried them, the errors made again.
+const revived = (verdicts) => {
+  const error = [];
+  for (let i = 0; i < verdicts.error.length; i++) {
+    error.push({ ...verdicts.error[i], error: revive(verdicts.error[i].error) });
+  }
+  return { success: verdicts.success, error };
+};
 const closed = (path) => new SyncomError('CLOSED', `The shared database at ${path} is closed`, { path });
 
 // A live Document of the current instance, made again over the next: `data()`, the `update` event (data, delta)
@@ -176,6 +250,150 @@ class SharedDocument extends Emitter {
   }
 }
 
+// A collection of the shared database: its readers the current instance's collection's (asked at every call, so a
+// failover changes nothing), its writers the leader's — run here where this instance leads, forwarded else — and
+// answered the same on both roles: `insert`/`upsert`/`insertIfAbsent` the id, a bulk its verdicts with the errors
+// made again. `modify()` and `remove()` are the leader's alone: a function does not cross, a write by query is a
+// read-modify-write the leader makes — NOT_LEADER on a follower, with the hint.
+class SharedCollection {
+  #shared;
+  #name;
+  constructor(shared, name) {
+    this.#shared = shared;
+    this.#name = name;
+  }
+  get name() {
+    return this.#name;
+  }
+  /** The current instance's collection: its cursors, documents and events. */
+  get collection() {
+    const collection = this.#shared.db.collections[this.#name];
+    if (collection === undefined) throw noCollection(this.#name);
+    return collection;
+  }
+  async #write(method, args) {
+    const answer = await this.#shared[CALL]('collection', [this.#name, method, args]);
+    return BULK.has(method) ? revived(answer) : answer;
+  }
+  /** `fn` over the record, inside the leader's queue: the leader's; on a follower NOT_LEADER — `update()` the fields instead. */
+  modify(id, fn, options) {
+    if (!this.#shared.leader) {
+      return Promise.reject(notLeader(this.#shared.path, 'modify()', 'read the record and update() its fields'));
+    }
+    return this.collection.modify(id, fn, options);
+  }
+  /** Every record of the collection removed: the leader's; on a follower NOT_LEADER. */
+  remove(options) {
+    if (!this.#shared.leader) {
+      return Promise.reject(notLeader(this.#shared.path, 'a write by query', 'delete() the ids on the leader'));
+    }
+    return this.collection.remove(options);
+  }
+  static {
+    for (let i = 0; i < COLLECTION_READERS.length; i++) {
+      const name = COLLECTION_READERS[i];
+      SharedCollection.prototype[name] = function (...args) {
+        const collection = this.collection;
+        return Reflect.apply(collection[name], collection, args);
+      };
+    }
+    for (let i = 0; i < COLLECTION_WRITERS.length; i++) {
+      const name = COLLECTION_WRITERS[i];
+      SharedCollection.prototype[name] = function (...args) {
+        return this.#write(name, args);
+      };
+    }
+  }
+}
+
+// The attachments of the shared database: `put` writes the blob into the shared store from either role — a blob is
+// content-addressed and outside the write set, so a follower's put beside the leader is safe — and the register
+// goes as a write (the leader's, or forwarded); `get` reads this instance's store and asks the leader to fetch what
+// it lacks (`fetchBlob`: the bytes land in the shared store, read again here); `remove` is a forwarded `unset`.
+class SharedAttachments {
+  #shared;
+  constructor(shared) {
+    this.#shared = shared;
+  }
+  get #attachments() {
+    return this.#shared.db.attachments;
+  }
+  async put(id, name, bytes, options = {}) {
+    const shared = this.#shared;
+    if (shared.leader) return shared.db.attachments.put(id, name, bytes, options);
+    const { stored, entry, field } = await this.#attachments.prepare(name, bytes, options);
+    const blobs = await shared[RAW_BLOBS]();
+    await blobs.put(entry.digest, stored);
+    await shared[WRITE]('update', [id, { [field]: entry }]);
+    return entry;
+  }
+  async get(id, name, { fetch = true } = {}) {
+    try {
+      return await this.#attachments.get(id, name, { fetch: false });
+    } catch (error) {
+      if (error?.code !== 'BLOB_NOT_FOUND' || fetch !== true || this.#shared.leader) throw error;
+      await this.#shared[CALL]('fetchBlob', [error.digest, id, name]);
+      return this.#attachments.get(id, name, { fetch: false });
+    }
+  }
+  has(id, name) {
+    return this.#attachments.has(id, name);
+  }
+  list(id) {
+    return this.#attachments.list(id);
+  }
+  async remove(id, name) {
+    await this.#shared[WRITE]('unset', [id, [this.#attachments.field(name)]]);
+  }
+}
+
+// The local documents of the shared database: reads this instance's (`get`, `list`, `scoped`), writes the leader's —
+// `set(key, value)` and `delete(key)` forwarded as the full key; `set(key, fn)` is refused on both roles (a function
+// does not cross a wire, and the same code must not fail by the election). No `observe`: a follower's local store
+// hears no leader's write (the kv namespace has no change stream), and a thing that would hear nothing is not offered.
+class SharedLocal {
+  #shared;
+  #prefixes;
+  constructor(shared, prefixes = []) {
+    this.#shared = shared;
+    this.#prefixes = prefixes;
+  }
+  get local() {
+    return true;
+  }
+  // The current instance's store under the prefixes (each checked as `scoped` checks it).
+  #store() {
+    let store = this.#shared.db.local;
+    for (let i = 0; i < this.#prefixes.length; i++) store = store.scoped(this.#prefixes[i]);
+    return store;
+  }
+  #full(key) {
+    if (typeof key !== 'string') throw new TypeError('local: a key is a text');
+    return this.#prefixes.length === 0 ? key : `${this.#prefixes.join('.')}.${key}`;
+  }
+  get(key) {
+    return this.#store().get(key);
+  }
+  list() {
+    return this.#store().list();
+  }
+  set(key, value) {
+    if (typeof value === 'function') {
+      return Promise.reject(
+        new TypeError('shared.local.set(key, fn) is not offered: set(key, value), or db.local.set on the leader'),
+      );
+    }
+    return this.#shared[CALL]('local', ['set', [this.#full(key), value]]);
+  }
+  delete(key) {
+    return this.#shared[CALL]('local', ['delete', [this.#full(key)]]);
+  }
+  scoped(prefix) {
+    this.#store().scoped(prefix);
+    return new SharedLocal(this.#shared, this.#prefixes.concat([prefix]));
+  }
+}
+
 // What `live()`'s `make` answered: the stop function, or a promise of one — stopped when it is there.
 const stopOf = (stop, logger) => {
   if (stop === null || stop === undefined) return;
@@ -208,6 +426,9 @@ class Shared extends Emitter {
   #channel = null;
   #dialing = null;
   #calls = 0;
+  #raw = null;
+  #attachments = null;
+  #local = null;
   #lives = new Set();
   #waiters = [];
 
@@ -493,11 +714,42 @@ class Shared extends Emitter {
     return () => this.off('leader', listener);
   }
 
-  /** The collection named, of the current instance (`shared.db.collections[name]`): its queries and documents. */
+  /**
+   * The collection named: its readers the current instance's, its writers the leader's — `insert`, `upsert` and
+   * `insertIfAbsent` answer the id on both roles, a bulk its verdicts; `modify()` and `remove()` on a follower are
+   * NOT_LEADER. A collection that is not there is a TypeError.
+   */
   collection(name) {
-    const collection = this.db.collections[name];
-    if (collection === undefined) throw new TypeError(`collection(): no collection ${String(name)}`);
-    return collection;
+    if (this.db.collections[name] === undefined) throw noCollection(name);
+    return new SharedCollection(this, name);
+  }
+  /** The attachments: `put` from either role (the blob into the shared store, the register the leader's), `get` fetching through the leader. */
+  get attachments() {
+    // PLUGIN_MISSING where the instance lacks the plugin, as `db.attachments` says it.
+    if (this.db.attachments === undefined) throw new TypeError('shared.attachments: no attachments plugin');
+    this.#attachments ??= new SharedAttachments(this);
+    return this.#attachments;
+  }
+  /** The local documents: reads this instance's, `set`/`delete` the leader's. */
+  get local() {
+    if (this.db.local === undefined) throw new TypeError('shared.local: no local plugin');
+    this.#local ??= new SharedLocal(this);
+    return this.#local;
+  }
+  // The engine's blobs store opened for this instance's own puts (a follower's database refuses a write): lazily,
+  // closed with the facade.
+  async [RAW_BLOBS]() {
+    if (this.#raw === null) {
+      const engine = this.#options.engine;
+      if (engine === undefined || engine === null) {
+        throw new TypeError('shared.attachments.put() on a follower needs the engine (openShared({ engine }))');
+      }
+      this.#raw = await engine.open(this.#path, { logger: this.#logger() });
+      if (this.#raw.blobs === undefined) {
+        throw new TypeError('shared.attachments: the engine has no blobs store (capabilities.blobs)');
+      }
+    }
+    return this.#raw.blobs;
   }
 
   /**
@@ -527,6 +779,13 @@ class Shared extends Emitter {
   async [WRITE](name, args) {
     this.#check();
     if (this.#leader) return Reflect.apply(this.#db[name], this.#db, args);
+    return this.#forward(name, args);
+  }
+
+  // A procedure beside the writers (`collection`, `local`, `fetchBlob`): run here where this instance leads, forwarded else.
+  async [CALL](name, args) {
+    this.#check();
+    if (this.#leader) return PROCEDURE[name](this.#db, args);
     return this.#forward(name, args);
   }
 
@@ -672,8 +931,9 @@ class Shared extends Emitter {
     };
     const run = (method, fn) => async (context, payload) => {
       const call = callOf(payload);
-      if (call === null)
+      if (call === null) {
         return { ok: false, error: describe(new TypeError(`${method}: a call is { id, args, retry? }`)) };
+      }
       const held = answers.get(call.token)?.get(call.id);
       if (held !== undefined) return held;
       if (this.#closed || !this.#leader) {
@@ -695,6 +955,9 @@ class Shared extends Emitter {
     for (let i = 0; i < MUTATORS.length; i++) {
       const name = MUTATORS[i];
       procedures[name] = { access, handler: run(name, (args) => Reflect.apply(this.#db[name], this.#db, args)) };
+    }
+    for (const name of Object.keys(PROCEDURE)) {
+      procedures[name] = { access, handler: run(name, (args) => PROCEDURE[name](this.#db, args)) };
     }
     procedures.transact = {
       access,
@@ -740,6 +1003,7 @@ class Shared extends Emitter {
     this.#leader = false;
     try {
       if (db !== null) await db.close();
+      if (this.#raw !== null) await Promise.resolve(this.#raw.close()).catch(NOOP);
     } finally {
       this.#election?.release();
     }
@@ -766,4 +1030,17 @@ const aborted = () => Object.assign(new Error('waitForLeadership() aborted'), { 
 /** Opens the database as one of several instances: `await openShared({ createDatabase, path, engine, …, channel, election })`. */
 const openShared = (options) => new Shared(options)[START]();
 
-module.exports = { openShared, Shared, SharedDocument, elect, MUTATORS, TX_WRITERS, READERS };
+module.exports = {
+  openShared,
+  Shared,
+  SharedDocument,
+  SharedCollection,
+  SharedAttachments,
+  SharedLocal,
+  elect,
+  MUTATORS,
+  TX_WRITERS,
+  READERS,
+  COLLECTION_WRITERS,
+  PROCEDURES,
+};

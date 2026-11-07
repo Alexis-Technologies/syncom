@@ -40,7 +40,18 @@ args, retry }` (`callOf`), the token the election's — otherwise; the leader's 
   `LEADER_LOST` with the cause and `maybeApplied`. A follower's `transact(fn)` is RECORDED: `fn` runs here against a recorder
   (`TX_WRITERS` note the call and answer at once; `get`/`has` read this instance), the batch goes as one `transact`
   call and runs in one transaction there — `insert` is refused on the recorder (its id would be the leader's). The
-  leader validates every name of a recorded batch against `TX_WRITERS` and the transaction's api.
+  leader validates every name of a recorded batch against `TX_WRITERS` and the transaction's api. Three procedures
+  stand beside the writers (`PROCEDURES` = `MUTATORS` + `transact` + them; `[CALL]` runs them here on the leader,
+  forwards them else): `collection` (`[name, method, args]`, `method` one of `COLLECTION_WRITERS` — the list of
+  src/collection.js, kept here so nothing of the core is bundled, the two held equal by tests/shared.test.js;
+  `insert`/`upsert`/`insertIfAbsent` answer the id, a bulk its verdicts with the errors `describe`d), `local`
+  (`[method, [key, value]]`, `set`/`delete` by the full key; `set(key, fn)` refused) and `fetchBlob` (`[digest, id,
+name]` → `db.sync.fetchBlob`, the bytes landing in the shared store, `{ length }` answered). `SharedCollection`,
+  `SharedAttachments` and `SharedLocal` are the facade's: readers the current instance's, writers through `[CALL]`
+  or `[WRITE]`, the same answer on either role; `SharedAttachments.put` writes the blob into the engine's blobs
+  store through a raw handle of the engine (`[RAW_BLOBS]`, lazily, closed with the facade: a follower's database
+  refuses the write, a blob is content-addressed and outside the write set) and forwards the register
+  (`Attachments.prepare` makes both).
 - **A promotion opens the leader beside the follower, then swaps.** Granted the lock, the instance opens the
   database as the leader (the follower holds no lock, so both stand; `LOCKED` — the old leader still letting go —
   is tried LOCKED_RETRIES times), checks the election still names it (two heartbeat leaders settling: the writer

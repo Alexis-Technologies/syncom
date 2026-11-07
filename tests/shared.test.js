@@ -12,7 +12,18 @@ const assert = require('node:assert');
 const { IDBFactory, IDBKeyRange } = require('fake-indexeddb');
 const syncom = require('../src/all/all.js');
 const { idbEngine } = require('../src/idb/idb.js');
-const { openShared, Shared, SharedDocument, MUTATORS, TX_WRITERS } = require('../src/shared/shared.js');
+const {
+  openShared,
+  Shared,
+  SharedDocument,
+  MUTATORS,
+  TX_WRITERS,
+  COLLECTION_WRITERS,
+  PROCEDURES,
+} = require('../src/shared/shared.js');
+const { COLLECTION_WRITERS: WRITERS_OF_COLLECTION } = require('../src/collection.js');
+const { attachments } = require('../src/attachments/attachments.js');
+const { local } = require('../src/local/local.js');
 const { elect } = require('../src/shared/election.js');
 const { describe, revive, answerOf, unwrap, isChannel } = require('../src/shared/channel.js');
 const { createSharedChannel } = require('../src/wrpc/wrpc.js');
@@ -250,7 +261,11 @@ test('Shared database', async (t) => {
       assert.throws(() => b.sync, { code: 'NOT_LEADER' });
       assert.throws(() => b.serve(), { code: 'NOT_LEADER' });
       assert.ok(a.sync, 'the leader replicates');
-      assert.deepStrictEqual(Object.keys(a.serve()).sort(), [...MUTATORS, 'transact'].sort());
+      assert.deepStrictEqual(Object.keys(a.serve()).sort(), [...PROCEDURES].sort());
+      assert.deepStrictEqual(
+        [...PROCEDURES].sort(),
+        [...MUTATORS, 'transact', 'collection', 'local', 'fetchBlob'].sort(),
+      );
       // A follower's live document hears the leader's writes (a follower raises no transaction event: no observe).
       const doc = b.document(id);
       const updates = [];
@@ -463,6 +478,165 @@ test('Shared database', async (t) => {
       await e.set('via-not-leader', { $type: 'Task', title: 'landed once' });
       assert.strictEqual(answered, 3);
       assert.deepStrictEqual(await c.get('via-not-leader'), { $type: 'Task', title: 'landed once' });
+    },
+  );
+
+  await t.test(
+    'a follower’s collection writes land through the leader: insert answers the id, a bulk its verdicts revived, modify() and a write by query are the leader’s',
+    async (t2) => {
+      assert.deepStrictEqual([...COLLECTION_WRITERS], [...WRITERS_OF_COLLECTION], 'one list, kept in step');
+      const { open } = profile(t2, { path: 'collections' });
+      const a = await open({ schema: { entities: { Task: { unique: ['slug'] } } } });
+      const b = await open({ schema: { entities: { Task: { unique: ['slug'] } } } });
+      const tasks = b.collection('Task');
+      assert.strictEqual(tasks.name, 'Task');
+      assert.strictEqual(tasks.collection, b.db.Task, 'the current instance’s collection behind it');
+      // The same calls, the same answers, on either role: an id, not a Document.
+      const id = await tasks.insert({ title: 'from the follower', slug: 'one' });
+      assert.strictEqual(typeof id, 'string');
+      const own = await a.collection('Task').insert({ title: 'from the leader', slug: 'two' });
+      assert.strictEqual(typeof own, 'string');
+      assert.deepStrictEqual(await a.get(id), { $type: 'Task', title: 'from the follower', slug: 'one' });
+      await waitUntil(() => b.hasRecord(id) && b.hasRecord(own));
+      assert.strictEqual(await tasks.count({}), 2);
+      assert.strictEqual((await tasks.get(id)).title, 'from the follower');
+      assert.strictEqual((await tasks.findByIds([id, own])).size, 2);
+      assert.deepStrictEqual(await tasks.distinct('slug'), ['one', 'two']);
+      await tasks.update(id, { done: true });
+      await tasks.unset(id, ['done']);
+      await tasks.set(id, { title: 'set whole', slug: 'one' });
+      assert.deepStrictEqual(await a.get(id), { $type: 'Task', title: 'set whole', slug: 'one' });
+      const up = await tasks.upsert({ id: 'fixed', title: 'upserted', slug: 'three' });
+      assert.strictEqual(up, 'fixed');
+      assert.strictEqual(await tasks.insertIfAbsent({ id: 'fixed', title: 'again', slug: 'x' }), 'fixed');
+      assert.strictEqual((await a.get('fixed')).title, 'upserted');
+      // A bulk: one transaction on the leader, the verdicts back with the errors made again (a unique key taken).
+      const bulk = await tasks.bulkInsert([{ title: 'ok', slug: 'four' }, { title: 'dup', slug: 'one' }, 7]);
+      assert.strictEqual(bulk.success.length, 1);
+      assert.strictEqual(bulk.error.length, 2);
+      assert.strictEqual(bulk.error[0].index, 1);
+      assert.strictEqual(bulk.error[0].error.code, 'VALIDATION_FAILED');
+      assert.ok(bulk.error[0].error instanceof SyncomError);
+      assert.strictEqual(bulk.error[1].error.name, 'TypeError');
+      const removed = await tasks.bulkRemove([bulk.success[0], 'absent']);
+      assert.deepStrictEqual(removed.success, [bulk.success[0]]);
+      assert.strictEqual(removed.error[0].error.code, 'NOT_FOUND');
+      await tasks.delete('fixed');
+      assert.strictEqual(await a.has('fixed'), false);
+      // The same shape from the leader's facade.
+      const leaderBulk = await a.collection('Task').bulkUpsert([
+        { id: 'l1', slug: 'five' },
+        { id: 'l2', slug: 'one' },
+      ]);
+      assert.deepStrictEqual(leaderBulk.success, ['l1']);
+      assert.strictEqual(leaderBulk.error[0].error.code, 'VALIDATION_FAILED');
+      // A refusal crosses with its code; a collection or a writer that is not there is a TypeError.
+      await assert.rejects(() => tasks.update('nope', { a: 1 }), { code: 'NOT_FOUND' });
+      await assert.rejects(() => tasks.update(id, { $type: 'Other' }), { name: 'TypeError' });
+      assert.throws(() => b.collection('Nope'), { name: 'TypeError' });
+      const served = a.serve();
+      const bad = await served.collection.handler({}, { id: 'p:1', args: ['Task', 'modify', [id, () => {}]] });
+      assert.strictEqual(bad.error.name, 'TypeError');
+      assert.strictEqual(
+        (await served.collection.handler({}, { id: 'p:2', args: ['Nope', 'insert', [{}]] })).error.name,
+        'TypeError',
+      );
+      // modify() and a write by query are the leader's: NOT_LEADER with the hint on a follower, the collection's on the leader.
+      await assert.rejects(
+        () => tasks.modify(id, (data) => ({ ...data, n: 1 })),
+        (error) => {
+          assert.strictEqual(error.code, 'NOT_LEADER');
+          assert.match(error.hint, /update\(\)/);
+          return true;
+        },
+      );
+      await assert.rejects(() => tasks.remove(), { code: 'NOT_LEADER' });
+      await a.collection('Task').modify(id, (data) => ({ ...data, n: 1 }));
+      assert.strictEqual((await a.get(id)).n, 1);
+      assert.deepStrictEqual(await a.collection('Task').remove(), { removed: await a.db.Task.count({}).then(() => 3) });
+      assert.strictEqual(await a.db.Task.count({}), 0);
+    },
+  );
+
+  await t.test(
+    'a follower’s attachments.put writes the blob into the shared store and forwards the register; get fetches through the leader; local.set is forwarded',
+    async (t2) => {
+      const engine = syncom.memoryEngine();
+      const plugins = [attachments(), local];
+      const { open } = profile(t2, { engine, path: 'blobs' });
+      const a = await open({ plugins });
+      const b = await open({ plugins });
+      const id = await a.insert({ $type: 'Task', title: 'with a file' });
+      await waitUntil(() => b.hasRecord(id));
+      // The follower puts: the blob lands in the shared store, the register through the leader.
+      const bytes = new TextEncoder().encode('from the follower');
+      const entry = await b.attachments.put(id, 'notes.txt', bytes, { type: 'text/plain' });
+      assert.strictEqual(entry.type, 'text/plain');
+      assert.deepStrictEqual((await a.get(id))._attachments, { 'notes.txt': entry });
+      assert.deepStrictEqual([...(await a.attachments.get(id, 'notes.txt')).bytes], [...bytes]);
+      await waitUntil(async () => (await b.get(id))?._attachments !== undefined);
+      assert.deepStrictEqual([...(await b.attachments.get(id, 'notes.txt')).bytes], [...bytes]);
+      assert.strictEqual(await b.attachments.has(id, 'notes.txt'), true);
+      assert.deepStrictEqual((await b.attachments.list(id)).length, 1);
+      // The leader's put, read on the follower; the follower's remove is a forwarded unset.
+      await a.attachments.put(id, 'leader.bin', new Uint8Array([1, 2, 3]));
+      await waitUntil(async () => (await b.attachments.list(id)).length === 2);
+      await b.attachments.remove(id, 'leader.bin');
+      assert.strictEqual(await a.attachments.get(id, 'leader.bin'), null);
+      // A register the follower holds whose bytes are nowhere: the leader is asked to fetch (nobody to ask here).
+      await a.transact(async (tx) =>
+        tx.update(id, { '_attachments/elsewhere': { digest: 'a'.repeat(64), type: 'x', length: 1 } }),
+      );
+      await waitUntil(async () => (await b.get(id))?._attachments?.elsewhere !== undefined);
+      await assert.rejects(() => b.attachments.get(id, 'elsewhere'), { code: 'BLOB_NOT_FOUND' });
+      await assert.rejects(() => b.attachments.get(id, 'elsewhere', { fetch: false }), { code: 'BLOB_NOT_FOUND' });
+      // The fetch goes through the leader: its answer lands in the shared store, the follower reads it.
+      const served = a.serve();
+      let asked = null;
+      const sync = a.db.sync;
+      const fetchBlob = sync.fetchBlob;
+      sync.fetchBlob = async (digest, named) => {
+        asked = { digest, ...named };
+        const blobs = (await engine.open('blobs')).blobs;
+        await blobs.put(digest, new Uint8Array([9]));
+        return new Uint8Array([9]);
+      };
+      t2.after(() => {
+        sync.fetchBlob = fetchBlob;
+      });
+      const answer = await served.fetchBlob.handler({}, { id: 'p:1', args: ['b'.repeat(64), id, 'elsewhere'] });
+      assert.deepStrictEqual(answer, { ok: true, value: { length: 1 } });
+      assert.deepStrictEqual(asked, { digest: 'b'.repeat(64), id, name: 'elsewhere' });
+      await a.transact(async (tx) =>
+        tx.update(id, { '_attachments/elsewhere': { digest: 'b'.repeat(64), type: 'x', length: 1 } }),
+      );
+      await waitUntil(async () => (await b.get(id))?._attachments?.elsewhere?.digest === 'b'.repeat(64));
+      assert.deepStrictEqual([...(await b.attachments.get(id, 'elsewhere')).bytes], [9]);
+      // Local documents: reads this instance's, writes the leader's; set(key, fn) is not offered on either role.
+      assert.strictEqual(b.local.local, true);
+      assert.deepStrictEqual(await b.local.set('theme', { dark: true }), { dark: true });
+      assert.deepStrictEqual(await a.db.local.get('theme'), { dark: true });
+      assert.deepStrictEqual(await b.local.get('theme'), { dark: true }, 'the same kv namespace');
+      await b.local.scoped('Task').set('filter', 'open');
+      assert.strictEqual(await a.db.Task.local.get('filter'), 'open');
+      assert.strictEqual(await b.local.scoped('Task').get('filter'), 'open');
+      assert.deepStrictEqual(await b.local.scoped('Task').list(), ['filter']);
+      await b.local.scoped('Task').delete('filter');
+      assert.strictEqual(await a.db.Task.local.get('filter'), null);
+      await assert.rejects(() => b.local.set('theme', () => 1), { name: 'TypeError' });
+      await assert.rejects(() => a.local.set('theme', () => 1), { name: 'TypeError' });
+      assert.throws(() => b.local.scoped('bad/prefix'), { name: 'TypeError' });
+      await assert.rejects(() => b.local.set('bad/key', 1), { name: 'TypeError' });
+      assert.strictEqual(
+        (await served.local.handler({}, { id: 'p:2', args: ['observe', ['k']] })).error.name,
+        'TypeError',
+      );
+      await a.local.delete('theme');
+      assert.strictEqual(await b.local.get('theme'), null);
+      // Without an engine given, a follower cannot put (nowhere to write the blob); without the plugin, PLUGIN_MISSING.
+      const bare = await open({ plugins: [] });
+      assert.throws(() => bare.attachments, { code: 'PLUGIN_MISSING' });
+      assert.strictEqual(bare.local.local, true, '/all ships the local plugin');
     },
   );
 

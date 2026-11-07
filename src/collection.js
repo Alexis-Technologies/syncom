@@ -449,4 +449,20 @@ class Collection extends Emitter {
   }
 }
 
-module.exports = { Collection };
+// The collection's writers that take data and answer a value — what a follower of `@alexify/syncom/shared` forwards
+// to the leader (its SharedCollection keeps the same list; tests/shared.test.js holds the two equal). `modify()` and
+// `remove()` are not among them: a function does not cross a wire, and a write by query is the leader's.
+const COLLECTION_WRITERS = Object.freeze([
+  'insert',
+  'upsert',
+  'insertIfAbsent',
+  'set',
+  'update',
+  'unset',
+  'delete',
+  'bulkInsert',
+  'bulkUpsert',
+  'bulkRemove',
+]);
+
+module.exports = { Collection, COLLECTION_WRITERS };

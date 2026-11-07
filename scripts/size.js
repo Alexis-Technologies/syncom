@@ -682,7 +682,10 @@ const ENTRIES = [
   // an honest START and close, one dial shared by the writes waiting on it (review №7, E6.1; 2026-11-07). 6.5, raised by name.
   // 6.6 with the forwarded call's id and `retry`, the leader's answers kept per follower and CALL_UNKNOWN (review №7,
   // E6.2; 2026-11-07). 7, raised by name.
-  { label: 'shared — browser', entry: 'src/shared/shared.js', platform: 'browser', budget: 7 },
+  // 8.0 with the follower's surface — a collection's writers, the attachments and the local documents forwarded
+  // (SharedCollection, SharedAttachments, SharedLocal; the collection/local/fetchBlob procedures; review №7, E6.3;
+  // 2026-11-07). 8.5, raised by name.
+  { label: 'shared — browser', entry: 'src/shared/shared.js', platform: 'browser', budget: 8.5 },
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
   { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7 },

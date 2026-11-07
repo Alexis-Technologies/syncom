@@ -52,8 +52,42 @@ What a follower reads is the record whole. A follower raises no `transaction`
 event and runs no `observe()` — those are the leader's, as is replication:
 `shared.sync` is the leader's `SyncManager` and `NOT_LEADER` on a follower,
 which neither dials nor hosts. `shared.db` is the current instance for
-anything else — `shared.db.Task.select(…)`, `shared.collection('Task')` —
-read-only on a follower.
+anything else — `shared.db.Task.select(…)` — read-only on a follower.
+
+## Collections, attachments, local documents
+
+The same code must not fail by the election, so what a follower's database
+refuses as `READ_ONLY` the facade forwards:
+
+```js
+const tasks = shared.collection('Task'); // a SharedCollection
+const id = await tasks.insert({ title: 'x' }); // the id — on the leader too, never a Document
+await tasks.update(id, { done: true });
+const { success, error } = await tasks.bulkInsert(rows); // the verdicts, the errors made again
+await tasks.select({ done: false }).fetch(); // the current instance's cursor
+
+await shared.attachments.put(id, 'photo.jpg', bytes, { type: 'image/jpeg' });
+const photo = await shared.attachments.get(id, 'photo.jpg'); // fetched through the leader where this tab lacks it
+await shared.local.set('theme', { dark: true }); // forwarded; shared.local.get() reads this tab's
+```
+
+A `SharedCollection`'s readers (`get`, `select`, `count`, `findByIds`,
+`distinct`, `countBy`, `document`) are the current instance's collection's,
+asked at every call; its writers are the leader's — `insert`, `upsert` and
+`insertIfAbsent` answer the **id** on either role (a `Document` does not cross
+a wire), a bulk its `{ success, error }` with each error made again with its
+code. `modify(id, fn)` and `remove()` are the leader's alone: a function does
+not cross, and a write by query (`remove()`, a cursor's `update`/`delete`) is a
+read-modify-write the leader makes — `NOT_LEADER` with a `hint` on a follower.
+`shared.attachments.put` writes the blob into the shared store from either
+role (a blob is content-addressed and outside the write set, so a follower's
+put beside the leader is safe) and forwards the register; `get` reads this
+instance's store and asks the leader to fetch what it lacks (`fetchBlob`: the
+bytes land in the shared store, read again here); `remove` is a forwarded
+`unset`. `shared.local.set(key, value)` and `delete` are forwarded as the full
+key, `get`/`list`/`scoped` read this instance's; `set(key, fn)` is refused on
+both roles, and there is no `observe` — a follower's local store hears no
+leader's write, and a thing that would hear nothing is not offered.
 
 A follower's `transact(fn)` is **recorded**: `fn` runs on the follower against
 a recorder whose writers note the call and answer at once (`get`/`has` read
