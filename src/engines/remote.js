@@ -32,20 +32,19 @@
 // port is the platform's (worker_threads, a browser's MessageChannel).
 
 const { checkEngine, checkEngineDb, capabilitiesOf, isKvKey, isKvNamespace } = require('../engine.js');
+const { isDigest, checkBlobBytes } = require('../blobs.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, typed } = require('../errors.js');
 
 const LOG_GETTERS = ['journaled', 'sealedTo', 'open', 'segments', 'corrupt', 'health'];
 // A call's arguments are its own, a short fixed list: more is no call of the contract's.
 const ARGS_MAX = 4;
 
 const refused = (what) => new TypeError(`serveEngine(): ${what}`);
-// A blob's digest: hex, 64 characters (SHA-256).
+// A blob's digest: hex, 64 characters (SHA-256) — the contract's `isDigest`.
 const digest = (value) => {
-  if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
-    throw refused(`${JSON.stringify(value)} is not a digest`);
-  }
+  if (!isDigest(value)) throw refused(`${JSON.stringify(value)} is not a digest`);
 };
 const text = (value, what) => {
   if (typeof value !== 'string') throw refused(`${what} is a text`);
@@ -156,6 +155,7 @@ const CHECKS = Object.freeze({
     put: (name, bytes) => {
       digest(name);
       if (!(bytes instanceof Uint8Array)) throw refused('a blob is a Uint8Array');
+      checkBlobBytes(typed, bytes, 'serveEngine() blobs.put');
     },
     remove: digest,
   }),

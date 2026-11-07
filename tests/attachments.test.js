@@ -13,6 +13,8 @@ const { atRestEngine } = require('../src/encryption/at-rest-engine.js');
 const { copyEngine } = require('../src/engines/copy.js');
 const { DB } = require('../src/symbols.js');
 const { hashBytes } = require('../src/crypto/digest.js');
+const { MAX_BLOB_BYTES } = require('../src/blobs.js');
+const { memory } = require('../src/memory/memory.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 
 const bytesOf = (text) => new TextEncoder().encode(text);
@@ -91,6 +93,14 @@ test('Attachments', async (t) => {
         message: /type/,
       });
       await assert.rejects(() => db.attachments.put('absent', 'x', bytesOf('x')), { code: 'NOT_FOUND' });
+      // A sealed record takes no attachment: its bytes would lie in the clear, outside the record's key.
+      const sealed = await db.insert({ secret: 'kept' }, { encrypted: true });
+      const held = (await db[DB].blobs.list()).length;
+      await assert.rejects(() => db.attachments.put(sealed, 'y', bytesOf('never stored')), {
+        code: 'ENCRYPTED',
+        id: sealed,
+      });
+      assert.strictEqual((await db[DB].blobs.list()).length, held, 'nothing stored for it');
       assert.throws(() => attachments({ compression: 'lz' }), { name: 'TypeError', message: /compression/ });
       // An engine without a blobs store cannot carry attachments.
       const plain = syncom.memoryEngine();
@@ -107,6 +117,206 @@ test('Attachments', async (t) => {
         () => syncom.createDatabase({ engine: without, path: 'x', logger: false, plugins: [attachments()] }),
         { name: 'TypeError', message: /blobs store/ },
       );
+    },
+  );
+
+  await t.test(
+    'a register a peer wrote with a digest that is none is ATTACHMENT_INVALID, never a path: every engine refuses a blob key that is no digest and a blob past 64 MiB',
+    async (t2) => {
+      // The files engine over a backend that counts what reaches it: a traversal in a register never does.
+      const fsi = memory();
+      const seen = [];
+      const spy = {
+        read(dir, name) {
+          seen.push(['read', dir, name]);
+          return fsi.read(dir, name);
+        },
+        write: (dir, name, content, options) => fsi.write(dir, name, content, options),
+        exists(dir, name) {
+          seen.push(['exists', dir, name]);
+          return fsi.exists(dir, name);
+        },
+        remove(dir, name) {
+          seen.push(['remove', dir, name]);
+          return fsi.remove(dir, name);
+        },
+        list: (dir) => fsi.list(dir),
+      };
+      const warnings = [];
+      const db = await syncom.createDatabase({
+        engine: syncom.filesEngine(spy),
+        path: 'peered',
+        logger: { warn: (e) => warnings.push(e), error: () => {}, info: () => {}, debug: () => {} },
+        defer: 0,
+        plugins: [attachments()],
+      });
+      t2.after(() => db.close().catch(() => {}));
+      const id = await db.insert({ title: 'a record a peer wrote registers on' });
+      const good = await db.attachments.put(id, 'ok.txt', bytesOf('fine'));
+      const bad = {
+        traversal: { digest: '../../../../etc/hosts', type: 'text/plain', length: 112 },
+        keys: { digest: 'keys/private.pem', type: 'text/plain', length: 1 },
+        upper: { digest: 'A'.repeat(64), type: 'x', length: 1 },
+        notype: { digest: good.digest, type: '', length: 1 },
+        negative: { digest: good.digest, type: 'x', length: -1 },
+        huge: { digest: good.digest, type: 'x', length: MAX_BLOB_BYTES + 1 },
+        float: { digest: good.digest, type: 'x', length: 1.5 },
+        encoding: { digest: good.digest, type: 'x', length: 1, encoding: 'lz' },
+        text: 'not a register',
+      };
+      await db.transact(async (tx) => {
+        for (const [name, entry] of Object.entries(bad)) await tx.update(id, { [`${FIELD}/${name}`]: entry });
+      });
+      seen.length = 0;
+      for (const name of Object.keys(bad)) {
+        await assert.rejects(
+          () => db.attachments.get(id, name),
+          (error) => {
+            assert.strictEqual(error.code, 'ATTACHMENT_INVALID', name);
+            assert.strictEqual(error.id, id);
+            assert.strictEqual(error.attachment, name);
+            assert.strictEqual(
+              error.name,
+              'SyncomError',
+              'the attachment rides as `attachment`, never as the error’s name',
+            );
+            return true;
+          },
+        );
+        await assert.rejects(() => db.attachments.has(id, name), { code: 'ATTACHMENT_INVALID' });
+      }
+      const touched = seen.filter(([, dir]) => dir.endsWith('/blobs'));
+      assert.deepStrictEqual(touched, [], 'no register that is none reached the blobs directory');
+      // list() leaves them out and warns once per register; the good one stands.
+      assert.deepStrictEqual(
+        (await db.attachments.list(id)).map((a) => a.name),
+        ['ok.txt'],
+      );
+      await db.attachments.list(id);
+      const invalid = warnings.filter((w) => w.event === 'attachments.register.invalid');
+      assert.strictEqual(invalid.length, Object.keys(bad).length, 'once each');
+      assert.ok(invalid.every((w) => w.id === id && typeof w.name === 'string'));
+      assert.deepStrictEqual([...(await db.attachments.get(id, 'ok.txt')).bytes], [...bytesOf('fine')]);
+      // Every engine's store refuses a key that is no digest before the medium sees it (the engine suites hold each);
+      // here the files engine over the spy: a traversal reaches no read, no exists.
+      const store = db[DB].blobs;
+      seen.length = 0;
+      for (const key of ['../../../../etc/hosts', 'A'.repeat(64), 'x']) {
+        await assert.rejects(() => store.get(key), { name: 'TypeError', message: /digest/ });
+        await assert.rejects(() => store.has(key), { name: 'TypeError', message: /digest/ });
+        await assert.rejects(() => store.remove(key), { name: 'TypeError', message: /digest/ });
+      }
+      assert.deepStrictEqual(
+        seen.filter(([, dir]) => dir.endsWith('/blobs')),
+        [],
+      );
+      // The one cap: a put past 64 MiB is BLOB_TOO_LARGE before the bytes are hashed or stored.
+      await assert.rejects(() => db.attachments.put(id, 'big.bin', new Uint8Array(MAX_BLOB_BYTES + 1)), {
+        name: 'TypeError',
+        code: 'BLOB_TOO_LARGE',
+      });
+      assert.strictEqual((await store.list()).length, 1);
+      // A register that is null is none; `sync.fetchBlob` refuses what is no digest the same way.
+      await db.transact(async (tx) => tx.update(id, { [`${FIELD}/none`]: null }));
+      assert.strictEqual(await db.attachments.get(id, 'none'), null);
+      await assert.rejects(() => db.sync.fetchBlob('../../etc/hosts'), { name: 'TypeError', message: /digest/ });
+    },
+  );
+
+  await t.test(
+    'the bytes are what the register says: a blob shorter or longer than length, or one that inflates past it, is BLOB_MISMATCH and is never inflated whole; a fetched blob is kept once, and a store that refuses it is a warning',
+    async (t2) => {
+      // Plain: the register's length is checked against the stored bytes.
+      const plain = await createStorage(t2, 'M');
+      const id = await plain.insert({ title: 'mismatched' });
+      const entry = await plain.attachments.put(id, 'ok.txt', bytesOf('twelve bytes'));
+      assert.strictEqual(entry.length, 12);
+      await plain.transact(async (tx) => {
+        await tx.update(id, { [`${FIELD}/short`]: { ...entry, length: 3 } });
+        await tx.update(id, { [`${FIELD}/long`]: { ...entry, length: 400 } });
+      });
+      for (const name of ['short', 'long']) {
+        await assert.rejects(
+          () => plain.attachments.get(id, name),
+          (error) => {
+            assert.strictEqual(error.code, 'BLOB_MISMATCH');
+            assert.strictEqual(error.reason, 'length');
+            assert.strictEqual(error.id, id);
+            assert.strictEqual(error.attachment, name);
+            assert.strictEqual(error.digest, entry.digest);
+            return true;
+          },
+        );
+      }
+      assert.strictEqual((await plain.attachments.get(id, 'ok.txt')).length, 12);
+      // Compressed: a register that says fewer bytes than the blob inflates to stops the inflating there — a few KiB of
+      // gzip naming a few GiB is never inflated whole; one that says more is a length mismatch after the inflating.
+      const zipped = await createStorage(t2, 'MZ', { plugins: [attachments({ compression: 'gzip' })] });
+      const zid = await zipped.insert({ title: 'zipped' });
+      const big = new Uint8Array(4 * 1024 * 1024);
+      const zentry = await zipped.attachments.put(zid, 'zeros.bin', big);
+      const stored = await zipped[DB].blobs.get(zentry.digest);
+      assert.ok(stored.length < 16 * 1024, `${stored.length} bytes of gzip name 4 MiB`);
+      await zipped.transact(async (tx) => {
+        await tx.update(zid, { [`${FIELD}/bomb`]: { ...zentry, length: 1024 } });
+        await tx.update(zid, { [`${FIELD}/more`]: { ...zentry, length: big.length + 1 } });
+      });
+      const before = process.memoryUsage().heapUsed;
+      await assert.rejects(() => zipped.attachments.get(zid, 'bomb'), { code: 'BLOB_MISMATCH', reason: 'inflated' });
+      assert.ok(process.memoryUsage().heapUsed - before < 2 * 1024 * 1024, 'stopped at the register’s length');
+      await assert.rejects(() => zipped.attachments.get(zid, 'more'), { code: 'BLOB_MISMATCH', reason: 'length' });
+      assert.strictEqual((await zipped.attachments.get(zid, 'zeros.bin')).bytes.length, big.length);
+      // Fetched once: the dialer's fetchBlob keeps the bytes, the plugin does not put them again; a store that refuses
+      // them is a warning, the bytes answered all the same.
+      const inner = syncom.memoryEngine();
+      const puts = [];
+      let refuse = false;
+      const counting = Object.freeze({
+        name: 'counting',
+        capabilities: inner.capabilities,
+        open: async (path, options) => {
+          const db = await inner.open(path, options);
+          const blobs = {
+            ...db.blobs,
+            put: async (digest, bytes) => {
+              puts.push(digest);
+              if (refuse) throw Object.assign(new Error('no room for a blob'), { code: 'ENOSPC' });
+              return db.blobs.put(digest, bytes);
+            },
+          };
+          return Object.freeze({ ...db, blobs });
+        },
+        remove: (path) => inner.remove(path),
+      });
+      const warnings = [];
+      const mesh = await createMesh(t2, ['A', 'B'], [['B', 'A']], async (t3, name, options = {}) => {
+        const db = await syncom.createDatabase({
+          engine: name === 'B' ? counting : engine,
+          path: `${t3.name}/${name}`,
+          logger:
+            name === 'B' ? { warn: (e) => warnings.push(e), error: () => {}, info: () => {}, debug: () => {} } : false,
+          defer: 0,
+          plugins: [attachments()],
+          ...options,
+        });
+        t3.after(() => db.close().catch(() => {}));
+        return db;
+      });
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const rid = await a.insert({ title: 'remote' });
+      const first = await a.attachments.put(rid, 'one.bin', new Uint8Array(3000).fill(1));
+      const second = await a.attachments.put(rid, 'two.bin', new Uint8Array(3000).fill(2));
+      await settle([a, b]);
+      assert.strictEqual((await b.attachments.get(rid, 'one.bin')).bytes.length, 3000);
+      assert.deepStrictEqual(puts, [first.digest], 'kept once, by fetchBlob');
+      assert.strictEqual(await b.attachments.has(rid, 'one.bin'), true);
+      refuse = true;
+      const got = await b.attachments.get(rid, 'two.bin');
+      assert.strictEqual(got.bytes.length, 3000);
+      assert.deepStrictEqual(puts, [first.digest, second.digest]);
+      assert.ok(warnings.some((w) => w.event === 'sync.blob.keep.failed' && w.digest === second.digest));
+      assert.strictEqual(await b.attachments.has(rid, 'two.bin'), false, 'fetched again next time');
     },
   );
 
@@ -214,6 +424,98 @@ test('Attachments', async (t) => {
         tx.update(lone, { [`${FIELD}/f`]: { digest: 'a'.repeat(64), type: 'x', length: 1 } }),
       );
       await assert.rejects(() => alone.attachments.get(lone, 'f'), { code: 'BLOB_NOT_FOUND' });
+    },
+  );
+
+  await t.test(
+    'sweep() removes the blobs no live record and no tag names, keeps the rest and a put in flight; dryRun counts; a follower cannot sweep',
+    async (t2) => {
+      // A gate inside the queue: a write held open holds a put between its blob and its register.
+      let gate = null;
+      const infos = [];
+      const db = await syncom.createDatabase({
+        engine,
+        path: 'swept',
+        logger: { info: (e) => infos.push(e), warn: () => {}, error: () => {}, debug: () => {} },
+        defer: 0,
+        plugins: [attachments()],
+        hooks: { beforeWrite: async () => void (gate === null || (await gate)) },
+      });
+      t2.after(() => db.close().catch(() => {}));
+      const store = db[DB].blobs;
+      const digestOf = (text) => hashBytes(bytesOf(text));
+      const kept = await db.insert({ title: 'keeps its file' });
+      await db.attachments.put(kept, 'a.txt', bytesOf('named by a live record'));
+      const unnamed = await db.insert({ title: 'drops its file' });
+      await db.attachments.put(unnamed, 'b.txt', bytesOf('named by nobody once removed'));
+      await db.attachments.remove(unnamed, 'b.txt');
+      const deleted = await db.insert({ title: 'is deleted' });
+      await db.attachments.put(deleted, 'c.txt', bytesOf('named by a tombstone'));
+      await db.delete(deleted);
+      const tagged = await db.insert({ title: 'tagged, then changed' });
+      await db.attachments.put(tagged, 'd.txt', bytesOf('named by a tag’s copy alone'));
+      await db.tag('v1');
+      await db.attachments.remove(tagged, 'd.txt');
+      await store.put(await digestOf('named by nothing at all'), bytesOf('named by nothing at all'));
+      assert.strictEqual((await store.list()).length, 5);
+      // A dry run counts: with the tags, the tag's copy keeps d.txt; without, it goes too.
+      const dry = await db.attachments.sweep({ dryRun: true });
+      assert.deepStrictEqual(dry, { blobs: 5, marked: 2, removed: 3, pending: 0 });
+      assert.strictEqual((await store.list()).length, 5, 'a dry run removes nothing');
+      assert.deepStrictEqual(await db.attachments.sweep({ dryRun: true, tags: false }), {
+        blobs: 5,
+        marked: 1,
+        removed: 4,
+        pending: 0,
+      });
+      // A put in flight — its blob stored, its register held in the queue — is kept by the sweep that runs meanwhile.
+      const heldId = await db.insert({ title: 'held' });
+      let open = null;
+      gate = new Promise((resolve) => {
+        open = resolve;
+      });
+      const held = db.attachments.put(heldId, 'e.txt', bytesOf('in flight'));
+      try {
+        await waitUntil(async () => store.has(await digestOf('in flight')));
+        const during = await db.attachments.sweep();
+        assert.strictEqual(during.pending, 1);
+        assert.strictEqual(during.removed, 3, 'b, c and the stray — not d (the tag), not e (in flight)');
+        assert.strictEqual(await store.has(await digestOf('in flight')), true);
+        assert.strictEqual(await store.has(await digestOf('named by a tag’s copy alone')), true);
+        assert.strictEqual(await store.has(await digestOf('named by nobody once removed')), false);
+        assert.strictEqual(await store.has(await digestOf('named by a tombstone')), false);
+        assert.strictEqual(await store.has(await digestOf('named by nothing at all')), false);
+      } finally {
+        open();
+        gate = null;
+      }
+      await held;
+      assert.deepStrictEqual(await db.attachments.sweep(), { blobs: 3, marked: 3, removed: 0, pending: 0 });
+      assert.deepStrictEqual(
+        [...(await db.attachments.get(kept, 'a.txt')).bytes],
+        [...bytesOf('named by a live record')],
+      );
+      assert.strictEqual(
+        (await db.at('v1').get(tagged))[FIELD]?.['d.txt']?.length,
+        bytesOf('named by a tag’s copy alone').length,
+        'the tag still reads the register whose bytes the sweep kept',
+      );
+      const line = infos.find((e) => e.event === 'attachments.sweep');
+      assert.ok(line !== undefined && typeof line.ms === 'number' && line.removed === 3);
+      // A follower cannot sweep (READ_ONLY); a closed database neither.
+      const follower = await syncom.createDatabase({
+        engine,
+        path: 'swept',
+        logger: false,
+        readOnly: true,
+        plugins: [attachments()],
+      });
+      t2.after(() => follower.close().catch(() => {}));
+      await assert.rejects(() => follower.attachments.sweep(), { code: 'READ_ONLY' });
+      const closing = await createStorage(t2, 'closing');
+      const sweep = closing.attachments;
+      await closing.close();
+      await assert.rejects(() => sweep.sweep(), { code: 'CLOSED' });
     },
   );
 

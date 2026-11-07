@@ -72,6 +72,7 @@ export type {
   CollectionEvents,
   LocalStore,
   AttachmentEntry,
+  AttachmentSweep,
   Attachment,
   AttachmentStore,
   DeleteOptions,

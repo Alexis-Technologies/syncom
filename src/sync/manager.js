@@ -37,6 +37,7 @@ const { scrubOp } = require('../header.js');
 const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
+const { isDigest } = require('../blobs.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
@@ -1407,9 +1408,7 @@ class SyncManager extends Emitter {
    * (`digest`, `asked`). Past `MAX_BLOB_BYTES` a peer's answer is refused.
    */
   async fetchBlob(digest, { id, name } = {}) {
-    if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
-      throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
-    }
+    if (!isDigest(digest)) throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
     const named = typeof id === 'string' && typeof name === 'string';
     if ((id !== undefined || name !== undefined) && !named) {
       throw new TypeError('fetchBlob(digest, { id, name }): the record id and the attachment name are strings');
@@ -1436,13 +1435,20 @@ class SyncManager extends Emitter {
         continue;
       }
       const store = this.#storage[DB]?.blobs;
-      if (store !== undefined) await store.put(digest, bytes);
+      if (store !== undefined) {
+        try {
+          await store.put(digest, bytes);
+        } catch (error) {
+          // Kept next time: the checked bytes are answered all the same.
+          this.#storage.logger.warn({ event: 'sync.blob.keep.failed', digest, err: error });
+        }
+      }
       return bytes;
     }
     const fields = { digest, asked, cause };
     if (named) {
       fields.id = id;
-      fields.name = name;
+      fields.attachment = name;
     }
     throw new SyncomError('BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, fields);
   }

@@ -10,7 +10,8 @@
 // Requires engine.js and errors.js only.
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 
 const CAPABILITIES = capabilitiesOf({
   atomicBatch: true,
@@ -156,20 +157,20 @@ const openDb = (path) => {
   const blobs = new Map();
   const blobStore = {
     async get(digest) {
-      const bytes = blobs.get(digest);
+      const bytes = blobs.get(checkDigest(digest, 'blobs.get'));
       return bytes === undefined ? null : bytes.slice();
     },
     async has(digest) {
-      return blobs.has(digest);
+      return blobs.has(checkDigest(digest, 'blobs.has'));
     },
     async list() {
       return sorted(blobs.keys());
     },
     async put(digest, bytes) {
-      blobs.set(digest, new Uint8Array(bytes));
+      blobs.set(checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put').slice());
     },
     async remove(digest) {
-      blobs.delete(digest);
+      blobs.delete(checkDigest(digest, 'blobs.remove'));
     },
   };
   const kv = {
@@ -349,6 +350,16 @@ const openDb = (path) => {
     }
     announce(ids);
   };
+  // What the database holds, as JSON would (the records are objects): an estimate, with nothing to say of a quota.
+  const estimate = async () => {
+    let usage = 0;
+    for (const keys of spaces.values()) for (const text of keys.values()) usage += text.length;
+    for (const stored of records.values()) usage += JSON.stringify(stored).length;
+    for (const named of pieces.values()) for (const text of named.values()) usage += text.length;
+    for (const tagged of copies.values()) for (const text of tagged.values()) usage += text.length;
+    for (const bytes of blobs.values()) usage += bytes.length;
+    return { usage, quota: null };
+  };
   return Object.freeze({
     path,
     capabilities: CAPABILITIES,
@@ -361,6 +372,7 @@ const openDb = (path) => {
     blobs: blobStore,
     changes,
     write,
+    estimate,
     close: async () => {},
     /** How many records the database holds, tombstones included. */
     get size() {

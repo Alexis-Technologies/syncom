@@ -12,7 +12,7 @@ src/idb/engine.js         idbEngine({ name, indexedDB, IDBKeyRange, durability, 
                           records [p, id] (the object as handed), pieces [p, id, name], copies [p, tag, id], log [p, seq] with the group's
                           first seq, meta [p, key] (the log's index and segments, the catalog's rows); one readwrite transaction per write
                           set and per log group, key ranges for listings, a BroadcastChannel for another tab — requires engine.js,
-                          errors.js only
+                          blobs.js, errors.js only
 ```
 
 ## Rules

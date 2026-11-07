@@ -10,8 +10,9 @@ src/files/files.js        filesEngine(fsi), a root export of @alexify/syncom: a 
                           a tag's copies tags/<tag>/data/<id>.json; write(batch)
                           lands the kv puts, then each record (its new pieces, its file, the pieces it drops), then the copies and the kv
                           removals — not atomic; remove(path) is the sweep a branch drops with; db.log is the journal store below —
-                          an attachment's bytes blobs/<digest> as base64 text (an fsi carries text) — requires backend.js, engine.js,
-                          layout.js, write-set.js, shape.js, errors.js, journal.js, crypto/pem.js only
+                          an attachment's bytes blobs/<digest> as base64 text (an fsi carries text; the digest checked at the door,
+                          src/blobs.js) — requires backend.js, engine.js, blobs.js, layout.js, write-set.js, shape.js, errors.js,
+                          journal.js, crypto/pem.js only
 src/files/journal.js      createJournalStore(fsi, path): the op log's medium — open groups as journal lines (or a file each), sealed
                           segments with a trailer, corrupt/, index.json; load/append/seal/sealed/segments/drop/saveIndex/scrub; the
                           file format (fileOf/readFile/segmentOf/readSegment) lives here — requires crc32.js, header.js, errors.js only

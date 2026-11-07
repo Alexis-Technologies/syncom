@@ -199,6 +199,8 @@ export interface EngineDb {
   /** The op log's medium — what `OpLog` writes its groups, segments and index through; its shape is the store's (src/files/journal.js). */
   readonly log: object;
   write(batch: EngineWriteSet): Promise<void>;
+  /** Optional: the room, in bytes — what the medium can say (`db.quota()` asks it). */
+  estimate?(): Promise<{ usage: number | null; quota: number | null }>;
   close(): Promise<void>;
 }
 
@@ -624,13 +626,19 @@ export type SyncomErrorCode =
   | 'LEASE_LOST'
   | 'NOT_LEADER'
   | 'LEADER_LOST'
+  | 'CALL_UNKNOWN'
+  | 'PROMOTE_FAILED'
   | 'BLOB_NOT_FOUND'
+  | 'BLOB_MISMATCH'
+  | 'ATTACHMENT_INVALID'
   | 'FOLLOW_LOST'
   | 'SHARED_LOG_FAILED'
   | 'REVOKED'
   | 'UNPROVEN'
   | 'WRITE_REFUSED'
   | 'TARGET_NOT_EMPTY'
+  | 'BLOBS_UNSUPPORTED'
+  | 'MOVED'
   | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
@@ -677,13 +685,14 @@ export type TypedErrorCode =
   | 'INVALID_VERSION'
   | 'NO_CHAIN'
   | 'PLUGIN_MISSING'
+  | 'BLOB_TOO_LARGE'
   | 'PRESENCE_SIZE';
 
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
  * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`,
- * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
+ * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `BLOB_TOO_LARGE`, `PRESENCE_SIZE`, whose
  * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
@@ -2683,7 +2692,7 @@ export interface Database {
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
   stats(): StorageStats;
-  /** The room the medium has, in bytes: the browser's Storage API estimate, or a file system's free space (`usage` null); null where the platform says nothing. */
+  /** The room the medium has, in bytes: the engine's own estimate (memory, SQLite, IndexedDB), the files engine's volume (`usage` null); null where the medium says nothing. */
   quota(): Promise<{ usage: number | null; quota: number | null }>;
   /** Asks the browser to keep this origin's storage out of eviction; true where nothing need be asked. */
   persist(): Promise<boolean>;
@@ -3104,8 +3113,24 @@ export interface AttachmentStore {
   /** Whether this node holds the bytes of the attachment named. */
   has(id: string, name: string): Promise<boolean>;
   list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
-  /** Takes the name off the record (replicated); the bytes stay in the store. */
+  /** Takes the name off the record (replicated); the bytes stay in the store until a `sweep()`. */
   remove(id: string, name: string): Promise<void>;
+  /** What a `put` would store and write, without storing or writing; the register's field name. */
+  prepare(name: string, bytes: Uint8Array | ArrayBuffer | string, options?: { type?: string }): Promise<{ stored: Uint8Array; entry: AttachmentEntry; field: string }>;
+  field(name: string): string;
+  /**
+   * Mark-and-sweep over the blobs store: every digest a live record, a tag's copy (`tags`, on by default) or a put in
+   * flight names is kept, every other blob removed (`dryRun` counts alone). `READ_ONLY` on a follower.
+   */
+  sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
+}
+
+/** What `db.attachments.sweep()` answers: the blobs the store held, the digests marked, the blobs removed, the puts in flight. */
+export interface AttachmentSweep {
+  blobs: number;
+  marked: number;
+  removed: number;
+  pending: number;
 }
 
 export interface LocalStore {

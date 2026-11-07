@@ -3,7 +3,8 @@
 // The in-process doubles of what several tabs share: `createLeaderPort()` is
 // the port the leader mounts its procedures on and every follower dials —
 // JSON across, the leader's handlers run with a bare context, a call with no
-// leader mounted a transport failure (the follower tries again) — and
+// leader mounted a transport failure that reached nobody (`sent: false`: the
+// follower tries again freely) — and
 // `createBroadcastChannels()` a BroadcastChannel per name over one bus
 // (`postMessage` reaches every other channel of the name on a microtask), the
 // constructor an engine takes as `channel` and an election as its channel.
@@ -29,6 +30,7 @@ const createLeaderPort = () => {
         if (procedure === undefined) {
           const error = new Error(`no leader answers ${method}`);
           error.code = 'ECONNREFUSED';
+          error.sent = false;
           throw error;
         }
         return clone(await procedure.handler({ client: null }, clone(args)));

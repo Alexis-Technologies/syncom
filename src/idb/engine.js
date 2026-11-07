@@ -25,7 +25,8 @@
 // has one. The lock stays the database's (Web Locks in a browser).
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 
 const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'blobs'];
 const KEYS = {
@@ -276,19 +277,23 @@ const idbEngine = ({
       drop: (tag) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.delete(under([p, tag]))),
     };
 
-    // Attachments' bytes by digest, a Uint8Array a row.
+    // Attachments' bytes by digest, a Uint8Array a row; the digest checked before the transaction.
     const blobs = {
-      get: (digest) =>
-        transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
+      get: async (digest) => {
+        checkDigest(digest, 'blobs.get');
+        return transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
           const row = await request(s.get([p, digest]));
           return row === undefined ? null : new Uint8Array(row.bytes);
-        }),
-      has: (digest) =>
-        transaction(
+        });
+      },
+      has: async (digest) => {
+        checkDigest(digest, 'blobs.has');
+        return transaction(
           ['blobs'],
           'readonly',
           async ({ blobs: s }) => (await request(s.getKey([p, digest]))) !== undefined,
-        ),
+        );
+      },
       list: () =>
         transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
           const keys = await request(s.getAllKeys(under([p])));
@@ -296,9 +301,15 @@ const idbEngine = ({
           for (let i = 0; i < keys.length; i++) digests.push(keys[i][1]);
           return digests;
         }),
-      put: (digest, bytes) =>
-        transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.put({ p, digest, bytes: new Uint8Array(bytes) })),
-      remove: (digest) => transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.delete([p, digest])),
+      put: async (digest, bytes) => {
+        checkDigest(digest, 'blobs.put');
+        const copy = checkBlobBytes(typed, bytes, 'blobs.put').slice();
+        return transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.put({ p, digest, bytes: copy }));
+      },
+      remove: async (digest) => {
+        checkDigest(digest, 'blobs.remove');
+        return transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.delete([p, digest]));
+      },
     };
 
     // The catalog's rows, as one value of the meta store: a structured clone, no text.
@@ -492,6 +503,13 @@ const idbEngine = ({
         }
       : undefined;
 
+    // The room: the browser's Storage API estimate for the origin (every database of it), where there is one.
+    const estimate = async () => {
+      const storage = globalThis.navigator?.storage;
+      if (storage === undefined || typeof storage.estimate !== 'function') return { usage: null, quota: null };
+      const { usage = null, quota = null } = await storage.estimate();
+      return { usage, quota };
+    };
     const db = {
       path: p,
       capabilities,
@@ -503,6 +521,7 @@ const idbEngine = ({
       log,
       blobs,
       write,
+      estimate,
       close: async () => {},
     };
     if (changes !== undefined) db.changes = changes;

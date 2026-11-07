@@ -24,6 +24,8 @@
 //   write    one write set — records (each with the pieces it makes and drops),
 //            kv puts and removals, copies — landed whole where the medium has
 //            transactions (`capabilities.atomicBatch`), in order otherwise
+//   estimate optional: `{ usage, quota }` in bytes, what the medium can say of
+//            the room (`db.quota()` asks it; the files engine asks its volume)
 //
 // The files engine (src/files/files.js) is the one every fsi becomes; a
 // native engine (memory, IndexedDB, SQLite, MongoDB) keeps rows, indexes and
@@ -47,7 +49,9 @@ const CAPABILITIES = Object.freeze({
   lock: 'kv',
   // Several instances may open one database at once (read-only followers).
   shared: false,
-  // A `blobs` store for attachments: `get(digest)`, `has`, `list()`, `put(digest, bytes)`, `remove` — bytes by their SHA-256.
+  // A `blobs` store for attachments: `get(digest)`, `has`, `list()`, `put(digest, bytes)`, `remove` — bytes by their
+  // SHA-256; every store checks the digest and the bytes at its door (src/blobs.js: checkDigest, checkBlobBytes
+  // within MAX_BLOB_BYTES) before the medium sees them.
   blobs: false,
   // The log's medium appends a line to a journal (a file per group otherwise).
   append: false,

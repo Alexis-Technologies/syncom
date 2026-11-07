@@ -108,6 +108,43 @@ test('an engine encrypted at rest', async (t) => {
     },
   );
 
+  await t.test(
+    'at rest a blob is iv and ciphertext bytes bound to its place: no base64, the size its own; the digest stays a name',
+    async () => {
+      const inner = memoryEngine();
+      const sealed = await atRest(inner, { key: KEY }).open('/blobs', { logger: null });
+      const plain = await inner.open('/blobs');
+      const digest = 'a'.repeat(64);
+      const bytes = new Uint8Array(1000);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = i & 255;
+      await sealed.blobs.put(digest, bytes);
+      const raw = await plain.blobs.get(digest);
+      assert.strictEqual(raw.length, 1000 + 12 + 16, 'the iv, the ciphertext, the tag — and nothing of base64');
+      assert.notStrictEqual(new TextDecoder().decode(raw.subarray(0, 5)), PREFIX);
+      let high = 0;
+      for (let i = 0; i < raw.length; i++) if (raw[i] > 127) high++;
+      assert.ok(high > 0, 'bytes, not text');
+      assert.deepStrictEqual([...(await sealed.blobs.get(digest))], [...bytes]);
+      assert.deepStrictEqual(await sealed.blobs.list(), [digest], 'the digest a name, in the clear');
+      assert.strictEqual(await sealed.blobs.has(digest), true);
+      // The place binds it: the same bytes under another digest, or in another database, do not open; another key
+      // opens nothing; a blob never sealed is not the key's either.
+      await plain.blobs.put('b'.repeat(64), raw);
+      await assert.rejects(() => sealed.blobs.get('b'.repeat(64)), { code: 'DECRYPT_FAILED', reason: 'key' });
+      await (await inner.open('/elsewhere')).blobs.put(digest, raw);
+      const elsewhere = await atRest(inner, { key: KEY }).open('/elsewhere', { logger: null });
+      await assert.rejects(() => elsewhere.blobs.get(digest), { code: 'DECRYPT_FAILED', reason: 'key' });
+      const other = await atRest(inner, { key: OTHER }).open('/blobs', { logger: null });
+      await assert.rejects(() => other.blobs.get(digest), { code: 'DECRYPT_FAILED', reason: 'key' });
+      await plain.blobs.put('c'.repeat(64), new Uint8Array([1, 2, 3]));
+      await assert.rejects(() => sealed.blobs.get('c'.repeat(64)), { code: 'DECRYPT_FAILED', reason: 'key' });
+      await plain.blobs.put('d'.repeat(64), new Uint8Array(0));
+      await assert.rejects(() => sealed.blobs.get('d'.repeat(64)), { code: 'DECRYPT_FAILED', reason: 'key' });
+      await sealed.blobs.remove(digest);
+      assert.strictEqual(await plain.blobs.has(digest), false);
+    },
+  );
+
   await t.test('a ciphertext moved to the same place in another database does not open', async () => {
     const inner = memoryEngine();
     const engine = atRest(inner, { key: KEY });

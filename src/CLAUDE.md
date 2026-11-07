@@ -28,6 +28,8 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
+src/blobs.js              the door of every blobs store: MAX_BLOB_BYTES (64 MiB, the one cap), isDigest/checkDigest (SHA-256 as 64 lowercase hex),
+                          checkBlobBytes (a Uint8Array within the cap, BLOB_TOO_LARGE past it) — the engines', attachments' and fetchBlob's; apart from engine.js, which every block bundles — no requires
 src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
 src/layout.js             DIRS, tagDirs — every directory a database keeps under its path (the kv namespaces, the files engine's, a tag's two): what engine.remove sweeps, tests/package/layout.test.js holds every module to — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
@@ -68,7 +70,7 @@ src/database.js           Database — the facade: open sequence, the mutation q
 src/writes.js             the facade's write helpers: checkOrm (an entity's methods/statics against what a Document and a Collection answer to), tombstone (a delete's payload), operate (an operator delta as the calls over a transaction's api), modifyIn (`modify(id, fn)` as the difference) — requires document.js, collection.js, operators.js, plugin.js, shape.js, errors.js only
 src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js only
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
-src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
+src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId); a rotated source's moved.json refused (MOVED) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
 src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
@@ -555,12 +557,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   landings) — nothing persisted, a reopen rebuilds. A write from inside a hook or a transaction's `fn` through the
   database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
   write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
-  (a cursor's writes), `guard` (a local write), `revert` (the sync manager's: the fields named brought to a host's
-  reading through the kinds' patches, `applyPatches` under `actor: 'revert'`) — every member a `#run` of the queue
-  or a refusal of it; a new member goes through the queue the same way. `[CURSOR](entity, query, { source, sealed })` leaves the collection's sealed
-  records out unless `sealed` — the facade's collections ask (`Collection.select(query, { sealed = true })`), a
-  host's `query`/`count`, an agent's tools and a connector read the seam as it is: a sealed record never leaves the
-  key holder by a read through it (SEC-7).
+  (a cursor's writes), `guard` (a local write), `revert` (the sync manager's: a host's reading laid back through the
+  kinds' patches) — every member a `#run` of the queue or a refusal of it; a new member goes through the queue the
+  same way. `[CURSOR](entity, query, { source, sealed })` leaves sealed records out unless `sealed`: the facade's
+  collections ask, a host's query, an agent's tools and a connector read the seam as it is (SEC-7).
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the

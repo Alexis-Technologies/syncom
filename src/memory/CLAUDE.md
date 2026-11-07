@@ -10,7 +10,7 @@ src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in me
 src/memory/engine.js      memoryEngine(): the engine in memory — a record as the object it was handed, the pieces and a tag's copies by
                           name, kv namespaces of texts, the op log as rows (a sealed range is a segment, nothing is written), the
                           catalog's rows kept as they are (`db.catalog`); one database per path until remove(path) — requires
-                          engine.js, errors.js only
+                          engine.js, blobs.js, errors.js only
 ```
 
 ## Rules
@@ -29,4 +29,5 @@ src/memory/engine.js      memoryEngine(): the engine in memory — a record as t
   the IndexedDB engine's token. `capabilities.changeStream` is true. The log's groups are not announced: a follower
   reads records whole.
 - **Blobs are copies.** `blobs` keeps a Uint8Array per digest and answers a copy (`slice()`): what a caller changes after a put
-  or a get is not in the store, as the engine suite asks of every engine.
+  or a get is not in the store, as the engine suite asks of every engine. `estimate()` adds up what the database holds
+  (the kv texts, the records as JSON, the pieces, the copies, the blobs' bytes) and says nothing of a quota.

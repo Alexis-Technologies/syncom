@@ -13,11 +13,12 @@
 
 const { checkFsi } = require('../backend.js');
 const { capabilitiesOf, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
+const { checkDigest, checkBlobBytes } = require('../blobs.js');
 const { toBase64, fromBase64 } = require('../crypto/pem.js');
 const { DIRS, tagDirs } = require('../layout.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, typed } = require('../errors.js');
 const { createJournalStore, isAbsent } = require('./journal.js');
 
 const DATA = 'data';
@@ -181,19 +182,21 @@ const openDb = (fsi, path, capabilities, logger) => {
     remove: async (id, name) => fsi.remove(data, named(name, 'piece')),
   };
 
-  // Attachments' bytes by digest, as base64 text under blobs/: an fsi carries text.
+  // Attachments' bytes by digest, as base64 text under blobs/: an fsi carries text. The digest is checked first —
+  // it is a file name here, and a register a peer wrote names it.
   const blobsDir = `${path}/${BLOBS}`;
   const blobs = {
     async get(digest) {
-      const text = await readOrNull(fsi, blobsDir, digest);
+      const text = await readOrNull(fsi, blobsDir, checkDigest(digest, 'blobs.get'));
       return text === null ? null : fromBase64(text);
     },
-    has: (digest) => fsi.exists(blobsDir, digest),
+    has: async (digest) => fsi.exists(blobsDir, checkDigest(digest, 'blobs.has')),
     async list() {
       return (await fsi.list(blobsDir)).sort();
     },
-    put: (digest, bytes) => fsi.write(blobsDir, digest, toBase64(bytes)),
-    remove: (digest) => fsi.remove(blobsDir, digest),
+    put: async (digest, bytes) =>
+      fsi.write(blobsDir, checkDigest(digest, 'blobs.put'), toBase64(checkBlobBytes(typed, bytes, 'blobs.put'))),
+    remove: async (digest) => fsi.remove(blobsDir, checkDigest(digest, 'blobs.remove')),
   };
 
   const copies = {

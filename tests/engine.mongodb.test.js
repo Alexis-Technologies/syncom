@@ -270,6 +270,61 @@ test('MongoDB engine (the driver in memory)', async (t) => {
   });
 
   await t.test(
+    'a blob past one document is chunked and read back whole; has, list and remove see one blob',
+    async () => {
+      const client = createFakeMongo();
+      const engine = mongoEngine({ client, name: 'chunked' });
+      const db = await engine.open('/c', { logger: null });
+      const collection = engine.database.collection('blobs');
+      const CHUNK = 15 * 1024 * 1024;
+      // Two parts and a byte: three documents of bytes and a head — none past the driver's 16 MiB.
+      const big = new Uint8Array(2 * CHUNK + 1);
+      for (let i = 0; i < big.length; i += 4099) big[i] = (i / 4099) & 255;
+      big[big.length - 1] = 77;
+      const digest = 'c'.repeat(64);
+      await db.blobs.put(digest, big);
+      assert.strictEqual(await collection.countDocuments({ p: '/c', digest }), 4);
+      const head = await collection.findOne({ _id: JSON.stringify(['/c', digest, 0]) });
+      assert.deepStrictEqual(
+        { parts: head.parts, length: head.length, n: head.n },
+        { parts: 3, length: big.length, n: 0 },
+      );
+      const parts = await collection.find({ p: '/c', digest, n: { $gte: 1 } }).toArray();
+      assert.ok(parts.every((doc) => doc.b.length <= CHUNK));
+      const back = await db.blobs.get(digest);
+      assert.strictEqual(back.length, big.length);
+      assert.strictEqual(back[big.length - 1], 77);
+      assert.strictEqual(back[4099 * 5000], 5000 & 255, 'a byte of the second part, where it was');
+      assert.ok(Buffer.from(back).equals(Buffer.from(big)), 'read back whole, in order');
+      // Small blobs are a part and a head; has, list and remove see a blob, never its parts.
+      const small = 'd'.repeat(64);
+      await db.blobs.put(small, new Uint8Array([1, 2, 3]));
+      await db.blobs.put('e'.repeat(64), new Uint8Array(0));
+      assert.strictEqual(await collection.countDocuments({ p: '/c', digest: small }), 2);
+      assert.strictEqual(
+        await collection.countDocuments({ p: '/c', digest: 'e'.repeat(64) }),
+        1,
+        'an empty blob is its head',
+      );
+      assert.strictEqual(await db.blobs.has(digest), true);
+      assert.strictEqual(await db.blobs.has(small), true);
+      assert.deepStrictEqual(await db.blobs.list(), [digest, small, 'e'.repeat(64)]);
+      assert.deepStrictEqual([...(await db.blobs.get('e'.repeat(64)))], []);
+      await db.blobs.remove(digest);
+      assert.strictEqual(await collection.countDocuments({ p: '/c', digest }), 0, 'every part gone');
+      assert.strictEqual(await db.blobs.has(digest), false);
+      assert.strictEqual(await db.blobs.get(digest), null);
+      assert.deepStrictEqual(await db.blobs.list(), [small, 'e'.repeat(64)]);
+      // A head without its parts (a put cut short the other way round never happens: the head goes last) reads as none.
+      await collection.deleteMany({ p: '/c', digest: small, n: 1 });
+      assert.strictEqual(await db.blobs.get(small), null);
+      // The room is the server's to know: nothing said.
+      assert.strictEqual(db.estimate, undefined);
+      await db.close();
+    },
+  );
+
+  await t.test(
     'capabilities and names: atomic with transactions, exclusive create, a change stream unless told not',
     () => {
       const engine = fresh();

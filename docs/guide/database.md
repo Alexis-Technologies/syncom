@@ -544,21 +544,35 @@ record's pair is the directory's (`keys/`): it is not rotated — a new pair is 
 **encrypted at rest** (`atRest(engine, options)`, [Engines](./backends#encrypted-at-rest)) is rotated by a copy:
 
 ```js
+const { createDatabase, dropDatabase, filesEngine } = require('@alexify/syncom');
 const { rotateAtRest, atRest } = require('@alexify/syncom/encryption');
 
+// over an engine (memory, IndexedDB, SQLite, MongoDB)
 await rotateAtRest(engine, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
 const db = await createDatabase({ engine: atRest(engine, { key: newKey }), path: 'app-2' });
-await engine.remove('app'); // once the new place reads
+await dropDatabase('app', { engine: atRest(engine, { key: oldKey }) }); // once the new place reads
+
+// over a backend — the default medium: the files engine, wrapped at its backend under each key
+await rotateAtRest({ fsi, filesEngine }, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
+const moved = await createDatabase({ fsi: atRest(fsi, { key: newKey }), path: 'app-2' });
 ```
 
 The database at `path` is copied whole — every record, piece, copy, kv text, log entry and blob — into `into`
-(another path, another engine, or both) sealed under the new key; it is the same node, so no peer bootstraps. Never
-in place: a copy cut short leaves the source as it was and the target empty.
+(another path, another engine or backend, or a path with either) sealed under the new key; it is the same node, so
+no peer bootstraps. Never in place. Once copied the source is **fenced**: `moved.json` in its root namespace names
+where it went, and `createDatabase()` there is `MOVED` (`to: { path, engine }`) until `dropDatabase()` takes it —
+the same node id never writes in two places. A copy cut short leaves the source as it was and its target marked
+(`copy.json`, written first and removed last): the next copy into that target takes the leftovers away first, while
+a target that holds a database is `TARGET_NOT_EMPTY`.
 
-The room the medium has is `db.quota()` — `{ usage, quota }` in bytes: the browser's Storage API estimate, a file
-system's free space (`usage` null) — and `db.persist()` asks the browser to keep the origin out of eviction. A log
-append refused for want of room is `QUOTA` (the platform's error as `cause`); a record file that could not be
-written for it is `UNPERSISTED` with `quota: true` (held in memory, written at the next open).
+The room the medium has is `db.quota()` — `{ usage, quota }` in bytes, what the engine can say: the memory engine
+counts what it holds (no quota), SQLite its file's pages (`page_count × page_size`) and the free space of the file's
+volume (none for `:memory:`), IndexedDB the browser's Storage API estimate for the origin, the files engine the free
+space of its volume (`usage` null; the Storage API over OPFS), MongoDB and an engine over a port nothing (`null`,
+`null`) — and `db.persist()` asks the browser to keep the origin out of eviction. A log append refused for want of
+room is `QUOTA` (the platform's error as `cause`: node:fs's ENOSPC, the browser's QuotaExceededError, SQLite's
+SQLITE_FULL — better-sqlite3's code, node:sqlite's errcode 13 — on the error or a `cause` under it); a record file that could not be written for it is `UNPERSISTED`
+with `quota: true` (held in memory, written at the next open).
 
 ## Documents
 
