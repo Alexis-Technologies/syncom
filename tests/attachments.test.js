@@ -13,6 +13,8 @@ const { atRestEngine } = require('../src/encryption/at-rest-engine.js');
 const { copyEngine } = require('../src/engines/copy.js');
 const { DB } = require('../src/symbols.js');
 const { hashBytes } = require('../src/crypto/digest.js');
+const { MAX_BLOB_BYTES } = require('../src/blobs.js');
+const { memory } = require('../src/memory/memory.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 
 const bytesOf = (text) => new TextEncoder().encode(text);
@@ -107,6 +109,109 @@ test('Attachments', async (t) => {
         () => syncom.createDatabase({ engine: without, path: 'x', logger: false, plugins: [attachments()] }),
         { name: 'TypeError', message: /blobs store/ },
       );
+    },
+  );
+
+  await t.test(
+    'a register a peer wrote with a digest that is none is ATTACHMENT_INVALID, never a path: every engine refuses a blob key that is no digest and a blob past 64 MiB',
+    async (t2) => {
+      // The files engine over a backend that counts what reaches it: a traversal in a register never does.
+      const fsi = memory();
+      const seen = [];
+      const spy = {
+        read(dir, name) {
+          seen.push(['read', dir, name]);
+          return fsi.read(dir, name);
+        },
+        write: (dir, name, content, options) => fsi.write(dir, name, content, options),
+        exists(dir, name) {
+          seen.push(['exists', dir, name]);
+          return fsi.exists(dir, name);
+        },
+        remove(dir, name) {
+          seen.push(['remove', dir, name]);
+          return fsi.remove(dir, name);
+        },
+        list: (dir) => fsi.list(dir),
+      };
+      const warnings = [];
+      const db = await syncom.createDatabase({
+        engine: syncom.filesEngine(spy),
+        path: 'peered',
+        logger: { warn: (e) => warnings.push(e), error: () => {}, info: () => {}, debug: () => {} },
+        defer: 0,
+        plugins: [attachments()],
+      });
+      t2.after(() => db.close().catch(() => {}));
+      const id = await db.insert({ title: 'a record a peer wrote registers on' });
+      const good = await db.attachments.put(id, 'ok.txt', bytesOf('fine'));
+      const bad = {
+        traversal: { digest: '../../../../etc/hosts', type: 'text/plain', length: 112 },
+        keys: { digest: 'keys/private.pem', type: 'text/plain', length: 1 },
+        upper: { digest: 'A'.repeat(64), type: 'x', length: 1 },
+        notype: { digest: good.digest, type: '', length: 1 },
+        negative: { digest: good.digest, type: 'x', length: -1 },
+        huge: { digest: good.digest, type: 'x', length: MAX_BLOB_BYTES + 1 },
+        float: { digest: good.digest, type: 'x', length: 1.5 },
+        encoding: { digest: good.digest, type: 'x', length: 1, encoding: 'lz' },
+        text: 'not a register',
+      };
+      await db.transact(async (tx) => {
+        for (const [name, entry] of Object.entries(bad)) await tx.update(id, { [`${FIELD}/${name}`]: entry });
+      });
+      seen.length = 0;
+      for (const name of Object.keys(bad)) {
+        await assert.rejects(
+          () => db.attachments.get(id, name),
+          (error) => {
+            assert.strictEqual(error.code, 'ATTACHMENT_INVALID', name);
+            assert.strictEqual(error.id, id);
+            assert.strictEqual(error.attachment, name);
+            assert.strictEqual(
+              error.name,
+              'SyncomError',
+              'the attachment rides as `attachment`, never as the error’s name',
+            );
+            return true;
+          },
+        );
+        await assert.rejects(() => db.attachments.has(id, name), { code: 'ATTACHMENT_INVALID' });
+      }
+      const touched = seen.filter(([, dir]) => dir.endsWith('/blobs'));
+      assert.deepStrictEqual(touched, [], 'no register that is none reached the blobs directory');
+      // list() leaves them out and warns once per register; the good one stands.
+      assert.deepStrictEqual(
+        (await db.attachments.list(id)).map((a) => a.name),
+        ['ok.txt'],
+      );
+      await db.attachments.list(id);
+      const invalid = warnings.filter((w) => w.event === 'attachments.register.invalid');
+      assert.strictEqual(invalid.length, Object.keys(bad).length, 'once each');
+      assert.ok(invalid.every((w) => w.id === id && typeof w.name === 'string'));
+      assert.deepStrictEqual([...(await db.attachments.get(id, 'ok.txt')).bytes], [...bytesOf('fine')]);
+      // Every engine's store refuses a key that is no digest before the medium sees it (the engine suites hold each);
+      // here the files engine over the spy: a traversal reaches no read, no exists.
+      const store = db[DB].blobs;
+      seen.length = 0;
+      for (const key of ['../../../../etc/hosts', 'A'.repeat(64), 'x']) {
+        await assert.rejects(() => store.get(key), { name: 'TypeError', message: /digest/ });
+        await assert.rejects(() => store.has(key), { name: 'TypeError', message: /digest/ });
+        await assert.rejects(() => store.remove(key), { name: 'TypeError', message: /digest/ });
+      }
+      assert.deepStrictEqual(
+        seen.filter(([, dir]) => dir.endsWith('/blobs')),
+        [],
+      );
+      // The one cap: a put past 64 MiB is BLOB_TOO_LARGE before the bytes are hashed or stored.
+      await assert.rejects(() => db.attachments.put(id, 'big.bin', new Uint8Array(MAX_BLOB_BYTES + 1)), {
+        name: 'TypeError',
+        code: 'BLOB_TOO_LARGE',
+      });
+      assert.strictEqual((await store.list()).length, 1);
+      // A register that is null is none; `sync.fetchBlob` refuses what is no digest the same way.
+      await db.transact(async (tx) => tx.update(id, { [`${FIELD}/none`]: null }));
+      assert.strictEqual(await db.attachments.get(id, 'none'), null);
+      await assert.rejects(() => db.sync.fetchBlob('../../etc/hosts'), { name: 'TypeError', message: /digest/ });
     },
   );
 

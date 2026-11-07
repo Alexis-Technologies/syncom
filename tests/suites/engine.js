@@ -7,6 +7,7 @@
 
 const assert = require('node:assert');
 const { isEngine, checkEngineDb } = require('../../src/engine.js');
+const { MAX_BLOB_BYTES } = require('../../src/blobs.js');
 
 const stored = (data, meta = { clock: {}, base: 0, deleted: 0 }, extra = {}) => ({
   data,
@@ -230,6 +231,31 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
       }
     },
   );
+
+  await t.test('blobs: a key that is no digest is a TypeError before the medium sees it', async () => {
+    const { db, done } = await open();
+    try {
+      if (db.capabilities.blobs !== true) return;
+      const keys = ['../../../../etc/hosts', 'x', 'A'.repeat(64), 'f'.repeat(63), `${'f'.repeat(63)}/`, 7, null];
+      for (const key of keys) {
+        await assert.rejects(() => db.blobs.get(key), { name: 'TypeError', message: /digest/ }, `get ${key}`);
+        await assert.rejects(() => db.blobs.has(key), { name: 'TypeError', message: /digest/ }, `has ${key}`);
+        await assert.rejects(() => db.blobs.put(key, new Uint8Array([1])), { name: 'TypeError' }, `put ${key}`);
+        await assert.rejects(() => db.blobs.remove(key), { name: 'TypeError', message: /digest/ }, `remove ${key}`);
+      }
+      const d = 'd'.repeat(64);
+      await assert.rejects(() => db.blobs.put(d, 'text'), { name: 'TypeError', message: /Uint8Array/ });
+      await assert.rejects(() => db.blobs.put(d, [1, 2]), { name: 'TypeError', message: /Uint8Array/ });
+      // The one cap: a blob past MAX_BLOB_BYTES is BLOB_TOO_LARGE (a TypeError with the code: the size is data).
+      await assert.rejects(() => db.blobs.put(d, new Uint8Array(MAX_BLOB_BYTES + 1)), {
+        name: 'TypeError',
+        code: 'BLOB_TOO_LARGE',
+      });
+      assert.deepStrictEqual(await db.blobs.list(), [], 'nothing reached the medium');
+    } finally {
+      await done();
+    }
+  });
 
   await t.test('copies: a tag’s copies by id, listed in id order, dropped whole', async () => {
     const { db, done } = await open();

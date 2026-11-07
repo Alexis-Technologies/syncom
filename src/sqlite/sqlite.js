@@ -24,7 +24,8 @@
 //   catalog  (p, id)            row — the catalog's row of a record (JSON), a row at a time
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 
 const MEMORY = ':memory:';
 const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
@@ -285,17 +286,17 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       drop: (tag) => run(SQL.copyDrop, [p, tag]),
     };
 
-    // Attachments' bytes by digest, a BLOB a row.
+    // Attachments' bytes by digest, a BLOB a row; the digest checked before the statement.
     const blobs = {
       get: async (digest) => {
-        const row = await get(SQL.blobGet, [p, digest]);
+        const row = await get(SQL.blobGet, [p, checkDigest(digest, 'blobs.get')]);
         return none(row) ? null : new Uint8Array(row.bytes);
       },
-      has: async (digest) => !none(await get(SQL.blobGet, [p, digest])),
+      has: async (digest) => !none(await get(SQL.blobGet, [p, checkDigest(digest, 'blobs.has')])),
       list: async () => names(await all(SQL.blobList, [p]), 'digest'),
-      put: (digest, bytes) =>
-        run(SQL.blobPut, [p, digest, bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)]),
-      remove: (digest) => run(SQL.blobRemove, [p, digest]),
+      put: async (digest, bytes) =>
+        run(SQL.blobPut, [p, checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put')]),
+      remove: async (digest) => run(SQL.blobRemove, [p, checkDigest(digest, 'blobs.remove')]),
     };
 
     const meta = async (tx, key) => {

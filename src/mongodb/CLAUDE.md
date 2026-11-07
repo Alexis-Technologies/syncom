@@ -9,8 +9,8 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
                           MongoDB database — kv, records (JSON text), pieces, copies, catalog (a document per record's row), log (a document per entry with its group's
                           first seq), meta; `_id` the key as JSON, the key's fields flat beside it over an index per collection;
                           a bulk write per collection per write set, in a session transaction under `transactions: true`; change
-                          streams as `db.changes`; the subpath also exports mongoSharedLog — requires engine.js, errors.js,
-                          shared-log.js only
+                          streams as `db.changes`; the subpath also exports mongoSharedLog — requires engine.js, blobs.js,
+                          errors.js, shared-log.js only
 src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes, poll, gapTimeout, retention, logger }): a shared log
                           (wrpc's BrokerLog shape) over two collections — a topic's entries `[topic, n]` numbered by its head document
                           (`<collection>_heads`: epoch, next, first) in one findOneAndUpdate; a read a range by `n` then a tail woken by a

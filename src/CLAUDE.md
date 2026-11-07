@@ -28,6 +28,8 @@ src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEven
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
+src/blobs.js              the door of every blobs store: MAX_BLOB_BYTES (64 MiB, the one cap), isDigest/checkDigest (SHA-256 as 64 lowercase hex),
+                          checkBlobBytes (a Uint8Array within the cap, BLOB_TOO_LARGE past it) — the engines', attachments' and fetchBlob's; apart from engine.js, which every block bundles — no requires
 src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
 src/layout.js             DIRS, tagDirs — every directory a database keeps under its path (the kv namespaces, the files engine's, a tag's two): what engine.remove sweeps, tests/package/layout.test.js holds every module to — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires

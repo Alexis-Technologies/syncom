@@ -9,7 +9,7 @@ src/sqlite/sqlite.js      @alexify/syncom/sqlite — sqliteEngine({ file, databa
                           — kv (p, ns, key), records (p, id) as JSON text, pieces (p, id, name), copies (p, tag, id), log (p, seq) with
                           the group's first seq, meta (p, key) for the log's index and segments and the catalog's head, catalog (p, id) a row
                           per record; one transaction per write set and per log group, a statement per listing, every statement
-                          through one lane — requires engine.js, errors.js only
+                          through one lane — requires engine.js, blobs.js, errors.js only
 ```
 
 ## Rules

@@ -10,7 +10,7 @@ src/encryption/encryption.js  @alexify/syncom/encryption — the sealing plugin 
 src/encryption/at-rest-engine.js  atRestEngine(engine, cipher): the engine contract over an engine, every value a ciphertext bound to
                           its place — records as text, pieces, copies, kv, the log's entries and index (its floor in the clear);
                           indexes off; a blob's bytes sealed as base64 text at the blob's place (the digest a name, in the clear);
-                          the files engine refused (wrap its backend) — requires engine.js, errors.js, crypto/pem.js only
+                          the files engine refused (wrap its backend) — requires engine.js, blobs.js, errors.js, crypto/pem.js only
 ```
 
 ## Rules

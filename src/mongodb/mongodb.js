@@ -35,7 +35,8 @@
 // index (`{ p, id: { $gt } }` sorted by `id` over `{ p: 1, id: 1 }`).
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 const { mongoSharedLog } = require('./shared-log.js');
 
 const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
@@ -337,12 +338,17 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       return null;
     };
     const blobs = {
-      get: async (digest) => bytesOf((await one(c.blobs, keyOf([p, digest]), { _id: 0, b: 1 }))?.b),
-      has: async (digest) => (await one(c.blobs, keyOf([p, digest]), { _id: 1 })) !== null,
+      get: async (digest) =>
+        bytesOf((await one(c.blobs, keyOf([p, checkDigest(digest, 'blobs.get')]), { _id: 0, b: 1 }))?.b),
+      has: async (digest) => (await one(c.blobs, keyOf([p, checkDigest(digest, 'blobs.has')]), { _id: 1 })) !== null,
       list: async () => sorted(await many(c.blobs, { p }, { projection: { _id: 0, digest: 1 } }), 'digest'),
-      put: (digest, bytes) =>
-        fenced((session) => bulk(c.blobs, [put(keyOf([p, digest]), { p, digest, b: new Uint8Array(bytes) })], session)),
-      remove: (digest) => fenced((session) => bulk(c.blobs, [del(keyOf([p, digest]))], session)),
+      put: async (digest, bytes) => {
+        checkDigest(digest, 'blobs.put');
+        const copy = checkBlobBytes(typed, bytes, 'blobs.put').slice();
+        return fenced((session) => bulk(c.blobs, [put(keyOf([p, digest]), { p, digest, b: copy })], session));
+      },
+      remove: async (digest) =>
+        fenced((session) => bulk(c.blobs, [del(keyOf([p, checkDigest(digest, 'blobs.remove')]))], session)),
     };
 
     const meta = async (key) => {

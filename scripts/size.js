@@ -201,7 +201,9 @@ const ENTRIES = [
   // reportLost; sync-parity plan, S1; 2026-11-06). 76, raised by name.
   // 76.4 with the attachments getter, the files engine's blobs store and the one base64 of crypto/pem.js (sync-parity
   // plan, S4). 77, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 77 },
+  // 77.2 with the digest and the blob cap at the contract (engine.js isDigest/checkDigest/checkBlobBytes, every store's
+  // door; review №7, E7.1; 2026-11-07). 77.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 77.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

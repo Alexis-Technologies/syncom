@@ -7,7 +7,8 @@ Bytes beside a record: in the engine's blobs store by digest, named on the recor
 ```
 src/attachments/attachments.js @alexify/syncom/attachments — attachments({ compression }): the plugin, db.attachments (put, get, has, list, remove)
                           over the engine's blobs store and the record's `_attachments/<name>` register; the bytes fetched through
-                          sync.fetchBlob where this node lacks them — requires errors.js, crypto/digest.js only
+                          sync.fetchBlob where this node lacks them; prepare() and field() for a follower of /shared — requires
+                          errors.js, blobs.js, crypto/digest.js only
 ```
 
 ## Rules
@@ -17,12 +18,17 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   `_attachments/<name>` through the database's own `update`: logged, replicated, tagged, undone like any field. `remove` is an
   `unset` of the register; the bytes stay (another name, another record may share them — there is no reference count and no
   sweep yet). Nothing of a blob is an op, and a peer's op never carries bytes.
-- **Bytes are believed by digest alone.** A node that reads a register whose bytes it lacks asks the connected peers
-  (`sync.fetchBlob`, `syncom/blob`), hashes what it got and keeps it only when the hash is the digest (`sync.blob.mismatch`
-  otherwise, the next peer asked); the host answers a wrpc stream where `client.binary` is not false, base64 on a text
-  transport (`toBase64` of crypto/pem.js — the one base64), and 404 `BLOB_NOT_FOUND` for what it lacks; a peer's answer past
-  MAX_BLOB_BYTES (64 MiB) is refused. `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a
-  read: an attachment reaches a node when that node reads it.
+- **Bytes are believed by digest alone, and a register only as far as it is one.** A node that reads a register whose
+  bytes it lacks asks the connected peers (`sync.fetchBlob`, `syncom/blob`), hashes what it got and keeps it only when the
+  hash is the digest (`sync.blob.mismatch` otherwise, the next peer asked); the host answers a wrpc stream where
+  `client.binary` is not false, base64 on a text transport (`toBase64` of crypto/pem.js — the one base64), and 404
+  `BLOB_NOT_FOUND` for what it lacks; a peer's answer past MAX_BLOB_BYTES (64 MiB, `src/blobs.js` — the one cap, every
+  store's `put` and `attachments.put` refuse past it as `BLOB_TOO_LARGE`) is refused. A register is a peer's word:
+  `#entry` takes it only where `validEntry` holds (`isDigest` — 64 lowercase hex, never a path: a digest is the files
+  engine's file name — a `type`, a safe `length` within the cap, a known `encoding`), `ATTACHMENT_INVALID` from
+  `get`/`has`, left out of `list` with one `attachments.register.invalid`; every engine's store checks the digest at its
+  own door too (`checkDigest`). `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a read:
+  an attachment reaches a node when that node reads it.
 - **The store is the engine's; the plugin refuses an engine without one.** Every shipped engine keeps `blobs` (memory: a Map;
   IndexedDB: a seventh store, VERSION 2; files: `blobs/<digest>` as base64 text; SQLite: a table; MongoDB: a collection) and
   says so in `capabilities.blobs`; the read-only wrapper reads them, the at-rest wrapper seals them as text at the blob's

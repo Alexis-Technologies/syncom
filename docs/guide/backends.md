@@ -30,7 +30,7 @@ opens is a set of stores:
 | `records` | The records by id — `get(id)` the stored record as the engine holds it, `raw(id)` its text, `has`, `getMany`, `ids({ after, limit })` in id order, tombstones included |
 | `pieces` | The runs of a large text or list beside its record, by the name the record's meta holds |
 | `copies` | A tag's copies of records, by tag and id |
-| `blobs` | Attachments' bytes by their SHA-256, where `capabilities.blobs`: `get`, `has`, `list`, `put`, `remove` — a copy in, a copy out; outside the write set (a blob is written before the record names it, and the same bytes are the same blob) |
+| `blobs` | Attachments' bytes by their SHA-256, where `capabilities.blobs`: `get`, `has`, `list`, `put`, `remove` — a copy in, a copy out; outside the write set (a blob is written before the record names it, and the same bytes are the same blob). Every store checks the key at its door (`checkDigest`: 64 lowercase hex characters, a `TypeError` otherwise — a digest is a file name in the files engine, a filter elsewhere) and takes a `Uint8Array` of at most `MAX_BLOB_BYTES` (64 MiB, `BLOB_TOO_LARGE`) |
 | `log` | The op log's medium — what the log writes its groups, segments and index through (the files engine's journal) |
 | `write(batch)` | One write set: a tag's copies of the records as they were, records (each with the pieces it makes and drops), kv puts and removals — whole or not at all where `capabilities.atomicBatch`, in order otherwise |
 

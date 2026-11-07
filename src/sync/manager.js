@@ -37,6 +37,7 @@ const { scrubOp } = require('../header.js');
 const { SIGNER, REWIND, DB } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
+const { isDigest } = require('../blobs.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
@@ -1271,9 +1272,7 @@ class SyncManager extends Emitter {
    * (`digest`, `asked`). Past `MAX_BLOB_BYTES` a peer's answer is refused.
    */
   async fetchBlob(digest) {
-    if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
-      throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
-    }
+    if (!isDigest(digest)) throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
     let asked = 0;
     let cause = null;
     for (const peer of this.#peers.values()) {

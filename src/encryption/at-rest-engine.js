@@ -16,11 +16,12 @@
 // medium keeps a text that is no JSON as it is, `raw(id)` hands it back),
 // and the files engine is not wrapped this way: its journal reads the ops it
 // writes, so it is the backend that is wrapped there — `filesEngine(atRest(fsi))`.
-// Requires engine.js and errors.js only; the cipher is handed in.
+// Requires engine.js, blobs.js, errors.js and crypto/pem.js only; the cipher is handed in.
 
 const { checkEngine, capabilitiesOf, unreadableRecord } = require('../engine.js');
+const { checkDigest, checkBlobBytes } = require('../blobs.js');
 const { toBase64, fromBase64 } = require('../crypto/pem.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, typed } = require('../errors.js');
 
 const unreadable = (id) => unreadableRecord(SyncomError, id);
 
@@ -288,15 +289,18 @@ const atRestEngine = (engine, cipher) => {
       const decoder = new TextDecoder();
       wrapped.blobs = {
         get: async (digest) => {
-          const stored = await db.blobs.get(digest);
+          const stored = await db.blobs.get(checkDigest(digest, 'blobs.get'));
           if (stored === null) return null;
           return fromBase64(await open(blobKey(digest), decoder.decode(stored)));
         },
-        has: (digest) => db.blobs.has(digest),
+        has: async (digest) => db.blobs.has(checkDigest(digest, 'blobs.has')),
         list: () => db.blobs.list(),
-        put: async (digest, bytes) =>
-          db.blobs.put(digest, encoder.encode(await seal(blobKey(digest), toBase64(bytes)))),
-        remove: (digest) => db.blobs.remove(digest),
+        put: async (digest, bytes) => {
+          checkDigest(digest, 'blobs.put');
+          checkBlobBytes(typed, bytes, 'blobs.put');
+          return db.blobs.put(digest, encoder.encode(await seal(blobKey(digest), toBase64(bytes))));
+        },
+        remove: async (digest) => db.blobs.remove(checkDigest(digest, 'blobs.remove')),
       };
     }
     if (typeof db.lock === 'function') wrapped.lock = (options) => db.lock(options);

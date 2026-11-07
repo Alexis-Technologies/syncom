@@ -27,6 +27,19 @@ record allows the field. `remove` is an `unset` of that register; the bytes
 stay in the store (another name may share them). `has(id, name)` says whether
 this node holds the bytes.
 
+A register is believed only as far as it is one. A peer writes registers too
+(the field replicates like any other), so `get` and `has` read the register
+before anything else touches the store: a `digest` that is not SHA-256 as hex
+(64 lowercase hex characters — a digest is a file name in the files engine
+and a key everywhere else), a `type` that is no text, a `length` that is no
+integer within 64 MiB, an `encoding` the plugin does not know, is
+`ATTACHMENT_INVALID` (`id`, `attachment`), and `list` leaves such a register out
+with one `attachments.register.invalid` warning. Every engine's blobs store
+checks the digest at its own door too (a `TypeError` before the medium sees
+it), and every store takes a blob of at most `MAX_BLOB_BYTES` (64 MiB —
+`BLOB_TOO_LARGE`, the one cap `syncom/blob` answers within as well): `put`
+refuses a larger one before hashing it.
+
 The engine must keep blobs (`capabilities.blobs`): the memory, IndexedDB
 (a seventh object store; an older IndexedDB database is upgraded at its open),
 files (`blobs/<digest>`, as base64 text — an fsi carries text), SQLite (a
@@ -42,8 +55,8 @@ naming bytes it lacks asks the peers it dials — `syncom/blob { digest }`,
 answered as a stream where the transport carries one, as base64 otherwise —
 checks the answer against the digest (a peer answering other bytes is not
 believed: `sync.blob.mismatch`, the next peer asked), keeps the bytes in its
-own store and answers them. No peer has them: `BLOB_NOT_FOUND` (`id`, `name`,
-`digest`). `get(id, name, { fetch: false })` asks nobody. A host serves blobs
+own store and answers them. No peer has them: `BLOB_NOT_FOUND` (`id`,
+`attachment`, `digest`). `get(id, name, { fetch: false })` asks nobody. A host serves blobs
 by default; `unit({ allow: { blob: false } })` refuses the call (403
 `NOT_SERVED`). `db.sync.fetchBlob(digest)` is the same fetch by digest alone.
 

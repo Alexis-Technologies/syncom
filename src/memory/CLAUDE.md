@@ -10,7 +10,7 @@ src/memory/memory.js      @alexify/syncom/memory — memory(), the backend in me
 src/memory/engine.js      memoryEngine(): the engine in memory — a record as the object it was handed, the pieces and a tag's copies by
                           name, kv namespaces of texts, the op log as rows (a sealed range is a segment, nothing is written), the
                           catalog's rows kept as they are (`db.catalog`); one database per path until remove(path) — requires
-                          engine.js, errors.js only
+                          engine.js, blobs.js, errors.js only
 ```
 
 ## Rules

@@ -347,7 +347,7 @@ What syncom rejects with when an operation cannot be done: `name`
 and `cause` when an underlying error exists. A `TypeError` is the other kind
 — a wrong argument, option or hook result, a bug in the calling code — and
 carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID_VERSION`,
-`NO_CHAIN`, `PLUGIN_MISSING` and `PRESENCE_SIZE`, whose value is data or configuration (the rows below say "a
+`NO_CHAIN`, `PLUGIN_MISSING`, `BLOB_TOO_LARGE` and `PRESENCE_SIZE`, whose value is data or configuration (the rows below say "a
 `TypeError`"; their union is the `TypedErrorCode` type). `HookError` and `ValidationError` are
 `SyncomError`s. Exported from the package root; the union of codes is the
 `SyncomErrorCode` type.
@@ -389,7 +389,8 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `CALL_UNKNOWN` | the leader's `serve()` answer to a forwarded call flagged `retry` whose id this leader never saw (it keeps the answers of the last 256 calls per follower, 64 followers, for this `serve()`): the call is never run; the follower turns it into `LEADER_LOST` with `maybeApplied` | `id`, `method` |
 | `PROMOTE_FAILED` | the shared facade's `error` event: the instance elected could not open the database as the leader — `LOCKED` past the retries, the engine's error — so it yielded the election (the next in line leads), and asks again after a backoff (`attempt`, counted up per failure in a row) | `path`, `attempt`, `cause` |
 | `QUOTA` | a log append refused for want of room: the medium is full (node:fs's ENOSPC, the browser's QuotaExceededError), the platform's error as `cause`; the write is refused whole, its seqs taken back, and the next append goes once there is room (`db.quota()`, `db.persist()`) | `cause` |
-| `BLOB_NOT_FOUND` | `db.attachments.get()`: the record names bytes this node lacks and no connected peer holds (`id`, `name`, `digest`), or `fetch: false`; `sync.fetchBlob(digest)`: no connected peer holds the blob (`digest`, `asked`, `cause`) | `id`, `name`, `digest`, `asked`, `cause` |
+| `BLOB_NOT_FOUND` | `db.attachments.get()`: the record names bytes this node lacks and no connected peer holds (`id`, `attachment`, `digest`), or `fetch: false`; `sync.fetchBlob(digest)`: no connected peer holds the blob (`digest`, `asked`, `cause`) | `id`, `attachment`, `digest`, `asked`, `cause` |
+| `ATTACHMENT_INVALID` | `db.attachments.get()`/`has()` of a name whose register is no register — a `digest` that is not SHA-256 as hex, a `type` that is no text, a `length` that is no integer within 64 MiB, an `encoding` the plugin does not know (a peer writes registers too: one is believed only as far as it is one; `list()` leaves it out and warns `attachments.register.invalid` once) | `id`, `attachment` |
 | `LEASE_LOST` | the storage's `error` event: the engine's lease on the database went to another instance (not renewed in time, or taken) — the database is read-only from here on and writes nothing more; what was logged but not landed is held (`UNPERSISTED`) for the next holder's replay. Also what an engine's write set, log group, seal, index, kv or copies put answers when a newer lease's document sits where it would write (MongoDB's fence) | `path`, `cause` |
 | `FOLLOW_LOST` | the storage's `error` event, on a follower (`readOnly: true`): the engine's change stream ended — an error, a close — so what the writer landed meanwhile was not heard; the follower subscribes again first and then reads every record again (a record removed meanwhile loses its row) | `path`, `cause` |
 | `KEYS_INCOMPLETE` | `createDatabase()` with the `encryption` or `signing` plugin, `loadKeys()` (`@alexify/syncom/encryption`), `loadSigningKeys()` (`@alexify/syncom/signing`) when one file of a pair (RSA or signing) is missing | — |
@@ -420,6 +421,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `ID_IMMUTABLE` | a local `set()`, `update()` (fields or operators), `modify()`, `unset()` or patch that changes or unsets a field the record's composite id is derived from (a `TypeError`) | — |
 | `NO_CHAIN` | `validate()` under `createDatabase({ chain: false })` or without the `chain` plugin (a `TypeError`; the message says which) | — |
 | `PLUGIN_MISSING` | a method, a patch action or a local op of a kind the storage was not opened with — `splice()` without the `text` plugin — and `createDatabase()` of a directory that ran with a kind the call lacks; `createDatabase()` asking for what no registered plugin provides — `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without `encryption` — and a per-call `{ encrypted: true }` without it; a collection's `select()`/`count()`, `update(id, delta, { ifMatch })` and `watch()` without `query`, `db.local` without `local`, `addCollections()` with a validator without `schema` (a `TypeError`; the message names the subpath) | — |
+| `BLOB_TOO_LARGE` | `db.attachments.put()`, an engine's `blobs.put()`, `serveEngine()`'s served store: a blob past `MAX_BLOB_BYTES` (64 MiB — the one cap, `src/blobs.js`; what a peer may be asked for over `syncom/blob` is bounded the same) (a `TypeError`) | `length`, `max` |
 | `PRESENCE_SIZE` | a presence `set()` whose state is past its bounds — 16 KiB, 64 keys, 8 deep (a `TypeError`) | — |
 | `HOOK_FAILED` | a `HookError` | `hook`, `cause` |
 | `VALIDATION_FAILED` | a `ValidationError` | `entity`, `issues`, `cause` |
@@ -815,7 +817,8 @@ in the engine's blobs store, named on it as the register `_attachments/<name>` �
 | --- | --- |
 | `put(id, name, bytes, { type }?)` → `{ digest, type, length, encoding? }` | The bytes (a `Uint8Array`, an `ArrayBuffer`, a string as UTF-8) kept under their SHA-256 — compressed where the plugin was told to — and named on the record (an `update`); `NOT_FOUND` for a record that is not there; a name is up to 128 letters, digits, `.`, `_`, `@`, `-` |
 | `get(id, name, { fetch }?)` → `{ bytes, type, length, digest, encoding? }` or null | The attachment named; bytes this node lacks are asked of the connected peers (`syncom/blob`), checked by digest and kept — `fetch: false` asks nobody; none has them, `BLOB_NOT_FOUND` |
-| `has(id, name)`, `list(id)` | Whether this node holds the bytes; the record's attachments by name |
+| `has(id, name)`, `list(id)` | Whether this node holds the bytes; the record's attachments by name — a register that is no register (a peer's) is `ATTACHMENT_INVALID` from `get`/`has`, left out of `list` with a warning |
+| `prepare(name, bytes, { type }?)` → `{ stored, entry, field }`, `field(name)` | What a `put` would store and write, without storing or writing — what a follower of `@alexify/syncom/shared` puts into the shared store itself; the register's field name |
 | `remove(id, name)` | The name off the record (an `unset`, replicated); the bytes stay in the store |
 
 `FIELD` is `'_attachments'`. The engine must have a blobs store (`capabilities.blobs`); the plugin is refused at

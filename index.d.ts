@@ -627,6 +627,7 @@ export type SyncomErrorCode =
   | 'CALL_UNKNOWN'
   | 'PROMOTE_FAILED'
   | 'BLOB_NOT_FOUND'
+  | 'ATTACHMENT_INVALID'
   | 'FOLLOW_LOST'
   | 'SHARED_LOG_FAILED'
   | 'REVOKED'
@@ -679,13 +680,14 @@ export type TypedErrorCode =
   | 'INVALID_VERSION'
   | 'NO_CHAIN'
   | 'PLUGIN_MISSING'
+  | 'BLOB_TOO_LARGE'
   | 'PRESENCE_SIZE';
 
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
  * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`,
- * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
+ * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `BLOB_TOO_LARGE`, `PRESENCE_SIZE`, whose
  * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
