@@ -624,6 +624,7 @@ export type SyncomErrorCode =
   | 'LEASE_LOST'
   | 'NOT_LEADER'
   | 'LEADER_LOST'
+  | 'CALL_UNKNOWN'
   | 'PROMOTE_FAILED'
   | 'BLOB_NOT_FOUND'
   | 'FOLLOW_LOST'

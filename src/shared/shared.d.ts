@@ -12,7 +12,8 @@ export type FullDatabase = Database & TextMethods & TextHandleMethods & TreeMeth
 
 /** The channel a follower carries its writes over: anything carrying JSON both ways (`createSharedChannel` of the wrpc subpath). */
 export interface LeaderChannel {
-  call(method: string, args: unknown[]): Promise<unknown>;
+  /** The payload is a `SharedCall`; a transport typed over `unknown[]` (the wrpc subpath's `SharedChannel`) is one too. */
+  call(method: string, call: SharedCall | unknown[]): Promise<unknown>;
   close?(): unknown;
 }
 
@@ -98,10 +99,20 @@ export interface SharedDocument<R = RecordData> {
   close(): void;
 }
 
+/** A forwarded call as the wire carries it: `id` is `'<follower token>:<n>'`, `retry` once the call may have reached a leader. */
+export interface SharedCall {
+  id: string;
+  args: unknown[];
+  retry?: boolean;
+}
+
 /** A procedure for a wrpc router: `defineRouter({ 'syncom-db': shared.serve() })`. */
 export interface ServedProcedure {
   access: string;
-  handler: (context: unknown, args: unknown) => Promise<{ ok: true; value: unknown } | { ok: false; error: unknown }>;
+  handler: (
+    context: unknown,
+    call: SharedCall,
+  ) => Promise<{ ok: true; value: unknown } | { ok: false; error: unknown }>;
 }
 
 export interface Shared {

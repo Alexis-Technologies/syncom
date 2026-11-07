@@ -100,10 +100,25 @@ const LOCKED_RETRIES = 40;
 const LOCKED_STEP = 50;
 // A promotion that failed asks for the lock again after LOCKED_STEP · 2^attempt ms, MAX_BACKOFF at most.
 const MAX_BACKOFF = 5000;
+// The answers a leader keeps for the calls tried again: per follower (its token), and how many followers.
+const ANSWERS_KEPT = 256;
+const TOKENS_KEPT = 64;
+const CALL_ID_MAX = 128;
 const NOOP = () => {};
 const QUIET = { warn: NOOP, error: NOOP, info: NOOP, debug: NOOP };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// A forwarded call as the wire carries it: `{ id: '<token>:<n>', args, retry? }`, or null where it is none.
+const callOf = (payload) => {
+  if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const { id, args, retry = false } = payload;
+  if (typeof id !== 'string' || id.length === 0 || id.length > CALL_ID_MAX || !Array.isArray(args)) return null;
+  if (typeof retry !== 'boolean') return null;
+  const at = id.lastIndexOf(':');
+  if (at <= 0) return null;
+  return { id, token: id.slice(0, at), args, retry };
+};
 
 const notLeader = (path, what) =>
   new SyncomError('NOT_LEADER', `${what} is the leader's: the instance at ${path} follows`, { path, what });
@@ -192,6 +207,7 @@ class Shared extends Emitter {
   #generation = 0;
   #channel = null;
   #dialing = null;
+  #calls = 0;
   #lives = new Set();
   #waiters = [];
 
@@ -535,13 +551,19 @@ class Shared extends Emitter {
     if (channel !== null) await Promise.resolve(channel.close?.()).catch(NOOP);
   }
 
-  // A follower's write: carried to the leader, tried again while a leader comes within `failover` ms — this
-  // instance's own, where the election made it so meanwhile — then `LEADER_LOST`. A dial that fails sent
-  // nothing; a call that rejects — a transport's error, a `TypeError` of a fetch among them — is tried again, as is
-  // a NOT_LEADER, LEADER_LOST or CLOSED answer (the instance that answered follows, or is going).
+  // A follower's write: carried to the leader as a CALL — `{ id: '<token>:<n>', args, retry }` — tried again while a
+  // leader comes within `failover` ms (this instance's own, where the election made it so meanwhile), then
+  // `LEADER_LOST`. At-least-once, deduplicated by the id: a call whose answer was lost goes again with `retry`, and
+  // the leader that saw it answers from what it kept; one no leader saw (the leader changed) is CALL_UNKNOWN there,
+  // LEADER_LOST with `maybeApplied` here — never run twice. A dial that fails sent nothing (`retry` stays off); a call
+  // that rejects — a transport's error, a `TypeError` of a fetch among them — may have reached the leader (`sent`,
+  // unless the transport says `sent: false`); a NOT_LEADER, LEADER_LOST or CLOSED answer is from an instance that
+  // follows, or is going: tried again, and it never marks a call sent.
   async #forward(name, args) {
     if (this.#dial === null) throw notLeader(this.#path, `${name}() without a channel to the leader`);
     const deadline = Date.now() + this.#failover;
+    const id = `${this.#election.token}:${++this.#calls}`;
+    let sent = false;
     let cause = null;
     for (let attempt = 0; ; attempt++) {
       this.#check();
@@ -560,16 +582,24 @@ class Shared extends Emitter {
       if (channel !== null) {
         let answer = null;
         try {
-          answer = await channel.call(name, args);
+          answer = await channel.call(name, { id, args, retry: sent });
         } catch (error) {
           cause = error;
+          sent = sent || error?.sent !== false;
         }
         if (answer !== null) {
           try {
             return unwrap(answer, name);
           } catch (error) {
-            // The instance that answered follows now, or is closing: the leader is another, dialed again.
             const code = error?.code;
+            if (code === 'CALL_UNKNOWN') {
+              throw new SyncomError(
+                'LEADER_LOST',
+                `${name}() was tried again at a leader that never saw it: the leader changed, the first may have landed`,
+                { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: true, cause: error },
+              );
+            }
+            // The instance that answered follows now, or is closing: the leader is another, dialed again.
             if (code !== 'NOT_LEADER' && code !== 'LEADER_LOST' && code !== 'CLOSED') throw error;
             cause = error;
           }
@@ -581,12 +611,7 @@ class Shared extends Emitter {
         throw new SyncomError(
           'LEADER_LOST',
           `${name}() reached no leader of ${this.#path} within ${this.#failover} ms`,
-          {
-            path: this.#path,
-            method: name,
-            attempts: attempt + 1,
-            cause,
-          },
+          { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: sent, cause },
         );
       }
       await sleep(Math.min(LOCKED_STEP * (attempt + 1), 1000));
@@ -624,27 +649,56 @@ class Shared extends Emitter {
 
   /**
    * The procedures a leader mounts for its followers (`defineRouter({ 'syncom-db': shared.serve() })`): one per
-   * writer and `transact`, each answering a value — the result, or the error described — never throwing; an
-   * instance that follows again answers `NOT_LEADER`. `NOT_LEADER` here on a follower. `access` is wrpc's:
-   * `'session'` by default — the leader's writers are the application's own tabs', never a router's public face.
+   * writer and `transact`, each taking a call `{ id, args, retry }` and answering a value — the result, or the error
+   * described — never throwing; an instance that follows again answers `NOT_LEADER`. The answers are kept by call
+   * id, ANSWERS_KEPT per follower and TOKENS_KEPT followers (in memory, this `serve()`'s): a call tried again is
+   * answered from what was kept, in flight or done, and one tried again that this leader never saw is
+   * CALL_UNKNOWN — never run. `NOT_LEADER` here on a follower. `access` is wrpc's: `'session'` by default — the
+   * leader's writers are the application's own tabs', never a router's public face.
    */
   serve({ access = 'session' } = {}) {
     this.#check();
     if (!this.#leader) throw notLeader(this.#path, 'serve()');
-    const run = (fn) => async (context, args) => {
+    const answers = new Map();
+    const keep = (token, id, answer) => {
+      let kept = answers.get(token);
+      if (kept === undefined) {
+        if (answers.size >= TOKENS_KEPT) answers.delete(answers.keys().next().value);
+        kept = new Map();
+      } else answers.delete(token);
+      answers.set(token, kept);
+      kept.set(id, answer);
+      if (kept.size > ANSWERS_KEPT) kept.delete(kept.keys().next().value);
+    };
+    const run = (method, fn) => async (context, payload) => {
+      const call = callOf(payload);
+      if (call === null)
+        return { ok: false, error: describe(new TypeError(`${method}: a call is { id, args, retry? }`)) };
+      const held = answers.get(call.token)?.get(call.id);
+      if (held !== undefined) return held;
       if (this.#closed || !this.#leader) {
         return { ok: false, error: describe(notLeader(this.#path, 'a forwarded write')) };
       }
-      return answerOf(() => fn(Array.isArray(args) ? args : []));
+      if (call.retry) {
+        const unknown = new SyncomError(
+          'CALL_UNKNOWN',
+          `${method}: the call ${call.id} was tried again, and this leader never saw it`,
+          { id: call.id, method },
+        );
+        return { ok: false, error: describe(unknown) };
+      }
+      const answer = answerOf(() => fn(call.args));
+      keep(call.token, call.id, answer);
+      return answer;
     };
     const procedures = {};
     for (let i = 0; i < MUTATORS.length; i++) {
       const name = MUTATORS[i];
-      procedures[name] = { access, handler: run((args) => Reflect.apply(this.#db[name], this.#db, args)) };
+      procedures[name] = { access, handler: run(name, (args) => Reflect.apply(this.#db[name], this.#db, args)) };
     }
     procedures.transact = {
       access,
-      handler: run(([ops, options]) => {
+      handler: run('transact', ([ops, options]) => {
         if (!Array.isArray(ops)) throw new TypeError('transact: a list of [method, args]');
         return this.#db.transact(async (tx) => {
           for (let i = 0; i < ops.length; i++) {

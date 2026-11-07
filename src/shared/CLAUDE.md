@@ -24,14 +24,20 @@ readOnly: true })` — `sync` and `lock` left out: a follower neither dials nor 
   `observe()` — a thing that would silently hear nothing is not offered. Nothing of the core is required here:
   `createDatabase` is an option, as `/branch` opens through the parent's constructor and `scripts/size.js` measures a
   block alone.
-- **Every write of a follower is the leader's write, answered as the leader answers it.** The facade's writers
-  (`MUTATORS`, one per writer of the database's API) run on the leader's `Database` where this instance leads and are
-  carried over the channel — `{ call(method, args) }` — otherwise; the leader's `serve()` answers every call as a
+- **Every write of a follower is the leader's write, answered as the leader answers it — once.** The facade's
+  writers (`MUTATORS`, one per writer of the database's API) run on the leader's `Database` where this instance
+  leads and are carried over the channel — `{ call(method, payload) }`, the payload a CALL `{ id: '<token>:<n>',
+args, retry }` (`callOf`), the token the election's — otherwise; the leader's `serve()` answers every call as a
   VALUE, `{ ok: true, value }` or `{ ok: false, error: describe(error) }`, never a thrown error, so a refusal
-  round-trips over any wire (`revive`: a SyncomError with its code and fields, a TypeError with its data code). A
-  transport failure, a `NOT_LEADER` or a `LEADER_LOST` answer drops the channel and tries again — `channel()` dialed
-  anew — while a leader comes within `failover` ms, this instance's own where the election made it so meanwhile;
-  past it, `LEADER_LOST` with the cause. A follower's `transact(fn)` is RECORDED: `fn` runs here against a recorder
+  round-trips over any wire (`revive`: a SyncomError with its code and fields, a TypeError with its data code). The
+  forward is at-least-once and deduplicated by id: the leader keeps the answers (`ANSWERS_KEPT` per token,
+  `TOKENS_KEPT` tokens, in memory, one `serve()`'s) and answers a call tried again from what it kept, in flight or
+  done; a `retry` it never saw is `CALL_UNKNOWN`, never run, which the follower turns into `LEADER_LOST
+{ maybeApplied: true }`. A call that rejected may have reached the leader (`sent`, unless the transport says
+  `sent: false`); a dial that failed, a `NOT_LEADER`, `LEADER_LOST` or `CLOSED` answer marks nothing sent. Every
+  such failure drops the channel and tries again — `channel()` dialed anew, one dial for every write waiting —
+  while a leader comes within `failover` ms, this instance's own where the election made it so meanwhile; past it,
+  `LEADER_LOST` with the cause and `maybeApplied`. A follower's `transact(fn)` is RECORDED: `fn` runs here against a recorder
   (`TX_WRITERS` note the call and answer at once; `get`/`has` read this instance), the batch goes as one `transact`
   call and runs in one transaction there — `insert` is refused on the recorder (its id would be the leader's). The
   leader validates every name of a recorded batch against `TX_WRITERS` and the transaction's api.

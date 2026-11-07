@@ -36,7 +36,7 @@ const led = (election) =>
 // One "browser profile": an engine, its locks, the port the leader serves on; `open(name)` is a tab.
 const profile = (
   t,
-  { engine = syncom.memoryEngine(), path = 'shared', createDatabase = syncom.createDatabase } = {},
+  { engine = syncom.memoryEngine(), path = 'shared', createDatabase = syncom.createDatabase, defer = 0 } = {},
 ) => {
   const locks = createFakeLocks();
   const port = createLeaderPort();
@@ -47,7 +47,7 @@ const profile = (
       engine,
       path,
       logger: false,
-      defer: 0,
+      defer,
       schema,
       channel: port.dial,
       election: { locks },
@@ -335,6 +335,138 @@ test('Shared database', async (t) => {
   );
 
   await t.test(
+    'a forwarded write whose answer was lost is applied once: the leader answers the retry from what it kept, in flight or done',
+    async (t2) => {
+      // Under the default `defer`: the leader's landing is deferred, the follower hears it through the change stream.
+      const { open, port } = profile(t2, { path: 'once', defer: undefined });
+      const a = await open();
+      // A channel that loses the answer of one call after the leader applied it, and of another while it still runs.
+      let dropped = 0;
+      let inFlight = 0;
+      const seen = [];
+      const flaky = async (info) => {
+        const channel = await port.dial(info);
+        return {
+          call: async (method, payload) => {
+            seen.push([method, payload.id, payload.retry]);
+            if (method === 'inc' && payload.args[1] === 'hits' && dropped === 0) {
+              dropped++;
+              await channel.call(method, payload);
+              throw Object.assign(new Error('socket closed before the answer'), { code: 'ECONNRESET' });
+            }
+            if (method === 'inc' && payload.args[1] === 'edits' && inFlight === 0) {
+              inFlight++;
+              channel.call(method, payload).catch(() => {});
+              throw Object.assign(new Error('socket closed while the call ran'), { code: 'ECONNRESET' });
+            }
+            return channel.call(method, payload);
+          },
+          close: () => channel.close?.(),
+        };
+      };
+      const b = await open({ channel: flaky });
+      const id = await a.insert({ $type: 'Task' });
+      await waitUntil(() => b.hasRecord(id));
+      await b.inc(id, 'hits', 1);
+      await b.inc(id, 'edits', 1);
+      assert.deepStrictEqual(await a.get(id), { $type: 'Task', hits: 1, edits: 1 }, 'applied once each');
+      await waitUntil(async () => (await b.get(id))?.edits === 1);
+      // The wire: every call named `<token>:<n>`, the retry flagged, the id the same.
+      const incs = seen.filter(([method]) => method === 'inc');
+      assert.strictEqual(incs.length, 4);
+      assert.strictEqual(incs[0][1], incs[1][1]);
+      assert.notStrictEqual(incs[1][1], incs[2][1]);
+      assert.strictEqual(incs[2][1], incs[3][1]);
+      assert.deepStrictEqual(
+        incs.map(([, , retry]) => retry),
+        [false, true, false, true],
+      );
+      assert.ok(incs[0][1].startsWith(`${b.token}:`));
+      // The leader's answers are kept: the same call asked again is the same answer, never a second write.
+      const served = a.serve();
+      const first = await served.insert.handler({}, { id: 'probe:1', args: [{ $type: 'Task', title: 'kept' }] });
+      const again = await served.insert.handler(
+        {},
+        { id: 'probe:1', args: [{ $type: 'Task', title: 'kept' }], retry: true },
+      );
+      assert.deepStrictEqual(again, first);
+      assert.strictEqual(await a.db.Task.count({ title: 'kept' }), 1);
+      // A call that is none; a retry this leader never saw.
+      assert.strictEqual((await served.set.handler({}, ['x', {}])).error.name, 'TypeError');
+      assert.strictEqual((await served.set.handler({}, { id: 'nocolon', args: [] })).error.name, 'TypeError');
+      const unknown = await served.set.handler({}, { id: 'probe:2', args: ['x', {}], retry: true });
+      assert.strictEqual(unknown.error.code, 'CALL_UNKNOWN');
+      assert.strictEqual(unknown.error.fields.id, 'probe:2');
+      assert.strictEqual(await a.has('x'), false, 'never run');
+    },
+  );
+
+  await t.test(
+    'a retry a new leader never saw is LEADER_LOST with maybeApplied; a dial that reached nobody is tried again freely; NOT_LEADER answers do not mark a call sent',
+    async (t2) => {
+      const { open, closeTab, port } = profile(t2, { path: 'unknown' });
+      const a = await open();
+      const c = await open();
+      // B's channel loses the answer of its first inc — and the leader goes before the retry: C leads, never saw it.
+      let lost = false;
+      const flaky = async (info) => {
+        const channel = await port.dial(info);
+        return {
+          call: async (method, payload) => {
+            const answer = await channel.call(method, payload);
+            if (method === 'inc' && !lost) {
+              lost = true;
+              await closeTab(a);
+              throw Object.assign(new Error('socket closed before the answer'), { code: 'ECONNRESET' });
+            }
+            return answer;
+          },
+          close: () => channel.close?.(),
+        };
+      };
+      const b = await open({ channel: flaky });
+      const id = await a.insert({ $type: 'Task' });
+      await waitUntil(() => b.hasRecord(id) && c.hasRecord(id));
+      await assert.rejects(
+        () => b.inc(id, 'hits', 1),
+        (error) => {
+          assert.strictEqual(error.code, 'LEADER_LOST');
+          assert.strictEqual(error.maybeApplied, true);
+          assert.strictEqual(error.method, 'inc');
+          assert.ok(error.id.startsWith(`${b.token}:`));
+          assert.strictEqual(error.cause?.code, 'CALL_UNKNOWN');
+          return true;
+        },
+      );
+      assert.strictEqual(c.leader, true);
+      assert.strictEqual((await c.get(id)).hits, 1, 'applied once, by the leader that went');
+      // A dial that reached nobody (the port unmounted) sent nothing: the write goes once a leader mounts, as new.
+      port.mount(null);
+      const pending = b.set('later', { $type: 'Task', title: 'after the gap' });
+      await sleep(120);
+      port.mount(c.serve());
+      await pending;
+      assert.deepStrictEqual(await c.get('later'), { $type: 'Task', title: 'after the gap' });
+      // An instance that follows answers NOT_LEADER: the call is tried again and lands as new once a leader answers.
+      const stale = c.serve();
+      const d = await open();
+      assert.strictEqual(d.leader, false);
+      let answered = 0;
+      const toFollower = async () => ({
+        call: async (method, payload) => {
+          answered++;
+          if (answered < 3) return { ok: false, error: describe(new SyncomError('NOT_LEADER', 'follows', {})) };
+          return stale[method].handler({}, JSON.parse(JSON.stringify(payload)));
+        },
+      });
+      const e = await open({ channel: toFollower });
+      await e.set('via-not-leader', { $type: 'Task', title: 'landed once' });
+      assert.strictEqual(answered, 3);
+      assert.deepStrictEqual(await c.get('via-not-leader'), { $type: 'Task', title: 'landed once' });
+    },
+  );
+
+  await t.test(
     'an elected instance that cannot open yields the lock, says PROMOTE_FAILED and leads once the database frees; openShared rejects and releases when the first open fails',
     async (t2) => {
       // A createDatabase that fails the next open as a writer: a disk on fire, a stale lock past LOCKED_RETRIES.
@@ -496,7 +628,9 @@ test('Shared database', async (t) => {
       await Promise.all(writes);
       assert.strictEqual(dials, 1);
       assert.strictEqual(await b.db.Task.count({}), 5);
-      // A transport whose first call throws a TypeError (a fetch's) is tried again; so is a CLOSED answer.
+      // A transport whose first call throws a TypeError (a fetch's, the request never sent) is tried again; so is a
+      // CLOSED answer. A transport that cannot say the request never left makes the retry a `retry` — the leader
+      // that saw it answers from what it kept, one that did not CALL_UNKNOWN (the test before this one).
       let failures = 0;
       const flaky = async (info) => {
         const channel = await port.dial(info);
@@ -504,7 +638,7 @@ test('Shared database', async (t) => {
           call: async (method, args) => {
             if (failures === 0) {
               failures++;
-              throw new TypeError('fetch failed');
+              throw Object.assign(new TypeError('fetch failed'), { sent: false });
             }
             if (failures === 1) {
               failures++;

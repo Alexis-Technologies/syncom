@@ -107,7 +107,16 @@ follows the instance (its `update` event, and once after a failover with the
 data as the new instance reads it, delta `null`). A follower's write sent
 while the leader went is tried again while a leader comes — `channel()` is
 called again for a fresh channel — within `failover` ms (10 000); past it, or
-when the channel answers nothing readable, `LEADER_LOST`. Concurrent writes
+when the channel answers nothing readable, `LEADER_LOST`. A write is carried as
+a **call** — `{ id: '<token>:<n>', args, retry }`, the id the follower's
+election token and a count — and the leader keeps the answers it gave (256 per
+follower, 64 followers): a call whose answer was lost goes again with `retry`
+and is answered from what the leader kept, in flight or done, never run
+twice; a retry that reaches a leader which never saw the call (the leader
+changed in between) is `CALL_UNKNOWN` there and `LEADER_LOST` here with
+`maybeApplied: true` — read the record before writing again. A dial that
+reached nobody, or a `NOT_LEADER` answer, marks nothing sent, so the next try
+is a new call. Concurrent writes
 waiting on a channel share one dial; a dial that fails sent nothing and is
 tried again, as is a call the transport rejects (a `fetch`'s `TypeError`
 among them) or a `NOT_LEADER`/`CLOSED` answer from an instance that follows
@@ -123,10 +132,12 @@ finds the old lock still held.
 
 ## The channel
 
-The channel is `{ call(method, args) }`, anything that carries JSON both
-ways; the leader answers every call as a value — `{ ok, value }` or `{ ok,
-error }` — so a refusal round-trips whatever the wire does with a thrown
-error. The leader mounts its writers with `shared.serve()` (one procedure per
+The channel is `{ call(method, payload) }`, anything that carries JSON both
+ways — the payload a call `{ id, args, retry }`; the leader answers every call
+as a value — `{ ok, value }` or `{ ok, error }` — so a refusal round-trips
+whatever the wire does with a thrown error. A transport that knows a request
+never left may say so with `sent: false` on the error it throws: the retry is
+then free of the `retry` flag. The leader mounts its writers with `shared.serve()` (one procedure per
 writer and `transact`, `access: 'session'` by default — the tabs' own, never a
 router's public face), and the wrpc subpath wraps a `WrpcClient` as the
 follower's channel. In a browser the leader's server runs where every tab can

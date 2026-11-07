@@ -1,6 +1,6 @@
 import { expectType } from 'tsd';
 import { openShared, elect } from '../src/shared/shared.js';
-import type { Shared, SharedDocument, LeaderChannel, Election } from '../src/shared/shared.js';
+import type { Shared, SharedDocument, LeaderChannel, Election, SharedCall } from '../src/shared/shared.js';
 import { createDatabase } from '../index.js';
 import { memoryEngine } from '../src/memory/memory.js';
 import { createSharedChannel } from '../src/wrpc/wrpc.js';
@@ -58,3 +58,7 @@ expectType<string>(shared.token);
 const tab = await openShared({ createDatabase, engine: memoryEngine(), path: 'data', election: { follower: true } });
 expectType<'locks' | 'heartbeat' | 'follower' | 'alone'>(tab.mode);
 expectType<string>(shared.serve().set.access);
+const answer = await shared.serve().set.handler({}, { id: 'tok:1', args: ['t1', {}], retry: false });
+expectType<boolean>(answer.ok);
+const call: SharedCall = { id: 'tok:2', args: [] };
+expectType<string>(call.id);
