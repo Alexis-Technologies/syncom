@@ -93,6 +93,14 @@ test('Attachments', async (t) => {
         message: /type/,
       });
       await assert.rejects(() => db.attachments.put('absent', 'x', bytesOf('x')), { code: 'NOT_FOUND' });
+      // A sealed record takes no attachment: its bytes would lie in the clear, outside the record's key.
+      const sealed = await db.insert({ secret: 'kept' }, { encrypted: true });
+      const held = (await db[DB].blobs.list()).length;
+      await assert.rejects(() => db.attachments.put(sealed, 'y', bytesOf('never stored')), {
+        code: 'ENCRYPTED',
+        id: sealed,
+      });
+      assert.strictEqual((await db[DB].blobs.list()).length, held, 'nothing stored for it');
       assert.throws(() => attachments({ compression: 'lz' }), { name: 'TypeError', message: /compression/ });
       // An engine without a blobs store cannot carry attachments.
       const plain = syncom.memoryEngine();

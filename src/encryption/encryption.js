@@ -36,6 +36,7 @@ const { isEngine } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 const { atRestEngine } = require('./at-rest-engine.js');
 const { copyEngine } = require('../engines/copy.js');
+const { toBase64, fromBase64 } = require('../crypto/pem.js');
 
 const encryption = Object.freeze({
   name: 'encryption',
@@ -56,43 +57,14 @@ const encryption = Object.freeze({
 // `enc1:` binds each ciphertext to its file name (the additional data of
 // AES-GCM): a file copied over another one of the store does not decrypt.
 const PREFIX = 'enc1:';
+// What follows the prefix: standard base64 (crypto/pem.js's decoder is lenient under Node, so the shape is checked here).
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
 // The fence a rotated source carries in its root namespace (src/identity.js reads it: MOVED).
 const MOVED_FILE = 'moved.json';
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
-
-// Base64 of bytes, three at a time into four letters, a chunk of text per
-// 3 KB joined at the end: a string per byte was a heap of them for a record.
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-const B64_CHUNK = 3072;
-const toBase64 = (bytes) => {
-  const out = [];
-  let chunk = '';
-  let i = 0;
-  for (; i + 2 < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    chunk += B64[n >> 18] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63];
-    if (chunk.length === (B64_CHUNK / 3) * 4) {
-      out.push(chunk);
-      chunk = '';
-    }
-  }
-  if (i < bytes.length) {
-    const second = i + 1 < bytes.length;
-    const n = (bytes[i] << 16) | ((second ? bytes[i + 1] : 0) << 8);
-    chunk += B64[n >> 18] + B64[(n >> 12) & 63] + (second ? B64[(n >> 6) & 63] : '=') + '=';
-  }
-  out.push(chunk);
-  return out.join('');
-};
-const fromBase64 = (text) => {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-};
 
 const failed = (where, reason, cause) =>
   new SyncomError(
@@ -175,13 +147,9 @@ const createCipher = (options) => {
   const seal = async (name, text) => PREFIX + toBase64(await sealBytes(name, encoder.encode(text)));
   const open = async (where, name, text) => {
     if (typeof text !== 'string' || !text.startsWith(PREFIX)) throw failed(where, 'plain');
-    let bytes;
-    try {
-      bytes = fromBase64(text.slice(PREFIX.length));
-    } catch (error) {
-      throw failed(where, 'torn', error);
-    }
-    return decoder.decode(await openBytes(where, name, bytes));
+    const body = text.slice(PREFIX.length);
+    if (!BASE64.test(body)) throw failed(where, 'torn');
+    return decoder.decode(await openBytes(where, name, fromBase64(body)));
   };
   return { seal, open, sealBytes, openBytes };
 };

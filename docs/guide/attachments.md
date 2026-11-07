@@ -25,7 +25,10 @@ under two names, or on two records, are one blob — and sets the register
 reads with `_attachments: { 'photo.jpg': { … } }`; a schema that validates the
 record allows the field. `remove` is an `unset` of that register; the bytes
 stay in the store (another name may share them). `has(id, name)` says whether
-this node holds the bytes.
+this node holds the bytes. A sealed record (`{ encrypted: true }`) takes no
+attachment: `put` is `ENCRYPTED` — the blobs store holds bytes in the clear
+(the [at-rest](./backends#encrypted-at-rest) wrapper apart), which the record's
+key does not cover.
 
 A register is believed only as far as it is one. A peer writes registers too
 (the field replicates like any other), so `get` and `has` read the register

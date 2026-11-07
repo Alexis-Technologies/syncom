@@ -179,6 +179,15 @@ class Attachments {
    */
   async put(id, name, bytes, options) {
     const { stored, entry, field } = await this.prepare(name, bytes, options);
+    // A sealed record takes none: the blobs store holds bytes the record's key does not cover.
+    const row = this.#storage[SOURCE].row(id);
+    if (row !== null && row.encrypted === true) {
+      throw new SyncomError(
+        'ENCRYPTED',
+        `attachments.put(): record ${id} is sealed — its bytes would lie in the clear`,
+        { id },
+      );
+    }
     // In flight: a sweep meanwhile keeps the blob the register is about to name.
     this.#pending.set(entry.digest, (this.#pending.get(entry.digest) ?? 0) + 1);
     try {

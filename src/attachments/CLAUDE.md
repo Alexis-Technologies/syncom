@@ -23,8 +23,9 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   `.pending` (the engine's `copies`, the record file's `data`; a sealed copy reads as none), the puts in flight (`#pending`:
   a count per digest between the blob's put and the register's landing) marked too — then `blobs.list()` minus the marks
   removed. The log is NOT marked (a restored register's bytes come from a peer or are `BLOB_NOT_FOUND`), and a follower's
-  put in flight is not the leader's to see — said in the guide. Nothing of a blob is an op, and a peer's op never carries
-  bytes.
+  put in flight is not the leader's to see — said in the guide. A sealed record (`row.encrypted`) takes no attachment:
+  `put` is `ENCRYPTED` before the blob is stored — the store holds bytes the record's key does not cover. Nothing of a
+  blob is an op, and a peer's op never carries bytes.
 - **Bytes are believed by digest alone, and a register only as far as it is one.** A node that reads a register whose
   bytes it lacks asks the connected peers (`sync.fetchBlob`, `syncom/blob`), hashes what it got and keeps it only when the
   hash is the digest (`sync.blob.mismatch` otherwise, the next peer asked); the host answers a wrpc stream where
