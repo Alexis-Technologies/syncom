@@ -14,21 +14,29 @@
 // compressed through CompressionStream where the platform has it — the
 // digest is the stored bytes', `encoding` on the register — and `get()`
 // inflates. A removed name leaves its bytes in the store (another record,
-// another name may share them). A register is believed only as far as it is
+// another name may share them) until `sweep()` — mark-and-sweep over the live
+// records' registers, the tags' copies and the puts in flight, then every
+// other digest of the store removed. A register is believed only as far as it is
 // one (`validEntry`: a digest, a type, a length within MAX_BLOB_BYTES, an
 // encoding the plugin knows — a peer writes registers too, and a digest is a
 // key of the store): `ATTACHMENT_INVALID` from `get`/`has`, skipped by `list`.
-// Requires errors.js, blobs.js, crypto/digest.js only: the id is checked where
-// it enters the core (`get`, `update`, `unset`), as every id is.
+// Requires errors.js, blobs.js, symbols.js, crypto/digest.js only: the id is
+// checked where it enters the core (`get`, `update`, `unset`), as every id is.
 
 const { SyncomError, typed } = require('../errors.js');
 const { isDigest, checkBlobBytes, MAX_BLOB_BYTES } = require('../blobs.js');
+const { SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 
 const FIELD = '_attachments';
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,127}$/;
 const ENCODINGS = new Set(['gzip', 'deflate']);
 const DEFAULT_TYPE = 'application/octet-stream';
+// A sweep reads the live records this many at a time (one read of the engine each page).
+const SWEEP_PAGE = 500;
+const TAGS_FILE = 'tags.json';
+// The copies a tag has not taken yet (src/versions/tags.js PENDING): records as they were, named by no tag yet.
+const PENDING_TAG = '.pending';
 const encoder = new TextEncoder();
 
 const checkName = (name) => {
@@ -90,16 +98,34 @@ const inflate = async (bytes, encoding, limit) => {
   return out;
 };
 
+// The digests a record's registers name, added to `marked`: what a sweep keeps. A reader's view nests the field
+// (`_attachments: { name: entry }`); a stored record file keeps every path apart (`'_attachments/name': entry`).
+const PREFIX = `${FIELD}/`;
+const markOf = (data, marked) => {
+  if (!isPlainObject(data)) return;
+  const held = data[FIELD];
+  if (isPlainObject(held)) {
+    for (const name of Object.keys(held)) if (validEntry(held[name])) marked.add(held[name].digest);
+  }
+  for (const key of Object.keys(data)) {
+    if (key.startsWith(PREFIX) && validEntry(data[key])) marked.add(data[key].digest);
+  }
+};
+
 class Attachments {
   #storage;
+  #db;
   #blobs;
   #encoding;
   #logger;
   // The invalid registers warned about, once each (`<id>/<name>`).
   #warned = new Set();
-  constructor(storage, blobs, encoding, logger) {
+  // The digests of the puts in flight — between the blob's put and the register's landing — and how many each.
+  #pending = new Map();
+  constructor(storage, db, encoding, logger) {
     this.#storage = storage;
-    this.#blobs = blobs;
+    this.#db = db;
+    this.#blobs = db.blobs;
     this.#encoding = encoding;
     this.#logger = logger;
   }
@@ -153,9 +179,88 @@ class Attachments {
    */
   async put(id, name, bytes, options) {
     const { stored, entry, field } = await this.prepare(name, bytes, options);
-    await this.#blobs.put(entry.digest, stored);
-    await this.#storage.update(id, { [field]: entry });
+    // In flight: a sweep meanwhile keeps the blob the register is about to name.
+    this.#pending.set(entry.digest, (this.#pending.get(entry.digest) ?? 0) + 1);
+    try {
+      await this.#blobs.put(entry.digest, stored);
+      await this.#storage.update(id, { [field]: entry });
+    } finally {
+      const left = this.#pending.get(entry.digest) - 1;
+      if (left === 0) this.#pending.delete(entry.digest);
+      else this.#pending.set(entry.digest, left);
+    }
     return entry;
+  }
+
+  /**
+   * Mark-and-sweep over the blobs store: every digest a live record's register names, a tag's copy names (`tags`,
+   * on by default; the pending copies among them) or a put in flight holds is kept, every other blob removed.
+   * Answers `{ blobs, marked, removed, pending }`; `dryRun` counts and removes nothing. The log is not marked: a
+   * `restore()` or `applyPatches()` that brings a swept register back names bytes a peer may still hold (fetched on
+   * the read), else `BLOB_NOT_FOUND`. The writer's alone: `READ_ONLY` on a follower, `CLOSED` after close.
+   */
+  async sweep({ dryRun = false, tags = true } = {}) {
+    const seam = this.#storage[SOURCE];
+    seam.guard('a sweep');
+    const started = Date.now();
+    const marked = new Set();
+    // The live records, a page at a time: a row that is gone names nothing.
+    const ids = seam.all();
+    let page = [];
+    for (let i = 0; i <= ids.length; i++) {
+      if (i < ids.length) {
+        const row = seam.row(ids[i]);
+        if (row === null || row.gone === true) continue;
+        page.push(ids[i]);
+      }
+      if (page.length < SWEEP_PAGE && i < ids.length) continue;
+      if (page.length > 0) {
+        const found = await seam.loadMany(page);
+        for (const data of found.values()) markOf(data, marked);
+        page = [];
+      }
+    }
+    // A tag's copies: the records as they were, their registers too (a sealed copy reads as none here).
+    if (tags) {
+      const names = [PENDING_TAG];
+      const text = await this.#db.kv.get('', TAGS_FILE);
+      if (text !== null) {
+        let parsed = null;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          // Unreadable tags are none: nothing of them to keep.
+        }
+        const held = Array.isArray(parsed?.tags) ? parsed.tags : [];
+        for (let i = 0; i < held.length; i++) if (typeof held[i]?.name === 'string') names.push(held[i].name);
+      }
+      for (let i = 0; i < names.length; i++) {
+        const copied = await this.#db.copies.ids(names[i]);
+        for (let k = 0; k < copied.length; k++) {
+          const raw = await this.#db.copies.get(names[i], copied[k]);
+          if (raw === null) continue;
+          let stored = null;
+          try {
+            stored = JSON.parse(raw);
+          } catch {
+            // A copy that does not read names nothing.
+          }
+          if (stored !== null && stored.encrypted !== true) markOf(stored.data, marked);
+        }
+      }
+    }
+    for (const digest of this.#pending.keys()) marked.add(digest);
+    // The sweep: what the store holds and nothing names.
+    const digests = await this.#blobs.list();
+    let removed = 0;
+    for (let i = 0; i < digests.length; i++) {
+      if (marked.has(digests[i])) continue;
+      if (!dryRun) await this.#blobs.remove(digests[i]);
+      removed++;
+    }
+    const result = { blobs: digests.length, marked: marked.size, removed, pending: this.#pending.size };
+    this.#logger.info({ event: 'attachments.sweep', ...result, dryRun, ms: Date.now() - started });
+    return result;
   }
 
   /**
@@ -261,7 +366,7 @@ const attachments = ({ compression = null } = {}) => {
       if (db === null || db === undefined || db.blobs === undefined) {
         throw new TypeError('attachments: the engine has no blobs store (capabilities.blobs)');
       }
-      return { attachments: new Attachments(storage, db.blobs, compression, logger) };
+      return { attachments: new Attachments(storage, db, compression, logger) };
     },
   });
 };

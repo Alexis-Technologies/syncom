@@ -342,6 +342,10 @@ class SharedAttachments {
   list(id) {
     return this.#attachments.list(id);
   }
+  /** The leader's sweep over the shared store; READ_ONLY on a follower (its puts in flight are not the leader's to see). */
+  sweep(options) {
+    return this.#attachments.sweep(options);
+  }
   async remove(id, name) {
     await this.#shared[WRITE]('unset', [id, [this.#attachments.field(name)]]);
   }

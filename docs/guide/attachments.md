@@ -73,6 +73,26 @@ So an attachment reaches a node when that node reads it, not before: a phone
 syncing a thousand records does not download a thousand photos. Pushing bytes
 ahead of a read is not here — see the [comparison](./vs-rxdb).
 
+## Collecting the bytes
+
+`remove`, `delete`, `purge` and `forget` leave an attachment's bytes in the
+store — another name, another record may share them, and nothing counts
+references. `db.attachments.sweep()` collects them: a mark-and-sweep over the
+store, where every digest a live record's register names, a tag's copy names
+(`tags: true` by default — a record as it was at a tag keeps its file) or a put
+in flight holds is kept, and every other blob is removed. It answers
+`{ blobs, marked, removed, pending }`; `sweep({ dryRun: true })` counts and
+removes nothing. The log is not marked: a `restore()` or `applyPatches()` that
+brings a swept register back names bytes a peer may still hold — fetched on the
+read — else `BLOB_NOT_FOUND`. A sweep is the writer's: `READ_ONLY` on a
+follower, and a follower's put in flight (`@alexify/syncom/shared`) is not the
+leader's to see — sweep when the tabs are quiet, or put again.
+
+```js
+const { blobs, marked, removed } = await db.attachments.sweep({ dryRun: true });
+await db.attachments.sweep(); // removes what nothing names
+```
+
 ## Compression
 
 ```js

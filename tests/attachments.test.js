@@ -411,6 +411,98 @@ test('Attachments', async (t) => {
   );
 
   await t.test(
+    'sweep() removes the blobs no live record and no tag names, keeps the rest and a put in flight; dryRun counts; a follower cannot sweep',
+    async (t2) => {
+      // A gate inside the queue: a write held open holds a put between its blob and its register.
+      let gate = null;
+      const infos = [];
+      const db = await syncom.createDatabase({
+        engine,
+        path: 'swept',
+        logger: { info: (e) => infos.push(e), warn: () => {}, error: () => {}, debug: () => {} },
+        defer: 0,
+        plugins: [attachments()],
+        hooks: { beforeWrite: async () => void (gate === null || (await gate)) },
+      });
+      t2.after(() => db.close().catch(() => {}));
+      const store = db[DB].blobs;
+      const digestOf = (text) => hashBytes(bytesOf(text));
+      const kept = await db.insert({ title: 'keeps its file' });
+      await db.attachments.put(kept, 'a.txt', bytesOf('named by a live record'));
+      const unnamed = await db.insert({ title: 'drops its file' });
+      await db.attachments.put(unnamed, 'b.txt', bytesOf('named by nobody once removed'));
+      await db.attachments.remove(unnamed, 'b.txt');
+      const deleted = await db.insert({ title: 'is deleted' });
+      await db.attachments.put(deleted, 'c.txt', bytesOf('named by a tombstone'));
+      await db.delete(deleted);
+      const tagged = await db.insert({ title: 'tagged, then changed' });
+      await db.attachments.put(tagged, 'd.txt', bytesOf('named by a tag’s copy alone'));
+      await db.tag('v1');
+      await db.attachments.remove(tagged, 'd.txt');
+      await store.put(await digestOf('named by nothing at all'), bytesOf('named by nothing at all'));
+      assert.strictEqual((await store.list()).length, 5);
+      // A dry run counts: with the tags, the tag's copy keeps d.txt; without, it goes too.
+      const dry = await db.attachments.sweep({ dryRun: true });
+      assert.deepStrictEqual(dry, { blobs: 5, marked: 2, removed: 3, pending: 0 });
+      assert.strictEqual((await store.list()).length, 5, 'a dry run removes nothing');
+      assert.deepStrictEqual(await db.attachments.sweep({ dryRun: true, tags: false }), {
+        blobs: 5,
+        marked: 1,
+        removed: 4,
+        pending: 0,
+      });
+      // A put in flight — its blob stored, its register held in the queue — is kept by the sweep that runs meanwhile.
+      const heldId = await db.insert({ title: 'held' });
+      let open = null;
+      gate = new Promise((resolve) => {
+        open = resolve;
+      });
+      const held = db.attachments.put(heldId, 'e.txt', bytesOf('in flight'));
+      try {
+        await waitUntil(async () => store.has(await digestOf('in flight')));
+        const during = await db.attachments.sweep();
+        assert.strictEqual(during.pending, 1);
+        assert.strictEqual(during.removed, 3, 'b, c and the stray — not d (the tag), not e (in flight)');
+        assert.strictEqual(await store.has(await digestOf('in flight')), true);
+        assert.strictEqual(await store.has(await digestOf('named by a tag’s copy alone')), true);
+        assert.strictEqual(await store.has(await digestOf('named by nobody once removed')), false);
+        assert.strictEqual(await store.has(await digestOf('named by a tombstone')), false);
+        assert.strictEqual(await store.has(await digestOf('named by nothing at all')), false);
+      } finally {
+        open();
+        gate = null;
+      }
+      await held;
+      assert.deepStrictEqual(await db.attachments.sweep(), { blobs: 3, marked: 3, removed: 0, pending: 0 });
+      assert.deepStrictEqual(
+        [...(await db.attachments.get(kept, 'a.txt')).bytes],
+        [...bytesOf('named by a live record')],
+      );
+      assert.strictEqual(
+        (await db.at('v1').get(tagged))[FIELD]?.['d.txt']?.length,
+        bytesOf('named by a tag’s copy alone').length,
+        'the tag still reads the register whose bytes the sweep kept',
+      );
+      const line = infos.find((e) => e.event === 'attachments.sweep');
+      assert.ok(line !== undefined && typeof line.ms === 'number' && line.removed === 3);
+      // A follower cannot sweep (READ_ONLY); a closed database neither.
+      const follower = await syncom.createDatabase({
+        engine,
+        path: 'swept',
+        logger: false,
+        readOnly: true,
+        plugins: [attachments()],
+      });
+      t2.after(() => follower.close().catch(() => {}));
+      await assert.rejects(() => follower.attachments.sweep(), { code: 'READ_ONLY' });
+      const closing = await createStorage(t2, 'closing');
+      const sweep = closing.attachments;
+      await closing.close();
+      await assert.rejects(() => sweep.sweep(), { code: 'CLOSED' });
+    },
+  );
+
+  await t.test(
     'at rest the bytes are sealed at the blob’s place and read back whole; copyEngine carries the blobs',
     async (t2) => {
       const inner = syncom.memoryEngine();

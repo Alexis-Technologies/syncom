@@ -4,6 +4,7 @@
 
 import type {
   AttachmentEntry,
+  AttachmentSweep,
   Attachment,
   Collection,
   Database,
@@ -190,6 +191,8 @@ export interface SharedAttachments {
   has(id: string, name: string): Promise<boolean>;
   list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
   remove(id: string, name: string): Promise<void>;
+  /** The leader's sweep over the shared store; `READ_ONLY` on a follower. */
+  sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
 }
 
 /** The local documents of the shared database: reads this instance's, `set(key, value)`/`delete` the leader's; no `set(key, fn)`, no `observe`. */

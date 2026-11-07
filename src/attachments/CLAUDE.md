@@ -7,8 +7,8 @@ Bytes beside a record: in the engine's blobs store by digest, named on the recor
 ```
 src/attachments/attachments.js @alexify/syncom/attachments — attachments({ compression }): the plugin, db.attachments (put, get, has, list, remove)
                           over the engine's blobs store and the record's `_attachments/<name>` register; the bytes fetched through
-                          sync.fetchBlob where this node lacks them; prepare() and field() for a follower of /shared — requires
-                          errors.js, blobs.js, crypto/digest.js only
+                          sync.fetchBlob where this node lacks them; prepare() and field() for a follower of /shared; sweep(), the
+                          mark-and-sweep over the store — requires errors.js, blobs.js, symbols.js, crypto/digest.js only
 ```
 
 ## Rules
@@ -16,8 +16,15 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
 - **The name is a field; the bytes are content.** `put` writes the blob first (`blobs.put(digest, bytes)`: content-addressed,
   idempotent, outside the write set — the same bytes are the same blob whoever names them) and then the register
   `_attachments/<name>` through the database's own `update`: logged, replicated, tagged, undone like any field. `remove` is an
-  `unset` of the register; the bytes stay (another name, another record may share them — there is no reference count and no
-  sweep yet). Nothing of a blob is an op, and a peer's op never carries bytes.
+  `unset` of the register; the bytes stay (another name, another record may share them — there is no reference count) until
+  `sweep({ dryRun, tags })`: a mark-and-sweep through the `[SOURCE]` seam — `guard('a sweep')` first (CLOSED, READ_ONLY on a
+  follower), the live rows (`all()` minus `gone`) read `SWEEP_PAGE` at a time through `loadMany` (a sealed record's data as
+  the key here opens it), every valid register's digest marked; with `tags` the copies of every tag in `tags.json` and of
+  `.pending` (the engine's `copies`, the record file's `data`; a sealed copy reads as none), the puts in flight (`#pending`:
+  a count per digest between the blob's put and the register's landing) marked too — then `blobs.list()` minus the marks
+  removed. The log is NOT marked (a restored register's bytes come from a peer or are `BLOB_NOT_FOUND`), and a follower's
+  put in flight is not the leader's to see — said in the guide. Nothing of a blob is an op, and a peer's op never carries
+  bytes.
 - **Bytes are believed by digest alone, and a register only as far as it is one.** A node that reads a register whose
   bytes it lacks asks the connected peers (`sync.fetchBlob`, `syncom/blob`), hashes what it got and keeps it only when the
   hash is the digest (`sync.blob.mismatch` otherwise, the next peer asked); the host answers a wrpc stream where

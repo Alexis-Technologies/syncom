@@ -3099,8 +3099,24 @@ export interface AttachmentStore {
   /** Whether this node holds the bytes of the attachment named. */
   has(id: string, name: string): Promise<boolean>;
   list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
-  /** Takes the name off the record (replicated); the bytes stay in the store. */
+  /** Takes the name off the record (replicated); the bytes stay in the store until a `sweep()`. */
   remove(id: string, name: string): Promise<void>;
+  /** What a `put` would store and write, without storing or writing; the register's field name. */
+  prepare(name: string, bytes: Uint8Array | ArrayBuffer | string, options?: { type?: string }): Promise<{ stored: Uint8Array; entry: AttachmentEntry; field: string }>;
+  field(name: string): string;
+  /**
+   * Mark-and-sweep over the blobs store: every digest a live record, a tag's copy (`tags`, on by default) or a put in
+   * flight names is kept, every other blob removed (`dryRun` counts alone). `READ_ONLY` on a follower.
+   */
+  sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
+}
+
+/** What `db.attachments.sweep()` answers: the blobs the store held, the digests marked, the blobs removed, the puts in flight. */
+export interface AttachmentSweep {
+  blobs: number;
+  marked: number;
+  removed: number;
+  pending: number;
 }
 
 export interface LocalStore {

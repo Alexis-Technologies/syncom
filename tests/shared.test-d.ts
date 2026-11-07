@@ -48,6 +48,7 @@ await tasks.update('t1', { title: 'y' });
 expectType<number>(await tasks.count({}));
 expectType<SharedAttachments>(shared.attachments);
 expectType<string>((await shared.attachments.put('t1', 'a.txt', new Uint8Array(1))).digest);
+expectType<number>((await shared.attachments.sweep()).removed);
 expectType<SharedLocal>(shared.local);
 expectType<SharedLocal>(shared.local.scoped('Task'));
 await shared.local.set('k', { v: 1 });
