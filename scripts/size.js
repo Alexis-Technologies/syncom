@@ -457,7 +457,9 @@ const ENTRIES = [
   // name.
   // 177.6 with the blob served by record and beforeSend on hosted pages (review №7, E3.5; 2026-11-07). 178, raised by
   // name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 178 },
+  // 178.0 with the hosting side split into hosting.js, rules.js and reads.js (review №7, E11.1; 2026-11-07). 178.5, raised
+  // by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 178.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

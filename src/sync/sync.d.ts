@@ -98,7 +98,7 @@ export interface SyncUnitOptions {
   pageBytes?: number;
   /** Per-peer push limits: a page over `opsPerPush`/`bytesPerPush` is refused with 413, a peer over `opsPerSecond` with 429. */
   limits?: SyncLimits;
-  /** Copied onto all four procedures — what a wrpc `onRequest` hook reads as `context.procedure.meta`. */
+  /** Copied onto every procedure of the unit — what a wrpc `onRequest` hook reads as `context.procedure.meta`. */
   meta?: Record<string, unknown>;
   /**
    * Which procedures this unit serves (every one by default): a peer asking for `push` where it is off is refused

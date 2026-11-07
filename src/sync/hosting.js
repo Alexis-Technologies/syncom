@@ -10,33 +10,59 @@
 //
 // The dialing side is src/sync/manager.js; `SyncManager.unit()` builds the unit here
 // with what the two halves share: the storage, the telemetry writer, the
-// wakers every live feed waits on and the set `hosted()` lists.
+// wakers every live feed waits on and the set `hosted()` lists. The rules the
+// procedures stand on — refusals, the peer of a call, the options, the limits,
+// the grant, the proof, the sessions — are src/sync/rules.js; the reads a thin
+// client makes (`query`, `count`, `blob`) are src/sync/reads.js; here are the
+// hello, the push, the snapshot, the two feeds, the presence and the unit.
 
 const { packOps, unpackOps } = require('./wire.js');
 const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
-const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
+const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
 const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js');
-const { SIGNER, CURSOR, DB, SOURCE } = require('../symbols.js');
-const { safeRegex } = require('../query/safe-regex.js');
-const { toBase64 } = require('../crypto/pem.js');
+const { SIGNER, SOURCE } = require('../symbols.js');
+const {
+  refuse,
+  refuseCall,
+  peerOf,
+  announceRefused,
+  refuseOps,
+  normalizeAllow,
+  normalizeLimits,
+  limit,
+  grant,
+  challengeOf,
+  prove,
+  joinRooms,
+  remember,
+  handPresence,
+} = require('./rules.js');
+const { normalizeQuery, query, count, blob } = require('./reads.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
 const MAX_SCOPES = 256;
 const { isUpdate: isPresenceUpdate, isEntry: isPresenceEntry, sized } = require('../presence/presence.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
 const { parseEntry, sleep } = require('./shared.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
+
 const TRACKED = Symbol.for('wrpc.tracked');
+
 // A feed over a shared log labels a page at least every so many entries it passed without one for its peer.
 const PASS_EVERY = 64;
+
 // A feed whose read of the shared log failed waits this long before it reads again, doubling.
 const FEED_BACKOFF = 1000;
+
 const MAX_FEED_BACKOFF = 60_000;
+
 // A feed over a shared log that read nothing for this long tells its peer it is caught up (an idle page).
 const IDLE_AFTER = 50;
+
 const IDLE = Symbol('syncom.idle');
+
 // The next entry of a shared read, or IDLE after `ms` with none.
 const nextOrIdle = (pending, ms) =>
   new Promise((resolve, reject) => {
@@ -54,143 +80,7 @@ const nextOrIdle = (pending, ms) =>
     );
   });
 
-// `unit({ allow })`: which procedures this unit serves; a peer asking for one it does not is refused by code
-// (403): `push` as READ_ONLY — the host takes nothing — `snapshot`, `changes` and `blob` as NOT_SERVED. `blob` is
-// `'named'` (true: a digest served to a peer that names a record in its scopes holding it — a revoke, a purge, a
-// forget follow the record), `'any'` (by digest alone: a capability, a trusted mesh's) or false.
-const ALLOW_KEYS = new Set(['push', 'changes', 'snapshot', 'blob']);
-const BLOB_MODES = new Set([false, 'named', 'any']);
-const normalizeAllow = (allow) => {
-  const normalized = { push: true, changes: true, snapshot: true, blob: 'named' };
-  if (allow === undefined || allow === null) return normalized;
-  if (typeof allow !== 'object') throw new TypeError('unit({ allow }): allow must be an object');
-  for (const key of Object.keys(allow)) {
-    if (!ALLOW_KEYS.has(key)) throw new TypeError(`unit({ allow }): unknown procedure '${key}'`);
-    const value = allow[key];
-    if (value === undefined) continue;
-    if (key === 'blob') {
-      const mode = value === true ? 'named' : value;
-      if (!BLOB_MODES.has(mode)) throw new TypeError("unit({ allow }): blob is false, true ('named') or 'any'");
-      normalized.blob = mode;
-      continue;
-    }
-    if (typeof value !== 'boolean') throw new TypeError(`unit({ allow }): ${key} must be a boolean`);
-    normalized[key] = value;
-  }
-  return normalized;
-};
 const encoder = new TextEncoder();
-
-// A refusal as it goes on the wire: the numeric `code` a transport carries
-// (wrpc sends code and message), and `reason` — a constant naming which
-// check refused — for the host's own logs and listeners.
-const coded = (message, code, reason) => {
-  const error = new Error(message);
-  error.code = code;
-  error.reason = reason;
-  error.expose = true;
-  return error;
-};
-
-const LIMIT_KEYS = new Set(['opsPerPush', 'bytesPerPush', 'opsPerSecond', 'rowsPerQuery']);
-// The rows one `query` answers at most, and a scoped `count` reads, when the host says nothing.
-const DEFAULT_ROWS_PER_QUERY = 500;
-
-// The ops one push may carry when the host says nothing: twenty pages of a
-// dialer's default size. A page that size is a peer gone wrong — or one
-// that wants this node's memory — and is refused at a length check, before
-// a byte of it is read. `limits: { opsPerPush: Infinity }` lifts it; the
-// bytes and the rate have no default (the byte count serializes every page).
-const DEFAULT_OPS_PER_PUSH = 10_000;
-
-// `unit({ limits })`: each a positive number (Infinity for none), unknown keys refused. A limit that is Infinity is
-// kept as such: a reader tests `=== Infinity`, never the key's absence.
-const normalizeLimits = (limits) => {
-  const normalized = { opsPerPush: DEFAULT_OPS_PER_PUSH, rowsPerQuery: DEFAULT_ROWS_PER_QUERY };
-  if (limits === undefined || limits === null) return normalized;
-  if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
-  for (const key of Object.keys(limits)) {
-    if (!LIMIT_KEYS.has(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
-    const value = limits[key];
-    if (value === undefined) continue;
-    if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
-      throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
-    }
-    normalized[key] = value;
-  }
-  return normalized;
-};
-
-// `unit({ query })`: false (the default: no `query`, no `count` mounted), true, or `{ regex }` — whether a `$regex`
-// is taken from the wire: false (the default under true: refused, 400 REGEX), 'safe' (one `safeRegex` passes), or
-// true (any; a pattern is a denial of the host's event loop — a trusted mesh's).
-const REGEX_MODES = new Set([false, true, 'safe']);
-const normalizeQuery = (query) => {
-  if (query === undefined || query === false) return false;
-  if (query === true) return { regex: false };
-  if (!isPlainObject(query)) {
-    throw new TypeError("unit({ query }): query must be a boolean or { regex: false | true | 'safe' }");
-  }
-  for (const key of Object.keys(query)) {
-    if (key !== 'regex') throw new TypeError(`unit({ query }): unknown key '${key}'`);
-  }
-  const { regex = false } = query;
-  if (!REGEX_MODES.has(regex)) throw new TypeError("unit({ query }): regex must be false, true or 'safe'");
-  return { regex };
-};
-
-// Every `$regex` a query carries, down every branch and nest, judged by the unit's `regex` mode: refused where
-// off, where unsafe under 'safe'. An iterative walk — a query is a peer's — bounded as the cursor bounds it.
-const MAX_QUERY_NODES = 4096;
-const regexRefusal = (query, mode) => {
-  if (mode === true) return null;
-  const stack = [query];
-  let seen = 0;
-  while (stack.length > 0) {
-    const value = stack.pop();
-    if (++seen > MAX_QUERY_NODES) return 'a query too large to read';
-    if (Array.isArray(value)) {
-      for (let i = 0; i < value.length; i++) {
-        if (typeof value[i] === 'object' && value[i] !== null) stack.push(value[i]);
-      }
-      continue;
-    }
-    if (!isPlainObject(value)) continue;
-    for (const key of Object.keys(value)) {
-      const inner = value[key];
-      if (key === '$regex' || key === '$options') {
-        if (mode === false) return 'this host takes no $regex';
-        if (key === '$regex' && !safeRegex(inner)) {
-          return 'the $regex is not safe to run here (a nested quantifier, a backreference, a lookaround)';
-        }
-        continue;
-      }
-      if (typeof inner === 'object' && inner !== null) stack.push(inner);
-    }
-  }
-  return null;
-};
-
-// The scopes a read may cover: what hello granted, narrowed to what the
-// call asks for. A peer granted `'*'` reads what it asks (nothing asked:
-// everything); one granted a list reads the intersection — asking for `'*'`
-// or for nothing is asking for its list, asking only for others is 403.
-const grant = (asked, granted) => {
-  const everything = granted.includes(GLOBAL_SCOPE);
-  if (!Array.isArray(asked)) return everything ? null : granted;
-  const held = everything ? null : new Set(granted);
-  const scopes = [];
-  for (let i = 0; i < asked.length; i++) {
-    const scope = asked[i];
-    if (typeof scope !== 'string') continue;
-    if (held === null) scopes.push(scope);
-    else if (scope === GLOBAL_SCOPE) return granted;
-    else if (held.has(scope)) scopes.push(scope);
-  }
-  if (held === null) return scopes;
-  if (scopes.length === 0) throw coded('Scopes not granted', 403, 'SCOPES');
-  return scopes;
-};
 
 // Resolves on the next change (or abort). The manager keeps ONE listener on
 // the storage and wakes every waiting subscription from it, because a host
@@ -206,38 +96,6 @@ const waitFor = (wakers, signal) =>
     wakers.add(done);
     signal?.addEventListener?.('abort', done, { once: true });
   });
-
-// Per-peer push limits, the one place that knows the ops and the bytes:
-// a page over `opsPerPush` or `bytesPerPush` is 413, a peer over
-// `opsPerSecond` is 429 — a token bucket in its state, refilled at that
-// rate, holding one second's worth. Codes, not a hang-up: the dialer
-// reports them, marks the host behind and pushes again from the vector at
-// the next sign of life on the link (`#recover` in src/sync/manager.js).
-const limit = (otel, state, args, ops, limits) => {
-  const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
-  if (opsPerPush !== undefined && ops.length > opsPerPush) {
-    otel.recordLimited('ops');
-    throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413, 'OPS_PER_PUSH');
-  }
-  if (bytesPerPush !== undefined) {
-    const bytes = encoder.encode(JSON.stringify(args?.ops ?? null)).length;
-    if (bytes > bytesPerPush) {
-      otel.recordLimited('bytes');
-      throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413, 'BYTES_PER_PUSH');
-    }
-  }
-  if (opsPerSecond !== undefined) {
-    const at = Date.now();
-    const bucket = (state.bucket ??= { tokens: opsPerSecond, at });
-    bucket.tokens = Math.min(opsPerSecond, bucket.tokens + ((at - bucket.at) / 1000) * opsPerSecond);
-    bucket.at = at;
-    if (ops.length > bucket.tokens) {
-      otel.recordLimited('rate');
-      throw coded(`Rate limited: ${ops.length} ops over opsPerSecond ${opsPerSecond}`, 429, 'OPS_PER_SECOND');
-    }
-    bucket.tokens -= ops.length;
-  }
-};
 
 // A snapshot page as a wrpc stream — NDJSON, serialized first because a
 // stream declares its size up front; a page is bounded, so that buffer is
@@ -258,56 +116,6 @@ const streamed = (client, page, pageBytes) => {
     stream.end();
   });
   return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
-};
-
-// A refusal before the handler: counted by code; 428 is the normal course
-// of a wrpc reconnect (a new server-side client) and only counted.
-const refuse = (host, message, code, reason, node = null) => {
-  host.otel.recordRefusal(code);
-  if (code !== 428) host.logger.warn({ event: 'sync.hello.refused', code, reason, node });
-  return coded(message, code, reason);
-};
-
-// What a hello hands a peer to sign: 32 random bytes as base64url, bound to both node ids in the message.
-const challengeOf = () => {
-  const bytes = new Uint8Array(32);
-  globalThis.crypto.getRandomValues(bytes);
-  let text = '';
-  for (let i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
-  return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-};
-const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', challenge, host, node]);
-
-// A call this unit does not serve, or cannot: counted, logged under the procedure's event, refused by code.
-const refuseCall = (host, procedure, message, code, reason, node = null) => {
-  host.otel.recordRefusal(code);
-  host.logger.warn({ event: `sync.${procedure}.refused`, code, reason, node });
-  return coded(message, code, reason);
-};
-
-const peerOf = (host, context, procedure = null) => {
-  const state = context?.client?.data?.syncom;
-  if (!state) throw refuse(host, 'Say hello first', 428, 'HELLO_FIRST');
-  // Under `prove` nothing is taken or handed before the peer signed the challenge its hello was given.
-  if (procedure !== null && host.prove && state.proven !== true) {
-    throw refuseCall(host, procedure, 'Prove the key first (syncom/prove)', 403, 'UNPROVEN', state.node);
-  }
-  return state;
-};
-
-// Ops of a peer this host would not take, logged and announced through the
-// `refused` event — where the host ties a refusal to the client that pushed.
-const announceRefused = (host, node, reason, count) => {
-  host.logger.warn({ event: 'sync.op.refused', node, reason, count });
-  notify(host.manager, host.logger, 'refused', { node, reason, count });
-};
-
-// Refused HERE, before anything sees them: counted too — `reason` is what
-// the `syncom.ops.rejected` metric carries. (A signature refusal is counted
-// per op in applyRemote already, and only announced here.)
-const refuseOps = (host, node, reason, count) => {
-  for (let i = 0; i < count; i++) host.otel.recordRejected(reason);
-  announceRefused(host, node, reason, count);
 };
 
 // What a dialer that lost part of its log needs to move its streams past
@@ -435,72 +243,6 @@ const greet = async (host, context, args, keep) => {
   if (challenge !== null) answer.challenge = challenge;
   if (revoked !== null && revoked.length > 0) answer.revoked = revoked;
   return answer;
-};
-
-// The rooms of the scopes a persistent peer asked for: where a presence update of a scope is relayed.
-const joinRooms = (context, scopes) => {
-  if (typeof context.client.join !== 'function') return;
-  for (const scope of scopes) context.client.join(`syncom:${scope}`);
-};
-
-// The live session of a greeted peer, by node, for `sync.revoke(node, scopes)`: told at once through the
-// server (`syncom/revoke`), its grant narrowed, its feeds ended. A session is let go of when the same client
-// greets again, when its socket closes (the client's `close` — wrpc hands a reconnect a new client, so a session
-// outlived by its socket would stay for good), and the node's set with its last one.
-const remember = (host, context, state) => {
-  const { client, server } = context;
-  let sessions = host.sessions.get(state.node);
-  if (sessions === undefined) host.sessions.set(state.node, (sessions = new Set()));
-  for (const session of sessions) if (session.client === client) sessions.delete(session);
-  const session = {
-    client,
-    revoke(scopes) {
-      const taken = new Set(scopes);
-      const kept = [];
-      for (let i = 0; i < state.scopes.length; i++) if (!taken.has(state.scopes[i])) kept.push(state.scopes[i]);
-      state.scopes = kept;
-      state.generation++;
-      if (server && typeof server.sendTo === 'function' && client?.id !== undefined) {
-        server.sendTo(client.id, 'syncom/revoke', { scopes: scopes.slice() });
-      }
-    },
-  };
-  sessions.add(session);
-  if (typeof client?.once === 'function') {
-    client.once('close', () => {
-      const held = host.sessions.get(state.node);
-      if (held === undefined) return;
-      held.delete(session);
-      if (held.size === 0) host.sessions.delete(state.node);
-    });
-  }
-};
-
-// `prove`: the challenge hello handed this peer, signed under its key — the key that is its node id.
-const prove = (host) => async (context, args) => {
-  const state = peerOf(host, context);
-  const sig = args?.sig;
-  if (state.challenge === null || typeof sig !== 'string') {
-    throw refuseCall(host, 'prove', 'Nothing to prove, or no signature', 400, 'BAD_PROOF', state.node);
-  }
-  const signer = host.storage[SIGNER];
-  let ok = false;
-  try {
-    ok = await signer.verifyMessage(proveMessage(state.challenge, host.storage.nodeId, state.node), sig, state.node);
-  } catch {
-    ok = false;
-  }
-  if (ok !== true) {
-    throw refuseCall(host, 'prove', 'The signature does not prove the key', 403, 'BAD_PROOF', state.node);
-  }
-  state.proven = true;
-  state.challenge = null;
-  // Proven: the rooms joined and the presence handed now, what hello withheld.
-  if (state.keep === true) {
-    joinRooms(context, state.scopes);
-    handPresence(host, context, state.scopes);
-  }
-  return { proven: true };
 };
 
 const push = (host) => async (context, args) => {
@@ -778,196 +520,6 @@ const changes = (host) =>
     }
   };
 
-// `query` and `count` (`unit({ query: true })`): a thin client's read of this host's records through the query
-// plugin — `{ entity, query, order, limit, offset }` — the rows narrowed to the peer's scopes (as the host scopes a
-// record, the scope function reading the row; one it throws on is left out) and capped by `limits.rowsPerQuery`.
-const BAD_QUERY = 'BAD_QUERY';
-const cursorOf = (host, args, procedure, state) => {
-  if (!host.query) throw refuseCall(host, procedure, 'This host answers no queries', 403, 'QUERY_DISABLED', state.node);
-  if (!isPlainObject(args) || typeof args.entity !== 'string') {
-    throw refuseCall(host, procedure, `${procedure} needs an entity`, 400, BAD_QUERY, state.node);
-  }
-  const query = args.query === undefined || args.query === null ? {} : args.query;
-  if (!isPlainObject(query)) throw refuseCall(host, procedure, 'query must be an object', 400, BAD_QUERY, state.node);
-  // A pattern from the wire runs on this host's event loop: refused unless the unit takes them (REGEX).
-  const refused = regexRefusal(query, host.query.regex);
-  if (refused !== null) throw refuseCall(host, procedure, refused, 400, 'REGEX', state.node);
-  let cursor;
-  try {
-    // Through the seam as it is: the collection's sealed records are the key holder's and never a peer's.
-    cursor = host.storage[CURSOR](args.entity, query);
-    if (Array.isArray(args.order)) {
-      for (let i = 0; i < args.order.length; i++) {
-        const key = args.order[i];
-        if (typeof key === 'string') cursor = cursor.order(key);
-        else if (isPlainObject(key) && typeof key.field === 'string') {
-          cursor = key.desc === true ? cursor.desc(key.field) : cursor.order(key.field);
-        } else throw new TypeError('order: a field name or { field, desc }');
-      }
-    }
-  } catch (error) {
-    throw refuseCall(host, procedure, error.message, 400, BAD_QUERY, state.node);
-  }
-  return cursor;
-};
-
-// The peer of a read: greeted before, or — a thin client over a stateless transport, where one request is one
-// client and no hello can come first — greeting with the call itself, `args.hello` the hello's own arguments, taken
-// as a hello is (authorize, the scopes, the revocations) and kept nowhere: `ephemeral` says so, and the read takes
-// the state off the client when it is done (a persistent socket greeted by a read would otherwise push and
-// subscribe on a state no session knows of, which no revoke could reach).
-const greeted = async (host, context, args, procedure) => {
-  let ephemeral = false;
-  if (!context?.client?.data?.syncom && isPlainObject(args?.hello)) {
-    await greet(host, context, args.hello, false);
-    ephemeral = true;
-  }
-  return { state: peerOf(host, context, procedure), ephemeral };
-};
-
-// What a read greeted for the call alone leaves: nothing.
-const ungreet = (context, ephemeral) => {
-  if (ephemeral && context?.client?.data !== undefined) delete context.client.data.syncom;
-};
-
-// A scoped read walks the cursor — in its order, `batch` rows a page — until the window is full or the read budget
-// (`limits.rowsPerQuery`: the rows READ, not answered) is spent: a peer whose rows lie past the first ones reads
-// them all the same, and `capped` says when the budget ended the walk before the window was full. A sealed row is
-// never a peer's (the seam leaves them out; the catalog's row is asked once more, belt and braces).
-const SCOPED_BATCH = 100;
-const walkScoped = async (host, cursor, scopes, { limit, offset, budget }) => {
-  const { row } = host.storage[SOURCE];
-  const rows = [];
-  let read = 0;
-  let skipped = 0;
-  const bounded = budget === Infinity ? cursor : cursor.limit(budget);
-  for await (const candidate of bounded.stream({ batch: SCOPED_BATCH })) {
-    read++;
-    if (row(candidate.id)?.encrypted === true) continue;
-    let scope;
-    try {
-      scope = host.scopeOf(candidate.id, candidate);
-    } catch (error) {
-      host.logger.warn({ event: 'sync.query.scope', id: candidate.id, err: error });
-      continue;
-    }
-    if (!inScope(scope, scopes)) continue;
-    if (skipped < offset) {
-      skipped++;
-      continue;
-    }
-    rows.push(candidate);
-    if (rows.length >= limit) break;
-  }
-  return { rows, capped: read >= budget && rows.length < limit };
-};
-
-const query = (host) => async (context, args) => {
-  const { state, ephemeral } = await greeted(host, context, args, 'query');
-  try {
-    let cursor = cursorOf(host, args, 'query', state);
-    const cap = host.limits.rowsPerQuery;
-    const limit = Number.isInteger(args.limit) && args.limit > 0 ? Math.min(args.limit, cap) : cap;
-    const offset = Number.isInteger(args.offset) && args.offset > 0 ? args.offset : 0;
-    const scopes = grant(args.scopes, state.scopes);
-    try {
-      // A grant of everything: the window is the cursor's, the cap the rows answered. A scoped peer: the cap bounds
-      // what is read, the window what goes out.
-      if (scopes !== null) return await walkScoped(host, cursor, scopes, { limit, offset, budget: cap });
-      if (limit !== Infinity) cursor = cursor.limit(limit);
-      if (offset > 0) cursor = cursor.offset(offset);
-      return { rows: await cursor.fetch(), capped: false };
-    } catch (error) {
-      throw refuseCall(host, 'query', error.message, 400, BAD_QUERY, state.node);
-    }
-  } finally {
-    ungreet(context, ephemeral);
-  }
-};
-
-// An attachment's bytes (`syncom/blob { digest, id, name }`): a wrpc stream of the bytes where the transport carries
-// one, the bytes as base64 otherwise. Under `allow.blob` 'named' (the default) the call names the record and the
-// attachment: served only where a live record in the peer's scopes names the digest under that name — a record
-// forgotten, purged, sealed, out of scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing
-// of what this host holds is told; a revoke, a purge, a forget follow the record for free. Under 'any' the digest
-// alone serves (a capability: a trusted mesh's). 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for
-// what is no digest, 404 where this host holds no bytes (or has no blobs store).
-const DIGEST = /^[0-9a-f]{64}$/;
-const blobNamed = async (host, state, digest, id, name) => {
-  if (typeof id !== 'string' || typeof name !== 'string') return false;
-  const { row, load } = host.storage[SOURCE];
-  const held = row(id);
-  if (held === null || held.gone === true || held.encrypted === true) return false;
-  let data;
-  try {
-    data = await load(id);
-  } catch {
-    return false;
-  }
-  if (data === null) return false;
-  const named = data[ATTACHMENTS_FIELD];
-  const entry = isPlainObject(named) ? named[name] : undefined;
-  if (!isPlainObject(entry) || entry.digest !== digest) return false;
-  if (state.scopes === null) return true;
-  try {
-    return inScope(host.scopeOf(id, data), state.scopes);
-  } catch {
-    return false;
-  }
-};
-
-const blob = (host) => async (context, args) => {
-  const state = peerOf(host, context, 'blob');
-  if (host.allow.blob === false) {
-    throw refuseCall(host, 'blob', 'This host serves no blobs', 403, 'NOT_SERVED', state.node);
-  }
-  const digest = args?.digest;
-  if (typeof digest !== 'string' || !DIGEST.test(digest)) {
-    throw refuseCall(host, 'blob', 'blob needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST', state.node);
-  }
-  const notFound = () => refuseCall(host, 'blob', `No blob ${digest} here`, 404, 'BLOB_NOT_FOUND', state.node);
-  if (host.allow.blob === 'named' && !(await blobNamed(host, state, digest, args.id, args.name))) throw notFound();
-  const store = host.storage[DB]?.blobs;
-  const bytes = store === undefined ? null : await store.get(digest);
-  if (bytes === null) throw notFound();
-  const client = context?.client;
-  if (client && client.binary !== false && typeof client.createStream === 'function') {
-    const stream = client.createStream('syncom/blob', bytes.length);
-    queueMicrotask(() => {
-      stream.write(bytes);
-      stream.end();
-    });
-    return { id: stream.id, size: bytes.length, digest };
-  }
-  return { digest, size: bytes.length, base64: toBase64(bytes) };
-};
-
-const count = (host) => async (context, args) => {
-  const { state, ephemeral } = await greeted(host, context, args, 'count');
-  try {
-    const cursor = cursorOf(host, args, 'count', state);
-    const scopes = grant(args.scopes, state.scopes);
-    try {
-      if (scopes === null) return { count: await cursor.count(), capped: false };
-      // A scoped count reads the rows (the catalog knows no scopes), as many as the budget allows: `capped` says
-      // when it ended the count.
-      const budget = host.limits.rowsPerQuery;
-      const { rows, capped } = await walkScoped(host, cursor, scopes, { limit: Infinity, offset: 0, budget });
-      return { count: rows.length, capped };
-    } catch (error) {
-      throw refuseCall(host, 'count', error.message, 400, BAD_QUERY, state.node);
-    }
-  } finally {
-    ungreet(context, ephemeral);
-  }
-};
-
-/**
- * The unit `manager.unit(options)` returns. `access` defaults to wrpc's own
- * default, 'session'; `authorize(context, hello)` gates a peer by whatever
- * the transport presented. `drift(schema, peer)` is the manager's report of
- * a schema that disagrees with this node's.
- */
 // A peer's presence, the inbound event `syncom/presence`: the update must be
 // the peer's own (every entry the node that said hello), of a scope it
 // asked for, within the rate, signed when this host requires signatures —
@@ -1043,27 +595,6 @@ const presence = (host) => async (context, update) => {
   await host.manager.receivePresence(update, { node, url: null });
 };
 
-// What a newcomer is handed at hello: the room's states of every scope it asked for.
-const handPresence = (host, context, scopes) => {
-  const server = context?.server;
-  const client = context?.client;
-  if (!server || typeof server.sendTo !== 'function' || !client || client.id === undefined) return;
-  const floor = Date.now() - host.presence.timeout;
-  const self = client.data?.syncom?.node;
-  const { rooms } = host.presence;
-  const seen = new Set();
-  for (let i = 0; i < scopes.length; i++) {
-    const scope = scopes[i];
-    if (seen.has(scope)) continue;
-    seen.add(scope);
-    const room = rooms.get(scope);
-    if (room === undefined) continue;
-    const s = [];
-    for (const entry of room.values()) if (entry[2] >= floor && entry[0] !== self) s.push(entry);
-    if (s.length > 0) server.sendTo(client.id, 'syncom/presence', { p: 1, scope, s });
-  }
-};
-
 const createUnit = (
   manager,
   options,
@@ -1129,6 +660,8 @@ const createUnit = (
     pageBytes,
     logger: storage.logger,
     track: tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data })),
+    // What a read that carries its hello greets through (src/sync/reads.js `greeted`).
+    greet: (context, args, keep) => greet(host, context, args, keep),
     presence: { timeout: presenceTimeout, rate: presenceRate, max: presenceMax, rooms: new Map() },
   };
   // `meta` rides on every procedure: what a wrpc `onRequest` hook reads as
