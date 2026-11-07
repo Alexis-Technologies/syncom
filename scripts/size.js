@@ -201,7 +201,9 @@ const ENTRIES = [
   // reportLost; sync-parity plan, S1; 2026-11-06). 76, raised by name.
   // 76.4 with the attachments getter, the files engine's blobs store and the one base64 of crypto/pem.js (sync-parity
   // plan, S4). 77, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 77 },
+  // 77.2 with the sealed seam's flag and the merged sealed page, the seam's `revert` by the kinds' patches (review №7,
+  // E1, E3.1; 2026-11-07). 77.5, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 77.5 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -446,7 +448,9 @@ const ENTRIES = [
   // 2026-11-07). 174.5, raised by name.
   // 174.5 with the snapshot's relayed vector, the holes, the ring the feeds read from (review №7, E2.2–E2.4;
   // 2026-11-07). 175, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 175 },
+  // 175.1 with the revert by what the op touched, through the kinds' patches (review №7, E3.1; 2026-11-07). 175.5,
+  // raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 175.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

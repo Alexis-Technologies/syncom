@@ -474,7 +474,10 @@ const refused = async (batch, op, current) => {
   (batch.stripped ??= new Set()).add(op);
   skip(batch, op);
   const scope = op.scope ?? null;
-  (batch.refused ??= []).push({ origin: op.origin, seq: op.seq, scope, id: op.id, current: visibleOf(current) });
+  // The actor rides along: a revert the rule refuses too is told by it, never reverted again (the pusher's log may
+  // have compacted the op by then).
+  const actor = typeof op.actor === 'string' ? op.actor : null;
+  (batch.refused ??= []).push({ origin: op.origin, seq: op.seq, scope, id: op.id, current: visibleOf(current), actor });
   return true;
 };
 
@@ -519,18 +522,19 @@ const applyOne = async (batch, op) => {
     (batch.stripped ??= new Set()).add(op);
     return void skip(batch, op);
   }
-  // The host's rule on what a peer may write, asked before anything else may apply the op: refused, the op is
-  // logged as a scrub leaves it — skipped and scrubbed, a no-op for every node behind this one, no gap in its
-  // stream — and named in the answer, with the record as it stands here, for the pusher to set itself straight.
-  if (batch.authorize !== null && (await refused(batch, op, current))) return;
   if (current?.encrypted) {
     // Sealed here for this node alone: the op is logged and relayed, never
     // applied — flagged skipped, so neither a replay nor a fold of the log
-    // applies what this node did not.
+    // applies what this node did not — and no rule is asked of it (a sealed
+    // entry has no meta an op could be tried over).
     core.logger.warn({ event: 'sync.op.encrypted', id: op.id });
     skip(batch, op);
     return;
   }
+  // The host's rule on what a peer may write, asked before anything else may apply the op: refused, the op is
+  // logged as a scrub leaves it — skipped and scrubbed, a no-op for every node behind this one, no gap in its
+  // stream — and named in the answer, with the record as it stands here, for the pusher to set itself straight.
+  if (batch.authorize !== null && (await refused(batch, op, current))) return;
   // A `false` from beforeApply skips the op HERE only. A throw aborts the
   // batch — nothing is durable yet, so the peer sees a failed push and
   // offers the page again.

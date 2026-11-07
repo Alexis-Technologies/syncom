@@ -32,9 +32,9 @@ const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
 const { SyncomError } = require('../errors.js');
-const { wellFormed, VERDICT } = require('../shape.js');
+const { wellFormed, VERDICT, isPlainObject } = require('../shape.js');
 const { scrubOp } = require('../header.js');
-const { SIGNER, REWIND, DB } = require('../symbols.js');
+const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
 
@@ -65,6 +65,15 @@ const MAX_RECOVER_BACKOFF = 60_000;
 // scopes })` runs when a host takes scopes back; without it the records of
 // those scopes are forgotten here.
 const SYNC_HOOKS = ['beforeConnect', 'beforeBootstrap', 'beforeSend', 'onRevoke'];
+
+// The fields an op touches — what a revert of it brings back to the host's: a set's keys, an unset's names, the
+// field of a kind's op (`key`); null for the whole record (a write, a delete, a merge).
+const touchedBy = (op) => {
+  if (op.type === 'set') return isPlainObject(op.data) ? Object.keys(op.data) : null;
+  if (op.type === 'unset') return Array.isArray(op.value) ? op.value.slice() : null;
+  if (op.type === 'write' || op.type === 'delete' || op.type === 'merge') return null;
+  return typeof op.key === 'string' ? [op.key] : null;
+};
 // What a proof of this node's key signs: the host's challenge, bound to both node ids.
 const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', challenge, host, node]);
 // What #connect's chain carries when beforeConnect said no.
@@ -1007,29 +1016,35 @@ class SyncManager extends Emitter {
   }
 
   // Ops the host's `authorizeWrite` refused: each reported (WRITE_REFUSED), and one of this node's own reverted
-  // — the record set to what the host holds (a new op stamped above the refused one, `actor: 'revert'`, so every
-  // node comes to the host's state), or forgotten here where the host holds nothing (no op: there is nothing to
-  // bring the others to). A revert the host refuses too is reported, never reverted again.
+  // — the fields the op touched brought to what the host holds of them (new ops stamped above the refused one,
+  // `actor: 'revert'`, through the kinds' patches, so every node comes to the host's state and what the host
+  // accepted since stands), or the record forgotten here where the host holds nothing (no op: there is nothing to
+  // bring the others to). A revert the host refuses too is reported, never reverted again — the answer names the
+  // op's actor, so a log that compacted the op tells it the same. A purge refused is reported alone: nothing can be
+  // written over a purge here.
   async #refused(peer, refused) {
     const storage = this.#storage;
     for (let i = 0; i < refused.length; i++) {
-      const { origin, seq, scope, id, current } = refused[i];
+      const { origin, seq, scope, id, current, actor } = refused[i];
       const own = origin === storage.nodeId && typeof id === 'string';
       const held = own
         ? storage.log.entryOf(typeof scope === 'string' ? `${origin}@${scope}` : origin, seq)
         : undefined;
-      const revert = own && held?.op.actor !== 'revert';
+      // What the op touched: the fields of a set or an unset, the field of a kind's op, the whole record for a
+      // write, a delete or a merge; the whole record where the log no longer holds the op.
+      const touched = held === undefined ? null : touchedBy(held.op);
+      const revert = own && actor !== 'revert' && held?.op.type !== 'purge';
       const what = revert
         ? current === null || current === undefined
           ? '; forgotten here'
           : '; reverted to what it holds'
         : '';
       const message = `${peer.node.url} refused ${origin}:${seq} on ${id}${what}`;
-      this.#fail(peer, new SyncomError('WRITE_REFUSED', message, { origin, seq, id, current: current ?? null, own }));
+      const fields = { origin, seq, id, current: current ?? null, own, touched };
+      this.#fail(peer, new SyncomError('WRITE_REFUSED', message, fields));
       if (!revert) continue;
       try {
-        if (current === null || current === undefined) await storage.forget(id);
-        else await storage.set(id, current, { actor: 'revert' });
+        await storage[SOURCE].revert(id, current ?? null, touched, { actor: 'revert' });
       } catch (error) {
         storage.logger.warn({ event: 'sync.revert.failed', url: peer.node.url, id, err: error });
       }

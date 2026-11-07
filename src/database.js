@@ -21,7 +21,7 @@ const P = require('./patches.js');
 const B = require('./blame.js');
 const { applyBatch } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, kindOf } = require('./ops.js');
+const { applyOp, isAlive, kindOf, kindsOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { project, namedId, idReason } = require('./schema/entity.js');
@@ -42,7 +42,8 @@ const { dropDatabase } = require('./drop.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
-const { compose, composeData } = require('./compose.js');
+const { compose, composeData, decompose } = require('./compose.js');
+const { diffViews } = require('./patch.js');
 
 // The ids a `storage.unpersisted` line names; past them it says how many.
 const UNPERSISTED_NAMED = 32;
@@ -1293,6 +1294,11 @@ class Database extends Emitter {
       },
       // The sealed records of a collection, by id: what a query reads whole at the key holder.
       sealed: (entity) => catalog.sealed(entity),
+      // The record brought to what a host holds of it (the dialer's revert of a refused op): the fields named —
+      // every one for null — made to read as `target` (the host's data, flat) reads, through the kinds' patches, so
+      // a counter moves by an inc, a set by adds and removes, a text by its diff — never a register written over
+      // another kind, and nothing the host accepted since is touched; `target` null forgets the record.
+      revert: (id, target, fields, options) => this.#revert(id, target, fields, options),
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),
@@ -2785,6 +2791,49 @@ class Database extends Emitter {
    * the log: live records AND tombstones, with their metadata, in id order.
    * `cursor` is the last id of the previous page; `null` back means done.
    */
+  // The seam's `revert` (src/sync/manager.js): the patches from the record as it reads here — flat, every path a
+  // field, as `compact` reads it — to the same with the fields named read as `target` has them (gone where it
+  // lacks them), realized as ops of this node's own under `actor`.
+  async #revert(id, target, fields, { actor = 'revert' } = {}) {
+    if (target === null || target === undefined) return this.forget(id);
+    const entry = await this.#entries.load(id);
+    const plugins = this.#plugins;
+    const alive = entry !== null && !entry.encrypted && isAlive(entry);
+    const fromKinds = alive ? kindsOf(entry, plugins) : {};
+    const from = alive ? decompose(await this.#view(id, entry), entry, plugins) : null;
+    // A field under a member that is not shown is unreachable (as `compact` reads it): not this revert's.
+    if (from !== null) {
+      for (const field of Object.keys(fromKinds)) if (!Object.hasOwn(from, field)) delete fromKinds[field];
+    }
+    const to = {};
+    const toKinds = {};
+    if (fields === null || from === null) {
+      for (const field of Object.keys(target)) {
+        to[field] = target[field];
+        toKinds[field] = fromKinds[field] ?? 'register';
+      }
+    } else {
+      for (const field of Object.keys(from)) {
+        to[field] = from[field];
+        toKinds[field] = fromKinds[field];
+      }
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        if (Object.hasOwn(target, field)) {
+          to[field] = target[field];
+          toKinds[field] ??= 'register';
+        } else {
+          delete to[field];
+          delete toKinds[field];
+        }
+      }
+    }
+    const context = { from: { entry }, to: { entry } };
+    const patches = diffViews(from, fromKinds, to, toKinds, { plugins, context });
+    if (patches.length === 0) return 0;
+    return P.applyPatches(this.#core, id, patches, { actor });
+  }
+
   snapshot(options = {}) {
     return snapshotPage(this.#core, options);
   }

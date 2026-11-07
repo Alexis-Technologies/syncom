@@ -121,6 +121,184 @@ test('Rules on the host and on the dialer', async (t) => {
   );
 
   await t.test(
+    'a revert touches the fields the refused op touched and nothing else: what the host accepted since stands',
+    async (t2) => {
+      // Nobody writes `locked`.
+      const authorizeWrite = ({ op }) => !(op.type === 'set' && Object.hasOwn(op.data ?? {}, 'locked'));
+      const mesh = await createMesh(
+        t2,
+        ['H', 'A', 'B'],
+        [
+          ['A', 'H'],
+          ['B', 'H'],
+        ],
+        createStorage,
+        {
+          unit: { access: 'public', authorizeWrite },
+        },
+      );
+      const [h, a, b] = ['H', 'A', 'B'].map((name) => mesh.get(name));
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      const id = await a.insert({ title: 'kept', n: 1 });
+      await settle([h, a, b]);
+      // Two writes in one page: the first refused (locked, n), the second accepted (title). The revert brings
+      // `locked` and `n` back to the host's and leaves `title` as the host accepted it.
+      await Promise.all([a.update(id, { locked: true, n: 3 }), a.update(id, { title: 'renamed' })]);
+      await waitUntil(() => errors.some((error) => error.code === 'WRITE_REFUSED'));
+      await settle([h, a, b]);
+      const [refusal] = errors.filter((error) => error.code === 'WRITE_REFUSED');
+      assert.deepStrictEqual(refusal.touched, ['locked', 'n']);
+      assert.deepStrictEqual(await h.get(id), { title: 'renamed', n: 1 });
+      assert.deepStrictEqual(await a.get(id), { title: 'renamed', n: 1 }, 'the title the host accepted stands');
+      assert.deepStrictEqual(await b.get(id), { title: 'renamed', n: 1 });
+      // A field the op touched that the host never had goes; one it did not touch that B wrote meanwhile stays.
+      await b.update(id, { by: 'B' });
+      await settle([h, a, b]);
+      await Promise.all([a.update(id, { locked: true }), a.update(id, { n: 2 })]);
+      await waitUntil(() => errors.filter((error) => error.code === 'WRITE_REFUSED').length >= 2);
+      await settle([h, a, b]);
+      assert.deepStrictEqual(await a.get(id), { title: 'renamed', n: 2, by: 'B' });
+      assert.deepStrictEqual(await h.get(id), { title: 'renamed', n: 2, by: 'B' });
+      assert.strictEqual(errors.filter((error) => error.code === 'WRITE_REFUSED').length, 2, 'no revert of a revert');
+    },
+  );
+
+  await t.test(
+    'a refused op on a counter, a set or a text is reverted through the kinds’ patches, not a register write',
+    async (t2) => {
+      let admin = null;
+      // Only the admin counts hits, tags or writes the body.
+      const authorizeWrite = ({ op, peer }) =>
+        peer?.node === admin ||
+        !((op.type === 'inc' || op.type === 'add' || op.type === 'splice') && op.key !== 'free');
+      const mesh = await createMesh(
+        t2,
+        ['H', 'A', 'B'],
+        [
+          ['A', 'H'],
+          ['B', 'H'],
+        ],
+        createStorage,
+        {
+          unit: { access: 'public', authorizeWrite },
+        },
+      );
+      const [h, a, b] = ['H', 'A', 'B'].map((name) => mesh.get(name));
+      admin = b.nodeId;
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      const failed = [];
+      a.on('log', () => {});
+      const id = await b.insert({ title: 'counted' });
+      await b.inc(id, 'hits', 5);
+      await b.add(id, 'tags', ['x']);
+      await b.updateText(id, 'body', 'hello');
+      await settle([h, a, b]);
+      assert.deepStrictEqual(await a.get(id), { title: 'counted', hits: 5, tags: ['x'], body: 'hello' });
+      // A's inc, add and splice: each refused, each reverted by its kind — the counter by an inc, the set by a
+      // remove, the text by a splice — so A reads as the host again and nothing is FIELD_KIND.
+      await a.inc(id, 'hits', 1);
+      await a.add(id, 'tags', ['y']);
+      await a.updateText(id, 'body', 'hello!');
+      await waitUntil(() => errors.filter((error) => error.code === 'WRITE_REFUSED').length >= 3, { timeout: 5000 });
+      await settle([h, a, b]);
+      assert.deepStrictEqual(await a.get(id), { title: 'counted', hits: 5, tags: ['x'], body: 'hello' });
+      assert.deepStrictEqual(await h.get(id), { title: 'counted', hits: 5, tags: ['x'], body: 'hello' });
+      const reverts = a.log.entriesOf(id).filter((entry) => entry.op.actor === 'revert');
+      assert.deepStrictEqual(
+        reverts.map((entry) => entry.op.type).sort(),
+        ['inc', 'remove', 'splice'],
+        'the kinds’ own ops, never a register write',
+      );
+      assert.strictEqual(failed.length, 0);
+      // A field the host never had: the counter A made is unset again.
+      await a.inc(id, 'views', 1);
+      await waitUntil(() => errors.filter((error) => error.code === 'WRITE_REFUSED').length >= 4, { timeout: 5000 });
+      await settle([h, a, b]);
+      assert.deepStrictEqual(await a.get(id), { title: 'counted', hits: 5, tags: ['x'], body: 'hello' });
+    },
+  );
+
+  await t.test(
+    'a revert refused is told by its actor in the answer, never reverted again, the log compacted or not',
+    async (t2) => {
+      // Nobody but the admin writes `n` at all — a revert of it included.
+      let admin = null;
+      const authorizeWrite = ({ op, peer }) =>
+        peer?.node === admin || !(op.type === 'set' && Object.hasOwn(op.data ?? {}, 'n'));
+      const mesh = await createMesh(
+        t2,
+        ['H', 'A', 'B'],
+        [
+          ['A', 'H'],
+          ['B', 'H'],
+        ],
+        createStorage,
+        {
+          unit: { access: 'public', authorizeWrite },
+        },
+      );
+      const [h, a, b] = ['H', 'A', 'B'].map((name) => mesh.get(name));
+      admin = b.nodeId;
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      const id = await b.insert({ title: 't', n: 1 });
+      await settle([h, a, b]);
+      await a.update(id, { n: 2 });
+      await waitUntil(() => errors.filter((error) => error.code === 'WRITE_REFUSED').length >= 2, { timeout: 5000 });
+      await settle([h, a, b]);
+      await sleep(50);
+      const refusals = errors.filter((error) => error.code === 'WRITE_REFUSED');
+      assert.strictEqual(refusals.length, 2, 'the op, then its revert — and nothing after');
+      assert.deepStrictEqual(await h.get(id), { title: 't', n: 1 });
+      assert.deepStrictEqual(await a.get(id), { title: 't', n: 1 }, 'the revert landed here (A reads as the host)');
+      // The answer told the actor: the revert's refusal is not reverted, whatever the log holds of it.
+      const reverts = a.log.entriesOf(id).filter((entry) => entry.op.actor === 'revert');
+      assert.strictEqual(reverts.length, 1);
+    },
+  );
+
+  await t.test(
+    'authorizeWrite on a sealed record: the op is logged skipped, the rule not asked, nothing throws',
+    async (t2) => {
+      const asked = [];
+      const authorizeWrite = ({ op }) => {
+        asked.push(op.id);
+        return true;
+      };
+      const mesh = await createMesh(t2, ['H', 'A'], [['A', 'H']], createStorage, {
+        unit: { access: 'public', authorizeWrite },
+      });
+      const [h, a] = ['H', 'A'].map((name) => mesh.get(name));
+      await a.sync.awaitInitialReplication();
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      h.sync.on('error', (error) => errors.push(error));
+      // The host holds a sealed record; a peer writes the same id (it never saw the record: sealed records do not
+      // replicate). The op is logged skipped at the host, the rule is never asked of it, the push lands.
+      const sealed = await h.insert({ secret: 'host only' }, { encrypted: true });
+      await a.set(sealed, { title: 'from A' });
+      const plain = await a.insert({ title: 'plain' });
+      await settle([h, a]);
+      assert.deepStrictEqual(await h.get(sealed), { secret: 'host only' }, 'the sealed record stands');
+      assert.deepStrictEqual(await h.get(plain), { title: 'plain' }, 'the page landed');
+      assert.ok(asked.includes(plain));
+      assert.ok(!asked.includes(sealed), 'the rule was not asked of the sealed record');
+      const held = h.log.entriesOf(sealed).filter((entry) => entry.op.origin === a.nodeId);
+      assert.strictEqual(held.length, 1);
+      assert.strictEqual(held[0].skipped, true);
+      assert.strictEqual(errors.length, 0);
+    },
+  );
+
+  await t.test(
     'authorizeWrite that throws fails the page; a refusal of a relayed op is reported, not reverted',
     async (t2) => {
       const host = await createStorage(t2, 'H');
@@ -138,7 +316,9 @@ test('Rules on the host and on the dialer', async (t) => {
       const answer = await link.call('syncom/push', { ops: packOps([op(1, 'yes'), op(2, 'no'), op(3, 'also')]) });
       assert.strictEqual(answer.applied, 3, 'the refused op is accepted (logged, skipped): the stream moves on');
       assert.strictEqual(answer.skipped, 1);
-      assert.deepStrictEqual(answer.refused, [{ origin: 'other', seq: 2, scope: null, id: 'no', current: null }]);
+      assert.deepStrictEqual(answer.refused, [
+        { origin: 'other', seq: 2, scope: null, id: 'no', current: null, actor: null },
+      ]);
       assert.deepStrictEqual(answer.vector, { other: 3 });
       assert.deepStrictEqual(await host.get('yes'), { n: 1 });
       assert.strictEqual(await host.get('no'), null);

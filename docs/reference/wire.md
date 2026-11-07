@@ -487,11 +487,13 @@ op of it names as `prev`. The answer, from the run above:
 ```
 
 `refused` names the ops the host's `authorizeWrite` said no to — `{ origin,
-seq, scope, id, current }`, `current` the record as the host holds it (null
-for none): each is logged there as a scrub leaves it (skipped, scrubbed) and
-relayed as a no-op, so the stream has no gap, and the pusher sets itself
-straight (`WRITE_REFUSED`: a revert of its own op, or the record forgotten
-where the host holds nothing).
+seq, scope, id, current, actor }`, `current` the record as the host holds it
+(null for none), `actor` the op's own (null for none): each is logged there
+as a scrub leaves it (skipped, scrubbed) and relayed as a no-op, so the
+stream has no gap, and the pusher sets itself straight (`WRITE_REFUSED`: the
+fields its own op touched brought back to `current` through the kinds' own
+ops, or the record forgotten where the host holds nothing; an op whose
+`actor` is `revert` is reported and reverted no further).
 
 `vector` carries the keys the page touched, not the host's whole vector.
 An op outside the scopes hello granted is refused before anything reads it

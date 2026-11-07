@@ -555,8 +555,9 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   landings) — nothing persisted, a reopen rebuilds. A write from inside a hook or a transaction's `fn` through the
   database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
   write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
-  (a cursor's writes), `guard` (a local write) — every member a `#run` of the queue or a refusal of it; a new member
-  goes through the queue the same way. `[CURSOR](entity, query, { source, sealed })` leaves the collection's sealed
+  (a cursor's writes), `guard` (a local write), `revert` (the sync manager's: the fields named brought to a host's
+  reading through the kinds' patches, `applyPatches` under `actor: 'revert'`) — every member a `#run` of the queue
+  or a refusal of it; a new member goes through the queue the same way. `[CURSOR](entity, query, { source, sealed })` leaves the collection's sealed
   records out unless `sealed` — the facade's collections ask (`Collection.select(query, { sealed = true })`), a
   host's `query`/`count`, an agent's tools and a connector read the seam as it is: a sealed record never leaves the
   key holder by a read through it (SEC-7).

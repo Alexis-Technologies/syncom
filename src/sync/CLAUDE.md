@@ -101,8 +101,14 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   `authorizeWrite` on the host (`refused` in src/apply.js, before `beforeApply`) both end in `scrubOp`: the header
   with `scrubbed: true` (slot 20) goes on — logged skipped and scrubbed, relayed, applied nowhere — so no stream has
   a gap. The host names what it refused in the push's answer (`refused`, with the record as it holds it) and the
-  dialer sets itself straight (`#refused`: `set` to the host's record with `actor: 'revert'`, `forget` where the
-  host holds nothing; a revert refused is reported, never reverted again — `entryOf` tells one by its actor).
+  dialer sets itself straight (`#refused`: the fields the op touched — `touchedBy`: a set's keys, an unset's names,
+  a kind's op's `key`, the whole record for a write, a delete, a merge or an op the log compacted — brought to the
+  host's through the seam's `revert(id, current, fields, { actor: 'revert' })`, which diffs the reading by kind
+  (`diffViews`: a counter by an inc, a set by adds and removes, a text by its splices — never a register over
+  another kind) so what the host accepted since stands; `forget` where the host holds nothing; a revert refused is
+  reported, never reverted again — the answer's `actor` tells one, the log compacted or not; a purge refused is
+  reported alone). A sealed record at the host is skipped before the rule is asked: a sealed entry has no meta an op
+  could be tried over.
   `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, snapshot and
   changes (403 `UNPROVEN`) until `syncom/prove` carries its signature under the peer's key — `[1, 'prove',
 challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no signing
