@@ -2986,9 +2986,9 @@
           "source": "docs/guide/frameworks.md#vue"
         },
         "angular": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "⚠️",
+          "text": "`toObservable(store)` of `/store` fits the `async` pipe and `toSignal()` (a documented recipe over the `Subscribable` contract, not run here); no Angular package",
+          "source": "src/store/store.js (toObservable); docs/guide/frameworks.md#angular"
         },
         "svelte": {
           "mark": "✅",
@@ -2997,8 +2997,8 @@
         },
         "signals": {
           "mark": "⚠️",
-          "text": "Solid's `from(store)` over `/store`; another signal library wraps `subscribe` the same way",
-          "source": "docs/guide/frameworks.md#solid"
+          "text": "Solid's `from(store)`, Preact's `signal` fed by `subscribe`, Angular's `toSignal(toObservable(store))` — recipes over `/store`, no package per library",
+          "source": "docs/guide/frameworks.md#solid; docs/guide/frameworks.md#preact-signals; docs/guide/frameworks.md#angular"
         },
         "tanstack": {
           "mark": "❌",
@@ -3086,9 +3086,10 @@
           "source": "docs/guide/benchmarks.md; bench/compare/; bench/results/compare.json"
         },
         "webmcp": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "✅",
+          "text": "`@alexify/syncom/mcp`: `createTools(db, { collections, readOnly })` — query, count, get, changes, wait_changes, insert, upsert, delete per collection as tool definitions (`inputSchema` checked at `execute`); `navigator.modelContext.registerTool(tool)` or an MCP server registers them",
+          "source": "src/mcp/mcp.js; docs/guide/mcp.md",
+          "detail": "No WebMCP or MCP SDK is imported: the definitions are the protocol's shape, the registration the caller's line."
         },
         "agentDocs": {
           "mark": "✅",

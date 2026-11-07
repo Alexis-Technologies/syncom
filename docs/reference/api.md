@@ -832,6 +832,23 @@ in the engine's blobs store, named on it as the register `_attachments/<name>` �
 
 A timeout of `settle()` or `waitUntil()` is a plain `Error` (a test's failure, not a condition a program handles).
 
+## Agent tools (subpath)
+
+`@alexify/syncom/mcp` — `createTools(db, { collections, readOnly, limit })`: the tools an agent calls over a database,
+in the Model Context Protocol's shape — see [Agent tools](../guide/mcp).
+
+| Member | Notes |
+| --- | --- |
+| `createTools(db, options?)` → `AgentTool[]` | A set per collection (every one of `db.collections`, or `collections` by name): `<Collection>_query`, `_count`, `_get`, `_changes`, `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly`; `limit` caps a query's window (1000 by default and at most); a TypeError for a name that is no collection |
+| `tool.name`, `tool.description`, `tool.inputSchema` | The definition as `tools/list` answers it — `inputSchema` is JSON Schema, every object closed (`additionalProperties: false`) |
+| `tool.execute(args?)` → `Promise<json>` | `checkArgs(inputSchema, args)` first — a wrong type, a member not named, a required one missing, a window past the cap is a `TypeError` naming the member — then the collection's call; its own refusals (`NOT_FOUND`, a validator's, `PLUGIN_MISSING` without the query plugin) come through as they are |
+| `_query { query, order, limit, offset }` → `{ rows }` | A Mango query over the collection, `order` the fields (`'-field'` descending), `limit` (100 by default) and `offset` |
+| `_count { query }` → `{ count }`; `_get { id }` → `{ record }` | How many match; one record by id, or null |
+| `_changes { since? }` → `{ eventId, changes }` | Without `since`: the `eventId` to start from. With one: the collection's records the log touched since, an id once with `deleted`, and the `eventId` to ask from next; `changes: null` where the log cannot resume there (another epoch, a position compacted away) — list again then |
+| `_wait_changes { since, timeout? }` → the same | What `_changes` answers once there is a change after `since`, or at `timeout` ms (30 000 by default, 120 000 at most) with none |
+| `_insert { data }` → `{ id }`; `_upsert { id?, data }` → `{ id }`; `_delete { id }` → `{ id, deleted }` | A new record; a record written whole under `id` or the id its data names; a delete — `deleted: false` where there is none (no tombstone written), `NOT_FOUND` for a record of another collection |
+| `checkArgs(schema, args)`, `MAX_LIMIT` | The check on its own; 1000 |
+
 ## Cleanup (subpath)
 
 `@alexify/syncom/cleanup` — `cleanup(db, { minimumDeletedTime, runEach, awaitSync, leader, now }?)`: a deleted record
@@ -1111,6 +1128,7 @@ builds on. See [Editors](../guide/editors).
 | `toStore(cursor, options?)` | A query's rows, as `watch()` gives them; `undefined` until the first fetch |
 | `toStore(record, options?)` | A live `Document`'s data — a copy per change; `null` once deleted |
 | `toStore(presence, options?)` | A presence room's states, a `Map` by node |
+| `toObservable(store)` | An interop Observable over a store — `subscribe(observer \| next)` → `{ closed, unsubscribe() }`, itself at `Symbol.observable` — for Angular's `async` pipe and `toSignal()`, RxJS's `from()`; never errors or completes, `unsubscribe()` lets the store go |
 | `toStore(storage, id, { path }?)` | The record as `get()` reads it — or the field at `path` (`'profile/city'`) — read again after every turn that changed it; the newest read wins |
 | `fromEvents(emitter, events, read, options?)` | `read()` (a value or a promise of one) at the start and after each of `events` — the sync manager's `peers()` on `peer` and `sync`, say |
 

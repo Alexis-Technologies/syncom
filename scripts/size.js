@@ -682,6 +682,8 @@ const ENTRIES = [
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
   { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7 },
+  // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
+  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 2.5 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.

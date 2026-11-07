@@ -58,3 +58,28 @@ export declare function fromEvents<T>(
   read: () => T | Promise<T>,
   options?: StoreOptions<T>,
 ): SyncomStore<T | undefined>;
+
+/** An observer as RxJS and Angular subscribe: `next` per value; `error` and `complete` are never called (a live source). */
+export interface StoreObserver<T> {
+  next?: (value: T) => void;
+  error?: (error: unknown) => void;
+  complete?: () => void;
+}
+
+export interface StoreSubscription {
+  readonly closed: boolean;
+  unsubscribe(): void;
+}
+
+/**
+ * An interop Observable over a store: `subscribe(observer | next)`, and itself at `Symbol.observable` — spelled
+ * `'@@observable'` where no library defined the symbol — so RxJS's `from()`, Angular's `async` pipe and `toSignal()`
+ * take it as an Observable.
+ */
+export interface StoreObservable<T> {
+  subscribe(observer: StoreObserver<T> | ((value: T) => void)): StoreSubscription;
+  '@@observable'(): StoreObservable<T>;
+}
+
+/** A store as an interop Observable; never errors or completes, `unsubscribe()` lets the store go. */
+export declare function toObservable<T>(store: SyncomStore<T>): StoreObservable<T>;

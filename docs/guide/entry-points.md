@@ -32,6 +32,7 @@ same process may run with others.
 | `@alexify/syncom/connector` | a collection kept in step with a backend of its own through `pull` and `push` handlers — the adapters beside it speak CouchDB, GraphQL, Firestore, Supabase, MongoDB, Appwrite, Google Drive, OneDrive | `replicate(db, { name, collection, pull, push })` |
 | `@alexify/syncom/shared` | several instances over one database: one leads, the others follow (read-only over the same engine) and write through it over a channel; the leader gone, a follower takes its place | `openShared({ createDatabase, path, engine, channel, election })` |
 | `@alexify/syncom/attachments` | bytes beside a record in the engine's blobs store, named on it as a register that replicates; fetched from a peer on demand, checked by digest | `createDatabase({ plugins: [attachments({ compression })] })` |
+| `@alexify/syncom/mcp` | the tools an agent calls over a database, in the Model Context Protocol's shape: query, count, get, changes, wait_changes, insert, upsert, delete per collection, every argument checked against the tool's `inputSchema`; registering them is the caller's | `createTools(db, { collections, readOnly })` |
 | `@alexify/syncom/testing` | what a test over syncom stands on: the memory engine, an in-process link with a transport's hazards (latency, a page dropped or doubled, a disconnect), a mesh of nodes from an adjacency list, `settle()`, `withDatabase()` | `createMesh(names, edges, { createStorage })` |
 | `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
@@ -128,7 +129,7 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 | `/query` | 17.3 KB | `/telemetry` | 4.1 KB |
 | `/undo` | 8.8 KB | `/branch` | 4.7 KB |
 | `/presence` | 4.5 KB | `/inspect` | 5.4 KB |
-| `/editor` | 4.6 KB | `/store` | 1.1 KB |
+| `/editor` | 4.6 KB | `/store` | 1.2 KB |
 | `/prosemirror` | 7.8 KB | `/codemirror` | 6.4 KB |
 | `/memory` | 3.3 KB | `/layered` | 1.5 KB |
 | `/local` | 2.8 KB | `/state` | 2.9 KB |
@@ -138,7 +139,8 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 | `/connector/supabase` | 1.2 KB | `/connector/firestore` | 1.3 KB |
 | `/connector/appwrite` | 1.4 KB | `/connector/gdrive` | 2.1 KB |
 | `/connector/onedrive` | 1.9 KB | `/shared` | 5.5 KB |
-| `/attachments` | 4.1 KB | | |
+| `/attachments` | 4.1 KB | `/testing` | 6.5 KB |
+| `/mcp` | 2.2 KB | | |
 | `/cleanup` | 3.0 KB | `/engines` | 9.9 KB |
 | `/idb` | 4.9 KB | `/search` | 1.1 KB |
 | `/order` | 1.0 KB | `/contracts` | 1.0 KB |

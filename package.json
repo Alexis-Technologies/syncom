@@ -215,6 +215,10 @@
       "types": "./src/testing/testing.d.ts",
       "default": "./src/testing/testing.js"
     },
+    "./mcp": {
+      "types": "./src/mcp/mcp.d.ts",
+      "default": "./src/mcp/mcp.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
@@ -288,7 +292,8 @@
     "mongodb",
     "opentelemetry",
     "observability",
-    "connector"
+    "connector",
+    "mcp"
   ],
   "author": "Alex Dolid <dolid.sasha@gmail.com>",
   "license": "MIT",

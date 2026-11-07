@@ -26,3 +26,18 @@ expectType<number | undefined>(options.initial);
 // React's useSyncExternalStore takes the two members as they are.
 declare function useSyncExternalStore<T>(subscribe: (onChange: () => void) => () => void, getSnapshot: () => T): T;
 expectType<QueryRow<{ title: string }>[] | undefined>(useSyncExternalStore(rows.subscribe, rows.getSnapshot));
+
+// The interop Observable over a store.
+import { fromEvents as fromEv, toObservable } from '../src/store/store.js';
+import type { StoreObservable, StoreSubscription } from '../src/store/store.js';
+const emitterLike = { on() {}, off() {} };
+const ticks = fromEv(emitterLike, ['tick'], () => 1);
+const observable = toObservable(ticks);
+expectType<StoreObservable<number | undefined>>(observable);
+const subscription = observable.subscribe((value) => {
+  expectType<number | undefined>(value);
+});
+expectType<StoreSubscription>(subscription);
+expectType<boolean>(subscription.closed);
+observable.subscribe({ next: (value) => value, error: () => {}, complete: () => {} }).unsubscribe();
+expectType<StoreObservable<number | undefined>>(observable['@@observable']());

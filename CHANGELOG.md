@@ -139,6 +139,13 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   `createMesh(names, edges, { createStorage })` from an adjacency list, `settle()`, `waitUntil()`, `withDatabase()` —
   the one copy this repository's suite runs on. A smoke of the package runs under Deno and Bun in CI
   (`tests/smoke/smoke.js`: a database in memory, two nodes over the link).
+- **`@alexify/syncom/mcp`.** `createTools(db, { collections, readOnly, limit })`: the tools an agent calls over a
+  database in the Model Context Protocol's shape — `<Collection>_query`, `_count`, `_get`, `_changes`,
+  `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly` — as `{ name, description, inputSchema,
+  execute }`, every argument checked against the schema before anything runs; registering them with an MCP server
+  or WebMCP's `navigator.modelContext` is the caller's.
+- **`toObservable(store)`** of `@alexify/syncom/store`: an interop Observable over a store for Angular's `async`
+  pipe and `toSignal()`, RxJS's `from()`; Angular and Preact signals recipes in the frameworks guide.
 - **Sealed records in queries.** A collection's `encrypted: true` records are read whole at the key holder and
   matched, ordered, windowed and counted like the rest — they join the candidates of every plan over the collection
   (no index knows them: they alone are read, the plain rows answered from the index and the catalog as before, and

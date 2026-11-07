@@ -22,7 +22,8 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
 src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase, path, engine, channel, election }): several instances over one database, one leading, the others following and writing through it (its own CLAUDE.md)
 src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push }): a collection kept in step with a backend through two handlers, checkpointed (its own CLAUDE.md)
 src/testing/testing.js    @alexify/syncom/testing — MemoryLink, createMesh, settle, waitUntil, withDatabase, memoryEngine: what a test over syncom stands on; the repository's tests run on it through tests/utils (its own CLAUDE.md)
-src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
+src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit }): the tools an agent calls over a database in the Model Context Protocol's shape, every argument checked against the tool's inputSchema (its own CLAUDE.md)
+src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents/toObservable: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires

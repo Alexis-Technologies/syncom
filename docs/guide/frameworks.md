@@ -42,7 +42,8 @@ filter that threw, a read that rejected; the value stays as it was.
 | `toStore(presence)` | A [presence](./presence) room's states, a `Map` by node |
 | `fromEvents(emitter, events, read)` | `read()` — a value or a promise of one — at the start and after each of `events` |
 
-`fromEvents` covers what has no source of its own. The sync manager's
+`toObservable(store)` turns any of these into an interop Observable for what reads RxJS's shape
+([Angular](#angular)). `fromEvents` covers what has no source of its own. The sync manager's
 peers, say:
 
 ```js
@@ -113,12 +114,47 @@ const rows = from(tasks);
 
 `from` takes anything with a `subscribe` that returns the stop function.
 
+## Angular
+
+```ts
+import { Component } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { toObservable } from '@alexify/syncom/store';
+
+@Component({ /* … */ })
+export class TasksComponent {
+  readonly tasks$ = toObservable(tasks); // `tasks$ | async` in the template
+  readonly rows = toSignal(toObservable(tasks)); // or a signal
+}
+```
+
+`toObservable(store)` is an interop Observable — `subscribe({ next })` returning `{ closed, unsubscribe() }`, and
+itself at `Symbol.observable` — so the `async` pipe, `toSignal()` and RxJS's `from()` take it as they take an RxJS
+Observable. It never errors or completes (a live source; a failure stays on `store.error`), and `unsubscribe()`
+lets the store go — its source with it, once the last subscriber left.
+
+## Preact signals
+
+```js
+import { signal } from '@preact/signals-core';
+
+const rows = signal(tasks.value);
+const stop = tasks.subscribe((value) => (rows.value = value));
+```
+
+Any signal library wraps `subscribe` the same way: a signal set from the store, stopped with the function
+`subscribe` returned.
+
 ## Checked how
 
 The two contracts are checked by `tests/store.test.js`: a subscriber is
 called at once and on every change, a snapshot keeps its identity between
 changes, the source is watched only while subscribed, as React and Svelte
-read them. The Vue recipe above was run against Vue 3.5's reactivity
-(`effectScope`, `watchEffect`). React, Svelte and Solid are not
-dependencies of this repository, so their recipes follow each framework's
-documented store contract and were not run here.
+read them; the same file checks the interop Observable — a function or an
+observer object (its `next` called as a method, as RxJS's subscribers need),
+`unsubscribe()`, the `Symbol.observable` key. The Vue recipe above was run
+against Vue 3.5's reactivity (`effectScope`, `watchEffect`). React, Svelte,
+Solid, Angular and Preact are not dependencies of this repository, so their
+recipes follow each framework's documented contract (`Subscribable` for
+Angular's `async` pipe and `toSignal()`, `signal` for Preact) and were not
+run here.
