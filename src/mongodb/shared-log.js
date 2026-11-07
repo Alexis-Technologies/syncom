@@ -9,21 +9,34 @@
 // first }`) hands out `n` with one `findOneAndUpdate` — the one round trip two
 // appenders agree through — and the entry is inserted after, so a reader that
 // finds `n + 1` before `n` waits for `n` (`gapTimeout`, 2 s: an appender's
-// insert is one round trip behind its number, a hole older than that is a
-// crashed appender's). A read is a range by `n` over an index, then a tail:
-// woken by a change stream on the collection where the server has them
-// (`changes`, a replica set), polled every `poll` ms otherwise — a stream that
-// fails falls back to the poll. `after` names an entry of another epoch or one
-// trimmed past as 410, a malformed id or one past the tip as 400, the codes
-// wrpc's feeds speak. `trim(topic, keep)` drops all but the newest `keep`;
-// `retention.maxEntries` does it on every 64th append. The client is the
-// caller's: nothing here connects or closes it. Requires nothing of the core.
+// insert is one round trip behind its number), reads it once more, and then
+// yields a HOLE — `{ id, value: null, headers: { hole: '1' } }` — never passes
+// it in silence: a crashed appender's number is told. An append whose insert
+// failed marks its number a tombstone (`hole: true`, best effort) and one that
+// took longer than `gapTimeout` — a reader may have passed it — marks its
+// number and takes a fresh one (three times, then 503); a tombstone is passed
+// without a word (nothing was lost: the entry failed or moved). A read is a
+// range by `n` over an index, the head read once per page, then a tail: woken
+// by a change stream on the collection where the server has them (`changes`, a
+// replica set; a watchdog every `poll × 40` ms), polled every `poll` ms
+// otherwise — a stream that fails falls back to the poll. `after` names an
+// entry of another epoch or one trimmed past as 410, a malformed id or one past
+// the tip as 400, the codes wrpc's feeds speak. `trim(topic, keep)` drops all
+// but the newest `keep`; `retention.maxEntries` does it on every 64th append to
+// the topics `retention.topics` names (every topic when it names none — name
+// them where an inbox is in play: the writer trims the inbox past its cursor
+// through `trimBefore(topic, id)`). The client is the caller's: nothing here
+// connects or closes it. Requires nothing of the core.
 
 const DEFAULT_COLLECTION = 'shared';
 const LOG_ID = /^[A-Za-z0-9_-]{1,64}\.\d{1,16}$/;
 const PAGE = 256;
 // A retention check every so many appends.
 const TRIM_EVERY = 64;
+// An append slower than gapTimeout takes a fresh number this many times before it fails.
+const MAX_RENUMBER = 3;
+// With a live change stream the tail's timer is a watchdog, this many polls long.
+const WATCHDOG = 40;
 
 const decoder = new TextDecoder();
 
@@ -95,6 +108,16 @@ const mongoSharedLog = ({
   if (maxEntries !== undefined && !(Number.isInteger(maxEntries) && maxEntries > 0)) {
     throw new TypeError('mongoSharedLog: retention.maxEntries must be a positive integer');
   }
+  // The topics retention trims: every one without a list.
+  let trimmed = null;
+  if (retention?.topics !== undefined && retention.topics !== null) {
+    let valid = Array.isArray(retention.topics);
+    for (let i = 0; valid && i < retention.topics.length; i++) {
+      valid = typeof retention.topics[i] === 'string' && retention.topics[i].length > 0;
+    }
+    if (!valid) throw new TypeError('mongoSharedLog: retention.topics must be an array of topic names');
+    trimmed = new Set(retention.topics);
+  }
   const database = db ?? client.db(name);
   const entries = database.collection(collection);
   const heads = database.collection(`${collection}_heads`);
@@ -140,15 +163,47 @@ const mongoSharedLog = ({
     await heads.updateOne({ _id: topic }, { $max: { first: floor } });
   };
 
+  // A number whose entry failed or moved: a tombstone, so a reader passes it without a word (best effort).
+  const tombstone = async (topic, n) => {
+    try {
+      await entries.replaceOne(
+        { _id: keyOf(topic, n) },
+        { _id: keyOf(topic, n), topic, n, v: null, hole: true, at: new Date() },
+        { upsert: true },
+      );
+    } catch (error) {
+      logger?.warn?.({ event: 'shared.tombstone.failed', topic, n, err: error });
+    }
+  };
+
   const append = async (topic, value, options = {}) => {
     requireTopic(topic, 'mongoSharedLog.append');
     if (closed) throw coded('The shared log is closed', 503);
     const text = toText(value);
     const h = toHeaders(options.headers);
     await ensure();
-    const { n, epoch, first } = await number(topic);
-    await entries.insertOne({ _id: keyOf(topic, n), topic, n, v: text, h, at: new Date() });
-    if (maxEntries !== undefined) {
+    let numbered;
+    for (let attempt = 1; ; attempt++) {
+      const started = Date.now();
+      numbered = await number(topic);
+      const { n } = numbered;
+      try {
+        await entries.insertOne({ _id: keyOf(topic, n), topic, n, v: text, h, at: new Date() });
+      } catch (error) {
+        // The number is out and its entry never comes: marked, so no reader waits the gap out for it.
+        await tombstone(topic, n);
+        throw error;
+      }
+      // Landed within the gap a reader waits: no reader passed the number.
+      if (Date.now() - started < gapTimeout) break;
+      // Slower than the gap: a live reader may have passed the number as a hole — the entry moves to a fresh one.
+      await tombstone(topic, n);
+      if (attempt >= MAX_RENUMBER) {
+        throw coded(`mongoSharedLog.append: ${attempt} inserts slower than gapTimeout (${gapTimeout} ms)`, 503);
+      }
+    }
+    const { n, epoch, first } = numbered;
+    if (maxEntries !== undefined && (trimmed === null || trimmed.has(topic))) {
       const count = (appends.get(topic) ?? 0) + 1;
       appends.set(topic, count % TRIM_EVERY);
       const floor = n - maxEntries + 1;
@@ -221,10 +276,10 @@ const mongoSharedLog = ({
           }
         }
       },
-      // Until an entry lands, the poll elapses or the reader is done.
+      // Until an entry lands, the poll elapses (a watchdog's length with a live stream) or the reader is done.
       wait(signal) {
         return new Promise((resolve) => {
-          const timer = setTimeout(done, poll);
+          const timer = setTimeout(done, stream === null ? poll : poll * WATCHDOG);
           timer.unref?.();
           function done() {
             clearTimeout(timer);
@@ -266,7 +321,8 @@ const mongoSharedLog = ({
       const tail = tailOf(topic);
       tail.enter();
       try {
-        // How long the entry at `position` has been waited for: a hole older than `gapTimeout` is skipped.
+        // How long the entry at `position` has been waited for: past `gapTimeout` it is read once more, then told as
+        // a hole.
         let waitedSince = 0;
         for (;;) {
           if (signal?.aborted || closed) return;
@@ -279,23 +335,39 @@ const mongoSharedLog = ({
             await tail.wait(signal);
             continue;
           }
+          // The head once per page: another epoch, or a trim past the reader, is 410.
+          const current = await heads.findOne({ _id: topic }, { projection: { _id: 0, epoch: 1, first: 1 } });
+          if (current === null) throw coded('Event id belongs to another log', 410);
+          if (epoch === null) epoch = current.epoch;
+          else if (current.epoch !== epoch) throw coded('Event id belongs to another log', 410);
+          if (position < current.first) throw coded('Event history was trimmed past this reader', 410);
           let yielded = false;
           for (let i = 0; i < docs.length; i++) {
-            const doc = docs[i];
+            let doc = docs[i];
             if (doc.n > position) {
-              // A number handed out whose entry is not here yet, or never will be.
+              // A number handed out whose entry is not here yet, or never will be: waited for, read once more.
               if (waitedSince === 0) waitedSince = Date.now();
               if (Date.now() - waitedSince < gapTimeout) break;
-              position = doc.n;
+              const late = await entries.findOne({ _id: keyOf(topic, position) }, { projection: { _id: 0 } });
+              waitedSince = 0;
+              if (late === null) {
+                // A crashed appender's number: told, never passed in silence.
+                logger?.warn?.({ event: 'shared.hole', topic, n: position });
+                const id = `${epoch}.${position}`;
+                position++;
+                yielded = true;
+                yield { id, value: null, headers: { hole: '1' } };
+                i--;
+                continue;
+              }
+              doc = late;
+              i--;
             }
             waitedSince = 0;
-            yielded = true;
-            const current = await heads.findOne({ _id: topic }, { projection: { _id: 0, epoch: 1, first: 1 } });
-            if (current === null) throw coded('Event id belongs to another log', 410);
-            if (epoch === null) epoch = current.epoch;
-            else if (current.epoch !== epoch) throw coded('Event id belongs to another log', 410);
-            if (doc.n < current.first) throw coded('Event history was trimmed past this reader', 410);
             position = doc.n + 1;
+            // A tombstone: an append that failed, or moved to a fresh number — nothing to tell.
+            if (doc.hole === true) continue;
+            yielded = true;
             yield { id: `${epoch}.${doc.n}`, value: doc.v, headers: { ...doc.h } };
           }
           if (!yielded) await sleep(Math.min(poll, 50), signal);
@@ -318,12 +390,26 @@ const mongoSharedLog = ({
     if (floor > head.first) await trimTo(topic, floor);
   };
 
+  // Everything of `topic` at or before the entry `id` names dropped: what a writer landed of its inbox.
+  const trimBefore = async (topic, id) => {
+    requireTopic(topic, 'mongoSharedLog.trimBefore');
+    const parsed = parseId(id);
+    if (parsed === null) throw new TypeError('mongoSharedLog.trimBefore: id must be an event id');
+    const head = await heads.findOne({ _id: topic });
+    if (head === null) return;
+    const dot = parsed.lastIndexOf('.');
+    if (parsed.slice(0, dot) !== head.epoch) return;
+    const floor = Number(parsed.slice(dot + 1)) + 1;
+    if (floor > head.first) await trimTo(topic, Math.min(floor, head.next));
+  };
+
   return Object.freeze({
     name: 'mongodb',
     append,
     read,
     parseId,
     trim,
+    trimBefore,
     /** The topic's head: its epoch, the next number and the oldest kept, or null for a topic never appended to. */
     async head(topic) {
       requireTopic(topic, 'mongoSharedLog.head');

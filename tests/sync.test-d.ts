@@ -44,6 +44,7 @@ expectType<string>(shared.topic);
 expectType<string | false>(shared.inbox);
 expectType<string | null>(shared.appended);
 expectType<number>(shared.covered);
+expectType<number>(shared.holes);
 expectType<string | null>(shared.cursor.topic);
 expectType<string | null>(shared.appended);
 expectType<boolean>(shared.behind);

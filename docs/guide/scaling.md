@@ -113,9 +113,15 @@ from another hub fills it (`addNode` a hub, once); an entry that fails to
 apply three times leaves its topic `stuck` (`sync.shared().stuck`) and
 nothing past it is taken until `sync.stop()` and `start()`. `sync.shared()`
 is the cursors, the watermark (`appended`, and `covered`: the positions
-above it known to be in the topic) and the counts. Retention is the log's — a broker's
-`maxEntries`, `mongoSharedLog({ retention })` or `trim()` — and a client
-whose cursor was trimmed bootstraps.
+above it known to be in the topic) and the counts. A **hole** — a position
+the log handed out whose entry never came (`mongoSharedLog`: a crashed
+appender's number) — is told (`hole`, with the id) and passed; the appender's
+own recovery appends what it carried once it is back. Retention is the log's —
+a broker's `maxEntries`, `mongoSharedLog({ retention: { maxEntries, topics } })`
+or `trim()` — and a client whose cursor was trimmed bootstraps; name the
+topics retention trims where an inbox is in play: the writer trims the inbox
+past its cursor itself (`trimBefore`), so what a follower forwarded is never
+dropped before it landed.
 
 ## Scopes as buckets
 

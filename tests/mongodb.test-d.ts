@@ -38,6 +38,8 @@ expectType<'mongodb'>(log.name);
 expectType<Promise<string>>(log.append('syncom', '{}', { headers: { by: 'h1' } }));
 expectType<string | null>(log.parseId('a.1'));
 expectType<Promise<void>>(log.trim('syncom', 1000));
+expectType<Promise<void>>(log.trimBefore('syncom.inbox', 'k1x9ab.42'));
+mongoSharedLog({ client, retention: { maxEntries: 10_000, topics: ['syncom'] } });
 expectType<Promise<{ epoch: string; next: number; first: number } | null>>(log.head('syncom'));
 expectType<Promise<void>>(log.close());
 const tail = async () => {

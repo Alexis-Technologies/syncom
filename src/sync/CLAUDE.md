@@ -85,8 +85,11 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   does the same, so a stop with ops waiting loses none — and moves the watermark to the last of them (`#reached`;
   duplicates in the topic are every consumer's to drop); a watermark the log compacted past is told once (`lost`)
   and moved to the floor, what the log retains going to the topic; `stop()` waits `stopWait` for an append in
-  flight, then lets go of it; a cursor gone reads from the oldest; an entry that will not apply three times leaves
-  its topic `stuck` — never skipped, a skipped entry is a gap for good. The loops begin a turn after `start()` (setImmediate), so a listener
+  flight, then lets go of it; a cursor gone reads from the oldest; a hole the log yields (`value: null` — a number
+  whose entry never came) is told (`hole`) and passed, `stats().holes` counting; an entry that will not apply three
+  times leaves its topic `stuck` — never skipped, a skipped entry is a gap for good. A writer trims the inbox past
+  its cursor every `INBOX_TRIM_EVERY` entries passed (`log.trimBefore`, where the log has it): what it landed is no
+  one else's to read, and a second writer over the same inbox reads what it missed from the topic. The loops begin a turn after `start()` (setImmediate), so a listener
   attached right after the open hears the first read's failure. A read's 410/400 means the position is not the
   log's — the codes wrpc's brokers and `mongoSharedLog` answer; a log of another shape must answer them too.
 - **A rule never withholds an op; it scrubs it.** `beforeSend` on the dialer (`#outgoing`, a copy of the op) and

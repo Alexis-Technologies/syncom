@@ -11,10 +11,11 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
                           a bulk write per collection per write set, in a session transaction under `transactions: true`; change
                           streams as `db.changes`; the subpath also exports mongoSharedLog — requires engine.js, errors.js,
                           shared-log.js only
-src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes, poll, gapTimeout, retention, logger }): a shared log
-                          (wrpc's BrokerLog shape) over two collections — a topic's entries `[topic, n]` numbered by its head document
-                          (`<collection>_heads`: epoch, next, first) in one findOneAndUpdate; a read a range by `n` then a tail woken by a
-                          change stream or a poll; 410/400 as wrpc's feeds speak them; trim, retention — no requires
+src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes, poll, gapTimeout, retention: { maxEntries, topics }, logger }):
+                          a shared log (wrpc's BrokerLog shape) over two collections — a topic's entries `[topic, n]` numbered by its head
+                          document (`<collection>_heads`: epoch, next, first) in one findOneAndUpdate; a read a range by `n` (the head once a
+                          page) then a tail woken by a change stream or a poll; a hole told, a tombstone passed; 410/400 as wrpc's feeds
+                          speak them; trim, trimBefore, retention — no requires
 ```
 
 ## Rules
@@ -59,16 +60,22 @@ src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes
   ONE timer, in one bulk write a tick at the shortest margin among them (keyed by the holder's token: a lease lost and
   not yet noticed and the next on the same path are two); a tick that lands short or fails hands each lease its own
   renewal, which tells the lost one from the rest and keeps its retry (`late`, then lost) as it is.
-- **The shared log numbers in the head, waits for a hole, and is not the engine's log.** `mongoSharedLog` keeps a
+- **The shared log numbers in the head, tells a hole, and is not the engine's log.** `mongoSharedLog` keeps a
   topic's entries apart from the engine's `log` collection (a follower never reads the writer's op log — it hosts
   from the shared log, src/sync/shared.js): `append` takes a number from the topic's head document
   (`findOneAndUpdate` with a pipeline, upsert — the one round trip two appenders agree through, so two never share
   a number) and inserts the entry after it, so a reader that finds `n + 1` before `n` waits `gapTimeout` for `n`
-  (an insert is one round trip behind its number) and then skips it as a crashed appender's hole; the epoch is
+  (an insert is one round trip behind its number), reads it once more, and then yields it as a HOLE — `{ id,
+value: null, headers: { hole: '1' } }`, `shared.hole` warned — which the hub tells (`SHARED_LOG_FAILED` `hole`)
+  and passes; never skipped in silence. An insert that failed marks its number a tombstone (`hole: true`, best
+  effort) and one slower than `gapTimeout` — a live reader may have passed it — marks its number and takes a fresh
+  one (`MAX_RENUMBER` times, then 503): a tombstone is passed without a word, nothing was lost. The epoch is
   minted once per topic (`$ifNull` keeps the first) and a topic never appended to adopts the first head it sees.
   A tail is one per topic per instance, shared by its readers: a change stream matched to the topic on the server
-  wakes them, a poll every `poll` ms where there is none or it failed (`shared.stream.failed`); every read checks the
-  head again before it yields (another epoch or a trim under it is 410). `trim` and `retention.maxEntries` move
+  wakes them (the timer a watchdog then, `poll × WATCHDOG`), a poll every `poll` ms where there is none or it failed
+  (`shared.stream.failed`); a read checks the head once per page (another epoch, or a trim past the reader, is 410).
+  `trim`, `trimBefore(topic, id)` (what a writer landed of its inbox — the hub calls it every `INBOX_TRIM_EVERY`
+  inbox entries) and `retention.maxEntries` (the topics `retention.topics` names; every one without the list) move
   `first` with `$max` — the fake supports `$max` for it — and delete below it.
 - **A change stream is one path's records, matched on the server, and its end is heard.** `db.changes`
   watches `records` alone (the `log` collection is not watched: a follower hosts from the shared log, never

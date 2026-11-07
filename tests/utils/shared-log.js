@@ -107,6 +107,15 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     },
     parseId: (text) => (typeof text === 'string' && LOG_ID.test(text) ? text : null),
     trim,
+    /** Everything of `topic` at or before `id` dropped. */
+    async trimBefore(topic, id) {
+      const found = topics.get(topic);
+      if (!found || !LOG_ID.test(id)) return;
+      const dot = id.lastIndexOf('.');
+      if (id.slice(0, dot) !== epoch) return;
+      const n = Number(id.slice(dot + 1));
+      trim(topic, Math.max(0, found.next - 1 - n));
+    },
     /** The next `count` appends to `topic` fail with 503. */
     fail(topic, count = 1) {
       failing.set(topic, count);

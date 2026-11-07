@@ -69,8 +69,8 @@ export interface MongoSharedLogOptions {
   poll?: number;
   /** How long a reader waits for a number handed out whose entry is not there yet before it skips the hole (a crashed appender's), in ms; 2 000 by default. */
   gapTimeout?: number;
-  /** Trim a topic to its newest `maxEntries` on every 64th append. */
-  retention?: { maxEntries?: number };
+  /** Trim a topic to its newest `maxEntries` on every 64th append — the topics `topics` names, every one without a list (name them where an inbox is in play: the writer trims the inbox itself). */
+  retention?: { maxEntries?: number; topics?: readonly string[] | null };
   /** Where a change stream's failure is said (`shared.stream.failed`). */
   logger?: { warn?: (entry: Record<string, unknown>) => void } | null;
 }
@@ -80,6 +80,8 @@ export interface MongoSharedLog extends SharedLog {
   readonly name: 'mongodb';
   /** Drops all but the newest `keep` entries of a topic. */
   trim(topic: string, keep: number): Promise<void>;
+  /** Drops everything of a topic at or before the entry `id` names (what a writer landed of its inbox); another epoch's id drops nothing. */
+  trimBefore(topic: string, id: string): Promise<void>;
   /** The topic's head — its epoch, the next number, the oldest kept — or null for a topic never appended to. */
   head(topic: string): Promise<{ epoch: string; next: number; first: number } | null>;
   /** Stops every tail; a read after it fails with 503. The client is the caller's. */

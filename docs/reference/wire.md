@@ -663,7 +663,10 @@ appender's `pageSize` (500) an entry, in the order the appender accepted
 them; `scopes` rides on an inbox entry alone — the scopes the forwarding
 hub granted the client, what the landing hub bounds the ops to. A `mark`
 positions a snapshot: the id its append answered is the first page's
-`eventId`. `by` lets a hub pass its own entries without parsing them. The
+`eventId`. `by` lets a hub pass its own entries without parsing them. A log
+may yield a **hole** — `{ id, value: null, headers: { hole: '1' } }`, an id
+whose entry never came (`mongoSharedLog`: a crashed appender's number) —
+which a hub tells (`SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The
 ids are the log's (`<epoch>.<n>` on wrpc's brokers and `mongoSharedLog`);
 a hub keeps its consumer's cursors and the relay's watermark — the last
 position of its own log every op at or below which is in the topic — in

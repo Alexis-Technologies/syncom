@@ -217,6 +217,70 @@ test('A writer and a follower hub over one MongoDB database', async (t) => {
   );
 
   await t.test(
+    'a hole in the topic is told (SHARED_LOG_FAILED hole) and the hubs go on; the writer trims the inbox past its cursor alone',
+    async (t2) => {
+      const client = createFakeMongo();
+      const log = () => mongoSharedLog({ client, poll: 20, gapTimeout: 60 });
+      const writer = await syncom.createDatabase({
+        ...base,
+        path: 'hub',
+        engine: mongoEngine({ client }),
+        sync: { sharedLog: log() },
+      });
+      t2.after(() => writer.close().catch(() => {}));
+      const follower = await syncom.createDatabase({
+        ...base,
+        path: 'hub',
+        engine: mongoEngine({ client }),
+        readOnly: true,
+        sync: { sharedLog: log() },
+      });
+      t2.after(() => follower.close().catch(() => {}));
+      const errors = { writer: [], follower: [] };
+      writer.sync.on('error', (error) => errors.writer.push(error));
+      follower.sync.on('error', (error) => errors.follower.push(error));
+      const a = await writer.insert({ n: 1 });
+      await waitUntil(() => follower.sync.shared().entries >= 1);
+      // An appender that took a number and died before its insert: the next entry sits past a hole.
+      const heads = client.db('syncom').collection('shared_heads');
+      await heads.updateOne({ _id: 'syncom' }, { $inc: { next: 1 } });
+      const b = await writer.insert({ n: 2 });
+      await waitUntil(
+        () => errors.follower.some((error) => error.code === 'SHARED_LOG_FAILED' && error.reason === 'hole'),
+        {
+          timeout: 5000,
+        },
+      );
+      const hole = errors.follower.find((error) => error.reason === 'hole');
+      assert.strictEqual(hole.topic, 'syncom');
+      assert.match(hole.cursor, /^[a-z0-9]+\.\d+$/);
+      assert.strictEqual(follower.sync.shared().holes, 1);
+      // The hubs go on: the entry past the hole is read and the follower's shadow moved by it.
+      await waitUntil(() => follower.sync.shared().shadow === true && follower.sync.shared().entries >= 2);
+      const link = new MemoryLink(follower.sync.unit({ access: 'public' }));
+      const hello = await link.call('syncom/hello', { node: 'probe', version: 1 });
+      assert.strictEqual(hello.vector[writer.nodeId], writer.vector[writer.nodeId]);
+      assert.ok(a !== b);
+      // Pushes forwarded through the follower land at the writer; every 64 inbox entries the writer trims the inbox
+      // past its cursor — the topic is not retention's to trim here.
+      const op = (seq) => ({
+        origin: 'probe',
+        seq,
+        ts: Date.now() + seq,
+        type: 'write',
+        id: `p${seq}`,
+        data: { n: seq },
+      });
+      for (let seq = 1; seq <= 70; seq++) await link.call('syncom/push', { ops: packOps([op(seq)]) });
+      await waitUntil(() => writer.hasRecord('p70'), { timeout: 5000 });
+      await waitUntil(async () => ((await log().head('syncom.inbox'))?.first ?? 1) > 1, { timeout: 5000 });
+      const inbox = await log().head('syncom.inbox');
+      assert.ok(inbox.first >= 64, `trimmed past what the writer landed (first ${inbox.first})`);
+      assert.strictEqual((await log().head('syncom')).first, 1, 'the topic is left as it is');
+    },
+  );
+
+  await t.test(
     'a follower without an inbox refuses a push with 503 READ_ONLY; without a shared log it does not host',
     async (t2) => {
       const client = createFakeMongo();

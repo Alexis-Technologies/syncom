@@ -64,6 +64,8 @@ const MAX_BACKOFF = 60_000;
 const MAX_APPLY_RETRIES = 3;
 // How long a snapshot waits for the consumer to reach its marker.
 const REACH_TIMEOUT = 30_000;
+// A writer trims the inbox past its cursor every so many inbox entries passed (`log.trimBefore`, where the log has it).
+const INBOX_TRIM_EVERY = 64;
 // How long `stop()` waits for an append in flight before it lets go of it (`sharedLog.stopWait`): what it carried
 // is above the watermark, so the next start appends it again.
 const DEFAULT_STOP_WAIT = 5000;
@@ -128,6 +130,7 @@ const scopesOf = (value) => {
  * no entry of ours.
  */
 const parseEntry = (text) => {
+  if (typeof text !== 'string') return undefined;
   let value;
   try {
     value = JSON.parse(text);
@@ -179,12 +182,13 @@ class SharedHub {
   #recentSet = new Set();
   #waiters = new Set();
   #stuck = { topic: false, inbox: false };
+  #inboxPassed = 0;
   // A read-only hub's vector, as the topic moves it; null while this hub writes.
   #shadow = null;
   // A writing hub's vector as its reads reflect it: every op offered (announced, so landed), none merely reserved —
   // what a hello and a snapshot's first page answer, so a client takes as seen nothing a page could lack.
   #relayed;
-  #stats = { relayed: 0, appendFailures: 0, entries: 0, applied: 0, forwarded: 0, malformed: 0 };
+  #stats = { relayed: 0, appendFailures: 0, entries: 0, applied: 0, forwarded: 0, malformed: 0, holes: 0 };
 
   constructor(
     manager,
@@ -559,6 +563,18 @@ class SharedHub {
   // `start()` read it again).
   async #take(name, topic, entry) {
     this.#stats.entries++;
+    // A hole: a number the log handed out whose entry never came (a crashed appender's). Told — what it carried is
+    // in no one's hands but the appender's, whose recovery appends it again when it comes back — and passed.
+    if (entry.value === null) {
+      this.#stats.holes++;
+      this.#logger.warn({ event: 'shared.hole', topic, id: entry.id });
+      const message = `The shared log ${topic} has a hole at ${entry.id}: an appender's entry never came`;
+      notify(this.#manager, this.#logger, 'error', failed('hole', message, { topic, cursor: entry.id }));
+      this.#cursor[name] = entry.id;
+      this.#passed(entry.id);
+      this.#saveCursor();
+      return true;
+    }
     const headers = entry.headers;
     const own = headers !== undefined && headers !== null && headers.by === this.#token;
     if (!own) {
@@ -576,7 +592,19 @@ class SharedHub {
     this.#cursor[name] = entry.id;
     this.#passed(entry.id);
     this.#saveCursor();
+    // What the writer landed of the inbox is no one else's to read: trimmed past the cursor now and then.
+    if (name === 'inbox' && ++this.#inboxPassed >= INBOX_TRIM_EVERY) {
+      this.#inboxPassed = 0;
+      this.#trimInbox(topic, entry.id);
+    }
     return true;
+  }
+
+  #trimInbox(topic, id) {
+    if (typeof this.#log.trimBefore !== 'function') return;
+    this.#log
+      .trimBefore(topic, id)
+      .catch((error) => this.#logger.warn({ event: 'shared.inbox.trim.failed', topic, cursor: id, err: error }));
   }
 
   async #apply(name, topic, entry, parsed) {

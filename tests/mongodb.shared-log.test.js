@@ -147,22 +147,166 @@ test('MongoDB shared log (the driver in memory)', async (t) => {
     await log.close();
   });
 
-  await t.test('a number handed out whose entry never comes is a hole: waited for, then skipped', async () => {
+  await t.test(
+    'a number handed out whose entry never comes is read again after the wait, then yielded as a hole (value null), never passed in silence',
+    async () => {
+      const client = createFakeMongo();
+      const warned = [];
+      const log = mongoSharedLog({ client, poll: 20, gapTimeout: 60, logger: { warn: (entry) => warned.push(entry) } });
+      await log.append('g', 'v1');
+      // An appender that took a number and died before its insert.
+      const heads = client.db('syncom').collection('shared_heads');
+      await heads.updateOne({ _id: 'g' }, { $inc: { next: 1 } });
+      const third = await log.append('g', 'v3');
+      assert.match(third, /\.3$/);
+      const [epoch] = third.split('.');
+      const started = Date.now();
+      const read = await take(log.read('g', { from: 'earliest' }), 3);
+      assert.deepStrictEqual(
+        read.map((entry) => entry.value),
+        ['v1', null, 'v3'],
+      );
+      assert.deepStrictEqual(read[1], { id: `${epoch}.2`, value: null, headers: { hole: '1' } });
+      assert.ok(Date.now() - started >= 50, 'waited for the hole first');
+      assert.ok(warned.some((entry) => entry.event === 'shared.hole' && entry.n === 2));
+      // A late entry — the appender was slow, not dead — is read once more before the hole is told.
+      await heads.updateOne({ _id: 'g' }, { $inc: { next: 1 } });
+      const fifth = await log.append('g', 'v5');
+      assert.match(fifth, /\.5$/);
+      const entries = client.db('syncom').collection('shared');
+      setTimeout(
+        () =>
+          entries.insertOne({ _id: JSON.stringify(['g', 4]), topic: 'g', n: 4, v: 'v4-late', h: {}, at: new Date() }),
+        40,
+      );
+      const late = await take(log.read('g', { after: third }), 2);
+      assert.deepStrictEqual(
+        late.map((entry) => entry.value),
+        ['v4-late', 'v5'],
+      );
+      await log.close();
+    },
+  );
+
+  await t.test('an insert slower than gapTimeout takes a fresh number: no live reader skipped it', async () => {
     const client = createFakeMongo();
     const log = mongoSharedLog({ client, poll: 20, gapTimeout: 60 });
-    await log.append('g', 'v1');
-    // An appender that took a number and died before its insert.
-    const heads = client.db('syncom').collection('shared_heads');
-    await heads.updateOne({ _id: 'g' }, { $inc: { next: 1 } });
-    const third = await log.append('g', 'v3');
-    assert.match(third, /\.3$/);
-    const started = Date.now();
-    const read = await take(log.read('g', { from: 'earliest' }), 2);
+    await log.append('s', 'v1');
+    // A reader live before the slow append: it sees the fresh number, never a hole.
+    const live = [];
+    const controller = new AbortController();
+    const reading = (async () => {
+      for await (const entry of log.read('s', { from: 'earliest', signal: controller.signal })) live.push(entry);
+    })();
+    await sleep(10);
+    const entries = client.db('syncom').collection('shared');
+    const insertOne = entries.insertOne.bind(entries);
+    let slowed = 0;
+    entries.insertOne = async (doc, options) => {
+      if (doc.v === 'v2' && slowed++ === 0) await sleep(100);
+      return insertOne(doc, options);
+    };
+    const second = await log.append('s', 'v2');
+    assert.match(second, /\.3$/, 'the slow insert at 2 moved to 3');
+    const deadline = Date.now() + 2000;
+    while (live.length < 2 && Date.now() < deadline) await sleep(5);
+    controller.abort();
+    await reading;
     assert.deepStrictEqual(
-      read.map((entry) => entry.value),
-      ['v1', 'v3'],
+      live.map((entry) => [entry.id.split('.')[1], entry.value]),
+      [
+        ['1', 'v1'],
+        ['3', 'v2'],
+      ],
+      'the tombstone at 2 is passed without a word',
     );
-    assert.ok(Date.now() - started >= 50, 'waited for the hole first');
+    // A fresh reader the same: the tombstone is no hole.
+    const all = await take(log.read('s', { from: 'earliest' }), 2);
+    assert.deepStrictEqual(
+      all.map((entry) => entry.value),
+      ['v1', 'v2'],
+    );
+    // An insert that fails leaves a tombstone too: the next reader passes the number without the wait.
+    entries.insertOne = async (doc, options) => {
+      if (doc.v === 'v3') throw new Error('write concern failed');
+      return insertOne(doc, options);
+    };
+    await assert.rejects(() => log.append('s', 'v3'), /write concern failed/);
+    entries.insertOne = insertOne;
+    await log.append('s', 'v4');
+    const started = Date.now();
+    const rest = await take(log.read('s', { after: second }), 1);
+    assert.deepStrictEqual(
+      rest.map((entry) => entry.value),
+      ['v4'],
+    );
+    assert.ok(Date.now() - started < 50, 'no gap waited out for the tombstone');
+    await log.close();
+  });
+
+  await t.test('with a live change stream a tail does not poll, and the head is read once per page', async () => {
+    const client = createFakeMongo();
+    const log = mongoSharedLog({ client, poll: 10, gapTimeout: 60 });
+    const entries = client.db('syncom').collection('shared');
+    const heads = client.db('syncom').collection('shared_heads');
+    let finds = 0;
+    let headReads = 0;
+    const find = entries.find.bind(entries);
+    const findOne = heads.findOne.bind(heads);
+    entries.find = (...args) => {
+      finds++;
+      return find(...args);
+    };
+    heads.findOne = (...args) => {
+      headReads++;
+      return findOne(...args);
+    };
+    for (let i = 1; i <= 5; i++) await log.append('w', `v${i}`);
+    const live = [];
+    const controller = new AbortController();
+    const reading = (async () => {
+      for await (const entry of log.read('w', { from: 'earliest', signal: controller.signal })) live.push(entry.value);
+    })();
+    const deadline = Date.now() + 2000;
+    while (live.length < 5 && Date.now() < deadline) await sleep(5);
+    assert.strictEqual(live.length, 5);
+    const findsAfterPage = finds;
+    const headsAfterPage = headReads;
+    assert.ok(headsAfterPage <= 2, `the head is read once per page, not per entry (${headsAfterPage})`);
+    // Idle under a live stream: no poll — the finds stay where they were over many poll intervals.
+    await sleep(200);
+    assert.strictEqual(finds, findsAfterPage, 'no poll with a live change stream');
+    await log.append('w', 'v6');
+    while (live.length < 6 && Date.now() < deadline) await sleep(5);
+    assert.strictEqual(live.length, 6, 'woken by the stream');
+    controller.abort();
+    await reading;
+    await log.close();
+  });
+
+  await t.test('retention names its topics; trimBefore drops what a writer passed', async () => {
+    const client = createFakeMongo();
+    const log = mongoSharedLog({ client, poll: 20, retention: { maxEntries: 2, topics: ['a'] } });
+    const ids = { a: [], b: [] };
+    for (let i = 1; i <= 64; i++) {
+      ids.a.push(await log.append('a', `a${i}`));
+      ids.b.push(await log.append('b', `b${i}`));
+    }
+    assert.deepStrictEqual(await log.head('a'), { ...(await log.head('a')), first: 63 }, 'a trimmed to its newest two');
+    assert.strictEqual((await log.head('b')).first, 1, 'b is not retention’s to trim');
+    await log.trimBefore('b', ids.b[4]);
+    assert.strictEqual((await log.head('b')).first, 6, 'everything at or before the fifth is gone');
+    const rest = await take(log.read('b', { from: 'earliest' }), 1);
+    assert.strictEqual(rest[0].value, 'b6');
+    await assert.rejects(
+      () => take(log.read('b', { after: ids.b[2] }), 1),
+      (error) => error.code === 410,
+    );
+    // Another epoch's id trims nothing; a malformed one is a TypeError.
+    await log.trimBefore('b', 'other.100');
+    assert.strictEqual((await log.head('b')).first, 6);
+    await assert.rejects(() => log.trimBefore('b', 'nope'), { name: 'TypeError' });
+    assert.throws(() => mongoSharedLog({ client, retention: { maxEntries: 2, topics: [''] } }), { name: 'TypeError' });
     await log.close();
   });
 
