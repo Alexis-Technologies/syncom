@@ -32,7 +32,7 @@ const sse = wrpc && optional('@alexify/wrpc/sse');
 const brokers = wrpc && optional('@alexify/wrpc/broker');
 const { PROTOCOL } = require('../src/sync/protocol.js');
 const { MessageChannel } = require('node:worker_threads');
-const { openShared, MUTATORS } = require('../src/shared/shared.js');
+const { openShared, PROCEDURES } = require('../src/shared/shared.js');
 const { createSharedChannel } = require('../src/wrpc/wrpc.js');
 const { createFakeLocks } = require('./utils/fake-locks.js');
 const { createChannelPair } = require('./utils/fake-channel.js');
@@ -354,7 +354,8 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
         },
       });
       const procedures = {};
-      for (const name of [...MUTATORS, 'transact']) procedures[name] = procedure(name);
+      // Every procedure a follower forwards — the writers, a transaction, a collection's, a local document's, a blob's.
+      for (const name of PROCEDURES) procedures[name] = procedure(name);
       const router = wrpc.defineRouter({ 'syncom-db': procedures });
       const server = new wrpc.Server({ router, host: '127.0.0.1', port: 0, protocol: 'http', logger: false });
       await server.listen();

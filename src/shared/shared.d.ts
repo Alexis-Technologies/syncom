@@ -23,8 +23,8 @@ export type FullDatabase = Database & TextMethods & TextHandleMethods & TreeMeth
 
 /** The channel a follower carries its writes over: anything carrying JSON both ways (`createSharedChannel` of the wrpc subpath). */
 export interface LeaderChannel {
-  /** The payload is a `SharedCall`; a transport typed over `unknown[]` (the wrpc subpath's `SharedChannel`) is one too. */
-  call(method: string, call: SharedCall | unknown[]): Promise<unknown>;
+  /** The payload is a `SharedCall` — `{ id, args, retry }` — which the leader's `serve()` answers once per id. */
+  call(method: string, call: SharedCall): Promise<unknown>;
   close?(): unknown;
 }
 

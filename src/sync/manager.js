@@ -37,7 +37,7 @@ const { scrubOp } = require('../header.js');
 const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
-const { isDigest } = require('../blobs.js');
+const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
 const MAX_PAGE_RETRIES = 3;
@@ -52,7 +52,6 @@ const DEFAULT_MAX_OUTBOX = 10_000;
 // node's memory with it.
 const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 // What a peer may answer for one blob: 64 MiB.
-const MAX_BLOB_BYTES = 64 * 1024 * 1024;
 const encoder = new TextEncoder();
 // A failed recovery waits this long (doubling, by timestamp) before the next.
 const RECOVER_BACKOFF = 1000;

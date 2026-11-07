@@ -2,6 +2,7 @@
 // contract. wrpc itself is injected by the caller and never imported here.
 
 import type { SyncLink } from '../../index.js';
+import type { SharedCall } from '../shared/shared.js';
 
 export type { SyncLink } from '../../index.js';
 export { isSyncLink } from '../../index.js';
@@ -31,7 +32,8 @@ export function createWrpcLink(client: WrpcClientLike, options?: WrpcLinkOptions
 
 /** The channel a follower of `@alexify/syncom/shared` carries its writes over: a wrpc client to the leader's router unit (`syncom-db`). */
 export interface SharedChannel {
-  call(method: string, args: unknown[]): Promise<unknown>;
+  /** A forwarded call as the wire carries it (`{ id, args, retry }`): the leader answers a retry from what it kept. */
+  call(method: string, call: SharedCall): Promise<unknown>;
   close(): unknown;
   readonly client: { call(method: string, args: unknown): Promise<unknown>; close(): unknown };
 }

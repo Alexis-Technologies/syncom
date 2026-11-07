@@ -17,7 +17,7 @@ src/sync/rules.js         what the procedures stand on: a refusal on the wire (c
                           scope.js, symbols.js only
 src/sync/reads.js         the thin client's reads: query/count (normalizeQuery, the $regex gate regexRefusal, cursorOf, the scoped walk
                           walkScoped, greeted/ungreet for a hello carried by the call) and blob (blobNamed: served by the record that names
-                          it) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js only
+                          it) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js, blobs.js only
 src/sync/protocol.js      PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf — what both halves of the sync protocol agree on — no requires
 src/sync/wire.js          packOps / unpackOps and the type codes — the ops as they cross between peers; the core's ops.js re-exports
                           them — no requires

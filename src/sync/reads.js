@@ -4,7 +4,7 @@
 // scopes, never a sealed record) and `blob` (an attachment's bytes, served to a peer that names a record in its
 // scopes holding the digest) — over the rules of src/sync/rules.js and the `[CURSOR]`/`[SOURCE]` seams; what a
 // thin client's call carries as its hello is taken as a hello is and left on the client no longer than the call
-// (`greeted`, `ungreet`). Requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js only.
+// (`greeted`, `ungreet`). Requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js, blobs.js only.
 
 const { refuseCall, peerOf, grant } = require('./rules.js');
 const { ATTACHMENTS_FIELD } = require('./protocol.js');
@@ -13,6 +13,7 @@ const { inScope } = require('../scope.js');
 const { isPlainObject } = require('../shape.js');
 const { CURSOR, DB, SOURCE } = require('../symbols.js');
 const { toBase64 } = require('../crypto/pem.js');
+const { isDigest } = require('../blobs.js');
 
 // `unit({ query })`: false (the default: no `query`, no `count` mounted), true, or `{ regex }` — whether a `$regex`
 // is taken from the wire: false (the default under true: refused, 400 REGEX), 'safe' (one `safeRegex` passes), or
@@ -182,7 +183,6 @@ const query = (host) => async (context, args) => {
 // of what this host holds is told; a revoke, a purge, a forget follow the record for free. Under 'any' the digest
 // alone serves (a capability: a trusted mesh's). 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for
 // what is no digest, 404 where this host holds no bytes (or has no blobs store).
-const DIGEST = /^[0-9a-f]{64}$/;
 
 const blobNamed = async (host, state, digest, id, name) => {
   if (typeof id !== 'string' || typeof name !== 'string') return false;
@@ -213,7 +213,7 @@ const blob = (host) => async (context, args) => {
     throw refuseCall(host, 'blob', 'This host serves no blobs', 403, 'NOT_SERVED', state.node);
   }
   const digest = args?.digest;
-  if (typeof digest !== 'string' || !DIGEST.test(digest)) {
+  if (!isDigest(digest)) {
     throw refuseCall(host, 'blob', 'blob needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST', state.node);
   }
   const notFound = () => refuseCall(host, 'blob', `No blob ${digest} here`, 404, 'BLOB_NOT_FOUND', state.node);
