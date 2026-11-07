@@ -423,4 +423,199 @@ test('Connectors', async (t) => {
       assert.strictEqual(replication.errors.length, 1);
     },
   );
+
+  await t.test(
+    'a failure after the push handler — a throwing resolve, a landing refused — keeps the rows pending, is told, and nothing is unhandled',
+    async (t2) => {
+      const unhandled = [];
+      const onUnhandled = (reason) => unhandled.push(reason);
+      process.on('unhandledRejection', onUnhandled);
+      t2.after(() => process.off('unhandledRejection', onUnhandled));
+      const backend = createFakeBackend();
+      const validated = {
+        '~standard': {
+          version: 1,
+          vendor: 'test',
+          validate: (value) => (value.title === 'bad' ? { issues: [{ message: 'no', path: ['title'] }] } : { value }),
+        },
+      };
+      const a = await open(t2, 'A', { schema: { entities: { Task: { schema: validated }, Note: {} } } });
+      let throwing = true;
+      const replication = connect(t2, a, backend, {
+        resolve: () => {
+          if (!throwing) return undefined;
+          throwing = false;
+          throw new Error('resolve exploded');
+        },
+      });
+      const conflicts = [];
+      const refused = [];
+      const errors = [];
+      replication.on('conflict', (event) => conflicts.push(event));
+      replication.on('refused', (event) => refused.push(event));
+      replication.on('error', (error) => errors.push(error));
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await replication.awaitInSync();
+      // A throwing resolve: said, the backend wins, the connector goes on.
+      backend.set(id, { title: 'backend v2' });
+      await a.Task.update(id, { title: 'A v2' });
+      await replication.awaitInSync();
+      await waitUntil(async () => (await a.get(id))?.title === 'backend v2');
+      assert.strictEqual(conflicts.length, 1);
+      assert.deepStrictEqual(conflicts[0].resolved, { title: 'backend v2' });
+      // A conflict whose resolution the engine refuses (the validator says no to the backend's state): the row is
+      // said (refused, direction push), the local record stands and goes to the backend with its state assumed.
+      backend.set(id, { title: 'bad' });
+      await a.Task.update(id, { title: 'A v3' });
+      await replication.awaitInSync();
+      await waitUntil(() => refused.length === 1);
+      assert.strictEqual(refused[0].direction, 'push');
+      assert.strictEqual(refused[0].id, id);
+      assert.strictEqual(refused[0].reason, 'VALIDATION_FAILED');
+      assert.strictEqual(conflicts.length, 2);
+      await waitUntil(() => backend.read(id)?.title === 'A v3', { timeout: 5000 });
+      assert.deepStrictEqual(await a.get(id), { title: 'A v3', $type: 'Task' }, 'the local record stood');
+      // A landing that fails whole after the handler: the rows stay pending, the failure is told, tried again.
+      const original = a.transact.bind(a);
+      let failures = 1;
+      a.transact = async (fn, options) => {
+        if (failures > 0 && typeof options?.source === 'string' && options.source.endsWith(':resolve')) {
+          failures--;
+          throw new Error('engine hiccup');
+        }
+        return original(fn, options);
+      };
+      backend.set(id, { title: 'backend v4' });
+      await a.Task.update(id, { title: 'A v4' });
+      await waitUntil(() => errors.length === 1, { timeout: 5000 });
+      assert.strictEqual(errors[0].direction, 'push');
+      assert.match(errors[0].cause.message, /engine hiccup/);
+      assert.ok(replication.stats().pending >= 1, 'the row stays pending');
+      await waitUntil(async () => (await a.get(id))?.title === 'backend v4', { timeout: 5000 });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read(id), { title: 'backend v4' });
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepStrictEqual(unhandled, []);
+    },
+  );
+
+  await t.test(
+    'a row the backend refuses by name is parked and said (refused, direction push); the rest of the batch lands; a new turn of the record or reSync() tries it again',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const replication = connect(t2, a, backend);
+      const refused = [];
+      const errors = [];
+      replication.on('refused', (event) => refused.push(event));
+      replication.on('error', (error) => errors.push(error));
+      await replication.awaitInitialReplication();
+      backend.refuse('_bad', { code: 'bad_id', message: 'an id may not start with _' });
+      await a.transact(async (tx) => {
+        await tx.set('_bad', { $type: 'Task', title: 'refused by name' });
+        await tx.set('fine', { $type: 'Task', title: 'fine' });
+      });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read('fine'), { title: 'fine' }, 'the rest of the batch landed');
+      assert.strictEqual(backend.read('_bad'), null);
+      assert.deepStrictEqual(
+        refused.map(({ direction, id, reason }) => ({ direction, id, reason })),
+        [{ direction: 'push', id: '_bad', reason: 'bad_id' }],
+      );
+      assert.deepStrictEqual(refused[0].cause, { code: 'bad_id', message: 'an id may not start with _' });
+      assert.deepStrictEqual(errors, [], 'no failure: the backend answered');
+      const stats = replication.stats();
+      assert.strictEqual(stats.parked, 1);
+      assert.strictEqual(stats.pending, 0);
+      const pushes = backend.calls.push;
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      assert.strictEqual(backend.calls.push, pushes, 'a parked row is not tried again on its own');
+      // A new turn of the record tries it again (and is refused again).
+      await a.Task.update('_bad', { title: 'again' });
+      await replication.awaitInSync();
+      assert.strictEqual(refused.length, 2);
+      assert.strictEqual(replication.stats().parked, 1);
+      // reSync() tries the parked rows again: the backend takes it now.
+      backend.refuse('_bad', null);
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read('_bad'), { title: 'again' });
+      assert.strictEqual(replication.stats().parked, 0);
+    },
+  );
+
+  await t.test(
+    'retries back off: doubling from retryTime to maxRetryTime with jitter, reset by a success',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      assert.throws(
+        () => replicate(a, { name: 'x', collection: 'Task', ...backend.handlers(), retryTime: 20, maxRetryTime: 10 }),
+        {
+          name: 'TypeError',
+          message: /maxRetryTime/,
+        },
+      );
+      backend.fail('pull', 4);
+      const replication = connect(t2, a, backend, { retryTime: 20, maxRetryTime: 80, live: false });
+      const errors = [];
+      replication.on('error', (error) => errors.push(error));
+      await waitUntil(() => backend.calls.pull === 5, { timeout: 5000 });
+      assert.strictEqual(errors.length, 4);
+      const within = (value, low, high) => value >= low && value <= high;
+      const delays = errors.map((error) => error.retryIn);
+      assert.ok(within(delays[0], 15, 25), `first ${delays[0]}`);
+      assert.ok(within(delays[1], 30, 50), `second ${delays[1]}`);
+      assert.ok(within(delays[2], 60, 100), `third ${delays[2]} (capped at 80)`);
+      assert.ok(within(delays[3], 60, 100), `fourth ${delays[3]} (capped at 80)`);
+      // Reset by the success: the next failure waits retryTime again.
+      await waitUntil(() => replication.stats().pulls === 1);
+      backend.fail('pull', 1);
+      replication.reSync().catch(() => {});
+      await waitUntil(() => errors.length === 5, { timeout: 5000 });
+      assert.ok(within(errors[4].retryIn, 15, 25), `after a success ${errors[4].retryIn}`);
+      // The push direction backs off on its own count.
+      await waitUntil(() => backend.calls.pull === 7, { timeout: 5000 });
+      backend.fail('push', 2);
+      await a.insert({ $type: 'Task', title: 'kept pending' });
+      await waitUntil(() => errors.length === 7, { timeout: 5000 });
+      assert.strictEqual(errors[5].direction, 'push');
+      assert.ok(within(errors[5].retryIn, 15, 25), `push first ${errors[5].retryIn}`);
+      assert.ok(within(errors[6].retryIn, 30, 50), `push second ${errors[6].retryIn}`);
+      await replication.awaitInSync();
+    },
+  );
+
+  await t.test(
+    'a row equal to what the backend was assumed to hold is not pushed: a resolution the backend won goes nowhere',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const replication = connect(t2, a, backend);
+      const conflicts = [];
+      replication.on('conflict', (event) => conflicts.push(event));
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await replication.awaitInSync();
+      backend.set(id, { title: 'backend v2' });
+      await a.Task.update(id, { title: 'A v2' });
+      await replication.awaitInSync();
+      await waitUntil(() => conflicts.length === 1);
+      await waitUntil(async () => (await a.get(id))?.title === 'backend v2');
+      await replication.awaitInSync();
+      const pushes = backend.calls.push;
+      const { rev } = backend.docs.get(id);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.strictEqual(backend.calls.push, pushes, 'the resolution the backend won was not pushed back');
+      assert.strictEqual(backend.docs.get(id).rev, rev, 'no revision made of it');
+      // A turn that leaves the record as the backend holds it has nothing to say either.
+      await a.set(id, { $type: 'Task', title: 'backend v2' });
+      await replication.awaitInSync();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.strictEqual(backend.calls.push, pushes);
+      assert.strictEqual(backend.docs.get(id).rev, rev);
+      assert.strictEqual(replication.stats().pushed, 2, 'the insert and the edit went; nothing else');
+    },
+  );
 });

@@ -5,11 +5,12 @@ A collection kept in step with a backend of its own through two handlers. The ru
 ## Layout
 
 ```
-src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push, live, retryTime, batchSize,
-                          modifier, resolve }): pulled documents landed as one transaction a page (`source: connector:<name>`), the
-                          collection's turns pushed as rows with what the backend was assumed to hold, conflicts the backend wins,
-                          the checkpoint `{ pull, pushed }` in the `connector` kv namespace — requires symbols.js, engine.js,
-                          shape.js, errors.js, hooks.js, emitter.js, same.js only
+src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push, live, retryTime, maxRetryTime,
+                          batchSize, modifier, resolve }): pulled documents landed as one transaction a page (`source:
+                          connector:<name>`), a document that cannot land refused by name, the collection's turns pushed as rows
+                          with what the backend was assumed to hold (the canonical text of the backend's shape per id), conflicts
+                          the backend wins, rows refused by name parked, the checkpoint `{ pull, pushed }` in the `connector` kv
+                          namespace — requires symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only
 src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted), kept apart from shape.js's canonical so an
                           adapter weighs nothing of the core — no requires
 src/connector/jsonfile.js jsonFile(store, { poll }) — one JSON file as a backend, what the two drives share: `n` the position of a document's
@@ -58,18 +59,32 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   (the engine, the database closing) is the pull's failure (`#failed('pull')`): the checkpoint stays, the page is
   tried again. Never let a throw of one document stop a page, and never let a page's failure move the checkpoint.
 - **A push follows the turns and assumes the backend's state.** Every `transaction` event but this connector's own
-  pulls hands the records of the collection it changed (the row's type, a purge's `type`) to `#pending`; one push is
-  in flight at a time, `batchSize` rows a call, a row `{ id, data, deleted, assumed }` — `assumed` the backend's state
-  as this node last knew it (what came in a pull, what went out in a push, what a conflict said), for a
-  compare-and-set backend. The log position taken BEFORE the rows are read is what `pushed` moves to after the push:
-  a restart pushes `log.since(pushed)` — the collection's records those entries touched — or every record of the
-  collection once where the log cannot resume (`connector.rebuild`; tombstones not among them). A conflict the
-  handler answers (the row as the backend holds it) is the backend's win: the record is set to it here under
-  `source: 'connector:<name>:resolve'` — a turn the connector hears, so a `resolve` that answers something else goes
-  back to the backend with the backend's state as `assumed`. A handler that throws is told (`error`,
-  `REPLICATION_FAILED` with `direction`), kept (`errors`, the newest twenty) and tried again after `retryTime`;
-  nothing is skipped and no checkpoint moves past it. A pull whose checkpoint does not move while it answers full
-  pages is asked `MAX_STALLS` times, then left to the stream.
+  pulls hands the records of the collection it changed (the row's type, a purge's `type`; never a sealed one) to
+  `#pending`, a Map of id → the log position BEFORE the turn (`#last`, the newest turn heard); one push is in flight
+  at a time, `batchSize` rows a call, a row `{ id, data, deleted, assumed }` — `assumed` the backend's state as this
+  node last knew it, for a compare-and-set backend. `#known` holds that state per id as the CANONICAL TEXT of the
+  backend's shape (`modifier.push` applied; a pulled document before `modifier.pull`), null for nothing held: a row
+  whose text equals it has nothing to say and leaves `#pending` without a call (`#rowsOf`) — that is how a resolution
+  the backend won, or a turn that leaves the record as the backend holds it, makes no second write. The handler's
+  answer is judged row by row (`#answered`): a row not answered is the backend's now (`#learn`); `{ id, error }` is a
+  row refused by name — parked (`#park`: out of pending, `#parked`, the `refused` event with the error's code),
+  tried again by a turn of the record or `reSync()`; a document is a conflict (`#resolveConflicts`): the backend
+  wins — the record set to its state under `source: 'connector:<name>:resolve'` — unless `resolve` says otherwise (a
+  `resolve` that throws is `connector.resolve.failed` and the backend wins); the landing is one transaction with a
+  try/catch per row (a resolution the engine refuses is `#refuse('push')`, the record stands), the backend's state
+  learned and the `conflict` events told AFTER it landed, and the ids stay pending for the next round — equal to the
+  backend's state they say nothing, different they go with it assumed. A backend answering a conflict for a row that
+  assumed exactly what it holds, twice in a row (`#contradicted`), has the row parked (`reason: 'conflict'`) — never
+  a loop at microtask speed (it starved the event loop once). A turn heard while its id is in flight is pending
+  again after the push (`#redo`), from that turn's position. Everything after the handler answered — the reads, the
+  landing — runs inside one try: a failure keeps every row pending, is `#failed('push')` and tried again; `#flush()`
+  never rejects (`.catch(NOOP)` where it is not awaited). The log position taken BEFORE the rows are read is what
+  `pushed` moves to after the push: a restart pushes `log.since(pushed)` — the collection's records those entries
+  touched — or every record of the collection once where the log cannot resume (`connector.rebuild`; tombstones not
+  among them). A handler that throws is told (`error`, `REPLICATION_FAILED` with `direction` and `retryIn`), kept
+  (`errors`, the newest twenty) and tried again after a backoff (`#failed`: `retryTime · 2^n` up to `maxRetryTime`,
+  ±25 % jitter, `#attempts` per direction reset by a success); nothing is skipped and no checkpoint moves past it. A
+  pull whose checkpoint does not move while it answers full pages is asked `MAX_STALLS` times, then left to the stream.
 - **Live is the backend's stream or a timer, never a hook on the peers.** `pull.stream(emit)` hands pages or
   `'RESYNC'`; without one a live connector pulls every `retryTime`. `cancel()` is for good (the stream stopped, the
   listener off, what is in flight awaited, the waiters rejected); `reSync()` pulls and pushes again. Under `/shared`

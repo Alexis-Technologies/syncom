@@ -59,10 +59,24 @@ row is `{ id, data, deleted, assumed }`: the record as this node reads it (`dele
 `assumed`, the backend's state as this node last knew it — what came in a pull, what went out in a push, what a
 conflict said — for a backend that checks a write against what it holds (a `_rev`, an `updated_at`, an ETag).
 
+A row that reads as the backend is known to hold it has nothing to say and is not pushed — a resolution the backend
+won goes nowhere, a turn that leaves the record as the backend holds it makes no call — and a sealed record never
+goes at all.
+
 The handler answers the rows the backend refused, each as the backend holds it. A conflict is the backend's to win:
 the record is set to that state here, and both agree. With `resolve({ id, local, remote, deleted })` the application
 decides — answer the data to keep (it goes back to the backend, with the backend's state as what was assumed), `null`
-to delete, anything else to keep the backend's state. Every conflict is a `conflict` event.
+to delete, anything else to keep the backend's state; a `resolve` that throws is said (`connector.resolve.failed`)
+and the backend wins. Every conflict is a `conflict` event, told once the resolution has landed. A resolution the
+engine refuses (a validator says no to the backend's state) is a `refused` event with `direction: 'push'` and the
+record stands: it goes to the backend with the backend's state assumed. A backend that refuses a row assuming exactly
+what it says it holds, twice in a row, contradicts itself: the row is parked (`reason: 'conflict'`), never pushed in
+a loop.
+
+A row the backend refuses by name — an id it cannot carry (CouchDB's `_…`, Appwrite's past 36 letters), a body too
+large — is answered as `{ id, error }` rather than a conflict: the row is parked and said (`refused`, `direction:
+'push'`, the error's `code`), the rest of the batch lands, and a turn of the record or `reSync()` tries it again
+(`stats().parked` counts them; a restart does not retry a parked row).
 
 ## The checkpoint
 
@@ -76,9 +90,13 @@ equality of the data, makes the second a no-op.
 
 ## Failures
 
-A handler that throws is told — the connector's `error` event carries `REPLICATION_FAILED` with the `direction` —
-kept (`errors`, the newest twenty) and tried again after `retryTime`; nothing is skipped and no checkpoint moves
-past it. `awaitInitialReplication()` resolves once the first pull and push are through, `awaitInSync()` once
+A handler that throws — or the landing of what it answered: the engine, a `resolve` the connector could not land,
+the database closing — is told: the connector's `error` event carries `REPLICATION_FAILED` with the `direction` and
+`retryIn`, the wait before the retry. The failure is kept (`errors`, the newest twenty) and tried again after a
+backoff — `retryTime` doubled per failure in a row up to `maxRetryTime`, with ±25 % of jitter, reset by the next
+success of that direction; nothing is skipped, the rows stay pending and no checkpoint moves past the failure. A
+push's failure never cancels the pull's retry, nor the other way round. `awaitInitialReplication()` resolves once
+the first pull and push are through, `awaitInSync()` once
 nothing waits to go out and nothing is in flight either way (`{ signal }` cuts a wait short). `cancel()` stops for
 good; `reSync()` pulls and pushes again. `stats()` counts the documents pulled and applied, the rows pushed, the
 conflicts, the documents and rows refused, and what is pending.
@@ -89,9 +107,10 @@ conflicts, the documents and rows refused, and what is pending.
 | `collection` | — | The collection replicated |
 | `pull.handler(checkpoint, batchSize)` | — | `{ documents: [{ id, data, deleted }], checkpoint }` |
 | `pull.stream(emit)` | — | `emit({ documents, checkpoint })` or `emit('RESYNC')`; returns what stops it |
-| `push.handler(rows)` | — | `rows: [{ id, data, deleted, assumed }]`; answers the conflicts `[{ id, data, deleted }]` |
+| `push.handler(rows)` | — | `rows: [{ id, data, deleted, assumed }]`; answers the conflicts `[{ id, data, deleted }]` and the rows refused by name `[{ id, error }]` |
 | `live` | `true` | Follow the backend after the initial pull: its stream, or a pull every `retryTime` |
-| `retryTime` | `5000` | After a failure, and between pulls without a stream, in ms |
+| `retryTime` | `5000` | After a failure (doubled per failure in a row), and between pulls without a stream, in ms |
+| `maxRetryTime` | `60000` | The most a retry waits, in ms |
 | `batchSize` | `100` | Documents per pull, rows per push |
 | `modifier` | — | `{ pull(data, id), push(data, id) }` |
 | `resolve` | — | What a refused row's record should be; the backend's state without it |

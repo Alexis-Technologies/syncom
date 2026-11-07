@@ -382,7 +382,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `TARGET_NOT_EMPTY` | `copyEngine()` (`@alexify/syncom/engines`) when the target engine already holds a database at `path` (`node.json`, or a record) | `path` |
 | `SCHEMA_MISMATCH` | `importJSON()` (`@alexify/syncom/dump`) of a dump made under another schema hash than this database runs, without `force` | `expected`, `given` |
 | `PIPELINE_FAILED` | the database's `error` event when a pipeline's handler threw (`@alexify/syncom/pipeline`): the pipeline stopped before the turn, its checkpoint stays, `start()` hands the turn over again | `name`, `eventId`, `cause` |
-| `REPLICATION_FAILED` | a connector's `error` event (`@alexify/syncom/connector`): a pull or push handler threw (`direction`), tried again after `retryTime`; `start()` on a canceled connector, `reSync()` on one not active (`direction` null) | `direction`, `name`, `cause` |
+| `REPLICATION_FAILED` | a connector's `error` event (`@alexify/syncom/connector`): a pull or push handler threw, or the landing of what it answered failed (`direction`), tried again after `retryIn` ms (`retryTime` doubled per failure in a row up to `maxRetryTime`, with jitter); `start()` on a canceled connector, `reSync()` on one not active (`direction` null) | `direction`, `name`, `cause`, `retryIn` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `NOT_LEADER` | `shared.sync`, `shared.serve()` or a write without a channel on a follower of `@alexify/syncom/shared`: replication, the served writers and a write of its own are the leader's | `path`, `what` |
 | `LEADER_LOST` | a follower's write (`@alexify/syncom/shared`) that reached no leader within `failover` ms — the leader gone and none elected in time, or a channel answering nothing readable (`method`, `attempts`, `cause`); the shared facade's `error` event when the instance elected could not open the database as the leader (`path`, `cause`) | `path`, `method`, `attempts`, `cause` |
@@ -759,24 +759,26 @@ A handler's write to the source is another turn, handed over again: derive into 
 
 ## Connector (subpath)
 
-`@alexify/syncom/connector` — `replicate(db, { name, collection, pull, push, live, retryTime, batchSize, modifier,
-resolve, autoStart })`: one collection kept in step with a backend of its own through two handlers — see
-[Connectors](../guide/connector).
+`@alexify/syncom/connector` — `replicate(db, { name, collection, pull, push, live, retryTime, maxRetryTime,
+batchSize, modifier, resolve, autoStart })`: one collection kept in step with a backend of its own through two
+handlers — see [Connectors](../guide/connector).
 
 | Member | Notes |
 | --- | --- |
 | `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), a document equal to the record making no op |
 | `pull.stream(emit)` → stop | The backend's live changes: `emit({ documents, checkpoint })`, or `emit('RESYNC')`; without it a live connector pulls every `retryTime` |
-| `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it; answers the rows refused, each as the backend holds it |
-| `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise |
-| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good; pulls and pushes again |
+| `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it; a row that reads as the backend is known to hold it is not pushed; answers the rows refused, each as the backend holds it (a conflict), or `{ id, error }` for one refused by name (parked until a turn of the record or `reSync()`) |
+| `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise, and when `resolve` throws |
+| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good; pulls and pushes again, the parked rows too |
 | `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push through; nothing waiting to go out and nothing in flight either way |
-| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }`; whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`) |
+| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }`; whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`, `parked`) |
 
 Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,
 deleted, resolved })`, `refused` `({ direction, id, reason, cause })` — a document or a row left out by name: on pull
-`collection`, `sealed`, `value` (no JSON), `modifier`, or the code of the write the engine refused; on push the code
-of a resolution the engine refused — `error` (`REPLICATION_FAILED` with `direction`), `active` `(boolean)`.
+`collection`, `sealed`, `value` (no JSON), `modifier`, or the code of the write the engine refused; on push the
+backend's code for a row refused by name (`backend` without one), `modifier`, `answer`, `conflict` (a backend
+refusing a row that assumed exactly what it holds, twice), or the code of a resolution the engine refused — `error`
+(`REPLICATION_FAILED` with `direction` and `retryIn`), `active` `(boolean)`.
 
 ## Shared (subpath)
 

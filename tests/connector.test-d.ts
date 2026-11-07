@@ -40,6 +40,7 @@ const options: ReplicateOptions<Task, number> = {
   },
   live: true,
   retryTime: 1000,
+  maxRetryTime: 30_000,
   batchSize: 50,
   modifier: { pull: (data) => data, push: (data, id) => ({ ...data, id }) },
   resolve: ({ local, remote }) => remote ?? local,
@@ -59,8 +60,16 @@ expectType<number>(replication.stats().pending);
 replication.on('received', ({ documents, applied }) => expectType<number>(documents + applied));
 replication.on('conflict', ({ id, resolved }) => expectType<string>(id + String(resolved)));
 replication.on('error', (error) => expectType<'REPLICATION_FAILED'>(error.code));
+replication.on('error', (error) => expectType<number | null>(error.retryIn));
 replication.on('refused', ({ direction, id, reason }) => expectType<string>(direction + id + reason));
 expectType<number>(replication.stats().refused);
+expectType<number>(replication.stats().parked);
+const parking: ReplicateOptions<Task> = {
+  name: 'parking',
+  collection: 'Task',
+  push: { handler: (rows) => [{ id: rows[0].id, error: { code: 'bad_id', message: 'no' } }] },
+};
+expectAssignable<ReplicateOptions<Task>>(parking);
 expectAssignable<PullResult>({ documents: [], checkpoint: null });
 expectAssignable<ConnectorDocument>({ id: 'x', deleted: true });
 expectError(replicate(db, { collection: 'Task' }));

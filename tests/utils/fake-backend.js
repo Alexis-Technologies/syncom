@@ -2,18 +2,25 @@
 
 // A backend for the connector tests: documents by id with a revision each, a
 // change feed by sequence, compare-and-set on write (a row whose `assumed`
-// is not what the backend holds is a conflict), and a stream of changes —
-// what a CouchDB, a REST endpoint or a table with a `modified` column do,
-// in memory. `handlers()` is the pair `replicate()` takes.
+// is not what the backend holds is a conflict; a row that assumes nothing
+// known — `assumed` undefined, a probe — is answered as the backend holds it
+// and nothing is written), a row refused by name (`refuse(id, error)` →
+// `{ id, error }`), and a stream of changes — what a CouchDB, a REST endpoint
+// or a table with a `modified` column do, in memory. `handlers()` is the pair
+// `replicate()` takes.
+
+const { canonical } = require('../../src/connector/same.js');
 
 const clone = (value) => (value === undefined ? undefined : JSON.parse(JSON.stringify(value)));
-const same = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+// The same reading whatever the order of the keys: a compare-and-set judges the data, not its text.
+const same = (a, b) => canonical(a ?? null) === canonical(b ?? null);
 
 const createFakeBackend = () => {
   const docs = new Map();
   const changes = [];
   const listeners = new Set();
   const failing = { pull: 0, push: 0 };
+  const refusing = new Map();
   const backend = {
     docs,
     changes,
@@ -21,6 +28,11 @@ const createFakeBackend = () => {
     /** The next `count` pulls or pushes fail. */
     fail(direction, count = 1) {
       failing[direction] = count;
+    },
+    /** A row with this id is refused by name — answered `{ id, error }`, nothing written — until `refuse(id, null)`. */
+    refuse(id, error) {
+      if (error === null) refusing.delete(id);
+      else refusing.set(id, error);
     },
     /** A write made on the backend itself (another client's): told to the streams. */
     write(id, data, { deleted = false } = {}) {
@@ -72,8 +84,14 @@ const createFakeBackend = () => {
             for (const row of rows) {
               const held = docs.get(row.id);
               const heldData = held === undefined || held.deleted ? null : held.data;
-              // Compare-and-set: the row's `assumed` must be what the backend holds.
-              if (!same(heldData, row.assumed)) {
+              const refusal = refusing.get(row.id);
+              if (refusal !== undefined) {
+                conflicts.push({ id: row.id, error: clone(refusal) });
+                continue;
+              }
+              // A probe (`assumed` undefined): "tell me what you hold" — answered as a refusal, nothing written.
+              // Compare-and-set otherwise: the row's `assumed` must be what the backend holds.
+              if (row.assumed === undefined || !same(heldData, row.assumed)) {
                 conflicts.push(clone({ id: row.id, data: heldData, deleted: heldData === null }));
                 continue;
               }

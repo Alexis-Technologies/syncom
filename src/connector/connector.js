@@ -16,7 +16,8 @@
 //     node last knew it (what a compare-and-set backend checks against) —
 //     answered with the rows it refused, each as the backend holds it
 //     (`{ id, data, deleted }`): a conflict the backend wins, unless `resolve`
-//     says what the record should be.
+//     says what the record should be; or `{ id, error }` for a row refused by
+//     name, parked until a turn of the record or `reSync()`.
 //
 // What comes in lands as ordinary writes of this node — a transaction of
 // `set`/`delete` per page, stamped here, `source: 'connector:<name>'` — so a
@@ -32,9 +33,9 @@
 // position pushed through) lives in the `connector` kv namespace under the
 // name: a restart pulls from `pull` and pushes what the log holds since
 // `pushed` — every record of the collection once where the log cannot resume.
-// A handler that fails is told (`error`, REPLICATION_FAILED with the direction)
-// and tried again after `retryTime`; nothing is skipped. Requires symbols.js,
-// engine.js, shape.js, errors.js, hooks.js, emitter.js only.
+// A handler that fails is told (`error`, REPLICATION_FAILED with the direction
+// and `retryIn`) and tried again after a backoff; nothing is skipped. Requires
+// symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only.
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
@@ -42,11 +43,13 @@ const { isPlainObject, isRecordId } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 const { Emitter } = require('../emitter.js');
-const { same } = require('./same.js');
+const { canonical, same } = require('./same.js');
 
 const NAMESPACE = 'connector';
 const DEFAULT_BATCH = 100;
 const DEFAULT_RETRY = 5000;
+// The most a retry waits: the backoff doubles from `retryTime` up to it, with jitter (±25 %).
+const DEFAULT_MAX_RETRY = 60_000;
 // How many of the handlers' errors are kept (the newest).
 const MAX_ERRORS = 20;
 // A pull whose checkpoint does not move while it answers full pages is asked this many times, then left.
@@ -92,8 +95,11 @@ const isJson = (value, depth = 0) => {
   return true;
 };
 
-const failed = (direction, message, cause, name) =>
-  new SyncomError('REPLICATION_FAILED', message, { direction, name, cause });
+const failed = (direction, message, cause, name, retryIn = null) =>
+  new SyncomError('REPLICATION_FAILED', message, { direction, name, cause, retryIn });
+
+// The canonical text parsed back — the backend's state as a push hands it over as `assumed`.
+const parsed = (text) => (text === null ? null : JSON.parse(text));
 
 const checkHandlers = (name, side, value, methods) => {
   if (value === undefined) return null;
@@ -115,6 +121,7 @@ class Replication extends Emitter {
   #push;
   #live;
   #retryTime;
+  #maxRetryTime;
   #batchSize;
   #modifier;
   #resolve;
@@ -132,14 +139,31 @@ class Replication extends Emitter {
   #listener = null;
   #stream = null;
   #timer = null;
-  // A retry timer per direction: a push that fails must not cancel the pull's try, nor the other way round.
+  // A retry timer per direction: a push that fails must not cancel the pull's try, nor the other way round; the
+  // failures in a row per direction, what the backoff doubles by, reset by a success.
   #retry = { pull: null, push: null };
-  // The ids whose state is to go to the backend, in the order they came; the push in flight; the pull in flight.
-  #pending = new Set();
+  #attempts = { pull: 0, push: 0 };
+  // The ids whose state is to go to the backend, in the order they came, each with the log position BEFORE the
+  // turn that made it pending (where a restart resumes the push from; null: the start); the ids of the push in
+  // flight, and among them the ones a newer turn touched meanwhile (pending again after it, from that turn's
+  // position); the ids the backend refused by name, set aside until a turn of theirs or `reSync()`.
+  #pending = new Map();
+  #inflight = new Set();
+  #redo = new Map();
+  #parked = new Set();
+  // The ids of the push in flight whose rows the backend answered as conflicts: they stay pending for the next round.
+  #conflicted = new Set();
+  // Per id, the backend's state a conflict answered while the row assumed exactly it (the same data under a new
+  // revision heals in a round); answered so twice in a row, the backend contradicts itself and the row is parked.
+  #contradicted = new Map();
+  // The newest turn heard: the position the next pending id is pending since.
+  #last = null;
+  // The push in flight; the pull in flight.
   #pushing = null;
   #pulling = null;
-  // The backend's state of each record as this node last knew it — what a push says it assumed.
-  #assumed = new Map();
+  // The backend's state of each record as this node last knew it, as the canonical text of the backend's shape
+  // (null: it holds nothing) — what a push says it assumed, what a pull is judged against.
+  #known = new Map();
   #errors = [];
   #waiters = new Set();
   #stats = { pulled: 0, applied: 0, pushed: 0, conflicts: 0, refused: 0, pulls: 0, pushes: 0 };
@@ -153,6 +177,7 @@ class Replication extends Emitter {
       push,
       live = true,
       retryTime = DEFAULT_RETRY,
+      maxRetryTime = DEFAULT_MAX_RETRY,
       batchSize = DEFAULT_BATCH,
       modifier,
       resolve = null,
@@ -173,6 +198,9 @@ class Replication extends Emitter {
     if (!Number.isFinite(retryTime) || retryTime <= 0) {
       throw new TypeError('replicate(): retryTime must be a positive number');
     }
+    if (!Number.isFinite(maxRetryTime) || maxRetryTime < retryTime) {
+      throw new TypeError('replicate(): maxRetryTime must be a number of at least retryTime');
+    }
     if (!Number.isInteger(batchSize) || batchSize <= 0) {
       throw new TypeError('replicate(): batchSize must be a positive integer');
     }
@@ -192,6 +220,7 @@ class Replication extends Emitter {
     this.#collection = collection;
     this.#live = live;
     this.#retryTime = retryTime;
+    this.#maxRetryTime = maxRetryTime;
     this.#batchSize = batchSize;
     this.#modifier = { pull: modifier?.pull ?? null, push: modifier?.push ?? null };
     this.#resolve = resolve;
@@ -229,9 +258,15 @@ class Replication extends Emitter {
     return this.#errors.slice();
   }
 
-  /** The counts: documents pulled and applied, rows pushed, conflicts met, pulls and pushes made. */
+  /** The counts: documents pulled and applied, rows pushed, conflicts met, refused, pulls and pushes made, pending, parked. */
   stats() {
-    return { ...this.#stats, pending: this.#pending.size, active: this.#active, canceled: this.#canceled };
+    return {
+      ...this.#stats,
+      pending: this.#pending.size,
+      parked: this.#parked.size,
+      active: this.#active,
+      canceled: this.#canceled,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -259,13 +294,18 @@ class Replication extends Emitter {
   async #begin() {
     if (!this.#loaded) await this.#load();
     if (this.#canceled) return;
+    // Listened to before the log is read: a turn landing between the two is in `log.since` or is heard.
     this.#listener = (event) => this.#heard(event);
     this.#db.on('transaction', this.#listener);
+    this.#last = this.#db.log.lastEventId;
     try {
       // The backend first: what it holds is what a push then assumes (a fresh connector knows nothing of it), and
       // what the pull landed is the backend's already — the push since skips the connector's own writes.
       if (this.#pull !== null) await this.#pullAll();
-      if (this.#push !== null) await this.#pushSince();
+      if (this.#push !== null) {
+        this.#collectPending();
+        await this.#flush();
+      }
     } finally {
       this.#initialDone = true;
       this.#settle();
@@ -305,7 +345,12 @@ class Replication extends Emitter {
     // Behind a pull in flight: a pull again, from the checkpoint as it then stands.
     if (this.#pulling !== null) await this.#pulling.catch(NOOP);
     if (this.#pull !== null) await this.#pullAll();
-    if (this.#push !== null) await this.#pushSince();
+    if (this.#push === null) return;
+    // The rows the backend refused by name are tried again, with what the log holds since `pushed`.
+    for (const id of this.#parked) this.#pending.set(id, this.#last);
+    this.#parked.clear();
+    this.#collectPending();
+    await this.#flush();
   }
 
   /** Resolves once the initial pull and push are done — what a reader waits for before it trusts the collection. */
@@ -373,19 +418,26 @@ class Replication extends Emitter {
     }
   }
 
-  // A handler, or the landing of what it answered, failed: kept, told, tried again after `retryTime`.
+  // A handler, or the landing of what it answered, failed: kept, told (`retryIn`: the wait before the retry, null
+  // for none), tried again after a backoff — `retryTime` doubled per failure in a row up to `maxRetryTime`, with
+  // ±25 % of jitter, reset by the direction's next success.
   #failed(direction, error, retry) {
     if (this.#errors.length >= MAX_ERRORS) this.#errors.shift();
     this.#errors.push(error);
-    this.#logger.warn({ event: 'connector.failed', name: this.#name, direction, err: error });
+    let retryIn = null;
+    if (!this.#canceled && retry !== null && direction !== null) {
+      const doubled = this.#retryTime * 2 ** this.#attempts[direction]++;
+      retryIn = Math.round(Math.min(doubled, this.#maxRetryTime) * (0.75 + Math.random() / 2));
+    }
+    this.#logger.warn({ event: 'connector.failed', name: this.#name, direction, retryIn, err: error });
     const message = `Connector ${this.#name}: the ${direction} failed (${error?.message ?? error})`;
-    notify(this, this.#logger, 'error', failed(direction, message, error, this.#name));
-    if (this.#canceled || retry === null || direction === null) return;
+    notify(this, this.#logger, 'error', failed(direction, message, error, this.#name, retryIn));
+    if (retryIn === null) return;
     if (this.#retry[direction] !== null) clearTimeout(this.#retry[direction]);
     this.#retry[direction] = setTimeout(() => {
       this.#retry[direction] = null;
       if (!this.#canceled) retry();
-    }, this.#retryTime);
+    }, retryIn);
     this.#retry[direction].unref?.();
   }
 
@@ -410,6 +462,7 @@ class Replication extends Emitter {
       try {
         page = await this.#pull.handler(this.#checkpoint.pull, this.#batchSize);
         this.#stats.pulls++;
+        this.#attempts.pull = 0;
       } catch (error) {
         this.#failed('pull', error, () => this.#pullAll());
         return;
@@ -473,6 +526,8 @@ class Replication extends Emitter {
         refusals.push([id, 'value']);
         continue;
       }
+      // What the backend holds, in its own shape — before the modifier: what a push compares against.
+      doc.text = doc.deleted ? null : canonical(doc.data);
       if (!doc.deleted && modify !== null) {
         try {
           doc.data = modify(doc.data, id);
@@ -494,15 +549,14 @@ class Replication extends Emitter {
       await this.#db.transact(
         async (tx) => {
           for (let i = 0; i < docs.length; i++) {
-            const { id, deleted, data } = docs[i];
+            const { id, deleted, data, text } = docs[i];
             try {
               const local = await tx.get(id);
+              this.#learn(id, text);
               if (deleted) {
-                this.#assumed.set(id, null);
                 if (local === null) continue;
                 await tx.delete(id);
               } else {
-                this.#assumed.set(id, data);
                 if (local !== null && same(plain(local), plain(data))) continue;
                 await tx.set(id, { ...data, $type: collection });
               }
@@ -582,9 +636,24 @@ class Replication extends Emitter {
   // -------------------------------------------------------------------------
   // Push
 
+  // The backend's state of a record as this node knows it now: `text` the canonical JSON of the backend's shape,
+  // null for nothing held.
+  #learn(id, text) {
+    this.#known.set(id, text);
+  }
+
+  // What a push says it assumed of a record: the backend's state as known, null for a record never seen.
+  #assumedOf(id) {
+    return this.#known.has(id) ? parsed(this.#known.get(id)) : null;
+  }
+
   // A turn of the database: the records of the collection it changed go to the backend — every turn but this
-  // connector's own pulls (the backend has those already).
+  // connector's own pulls (the backend has those already). The turn before it (`#last`) is the position the ids are
+  // pending since; an id already pending keeps its older one, and one in the push in flight is pending again after
+  // it, from this turn's.
   #heard(event) {
+    const since = this.#last;
+    if (typeof event.eventId === 'string') this.#last = event.eventId;
     if (this.#canceled || this.#push === null || event.source === this.#source) return;
     const { changes } = event;
     let any = false;
@@ -593,153 +662,243 @@ class Replication extends Emitter {
       const row = this.#seam.row(id);
       const type = row?.type ?? changes[i].type ?? null;
       // A sealed record is the key holder's: it never goes to a backend.
-      if (type !== this.#collection || row?.encrypted === true || this.#pending.has(id)) continue;
-      this.#pending.add(id);
+      if (type !== this.#collection || row?.encrypted === true) continue;
+      if (this.#pending.has(id)) {
+        if (this.#inflight.has(id) && !this.#redo.has(id)) this.#redo.set(id, since);
+        continue;
+      }
+      this.#pending.set(id, since);
+      this.#parked.delete(id);
       any = true;
     }
-    if (any) this.#flush();
+    if (any) this.#flush().catch(NOOP);
   }
 
-  // What the log holds of the collection since the position pushed through; every record once where it cannot.
-  async #pushSince() {
+  // What the log holds of the collection since the position pushed through, pending since that position; every
+  // record once where the log cannot resume there (`connector.rebuild`), pending since the start.
+  #collectPending() {
     const pushed = this.#checkpoint.pushed;
     const entries = pushed === null ? null : this.#db.log.since(pushed);
     if (entries === null) {
       const ids = this.#seam.ids(this.#collection);
       this.#logger.info({ event: 'connector.rebuild', name: this.#name, records: ids.length });
+      this.#checkpoint.pushed = null;
       for (let i = 0; i < ids.length; i++) {
-        // A sealed record never goes; a record that reads as the backend was just seen to hold it (pulled,
-        // unchanged) has nothing to push.
-        if (this.#seam.row(ids[i])?.encrypted === true) continue;
-        const assumed = this.#assumed.get(ids[i]);
-        if (assumed !== undefined && assumed !== null && same(plain(await this.#db.get(ids[i])), plain(assumed))) {
-          continue;
-        }
-        this.#pending.add(ids[i]);
+        // A sealed record never goes.
+        if (this.#seam.row(ids[i])?.encrypted === true || this.#pending.has(ids[i])) continue;
+        this.#pending.set(ids[i], null);
       }
-    } else {
-      for (let i = 0; i < entries.length; i++) {
-        const { op } = entries[i];
-        // This connector's own writes — what it pulled, what a conflict set — are the backend's already.
-        if (op.actor === this.#actor) continue;
-        if (typeof op.id !== 'string') continue;
-        const row = this.#seam.row(op.id);
-        if (row === null || row.type !== this.#collection || row.encrypted === true) continue;
-        this.#pending.add(op.id);
-      }
-    }
-    if (this.#pending.size === 0) {
-      this.#checkpoint.pushed = this.#db.log.lastEventId;
-      await this.#save();
       return;
     }
-    await this.#flush();
+    for (let i = 0; i < entries.length; i++) {
+      const { op } = entries[i];
+      // This connector's own pulls are the backend's already.
+      if (op.actor === this.#actor || typeof op.id !== 'string' || this.#pending.has(op.id)) continue;
+      const row = this.#seam.row(op.id);
+      if (row === null || row.type !== this.#collection || row.encrypted === true) continue;
+      this.#pending.set(op.id, pushed);
+    }
   }
 
-  // One push at a time; what comes meanwhile goes in the next.
+  // One push at a time; what comes meanwhile goes in the next. Never rejects: a failure is told and tried again.
   #flush() {
     if (this.#pushing !== null || this.#push === null) return this.#pushing ?? Promise.resolve();
     this.#pushing = this.#pushPending().finally(() => {
       this.#pushing = null;
       this.#settle();
-      if (this.#pending.size > 0 && !this.#canceled && this.#retry.push === null) this.#flush();
+      if (this.#pending.size > 0 && !this.#canceled && this.#retry.push === null) this.#flush().catch(NOOP);
     });
     return this.#pushing;
   }
 
+  // The pending ids, `batchSize` a push: the rows read (one with nothing to say — the backend holds it as assumed —
+  // leaves pending without a push), the handler asked, its answer judged (a row accepted is the backend's state now;
+  // one refused by name is parked; a conflict is landed, the backend's or `resolve`'s way), then the ids leave
+  // pending — a conflicted one stays, for the resolution to go back or to say nothing — and the checkpoint moves.
+  // A failure anywhere after the rows were read keeps every row pending, is told and tried again.
   async #pushPending() {
     while (this.#pending.size > 0 && !this.#canceled) {
       // Everything appended before the rows were read is covered by this push: what lands after is its own turn.
       const eventId = this.#db.log.lastEventId;
       const ids = [];
-      for (const id of this.#pending) {
+      for (const id of this.#pending.keys()) {
         ids.push(id);
         if (ids.length >= this.#batchSize) break;
       }
-      const rows = [];
-      for (let i = 0; i < ids.length; i++) rows.push(await this.#rowOf(ids[i]));
-      let conflicts;
+      let rows;
+      let texts;
       try {
-        conflicts = await this.#push.handler(rows);
-        this.#stats.pushes++;
+        ({ rows, texts } = await this.#rowsOf(ids));
       } catch (error) {
         this.#failed('push', error, () => this.#flush());
         return;
       }
-      for (let i = 0; i < ids.length; i++) this.#pending.delete(ids[i]);
-      for (let i = 0; i < rows.length; i++) this.#assumed.set(rows[i].id, rows[i].deleted ? null : rows[i].data);
-      this.#stats.pushed += rows.length;
-      notify(this, this.#logger, 'sent', { rows: rows.length });
-      if (Array.isArray(conflicts) && conflicts.length > 0) await this.#conflicted(conflicts, new Set(ids));
+      if (rows.length > 0) {
+        for (let i = 0; i < rows.length; i++) this.#inflight.add(rows[i].id);
+        let answers;
+        try {
+          answers = await this.#push.handler(rows);
+          this.#stats.pushes++;
+          this.#attempts.push = 0;
+          await this.#answered(rows, texts, answers);
+        } catch (error) {
+          this.#inflight.clear();
+          this.#redo.clear();
+          this.#failed('push', error, () => this.#flush());
+          return;
+        }
+        this.#stats.pushed += rows.length;
+      }
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        const redo = this.#redo.get(id);
+        if (redo !== undefined) {
+          // A newer turn came while the row was in flight: pending again, from before that turn.
+          this.#parked.delete(id);
+          this.#pending.delete(id);
+          this.#pending.set(id, redo);
+        } else if (!this.#conflicted.has(id)) this.#pending.delete(id);
+      }
+      this.#inflight.clear();
+      this.#redo.clear();
+      this.#conflicted.clear();
+      if (rows.length > 0) notify(this, this.#logger, 'sent', { rows: rows.length });
       this.#checkpoint.pushed = eventId;
       await this.#save();
     }
   }
 
-  // A record as the backend is to hold it: its data (modified for the backend), or deleted; and what the backend
-  // was last known to hold of it.
-  async #rowOf(id) {
-    const data = await this.#db.get(id);
-    const row = { id, data: null, deleted: data === null, assumed: this.#assumed.get(id) ?? null };
-    if (data !== null) {
-      const stripped = plain(data);
-      row.data = this.#modifier.push === null ? stripped : this.#modifier.push(stripped, id);
+  // The rows of `ids` as the backend is to hold them — the data in the backend's shape (`modifier.push`), or
+  // deleted — with what the backend was last known to hold of each (`assumed`); beside them the canonical text of
+  // each. A row that reads as the backend is known to hold it has nothing to say and leaves pending here; a
+  // `modifier.push` that throws is that row's refusal.
+  async #rowsOf(ids) {
+    const rows = [];
+    const texts = [];
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const data = await this.#db.get(id);
+      let out = null;
+      if (data !== null) {
+        out = plain(data);
+        if (this.#modifier.push !== null) {
+          try {
+            out = this.#modifier.push(out, id);
+          } catch (error) {
+            this.#pending.delete(id);
+            this.#refuse('push', id, 'modifier', error);
+            continue;
+          }
+        }
+      }
+      const text = out === null ? null : canonical(out);
+      if (this.#known.has(id) && this.#known.get(id) === text) {
+        this.#pending.delete(id);
+        continue;
+      }
+      rows.push({ id, data: out, deleted: data === null, assumed: this.#assumedOf(id) });
+      texts.push(text);
     }
-    return row;
+    return { rows, texts };
   }
 
-  // Rows the backend refused: each as the backend holds it. The backend wins — the record is set to its state here
-  // (a turn of its own, so a resolution that differs goes back to the backend) — unless `resolve` says otherwise.
-  // An answer for a row the push did not carry is no conflict of this node's: said, left alone.
-  async #conflicted(conflicts, ids) {
-    const docs = [];
-    for (let i = 0; i < conflicts.length; i++) {
-      const remote = documentOf(conflicts[i]);
+  // The handler's answer, row by row: a row not answered is the backend's now (learned); `{ id, error }` is a row
+  // refused by name — parked; `{ id, data, deleted }` is the document as the backend holds it — a conflict, landed.
+  // An answer for a row the push did not carry, or that is no document, is said and left alone.
+  async #answered(rows, texts, answers) {
+    const byId = new Map();
+    const list = Array.isArray(answers) ? answers : [];
+    for (let i = 0; i < list.length; i++) {
+      const answer = list[i];
+      if (!isPlainObject(answer) || !isRecordId(answer.id)) {
+        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i, id: answer?.id });
+        continue;
+      }
+      if (!this.#inflight.has(answer.id)) {
+        this.#logger.warn({ event: 'connector.conflict.unexpected', name: this.#name, id: answer.id });
+        continue;
+      }
+      byId.set(answer.id, answer);
+    }
+    const conflicts = [];
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      const answer = byId.get(row.id);
+      if (answer === undefined) {
+        this.#learn(row.id, texts[i]);
+        this.#contradicted.delete(row.id);
+        continue;
+      }
+      if (answer.error !== undefined && answer.error !== null) {
+        this.#park(row.id, answer.error);
+        continue;
+      }
+      const remote = documentOf(answer);
       if (remote === null) {
-        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i, id: conflicts[i]?.id });
+        this.#park(row.id, { code: 'answer', message: 'the handler answered neither a document nor an error' });
         continue;
       }
-      if (!ids.has(remote.id)) {
-        this.#logger.warn({ event: 'connector.conflict.unexpected', name: this.#name, id: remote.id });
-        continue;
-      }
-      this.#stats.conflicts++;
+      // A conflict over a row that assumed exactly what the backend says it holds: once, a revision moved under the
+      // same data (tried again with it); twice in a row, a backend contradicting itself — parked, never a loop.
+      const text = remote.deleted ? null : canonical(remote.data);
+      if (row.assumed !== undefined && this.#known.has(row.id) && this.#known.get(row.id) === text) {
+        if (this.#contradicted.get(row.id) === text) {
+          this.#contradicted.delete(row.id);
+          this.#park(row.id, { code: 'conflict', message: 'the backend refused a row that assumed what it holds' });
+          continue;
+        }
+        this.#contradicted.set(row.id, text);
+      } else this.#contradicted.delete(row.id);
+      conflicts.push([row, remote, text]);
+    }
+    if (conflicts.length > 0) await this.#resolveConflicts(conflicts);
+  }
+
+  // A row the backend refuses by name (an id it cannot carry, a body too large): set aside — said (`refused`,
+  // `direction: 'push'`, the error's code), out of pending — until a turn of the record or `reSync()` tries it again.
+  #park(id, error) {
+    this.#pending.delete(id);
+    this.#parked.add(id);
+    this.#refuse('push', id, error?.code ?? 'backend', error);
+  }
+
+  // Rows the backend refused as conflicts, each with the document as the backend holds it. The backend's state is
+  // what the next push assumes; the backend wins — the record is set to its state here — unless `resolve` says
+  // otherwise (a `resolve` that throws is said and the backend wins). The landing is one transaction under
+  // `source: connector:<name>:resolve` — a turn this connector hears — row by row: a resolution the engine refuses
+  // is said (`refused`, `direction: 'push'`) and the record stands. The ids stay pending: a resolution equal to
+  // the backend's state has nothing to say, another goes back with the backend's state assumed.
+  async #resolveConflicts(conflicts) {
+    const docs = [];
+    const events = [];
+    for (let i = 0; i < conflicts.length; i++) {
+      const [row, remote] = conflicts[i];
+      const { id } = row;
       let local = null;
       try {
-        local = await this.#db.get(remote.id);
+        local = plain(await this.#db.get(id));
       } catch {
         local = null;
       }
-      let resolved = remote.deleted ? null : remote.data;
+      let resolved = remote.data;
       let deleted = remote.deleted;
       if (this.#resolve !== null) {
-        const answer = await this.#resolve({
-          id: remote.id,
-          local: plain(local),
-          remote: remote.data,
-          deleted: remote.deleted,
-        });
-        if (answer === null) deleted = true;
-        else if (isPlainObject(answer)) {
-          resolved = answer;
-          deleted = false;
+        try {
+          const answer = await this.#resolve({ id, local, remote: remote.data, deleted: remote.deleted });
+          if (answer === null) {
+            resolved = null;
+            deleted = true;
+          } else if (isPlainObject(answer)) {
+            resolved = answer;
+            deleted = false;
+          }
+        } catch (error) {
+          this.#logger.warn({ event: 'connector.resolve.failed', name: this.#name, id, err: error });
         }
       }
-      notify(this, this.#logger, 'conflict', {
-        id: remote.id,
-        local: plain(local),
-        remote: remote.data,
-        deleted: remote.deleted,
-        resolved,
-      });
-      // The backend's state is what the next push assumes.
-      this.#assumed.set(remote.id, remote.deleted ? null : remote.data);
-      docs.push({ id: remote.id, data: resolved, deleted });
+      events.push({ id, local, remote: remote.data, deleted: remote.deleted, resolved });
+      docs.push({ id, data: resolved, deleted });
     }
-    if (docs.length === 0) return;
-    // Landed under another source than a pull's: a resolution that differs from the backend's state is a turn this
-    // connector hears, and goes back to the backend with the backend's state as what it assumed.
-    const resolving = `${this.#source}:resolve`;
     const refusals = [];
     await this.#db.transact(
       async (tx) => {
@@ -758,9 +917,18 @@ class Replication extends Emitter {
           }
         }
       },
-      { source: resolving, actor: this.#actor },
+      { source: `${this.#source}:resolve`, actor: this.#actor },
     );
+    // Landed: the backend's state is what the next push assumes, the ids stay pending for it. A landing that failed
+    // whole learned nothing — the rows go again with what they assumed, and the backend answers the conflict again.
+    for (let i = 0; i < conflicts.length; i++) {
+      const [row, , text] = conflicts[i];
+      this.#stats.conflicts++;
+      this.#conflicted.add(row.id);
+      this.#learn(row.id, text);
+    }
     for (let i = 0; i < refusals.length; i++) this.#refuse('push', refusals[i][0], refusals[i][1], refusals[i][2]);
+    for (let i = 0; i < events.length; i++) notify(this, this.#logger, 'conflict', events[i]);
   }
 }
 
