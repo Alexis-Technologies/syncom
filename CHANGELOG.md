@@ -104,9 +104,14 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   `tabs.demoted` info lines); a connector counts its documents and rows by direction and result (`syncom.connector.rows`:
   pulled, applied, pushed, probed, refused, parked, conflict, failed; `stats().probed`) and an agent's tools their calls
   by verb (`syncom.mcp.calls`). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
-- **The hosting side in three files (review №7, E11.1).** `src/sync/hosting.js` keeps hello, push, snapshot, the
+- **The hosting side in three files, one of every helper (review №7, E11).** `src/sync/hosting.js` keeps hello, push, snapshot, the
   feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
-  `query`, `count` and `blob`.
+  `query`, `count` and `blob`. `proveMessage` is `src/sync/protocol.js`'s (the dialer and the host signed and verified
+  two copies of it); an error crosses a wire of this package — the tabs' channel, the remote engine — through one
+  `packError`/`unpackError` of `src/wire-error.js` (`{ name, message, code?, fields }`, a data error's own fields alone,
+  never one that would swap a prototype); a `SyncomError`'s fields never clobber its `name`, `code`, `message` or
+  `stack` — which is why `REPLICATION_FAILED` names its connector as `connector` and `PIPELINE_FAILED` its pipeline
+  as `pipeline` (both rode as `name` and renamed the error; a test had encoded it).
 - **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
   stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
   object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the

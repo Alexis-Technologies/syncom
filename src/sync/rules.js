@@ -8,6 +8,7 @@
 // `handPresence`). Requires hooks.js, scope.js, symbols.js only.
 
 const { notify } = require('../hooks.js');
+const { proveMessage } = require('./protocol.js');
 const { GLOBAL_SCOPE } = require('../scope.js');
 const { SIGNER } = require('../symbols.js');
 
@@ -150,8 +151,6 @@ const challengeOf = () => {
   for (let i = 0; i < bytes.length; i++) text += String.fromCharCode(bytes[i]);
   return btoa(text).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 };
-
-const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', challenge, host, node]);
 
 // A call this unit does not serve, or cannot: counted, logged under the procedure's event, refused by code.
 const refuseCall = (host, procedure, message, code, reason, node = null) => {

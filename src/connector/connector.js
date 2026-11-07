@@ -111,7 +111,7 @@ const isJson = (value, depth = 0) => {
 };
 
 const failed = (direction, message, cause, name, retryIn = null) =>
-  new SyncomError('REPLICATION_FAILED', message, { direction, name, cause, retryIn });
+  new SyncomError('REPLICATION_FAILED', message, { direction, connector: name, cause, retryIn });
 
 // The canonical text parsed back — the backend's state as a push hands it over as `assumed`.
 const parsed = (text) => (text === null ? null : JSON.parse(text));

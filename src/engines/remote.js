@@ -36,6 +36,7 @@ const { isDigest, checkBlobBytes } = require('../blobs.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError, typed } = require('../errors.js');
+const { packError, unpackError } = require('../wire-error.js');
 
 const LOG_GETTERS = ['journaled', 'sealedTo', 'open', 'segments', 'corrupt', 'health'];
 // A call's arguments are its own, a short fixed list: more is no call of the contract's.
@@ -240,30 +241,6 @@ const portOf = (port) => {
     return () => port.removeEventListener?.('close', once);
   };
   return { send, listen, onClose };
-};
-
-// An error as a message, and back: a SyncomError with its code and fields,
-// a TypeError, any other with its code (EEXIST) — and nothing else of it: a
-// file system's `path`, `syscall` or `errno` stays on the served side.
-const packError = (error) => {
-  if (error === null || typeof error !== 'object') return { message: String(error) };
-  const out = { name: error.name, message: error.message };
-  if (error.code !== undefined) out.code = error.code;
-  if (error instanceof SyncomError) {
-    for (const field of Object.keys(error)) {
-      if (field !== 'cause' && field !== 'stack' && field !== 'code') out[field] = error[field];
-    }
-  }
-  return out;
-};
-const unpackError = (packed) => {
-  const { name, message, code, ...fields } = packed;
-  if (name === 'SyncomError' && typeof code === 'string') {
-    return new SyncomError(code, message, { ...fields, cause: null });
-  }
-  const error = name === 'TypeError' ? new TypeError(message) : new Error(message);
-  if (code !== undefined) error.code = code;
-  return Object.assign(error, fields);
 };
 
 const logState = (log) => {

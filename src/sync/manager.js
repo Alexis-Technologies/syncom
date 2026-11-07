@@ -27,7 +27,7 @@ const { isSyncLink } = require('./link.js');
 const { writerOf, traced } = require('../telemetry/writer.js');
 const { notify, runHook, normalizeHooks } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf, proveMessage } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
@@ -79,7 +79,6 @@ const touchedBy = (op) => {
   return typeof op.key === 'string' ? [op.key] : null;
 };
 // What a proof of this node's key signs: the host's challenge, bound to both node ids.
-const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', challenge, host, node]);
 // What #connect's chain carries when beforeConnect said no.
 const NOT_DIALLED = Symbol('syncom.notDialled');
 // `addNode({ direction })`: what a link carries. `'both'` (the default) pushes and subscribes; `'pull'` only

@@ -219,7 +219,8 @@ test('Connectors', async (t) => {
       await waitUntil(() => errors.length === 1);
       assert.strictEqual(errors[0].code, 'REPLICATION_FAILED');
       assert.strictEqual(errors[0].direction, 'pull');
-      assert.strictEqual(errors[0].name, 'main');
+      assert.strictEqual(errors[0].connector, 'main');
+      assert.strictEqual(errors[0].name, 'SyncomError');
       assert.match(errors[0].cause.message, /backend down/);
       assert.strictEqual(replication.errors.length, 1);
       // Tried again after retryTime: the pull goes through.

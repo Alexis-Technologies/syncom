@@ -110,7 +110,7 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
           db,
           logger,
           'error',
-          new SyncomError('PIPELINE_FAILED', message, { name, eventId: batch.eventId, cause }),
+          new SyncomError('PIPELINE_FAILED', message, { pipeline: name, eventId: batch.eventId, cause }),
         );
         break;
       }

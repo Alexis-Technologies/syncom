@@ -54,8 +54,7 @@ src/header.js             what names an op, the core's: the header (v1, `prev` l
 src/shape.js              isPlainObject, own, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
 src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
-src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
-                          checks, shared by Database and realize() in patch.js — requires paths.js only
+src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument checks, shared by Database and realize() in patch.js — requires paths.js only
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes over a 62-letter alphabet (Loro's rule, MIT), as
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
@@ -81,7 +80,8 @@ src/collection.js         Collection — an entity's records, `db.<Entity>`; pub
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`); `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
-src/errors.js             SyncomError, ValidationError, typed() — no requires
+src/errors.js             SyncomError (a field never its own name, code or stack, never `__proto__`), ValidationError, typed() — no requires
+src/wire-error.js         packError/unpackError — an error as JSON between two sides of this package (the tabs' channel, the remote engine) — requires errors.js only
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over the store an engine hands it (a journal, rows; it builds none): seqs reserved at append

@@ -10,7 +10,7 @@ src/engines/remote.js     serveEngine(engine, port, { allow }) answers the contr
                           table of the stores, their methods and their arguments; remoteEngine(port, { name, capabilities, timeout })
                           and connectEngine(port, { timeout }) are the engine on the other side: a message per call, the log store's
                           getters kept from the last answer, change events, a lease's loss and its life (`leaseEvent`) pushed, the port's death and a timeout
-                          ENGINE_UNREACHABLE, stats() — requires engine.js, blobs.js, write-set.js, shape.js, errors.js only
+                          ENGINE_UNREACHABLE, stats() — requires engine.js, blobs.js, write-set.js, shape.js, errors.js, wire-error.js only
 src/engines/copy.js       copyEngine(from, to, { path, batch }): the database at a path copied — kv (not the lock; the identity last),
                           records with their pieces, a tag's copies, the log (sealed entries as one segment, `batch` a group; open
                           groups as they were) and its index — both held for the copy, the target empty (TARGET_NOT_EMPTY), a failure

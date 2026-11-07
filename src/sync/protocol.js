@@ -35,4 +35,7 @@ const schemaOf = (value) => {
   return { version: value.version, hash: typeof value.hash === 'string' ? value.hash : null };
 };
 
-module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf };
+// What a hello's `challenge` is signed over (`syncom/prove`): both node ids bound in, the dialer's and the host's.
+const proveMessage = (challenge, host, node) => JSON.stringify([1, 'prove', challenge, host, node]);
+
+module.exports = { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf, proveMessage };

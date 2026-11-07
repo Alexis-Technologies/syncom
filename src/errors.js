@@ -36,12 +36,16 @@ const isQuotaError = (error) => {
   return false;
 };
 
+// What a field riding on an error may never be: the error's own (`name`, `message`, `code`, `stack`) or `__proto__`,
+// which would swap its prototype — a field named `name` once renamed a SyncomError to its data.
+const RESERVED = new Set(['name', 'message', 'stack', 'cause', 'code', '__proto__']);
+
 class SyncomError extends Error {
   constructor(code, message, { cause, ...fields } = {}) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'SyncomError';
     this.code = code;
-    Object.assign(this, fields);
+    for (const key of Object.keys(fields)) if (!RESERVED.has(key)) this[key] = fields[key];
     Error.captureStackTrace?.(this, this.constructor);
   }
 }

@@ -221,7 +221,9 @@ const ENTRIES = [
     entry: 'src/contracts/contracts.js',
     platform: 'browser',
     // 1.1 with isQuotaError beside the errors it shares with the core (sync-parity plan, S5). 1.2, raised by name.
-    budget: 1.2,
+    // 1.2 (at the line) with a SyncomError's fields guarded against its own name, code and `__proto__` (review №7, E11.3;
+    // 2026-11-07). 1.25, raised by name.
+    budget: 1.25,
   },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
@@ -577,7 +579,8 @@ const ENTRIES = [
     // (review №5 E1). 3.25, raised by name.
     // 3.3 with the engines' shared errors beside the contract (review №5 M-4). 3.5, raised by name.
     // 3.5 with the blobs store and the change stream (sync-parity plan, S3/S4). 4, raised by name.
-    budget: 4,
+    // 4.0 (at the line) with a SyncomError's fields guarded (review №7, E11.3; 2026-11-07). 4.25, raised by name.
+    budget: 4.25,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',

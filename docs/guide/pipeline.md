@@ -40,7 +40,7 @@ change in order, the newer position — up to 500 ids, so however slow the handl
 a time and a burst of writes is one turn of the handler.
 
 A handler that throws stops the pipeline before the turn: the error is kept (`pipeline.errors`, the newest twenty),
-the database's `error` event carries `PIPELINE_FAILED` (`name`, `eventId`, `cause`), the log line `pipeline.failed`
+the database's `error` event carries `PIPELINE_FAILED` (`pipeline`, `eventId`, `cause`), the log line `pipeline.failed`
 says so, the checkpoint stays, and nothing is handed over until `start()` — which hands the failed turn over again.
 A turn is handled at least once and never skipped; a handler is written to be idempotent for that reason. `stopped`
 says whether the pipeline follows nothing now; `idle()` whether anything is queued or running; `awaitIdle()` resolves

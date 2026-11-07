@@ -11,7 +11,8 @@ src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase
                           election.js, channel.js only
 src/shared/election.js    elect({ name, locks, channel, follower, heartbeat, misses }) — Web Locks, or a heartbeat over a BroadcastChannel, a
                           follower that never leads, or alone; re-armable: onLead at every grant, yield(), request() — no requires
-src/shared/channel.js     the follower's channel to the leader: describe/revive an error across JSON, answerOf, unwrap, callLeader — requires errors.js only
+src/shared/channel.js     the follower's channel to the leader: describe/revive (wire-error.js's packError/unpackError), answerOf, unwrap,
+                          callLeader — requires errors.js, wire-error.js only
 ```
 
 ## Rules

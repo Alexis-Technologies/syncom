@@ -81,7 +81,7 @@ test('pipelines', async (t) => {
     // A handler that throws stops the pipeline before the turn: the error kept, the checkpoint not moved, nothing
     // handed over meanwhile; `start()` hands the failed turn over again.
     const errors = [];
-    db.on('error', (error) => errors.push([error.code, error.name, error.cause.message]));
+    db.on('error', (error) => errors.push([error.code, error.pipeline, error.cause.message]));
     let arm = true;
     const broken = createPipeline(db, {
       name: 'broken',
