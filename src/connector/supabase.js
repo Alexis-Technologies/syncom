@@ -87,16 +87,28 @@ const supabase = ({
   return {
     pull: {
       async handler(checkpoint, batchSize) {
+        // The cursor is (stamp, id): the rows modified after the checkpoint's stamp, and those modified at it with
+        // a greater key — a transaction's rows share one `now()`, and a page's edge never skips the rest of them.
+        const after =
+          checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.at === 'string'
+            ? checkpoint
+            : { at: typeof checkpoint === 'string' ? checkpoint : null, id: '' };
         let query = client.from(table).select('*');
-        if (typeof checkpoint === 'string') query = query.gt(modifiedColumn, checkpoint);
-        query = query.order(modifiedColumn, { ascending: true }).limit(batchSize);
+        if (after.at !== null) {
+          const m = modifiedColumn;
+          query = query.or(`${m}.gt."${after.at}",and(${m}.eq."${after.at}",${primaryKey}.gt."${after.id}")`);
+        }
+        query = query
+          .order(modifiedColumn, { ascending: true })
+          .order(primaryKey, { ascending: true })
+          .limit(batchSize);
         const rows = answered(await query, 'select') ?? [];
         const documents = [];
-        let last = typeof checkpoint === 'string' ? checkpoint : null;
+        let last = after.at === null ? null : after;
         for (let i = 0; i < rows.length; i++) {
           documents.push(documentOf(rows[i]));
           const stamp = rows[i][modifiedColumn];
-          if (typeof stamp === 'string' && (last === null || stamp > last)) last = stamp;
+          if (typeof stamp === 'string') last = { at: stamp, id: String(rows[i][primaryKey]) };
         }
         return { documents, checkpoint: last };
       },
@@ -154,7 +166,9 @@ const supabase = ({
             }
           } else landed = answered(result, held === undefined ? 'insert' : 'update') ?? [];
           if (landed.length > 0) {
-            stamps.set(row.id, stamp);
+            // The stamp as the database stored it — a trigger's, not this adapter's — is what the next update matches.
+            const stored = landed[0]?.[modifiedColumn];
+            stamps.set(row.id, typeof stored === 'string' ? stored : stamp);
             continue;
           }
           conflicts.push(await current(row.id));

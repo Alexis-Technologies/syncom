@@ -306,6 +306,34 @@ test('Connector adapters', async (t) => {
         read,
       });
       await t2.test(
+        'MongoDB: documents sharing the last stamp of a full page are not skipped — the cursor is (stamp, id)',
+        async () => {
+          // Five documents of one batch share one `_updated` (one `now()` for the batch, one millisecond).
+          const ties = client.db('app').collection('ties');
+          const at = 1_700_000_000_000;
+          for (let i = 0; i < 5; i++) {
+            await ties.replaceOne({ _id: `t${i}` }, { _id: `t${i}`, _rev: 1, _updated: at, n: i }, { upsert: true });
+          }
+          await ties.replaceOne({ _id: 'later' }, { _id: 'later', _rev: 1, _updated: at + 1, n: 9 }, { upsert: true });
+          const adapter = mongodb({ collection: ties, changes: false });
+          const seen = [];
+          let checkpoint = null;
+          for (;;) {
+            const page = await adapter.pull.handler(checkpoint, 2);
+            for (const doc of page.documents) seen.push(doc.id);
+            checkpoint = page.checkpoint;
+            if (page.documents.length < 2) break;
+          }
+          assert.deepStrictEqual(seen, ['t0', 't1', 't2', 't3', 't4', 'later'], 'every document once, in order');
+          assert.deepStrictEqual(checkpoint, { at: at + 1, id: 'later' });
+          assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, [], 'nothing repeated');
+          // The checkpoint of the first version, a stamp alone, still resumes: the documents at that stamp are read
+          // again (at least once, never skipped), and what came after.
+          const resumed = (await adapter.pull.handler(at, 10)).documents.map((doc) => doc.id);
+          assert.deepStrictEqual(resumed, ['t0', 't1', 't2', 't3', 't4', 'later']);
+        },
+      );
+      await t2.test(
         'the options are checked; without change streams there is no stream; a collision on insert is a conflict; a probe reads the document back; a server code refuses the row by name; a change stream that errs says END',
         async () => {
           assert.throws(() => mongodb({}), { name: 'TypeError', message: /collection/ });
@@ -406,6 +434,48 @@ test('Connector adapters', async (t) => {
         },
       });
       await t2.test(
+        'Supabase: rows sharing the last stamp of a full page are not skipped — the cursor is (stamp, id); a trigger-set modified column: the stamp kept is the stored one and the next update matches',
+        async () => {
+          const triggered = createFakeSupabase({ trigger: true });
+          // Five rows of one transaction share one `now()` — Postgres' `now()` is the transaction's.
+          const shared = triggered.stamp();
+          const table = new Map();
+          triggered.tables.set('ties', table);
+          for (let i = 0; i < 5; i++) table.set(`t${i}`, { id: `t${i}`, n: i, deleted: false, updated_at: shared });
+          const adapter = supabase({ client: triggered, table: 'ties' });
+          const seen = [];
+          let checkpoint = null;
+          for (;;) {
+            const page = await adapter.pull.handler(checkpoint, 2);
+            for (const doc of page.documents) seen.push(doc.id);
+            checkpoint = page.checkpoint;
+            if (page.documents.length < 2) break;
+          }
+          assert.deepStrictEqual(seen, ['t0', 't1', 't2', 't3', 't4'], 'every row once, in order');
+          assert.deepStrictEqual(checkpoint, { at: shared, id: 't4' });
+          assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, [], 'nothing repeated');
+          // The checkpoint of the first version, a stamp alone, still resumes: the rows at that stamp read again
+          // (at least once, never skipped).
+          assert.strictEqual((await adapter.pull.handler(shared, 10)).documents.length, 5);
+          // The modified column set by a trigger: the adapter keeps the stored stamp — not its own `now()` — so the
+          // next update matches it; before, every second edit was a conflict the backend won.
+          const tasks = supabase({ client: triggered, table: 'tasks' });
+          assert.deepStrictEqual(
+            await tasks.push.handler([{ id: 'r1', data: { n: 1 }, deleted: false, assumed: null }]),
+            [],
+          );
+          const stored = triggered.read('tasks', 'r1').updated_at;
+          assert.strictEqual(typeof stored, 'string');
+          assert.strictEqual(tasks.stampOf('r1'), stored, 'the stored stamp, not the adapter’s');
+          assert.deepStrictEqual(
+            await tasks.push.handler([{ id: 'r1', data: { n: 2 }, deleted: false, assumed: { n: 1 } }]),
+            [],
+            'the next update matches',
+          );
+          assert.strictEqual(triggered.read('tasks', 'r1').n, 2);
+        },
+      );
+      await t2.test(
         'the options are checked; a client without channels has no stream; an error answer is a failure; a probe reads the row back; a code of the database refuses the row by name; the channel’s error says END',
         async () => {
           assert.throws(() => supabase({ table: 'x' }), { name: 'TypeError', message: /client/ });
@@ -417,19 +487,9 @@ test('Connector adapters', async (t) => {
           assert.throws(() => supabase({ client, table: 'x', stream: 'yes' }), { name: 'TypeError' });
           const plain = supabase({ client: { from: client.from }, table: 'tasks' });
           assert.strictEqual(plain.pull.stream, undefined);
-          const erring = supabase({
-            client: {
-              from: () => ({
-                select: () => ({
-                  gt: () => ({
-                    order: () => ({ limit: () => ({ then: (r) => r({ data: null, error: { message: 'nope' } }) }) }),
-                  }),
-                  order: () => ({ limit: () => ({ then: (r) => r({ data: null, error: { message: 'nope' } }) }) }),
-                }),
-              }),
-            },
-            table: 'tasks',
-          });
+          const nope = { then: (r) => r({ data: null, error: { message: 'nope' } }) };
+          const chain = { or: () => chain, order: () => chain, limit: () => nope };
+          const erring = supabase({ client: { from: () => ({ select: () => chain }) }, table: 'tasks' });
           await assert.rejects(() => erring.pull.handler(null, 10), { message: /Supabase select failed: nope/ });
           const adapter = supabase({ client, table: 'tasks', now: client.stamp });
           assert.strictEqual(adapter.stampOf('b1'), undefined);
@@ -487,6 +547,32 @@ test('Connector adapters', async (t) => {
         write: (id, data, o) => fake.write(id, data, o),
         read: (id) => fake.read(id),
       });
+      await t2.test(
+        'Firestore: a stamp with microseconds neither skips nor repeats — the cursor is { seconds, nanoseconds, id }',
+        async () => {
+          // Five writes within one millisecond: the server's stamps differ by microseconds alone.
+          const micro = createFakeFirestore();
+          for (let i = 0; i < 5; i++) micro.write(`u${i}`, { n: i });
+          const adapter = firestore({ sdk: micro.sdk, database: micro.database, collection: micro.collection });
+          const seen = [];
+          let checkpoint = null;
+          for (;;) {
+            const page = await adapter.pull.handler(checkpoint, 2);
+            for (const doc of page.documents) seen.push(doc.id);
+            checkpoint = page.checkpoint;
+            if (page.documents.length < 2) break;
+          }
+          assert.deepStrictEqual(seen, ['u0', 'u1', 'u2', 'u3', 'u4'], 'every document once, in order');
+          assert.deepStrictEqual(Object.keys(checkpoint).sort(), ['id', 'nanoseconds', 'seconds']);
+          assert.strictEqual(checkpoint.id, 'u4');
+          assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, [], 'nothing repeated');
+          // The checkpoint of the first version, `{ at, id }` in milliseconds, still resumes.
+          const at = micro.docs.get('u4').serverTimestamp.toMillis();
+          micro.write('u5', { n: 5 });
+          const resumed = await adapter.pull.handler({ at, id: 'u4' }, 10);
+          assert.ok(resumed.documents.some((doc) => doc.id === 'u5'));
+        },
+      );
       await t2.test(
         'the options are checked; without onSnapshot no stream; a pending stamp waits; a transaction run again begins afresh; a probe reads the document back; an id the SDK refuses is the row’s; 600 rows go in two transactions; onSnapshot’s error says END',
         async () => {

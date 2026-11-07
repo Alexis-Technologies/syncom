@@ -269,8 +269,8 @@ One collection of the driver's, injected — a collection of the application's d
 [engine](./backends#engines) and the [shared log](./scaling#a-shared-log) are the other two things syncom does over
 the driver). Every document carries three fields of the adapter's: `_rev` (a count of its writes, the
 compare-and-set), `_deleted` (a tombstone, so a pull sees a deletion) and `_updated` (the position, stamped by `now`:
-a pull is the documents `_updated` after the checkpoint, in that order; two writes in one millisecond are read again
-at the next pull, and an equal document makes no op). The stream is a change stream on the collection, every change
+a pull is the documents after the checkpoint `{ at, id }` — stamped after it, or stamped the same with a greater
+`_id` — in that order, so a batch written within one millisecond is never skipped at a page's edge). The stream is a change stream on the collection, every change
 a `RESYNC`, its error or close an `END` — a replica set; `changes: false` without one, and a live connector pulls
 every `retryTime`. A push is a `replaceOne` matched on the `_rev` last seen (an upsert for a document never seen; a
 duplicate key is a conflict), a conflict is the document read back, a server's code on the document (a validator's
@@ -290,8 +290,11 @@ replicate(db, { name: 'supabase', collection: 'Task', ...supabase({ client, tabl
 One table through the injected client (`@supabase/supabase-js`, or anything with its `from().select()…` shape): a
 primary key column (`primaryKey`, `id`), a boolean column of a deletion (`deletedColumn`, `deleted`) and a text column
 the database sets on every write (`modifiedColumn`, `updated_at` — a trigger, or the adapter's own stamp, `now`, an
-ISO date). A pull is the rows modified after the checkpoint, in that order; a push is an `update` matched on the
-primary key and the modified value last seen — PostgREST's compare-and-set, no row matched a conflict — or an
+ISO date). A pull is the rows after the checkpoint `{ at, id }` — modified after its stamp, or at it with a greater
+key, in that order: the rows of one transaction share one `now()` and are never skipped at a page's edge; a push is
+an `update` matched on the primary key and the modified value last seen — PostgREST's compare-and-set, no row
+matched a conflict; the value kept for the next match is the one the database stored, a trigger's where there is
+one, never the adapter's own — or an
 `insert` for a row never seen (a duplicate key a conflict), and a conflict is the row read back; a code of the
 database's on the row (a check constraint, a type) is that row's `{ id, error }`, an error without a code (the
 network) the push's failure, tried again; a probe reads the row back. The stream is Realtime's `postgres_changes` on
@@ -317,8 +320,9 @@ The modular SDK is handed in whole as `sdk` — the adapter calls its `query`, `
 `documentId`, `getDocs`, `doc`, `runTransaction`, `serverTimestamp`, `Timestamp` and `onSnapshot`, and ships none of
 them. Every document carries two fields of the adapter's: the stamp the server sets on every write (`stampField`,
 `serverTimestamp`) and a tombstone (`deletedField`, `_deleted`), so a pull sees a deletion. A pull is the documents
-ordered by the stamp, then by id, after the checkpoint `{ at, id }` — one cursor, no second query for the documents
-stamped at the same instant; a document whose stamp is still pending (a write of the SDK's own cache not yet on the
+ordered by the stamp, then by id, after the checkpoint `{ seconds, nanoseconds, id }` — the stamp whole, as the
+server set it (a cursor of milliseconds skipped or repeated the rest of a commit's documents), one cursor, no second
+query for the documents stamped at the same instant; a document whose stamp is still pending (a write of the SDK's own cache not yet on the
 server) is left to the next pull, and `waitForPendingWrites` is awaited first where the SDK has it. A push is a
 transaction per 500 rows (Firestore's limit on a transaction's writes): every row's document read, compared with
 what the row assumed, written where it is the same and answered as a conflict where it is not — the transaction's

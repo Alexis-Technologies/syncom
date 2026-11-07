@@ -55,16 +55,25 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
   return {
     pull: {
       async handler(checkpoint, batchSize) {
-        const since = typeof checkpoint === 'number' ? checkpoint : 0;
+        // The cursor is (stamp, id): the documents stamped after the checkpoint's, and those stamped the same with a
+        // greater id — a batch written within one millisecond is never skipped at a page's edge.
+        const after =
+          checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.at === 'number'
+            ? checkpoint
+            : { at: typeof checkpoint === 'number' ? checkpoint : 0, id: '' };
+        const filter =
+          after.at === 0 && after.id === ''
+            ? {}
+            : { $or: [{ _updated: { $gt: after.at } }, { _updated: after.at, _id: { $gt: after.id } }] };
         // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
-        const cursor = collection.find({ _updated: { $gt: since } }, { sort: { _updated: 1 }, limit: batchSize });
+        const cursor = collection.find(filter, { sort: { _updated: 1, _id: 1 }, limit: batchSize });
         const docs = await cursor.toArray();
         const documents = [];
-        let last = since;
+        let last = after;
         for (let i = 0; i < docs.length; i++) {
           const doc = docs[i];
           if (typeof doc._rev === 'number') revs.set(String(doc._id), doc._rev);
-          if (typeof doc._updated === 'number' && doc._updated > last) last = doc._updated;
+          if (typeof doc._updated === 'number') last = { at: doc._updated, id: String(doc._id) };
           documents.push(documentOf(doc));
         }
         return { documents, checkpoint: last };

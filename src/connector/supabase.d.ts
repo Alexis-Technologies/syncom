@@ -29,8 +29,14 @@ export interface SupabaseOptions {
   now?: () => string;
 }
 
+/** The position of a pull: the modified stamp of the last row and its primary key (the ties at one stamp by key). */
+export interface SupabaseCheckpoint {
+  at: string;
+  id: string;
+}
+
 export interface SupabaseHandlers<T = RecordData> {
-  pull: PullHandlers<T, string>;
+  pull: PullHandlers<T, SupabaseCheckpoint>;
   push: PushHandlers<T>;
   /** The modified stamp this adapter last saw for a row, or undefined. */
   stampOf(id: string): string | undefined;

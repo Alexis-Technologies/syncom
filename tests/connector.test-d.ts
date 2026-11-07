@@ -8,6 +8,14 @@ import type {
   ConnectorDocument,
 } from '../src/connector/connector.js';
 import { createDatabase } from '../index.js';
+import type { MongodbCheckpoint } from '../src/connector/mongodb.js';
+import type { SupabaseCheckpoint } from '../src/connector/supabase.js';
+import type { FirestoreCheckpoint } from '../src/connector/firestore.js';
+
+expectAssignable<MongodbCheckpoint>({ at: 1, id: 'a' });
+expectAssignable<SupabaseCheckpoint>({ at: '2026-01-01T00:00:00Z', id: 'a' });
+expectAssignable<FirestoreCheckpoint>({ seconds: 1, nanoseconds: 500, id: 'a' });
+expectError<FirestoreCheckpoint>({ at: 1, id: 'a' });
 
 const db = await createDatabase({ path: 'data' });
 
