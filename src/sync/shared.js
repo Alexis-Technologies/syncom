@@ -26,7 +26,11 @@
 //     applies nothing: it shadows the vector as the log moves it — what its
 //     hello answers and what a push it forwards is held to.
 //   the FEED — `changes` on a hub with a shared log reads the topic from the
-//     client's cursor (src/sync/hosting.js), and a snapshot's first page is
+//     client's cursor (src/sync/hosting.js) through `read()`: ONE read of the
+//     log per hub — the consumer's — serves every feed from a ring of the
+//     entries it passed last (`RING`), woken as it passes; a cursor behind the
+//     ring (or ahead of the consumer, or a stopped one) reads the log its own
+//     way until an entry the ring holds comes by. A snapshot's first page is
 //     positioned at a marker this hub appended — behind every op offered before
 //     it, refused while the relay is behind — and its consumer reached; the
 //     vector it carries is what this hub's reads reflect (`#relayed`: moved by
@@ -66,6 +70,9 @@ const MAX_APPLY_RETRIES = 3;
 const REACH_TIMEOUT = 30_000;
 // A writer trims the inbox past its cursor every so many inbox entries passed (`log.trimBefore`, where the log has it).
 const INBOX_TRIM_EVERY = 64;
+// The entries of the topic the consumer passed last, kept for the feeds: a feed whose cursor is among them reads
+// from here, never from the log.
+const RING = 1024;
 // How long `stop()` waits for an append in flight before it lets go of it (`sharedLog.stopWait`): what it carried
 // is above the watermark, so the next start appends it again.
 const DEFAULT_STOP_WAIT = 5000;
@@ -181,6 +188,13 @@ class SharedHub {
   #recent = [];
   #recentSet = new Set();
   #waiters = new Set();
+  // The ring the feeds read: the topic's entries passed last, each's ordinal (`#ringNext` counting up, `#ringBase`
+  // the first kept), and the feeds waiting for the next one.
+  #ring = [];
+  #ringOrdinal = new Map();
+  #ringNext = 0;
+  #ringBase = 0;
+  #feedWaiters = new Set();
   #stuck = { topic: false, inbox: false };
   #inboxPassed = 0;
   // A read-only hub's vector, as the topic moves it; null while this hub writes.
@@ -275,6 +289,8 @@ class SharedHub {
       );
     }
     this.#waiters.clear();
+    // The feeds read the log their own way while the consumer is stopped.
+    this.#wakeFeeds();
     await Promise.allSettled(this.#loops);
     this.#loops = [];
     // An append the broker never answers does not hold the stop: what it carried is above the watermark, and the
@@ -572,6 +588,7 @@ class SharedHub {
       notify(this.#manager, this.#logger, 'error', failed('hole', message, { topic, cursor: entry.id }));
       this.#cursor[name] = entry.id;
       this.#passed(entry.id);
+      if (name === 'topic') this.#ringPush(entry);
       this.#saveCursor();
       return true;
     }
@@ -591,6 +608,7 @@ class SharedHub {
     }
     this.#cursor[name] = entry.id;
     this.#passed(entry.id);
+    if (name === 'topic') this.#ringPush(entry);
     this.#saveCursor();
     // What the writer landed of the inbox is no one else's to read: trimmed past the cursor now and then.
     if (name === 'inbox' && ++this.#inboxPassed >= INBOX_TRIM_EVERY) {
@@ -647,6 +665,82 @@ class SharedHub {
     for (let i = 0; i < ops.length; i++) vectorAdvance(shadow, ops[i]);
   }
 
+  // An entry of the topic passed, kept for the feeds; the oldest let go of past RING; every feed waiting woken.
+  #ringPush(entry) {
+    this.#ring.push({ id: entry.id, value: entry.value, headers: entry.headers });
+    this.#ringOrdinal.set(entry.id, this.#ringNext++);
+    if (this.#ring.length > RING) {
+      const gone = this.#ring.shift();
+      this.#ringOrdinal.delete(gone.id);
+      this.#ringBase++;
+    }
+    this.#wakeFeeds();
+  }
+
+  // Where the entry `id` sits in the ring, -1 for none: behind it, ahead of what the consumer passed, or not of the topic.
+  #ringIndex(id) {
+    const ordinal = this.#ringOrdinal.get(id);
+    return ordinal === undefined ? -1 : ordinal - this.#ringBase;
+  }
+
+  #wakeFeeds() {
+    if (this.#feedWaiters.size === 0) return;
+    const woken = [...this.#feedWaiters];
+    this.#feedWaiters.clear();
+    for (let i = 0; i < woken.length; i++) woken[i]();
+  }
+
+  // Until the consumer passes an entry, the hub stops, or the feed's signal aborts.
+  #waitFeed(signal) {
+    return new Promise((resolve) => {
+      const done = () => {
+        this.#feedWaiters.delete(done);
+        signal?.removeEventListener?.('abort', done);
+        resolve();
+      };
+      this.#feedWaiters.add(done);
+      signal?.addEventListener?.('abort', done, { once: true });
+    });
+  }
+
+  // A feed over the topic from `after`: from the ring where the cursor is in it, woken as the consumer passes the
+  // next; from a read of the log's own where it is not — behind the ring, ahead of the consumer, or the consumer
+  // stopped — until an entry the ring holds comes by, and over to the ring then. A read of the log that ends ends
+  // the feed, which its caller reads again from its cursor.
+  async *#feed(after, signal) {
+    let cursor = after;
+    for (;;) {
+      if (signal?.aborted) return;
+      if (this.#running && this.#ringIndex(cursor) !== -1) {
+        for (;;) {
+          if (signal?.aborted) return;
+          if (!this.#running) break;
+          const index = this.#ringIndex(cursor);
+          if (index === -1) break;
+          if (index + 1 < this.#ring.length) {
+            const entry = this.#ring[index + 1];
+            cursor = entry.id;
+            yield entry;
+            continue;
+          }
+          await this.#waitFeed(signal);
+        }
+        continue;
+      }
+      let caught = false;
+      for await (const entry of this.#log.read(this.#topic, { after: cursor, signal })) {
+        if (signal?.aborted) return;
+        cursor = entry.id;
+        yield entry;
+        if (this.#running && this.#ringIndex(entry.id) !== -1) {
+          caught = true;
+          break;
+        }
+      }
+      if (!caught) return;
+    }
+  }
+
   #passed(id) {
     this.#recent.push(id);
     this.#recentSet.add(id);
@@ -671,9 +765,13 @@ class SharedHub {
     return this.#shadow ?? (this.#shadow = { ...this.#storage.vector });
   }
 
-  /** The topic from `after` on, live — what a `changes` feed reads. */
+  /**
+   * The topic from `after` on, live — what a `changes` feed reads: the shape of a log's read, served from the
+   * consumer's ring where the cursor is in it (one read of the log per hub, however many feeds), the log's own read
+   * where it is not.
+   */
   read(after, signal) {
-    return this.#log.read(this.#topic, { after, signal });
+    return { ready: Promise.resolve(), [Symbol.asyncIterator]: () => this.#feed(after, signal) };
   }
 
   /**

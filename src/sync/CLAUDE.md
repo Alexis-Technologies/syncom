@@ -65,7 +65,10 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   what it applies from the topic goes through `applyRemote` like a push (`via`/`peer` the appending hub, `bound`
   the inbox entry's scopes, never `adoptFrom`). The topic's ids are the positions a client resumes by, so a hub
   over a shared log answers `epoch: shared:<topic>` at hello, serves `changes` from the topic alone (one page per
-  entry, labelled with the entry's id — never split: a resume would skip the rest), tells a subscription with no
+  entry, labelled with the entry's id — never split: a resume would skip the rest; through `SharedHub.read()`: the
+  consumer's one read of the log serves every feed from the ring of the entries it passed last, `RING`, woken as it
+  passes — a feed whose cursor is behind the ring, ahead of the consumer or on a stopped hub reads the log its own
+  way until an entry the ring holds comes by), tells a subscription with no
   cursor to bootstrap, and positions a snapshot's first page at a marker it appended (`mark()`: the tick's batch
   flushed first and the marker chained behind every append, refused `behind` while the relay is) and its consumer
   PASSED — the consumer applies every entry before the marker first, so nothing lands between the pages and the

@@ -88,6 +88,11 @@ epoch is the log's). Without an inbox a read-only hub refuses a push with 503
 it — correct, wasteful: a mesh of writers needs no inbox (`inbox: false`),
 one writer and its followers need one.
 
+A hub reads the log **once**, however many clients follow it: its consumer's
+read serves every `changes` feed from the entries it passed last (a ring of
+1 024), and only a feed whose cursor fell behind the ring reads the log its
+own way until it catches up — a thousand idle followers cost the log one tail.
+
 A hub **joins** the log with its state: everything its log retains goes to
 the topic first (what it compacted reaches the others through a snapshot of
 it — dial it once; a log compacted past the watermark is told once, `lost`,

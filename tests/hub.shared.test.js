@@ -453,6 +453,76 @@ test('Hubs over a shared log', async (t) => {
   );
 
   await t.test(
+    'the feeds of a hub share one read of the topic: many subscribers, one reader; a cursor behind the ring reads its own way until it catches up',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      let reads = 0;
+      const counted = {
+        ...shared,
+        read(topic, options) {
+          if (topic === TOPIC) reads++;
+          return shared.read(topic, options);
+        },
+      };
+      const hub = await createStorage(t2, 'H', { sync: { sharedLog: counted } });
+      await waitUntil(() => reads >= 1);
+      const consumer = reads;
+      const unit = hub.sync.unit({ access: 'public' });
+      // Five subscribers positioned at a marker: none reads the log itself.
+      const feeds = [];
+      for (let i = 0; i < 5; i++) {
+        const link = new MemoryLink(unit);
+        await link.call('syncom/hello', { node: `c${i}`, version: 1 });
+        const snapshot = await link.call('syncom/snapshot', { cursor: null });
+        const received = [];
+        link.subscribe(
+          'syncom/changes',
+          {},
+          { lastEventId: snapshot.eventId, onData: (value) => received.push(value) },
+        );
+        feeds.push(received);
+      }
+      await hub.insert({ n: 1 });
+      await hub.insert({ n: 2 });
+      const opsOf = (received) => received.flatMap((page) => page.ops ?? []);
+      await waitUntil(() => feeds.every((received) => opsOf(received).length >= 2), { timeout: 5000 });
+      assert.strictEqual(reads, consumer, 'one reader of the topic: the consumer');
+      // A cursor behind the ring: more entries than it keeps pass through, then a feed from the very first.
+      const first = shared.entries(TOPIC)[0].id;
+      const n = (id) => Number(id.slice(id.lastIndexOf('.') + 1));
+      for (let i = 0; i < 1100; i++) await shared.append(TOPIC, JSON.stringify({ v: 1, node: 'other', ops: [] }));
+      await waitUntil(() => hub.sync.shared().entries >= 1100, { timeout: 10_000 });
+      const late = new MemoryLink(unit);
+      await late.call('syncom/hello', { node: 'late', version: 1 });
+      const seen = [];
+      late.subscribe(
+        'syncom/changes',
+        {},
+        { lastEventId: first, onData: (value, eventId) => seen.push({ value, eventId }) },
+      );
+      await waitUntil(() => reads === consumer + 1, { timeout: 5000 });
+      const c = await hub.insert({ n: 3 });
+      await waitUntil(() => seen.some((page) => JSON.stringify(page.value).includes(c)), { timeout: 5000 });
+      // Every page once, in the log's order, from behind the ring through it: the read of its own, then the ring.
+      const positions = seen.map((page) => n(page.eventId));
+      for (let i = 1; i < positions.length; i++) assert.ok(positions[i] > positions[i - 1], 'in order, each once');
+      assert.deepStrictEqual(
+        opsOf(seen.map((page) => page.value)).map((row) => row[6].n),
+        [1, 2, 3],
+      );
+      assert.strictEqual(reads, consumer + 1, 'its own read, once');
+      const d = await hub.insert({ n: 4 });
+      await waitUntil(() => seen.some((page) => JSON.stringify(page.value).includes(d)), { timeout: 5000 });
+      assert.strictEqual(reads, consumer + 1, 'caught up: served from the ring');
+      // A hub stopped: the feeds go on from the log their own way.
+      await hub.sync.stop();
+      await shared.append(TOPIC, JSON.stringify({ v: 1, node: 'other', ops: [] }));
+      await waitUntil(() => reads > consumer + 1, { timeout: 5000 });
+      await hub.sync.start();
+    },
+  );
+
+  await t.test(
     'an entry that fails to apply three times leaves the topic stuck (SHARED_LOG_FAILED stuck); stop() and start() read it again',
     async (t2) => {
       const shared = createMemorySharedLog();
