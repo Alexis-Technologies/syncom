@@ -26,8 +26,76 @@ keeps its collection and its `deleted` stamp — so the live catalog is rebuilt 
 format-4 catalog still reads). Tombstones folded by the format-4 build were stamps on a catalog row alone and were
 lost at any rebuild: a database that ran that build's `cleanup` is best re-synced from a peer.
 
+**Upgrading a checkout from before review №7** (nothing published): a blob sealed at rest is iv ‖ ciphertext bytes
+now and a MongoDB blob is chunked — blobs written by the older build do not read (fetch them from a peer again, or
+re-put them); the channel between the tabs of `@alexify/syncom/shared` carries `{ id, args, retry }`, so a leader and a
+follower of two builds do not speak; `syncom/blob` names the record (`{ digest, id, name }`) and a host serves a
+digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer `capped` beside the rows and refuse a
+`$regex` unless the unit takes them; the host's revocations live in `revoked.json` of the root kv.
+
 ### Changed
 
+- **The shared log relays by log position, and its failures are told (review №7, E2).** The relay's watermark
+  (`sync.shared().appended`) is the last position of the hub's log every op at or below which is in the topic —
+  moved by whole runs of positions appended or read from the topic, never by `lastEventId`, which ran ahead of ops
+  still landing and lost a batch that failed behind one that landed; every op is offered with its position (the
+  `change` event's third argument carries `seq`), every start recovers what the log holds above the watermark (a stop
+  with ops waiting loses none), a watermark the log compacted past is told once (`lost`) and moved to the floor, and
+  `stop()` waits `sharedLog.stopWait` (5 s) for an append in flight, then lets go. A writing hub's snapshot carries
+  the vector its reads reflect and its marker is appended behind every op offered (503 `SHARED_LOG` with
+  `detail: 'behind'` while the relay recovers); a read-only hub serves no snapshot (403 `READ_ONLY`: a fresh client
+  lands on a hub that writes). `mongoSharedLog` tells a hole (`{ id, value: null, headers: { hole: '1' } }`;
+  `SHARED_LOG_FAILED` `hole` on the hub, `sync.shared().holes`) instead of passing a late appender's number in
+  silence — a failed insert leaves a tombstone, an insert slower than `gapTimeout` takes a fresh number — reads the
+  head once per page, polls no more under a live change stream, trims the topics `retention.topics` names alone
+  (the writer trims the inbox past its cursor through `trimBefore(topic, id)`). Every `changes` feed of a hub is
+  served from its consumer's one read of the topic (a ring of the entries passed last). An entry the engine refuses
+  is tried again, backed off (`SHARED_LOG_FAILED` `apply`, `sync.shared().retrying`); only a rule's refusal — a hook
+  that throws — leaves the topic `stuck`.
+- **The host's rules close their gaps (review №7, E3).** A refused op's revert brings back the fields the op
+  touched — through the kinds' patches, a counter by an inc, a set by a remove, a text by a splice — so what the
+  host accepted since stands (`refused[]` carries the op's `actor`, `WRITE_REFUSED` says `touched`; a sealed record
+  at the host is skipped before the rule is asked). `createDatabase({ sync: { authorizeWrite } })` is every unit's
+  rule and the writer's over the shared log's inbox; a follower verifies a push before it forwards it, holds its
+  shadow to what the topic shows, and reads the writer's `dropped` entries. `unit({ query })` takes `true` or
+  `{ regex: false | 'safe' | true }` — a `$regex` from the wire is 400 `REGEX` unless the unit takes them (`'safe'`:
+  no nested quantifier, backreference or lookaround) — and a scoped `query`/`count` walks the cursor until its
+  window is full or `limits.rowsPerQuery` rows were read, the answer saying `capped` (`Infinity` is no cap). A
+  session goes with its socket (`sync.sessions()` lists them), a read's hello leaves nothing on the client, and
+  revocations are kept in `revoked.json` and appended to the shared log for every hub to fold. Under `prove` the
+  rooms and the presence wait for the proof (`PRESENCE_UNPROVEN`). `syncom/blob` names the record and the
+  attachment, served under `allow.blob: 'named'` (the default) only where a live record in the peer's scopes names
+  the digest — `'any'` keeps the digest as a capability — and `fetchBlob(digest, { id, name })` names it; an op
+  flagged `scrubbed` with a payload is scrubbed before it is logged; `beforeSend` rules a hosted `changes` page as it
+  rules a push.
+- **The awaits are told, `forget()` holds under defer (review №7, E8).** `awaitInSync`/`awaitInitialReplication`
+  resolve when a dial fails after they began or the host refuses the feed for good (`peers()[i].terminal`);
+  `forget(id)` settles the record's deferred slot and scrubs the log in the same turn of the queue, so a flush lays
+  nothing back.
+- **Several tabs: the election re-armed, a write applied once, the follower's writers (review №7, E6).** The
+  election's one-shot `lead` promise is gone: `onLead(listener)`, `yield()`, `request()` — a promotion that cannot
+  open yields the lock and asks again (`PROMOTE_FAILED`), `openShared` never resolves with `db: null`, `close()`
+  closes the database before it releases the election, a fresh path in heartbeat mode waits the election out. A
+  forwarded write is `{ id: '<token>:<n>', args, retry }`: the leader keeps its answers and answers a retry from
+  them, a retry a new leader never saw is `CALL_UNKNOWN` → `LEADER_LOST { maybeApplied: true }`. A follower's
+  collection, attachments and local writers are forwarded (`SharedCollection`, `shared.attachments`,
+  `shared.local`; `insert` answers the id on either role; `PROCEDURES`, `COLLECTION_WRITERS`); `serve()` is
+  `'session'` by default; `election: { follower: true }` never leads (the SharedWorker recipe: the worker leads);
+  followers run over `shared` engines — never SQLite; the log events are `tabs.*`.
+- **Blobs: a digest at every door, bytes as the register says, the stores' promises, `sweep()` (review №7, E7).**
+  `src/blobs.js` holds the one cap (`MAX_BLOB_BYTES`, `BLOB_TOO_LARGE`) and the one check (`isDigest`): every
+  engine's blobs store refuses a key that is no digest, a register is believed only as far as it is one
+  (`ATTACHMENT_INVALID`), the bytes read are what the register says or `BLOB_MISMATCH` (an inflating stops at the
+  register's length), a fetched blob is kept once (`sync.blob.keep.failed` where the store refuses). SQLite's
+  `remove(path)` sweeps the blobs, `copyEngine` refuses a target without blobs while the source holds some
+  (`BLOBS_UNSUPPORTED`), MongoDB blobs are chunked at 15 MiB, `quota()` asks the engine (`estimate()`),
+  `isQuotaError` sees `SQLITE_FULL` and looks through `cause`. At rest a blob is iv ‖ ciphertext bytes;
+  `rotateAtRest` takes a backend (`{ fsi, filesEngine }`), fences the source (`moved.json`, `MOVED`) and marks a
+  copy in flight (`copy.json`). `attachments.sweep({ dryRun, tags })` collects the bytes nothing names; `put` on a
+  sealed record is `ENCRYPTED`; `BLOB_NOT_FOUND`'s field is `attachment`.
+- **The hosting side in three files (review №7, E11.1).** `src/sync/hosting.js` keeps hello, push, snapshot, the
+  feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
+  `query`, `count` and `blob`.
 - **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
   stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
   object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the
