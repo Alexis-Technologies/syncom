@@ -359,6 +359,7 @@ test('Hubs over a shared log', async (t) => {
   const gatedEngine = (inner) => {
     let gate = Promise.resolve();
     let release = null;
+    let failures = 0;
     return {
       close: () => {
         gate = new Promise((resolve) => {
@@ -369,14 +370,24 @@ test('Hubs over a shared log', async (t) => {
         release?.();
         release = null;
       },
+      /** The next `count` appends of the log fail (the medium refusing a group). */
+      fail: (count) => {
+        failures = count;
+      },
       engine: {
         name: inner.name,
         capabilities: inner.capabilities,
         async open(path) {
           const db = await inner.open(path);
-          const append = async (...args) => {
+          // The log store's contract: a group the medium refuses is told through `onFail`, and `false` answered.
+          const append = async (batch, headers, options) => {
             await gate;
-            return db.log.append(...args);
+            if (failures > 0) {
+              failures--;
+              options.onFail(new Error('the disk is full'));
+              return false;
+            }
+            return db.log.append(batch, headers, options);
           };
           return { ...db, log: Object.create(db.log, { append: { value: append } }) };
         },
@@ -523,7 +534,43 @@ test('Hubs over a shared log', async (t) => {
   );
 
   await t.test(
-    'an entry that fails to apply three times leaves the topic stuck (SHARED_LOG_FAILED stuck); stop() and start() read it again',
+    'an entry whose apply fails on the engine is tried again, backed off, until it lands (SHARED_LOG_FAILED apply, told once); a hook that throws leaves the topic stuck after three',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const h1 = await createStorage(t2, 'H1', { sync: { sharedLog: shared } });
+      const gated = gatedEngine(syncom.memoryEngine());
+      const h2 = await syncom.createDatabase({
+        engine: gated.engine,
+        path: `${t2.name}/H2`,
+        logger: false,
+        defer: 0,
+        sync: { sharedLog: shared },
+      });
+      t2.after(() => h2.close().catch(() => {}));
+      const errors = [];
+      h2.sync.on('error', (error) => errors.push(error));
+      await waitUntil(() => h2.sync.shared().running === true);
+      // The medium refuses the log's group twice: the entry is tried again after a second, then two.
+      gated.fail(2);
+      const a = await h1.insert({ n: 1 });
+      await waitUntil(() => h2.sync.shared().retrying.topic === true, { timeout: 5000 });
+      assert.strictEqual(h2.hasRecord(a), false);
+      const told = errors.filter((error) => error.code === 'SHARED_LOG_FAILED' && error.reason === 'apply');
+      assert.strictEqual(told.length, 1, 'told once per run');
+      assert.match(told[0].cursor, /^[a-z0-9]+\.\d+$/);
+      assert.strictEqual(told[0].cause.message, 'the disk is full');
+      assert.deepStrictEqual(h2.sync.shared().stuck, { topic: false, inbox: false }, 'never stuck on the engine');
+      await waitUntil(() => h2.hasRecord(a), { timeout: 10_000 });
+      assert.deepStrictEqual(await h2.get(a), { n: 1 });
+      assert.strictEqual(h2.sync.shared().retrying.topic, false);
+      assert.strictEqual(errors.filter((error) => error.reason === 'apply').length, 1, 'one run, told once');
+      const b = await h1.insert({ n: 2 });
+      await waitUntil(() => h2.hasRecord(b), { timeout: 5000 });
+    },
+  );
+
+  await t.test(
+    'a hook that throws three times leaves the topic stuck (SHARED_LOG_FAILED stuck); stop() and start() read it again',
     async (t2) => {
       const shared = createMemorySharedLog();
       let refusing = true;

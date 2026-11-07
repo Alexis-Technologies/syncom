@@ -114,9 +114,12 @@ waiting appends them at its next start (`stop()` waits `stopWait`, 5 s, for
 an append in flight, then lets go of it); a
 cursor the log trimmed past, or another log's (`gone`), is read from the
 oldest entry, and what fell between is a gap of its streams until a bootstrap
-from another hub fills it (`addNode` a hub, once); an entry that fails to
-apply three times leaves its topic `stuck` (`sync.shared().stuck`) and
-nothing past it is taken until `sync.stop()` and `start()`. `sync.shared()`
+from another hub fills it (`addNode` a hub, once); an entry the engine
+refuses — the medium down, a lease late, a group the log would not take — is
+tried again, backed off (`apply`, told once per run; `sync.shared().retrying`),
+until it lands, while one a rule refuses three times — a hook that throws, a
+bug — leaves its topic `stuck` (`sync.shared().stuck`) and nothing past it is
+taken until `sync.stop()` and `start()`. `sync.shared()`
 is the cursors, the watermark (`appended`, and `covered`: the positions
 above it known to be in the topic) and the counts. A **hole** — a position
 the log handed out whose entry never came (`mongoSharedLog`: a crashed

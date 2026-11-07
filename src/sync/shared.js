@@ -64,7 +64,8 @@ const RECENT = 256;
 // A failed append, read or apply waits this long before the next try, doubling.
 const BACKOFF = 1000;
 const MAX_BACKOFF = 60_000;
-// An entry whose apply fails this many times in a row leaves its topic stuck.
+// An entry whose apply a rule refuses this many times in a row leaves its topic stuck (a hook that throws, a bug);
+// the engine's refusals — the medium down, a lease late, a group the log refused — are tried again until they land.
 const MAX_APPLY_RETRIES = 3;
 // How long a snapshot waits for the consumer to reach its marker.
 const REACH_TIMEOUT = 30_000;
@@ -196,6 +197,8 @@ class SharedHub {
   #ringBase = 0;
   #feedWaiters = new Set();
   #stuck = { topic: false, inbox: false };
+  // A topic whose entry fails on the engine and is tried again, backed off (told once per run).
+  #retrying = { topic: false, inbox: false };
   #inboxPassed = 0;
   // A read-only hub's vector, as the topic moves it; null while this hub writes.
   #shadow = null;
@@ -249,6 +252,7 @@ class SharedHub {
     this.#running = true;
     this.#controller = new AbortController();
     this.#stuck = { topic: false, inbox: false };
+    this.#retrying = { topic: false, inbox: false };
     if (!this.#loaded) await this.#load();
     // The loops begin on the next turn of the event loop: what the first read
     // says — a cursor gone, a broker down — reaches a listener attached right
@@ -311,6 +315,7 @@ class SharedHub {
       covered: this.#covered.length,
       behind: this.#behind,
       stuck: { ...this.#stuck },
+      retrying: { ...this.#retrying },
       shadow: this.#shadow !== null,
       ...this.#stats,
     };
@@ -574,9 +579,9 @@ class SharedHub {
 
   // One entry: this hub's own passed, a marker passed, the rest applied — or,
   // on a hub that cannot write, folded into the shadow vector. False stops
-  // the loop: the inbox is not this hub's to land any more, or an entry that
-  // would not apply three times (`stuck`, reported; `sync.stop()` and
-  // `start()` read it again).
+  // the loop: the inbox is not this hub's to land any more, or an entry a
+  // rule refused three times (`stuck`, reported; `sync.stop()` and `start()`
+  // read it again) — an entry the engine refused is tried again until it lands.
   async #take(name, topic, entry) {
     this.#stats.entries++;
     // A hole: a number the log handed out whose entry never came (a crashed appender's). Told — what it carried is
@@ -630,10 +635,12 @@ class SharedHub {
     if (name === 'inbox') via.inbox = true;
     else via.shared = true;
     const bound = name === 'inbox' ? parsed.scopes : null;
+    let backoff = 0;
     for (let attempt = 1; ; attempt++) {
       try {
         const result = await this.#storage.applyRemote(parsed.ops, { via, peer: via, bound });
         this.#stats.applied += result.applied;
+        this.#retrying[name] = false;
         return true;
       } catch (error) {
         if (!this.#running) return false;
@@ -643,19 +650,40 @@ class SharedHub {
           this.#shadowAdvance(parsed.ops);
           return true;
         }
+        // Closed under the apply: the loop ends with the hub.
+        if (error?.code === 'CLOSED') return false;
         this.#logger.warn({ event: 'shared.entry.failed', topic, id: entry.id, attempt, err: error });
-        if (attempt >= MAX_APPLY_RETRIES) {
-          this.#stuck[name] = true;
-          const message = `An entry of the shared log ${topic} (${entry.id}) failed to apply ${attempt} times: nothing past it is taken until sync.stop() and start()`;
+        // A rule's refusal is the same at every try — a hook that throws, a bug (a TypeError): three times and the
+        // topic is stuck, for someone to look at. The engine's is not — the medium down, a lease late, a group the
+        // log refused: tried again, backed off, until it lands; told once per run.
+        const deterministic = error?.code === 'HOOK_FAILED' || error instanceof TypeError;
+        if (deterministic) {
+          if (attempt >= MAX_APPLY_RETRIES) {
+            this.#stuck[name] = true;
+            const message = `An entry of the shared log ${topic} (${entry.id}) failed to apply ${attempt} times: nothing past it is taken until sync.stop() and start()`;
+            notify(
+              this.#manager,
+              this.#logger,
+              'error',
+              failed('stuck', message, { topic, cursor: entry.id, cause: error }),
+            );
+            return false;
+          }
+          await sleep(BACKOFF * attempt, this.#controller.signal);
+          continue;
+        }
+        if (!this.#retrying[name]) {
+          this.#retrying[name] = true;
+          const message = `An entry of the shared log ${topic} (${entry.id}) failed to apply (${error?.code ?? error?.name ?? 'error'}): tried again until it lands`;
           notify(
             this.#manager,
             this.#logger,
             'error',
-            failed('stuck', message, { topic, cursor: entry.id, cause: error }),
+            failed('apply', message, { topic, cursor: entry.id, attempt, cause: error }),
           );
-          return false;
         }
-        await sleep(BACKOFF * attempt, this.#controller.signal);
+        backoff = backoff === 0 ? BACKOFF : Math.min(backoff * 2, MAX_BACKOFF);
+        await sleep(backoff, this.#controller.signal);
       }
     }
   }

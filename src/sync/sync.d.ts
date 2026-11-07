@@ -312,8 +312,10 @@ export interface SharedStats {
   covered: number;
   /** An append failed: nothing more goes out until the recovery appends what the log holds above `appended`. */
   behind: boolean;
-  /** A topic whose entry failed to apply three times: nothing past it is taken until `stop()` and `start()`. */
+  /** A topic whose entry a rule refused three times (a hook that throws, a bug): nothing past it is taken until `stop()` and `start()`. */
   stuck: { topic: boolean; inbox: boolean };
+  /** A topic whose entry the engine refused: tried again, backed off, until it lands (`SHARED_LOG_FAILED` `apply`, once per run). */
+  retrying: { topic: boolean; inbox: boolean };
   /** A read-only hub keeps the vector as the log moved it. */
   shadow: boolean;
   /** Ops this hub appended; entries read from the topic and the inbox; ops applied from them; ops forwarded to the inbox; entries that did not read; holes passed (a number whose entry never came, told as `SHARED_LOG_FAILED` `hole`). */
