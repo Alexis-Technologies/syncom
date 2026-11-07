@@ -62,6 +62,8 @@ export interface PeerView {
    * application intervenes (`enableNode` off and on, or a bootstrap).
    */
   stuck: boolean;
+  /** The host refused this node's feed for good — 403, a handshake loop, a stuck feed, a kinds mismatch: not waited for until a hello succeeds again. */
+  terminal: boolean;
   /** The last failure on the way to this peer, or null. */
   lastError: { code: string | number | null; message: string; at: number } | null;
   direction: 'both' | 'pull' | 'push';

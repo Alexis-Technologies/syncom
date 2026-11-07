@@ -337,7 +337,7 @@ class SyncManager extends Emitter {
   // `sync()` dials again), or the node was never dialed (`start()` not called).
   #peerOf(node) {
     const peer = this.#peers.get(node.url);
-    return peer !== undefined && !peer.failed ? peer : null;
+    return peer !== undefined && !peer.failed && !peer.terminal ? peer : null;
   }
 
   // Whether this node holds everything its peer told it of and the peer everything of this node's: the link up and
@@ -555,6 +555,7 @@ class SyncManager extends Emitter {
         pending: peer.outbox.length + (peer.inflight ? 1 : 0),
         behind: peer.behind,
         stuck: peer.stuck,
+        terminal: peer.terminal,
         lastError: peer.lastError,
         direction: directionOf(peer.node),
         caughtUp: peer.caughtUp,
@@ -608,6 +609,9 @@ class SyncManager extends Emitter {
       stuck: false,
       // The dial itself failed — no link: the next sync() dials again.
       failed: false,
+      // The host refused this node's feed for good — 403 (NOT_SERVED, UNPROVEN, SCOPES), a handshake loop, a stuck
+      // feed, a kinds mismatch: nothing of it is waited for (`#peerOf`), until a hello succeeds again.
+      terminal: false,
       // Streams of this node's own the host claimed more of at the last
       // hello, without proof: nothing of them goes to it (see #rewind).
       rewound: null,
@@ -670,10 +674,17 @@ class SyncManager extends Emitter {
       })
       .catch((error) => {
         // No link came of it: peers() still shows the node and its error,
-        // and the next sync() dials it again.
+        // and the next sync() dials it again — and whoever waits on the node waits no more.
         if (peer.link === null) peer.failed = true;
         this.#fail(peer, error);
+        this.#settle();
       });
+  }
+
+  // The host refused the feed for good: the peer is not waited for until a hello succeeds again.
+  #terminal(peer) {
+    peer.terminal = true;
+    this.#settle();
   }
 
   #disconnect(url) {
@@ -758,6 +769,8 @@ class SyncManager extends Emitter {
     const schema = schemaOf(answer.schema);
     peer.remote = { id: answer.node, vector: answer.vector ?? {}, epoch: answer.epoch, kinds: kindsOf(answer.kinds) };
     peer.ref.node = answer.node;
+    // Greeted anew: what the host refused for good before is asked again.
+    peer.terminal = false;
     node.remote = { id: answer.node, epoch: answer.epoch, schema };
     // The host asks for proof of this node's key before it takes or hands anything: the challenge signed.
     if (typeof answer.challenge === 'string') await this.#prove(peer, answer);
@@ -1182,12 +1195,15 @@ class SyncManager extends Emitter {
             if (++peer.rehellos > MAX_REHELLOS) {
               const message = `The host answered 428 to ${MAX_REHELLOS} fresh hellos in a row; not greeting again`;
               this.#fail(peer, new SyncomError('HANDSHAKE_LOOP', message, { cause: error }));
+              this.#terminal(peer);
               return;
             }
             this.#handshake(peer, { resubscribe: true }).catch((e) => this.#fail(peer, e));
             return;
           }
           this.#fail(peer, error);
+          // A refusal by code (NOT_SERVED, UNPROVEN, SCOPES): the feed is not opened again until the next hello.
+          if (error?.code === 403) this.#terminal(peer);
         },
         onEnd: ended,
       },
@@ -1219,6 +1235,7 @@ class SyncManager extends Emitter {
     this.#fail(peer, reported);
     if (stuck) {
       peer.stuck = true;
+      this.#terminal(peer);
       return;
     }
     if (peer.connected) this.#subscribe(peer);
@@ -1233,6 +1250,8 @@ class SyncManager extends Emitter {
         await this.#bootstrap(peer);
       } catch (error) {
         this.#fail(peer, error);
+        // Refused by code (a read-only hub's snapshot, UNPROVEN, SCOPES): nothing more comes until the next hello.
+        if (error?.code === 403) this.#terminal(peer);
       }
       return;
     }
@@ -1309,6 +1328,7 @@ class SyncManager extends Emitter {
         const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
         this.#otel.recordBootstrap('refused');
         this.#fail(peer, new SyncomError('KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
+        this.#terminal(peer);
         return;
       }
       const otel = this.#otel;

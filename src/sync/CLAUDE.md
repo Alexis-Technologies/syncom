@@ -49,7 +49,10 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   to `#pageFailed`, which closes the feed (pages of the old feed are dropped),
   reports `PAGE_FAILED` with the saved cursor, and resubscribes from it —
   `STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
-  did not land, and never catch inside `#receive` to "keep going".
+  did not land, and never catch inside `#receive` to "keep going". A peer the host refused for good — a 403 on the
+  feed or the bootstrap, a handshake loop, a stuck feed, a kinds mismatch — is `terminal` (`#terminal`): not waited
+  for by the awaits (`#peerOf` answers null, as for a failed dial, and `#settle()` runs so a waiter is told) until a
+  hello succeeds again; a dial that fails settles the waiters too.
 - **A hosted feed's cursor moves to a real entry, never to `lastEventId`.**
   `changes` in `src/sync/hosting.js` reads through `OpLog.read`, whose `last` is
   the seq of the last entry examined (in scope or not); when a wake brings

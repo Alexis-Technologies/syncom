@@ -680,10 +680,10 @@ and why a node is registered once: `addNode()` of a url already there is
 await storage.sync.start(); // dial every enabled node; automatic when `connect` is given
 await storage.sync.stop();  // close every link
 await storage.sync.sync();  // push what the peers lack right now
-storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError, direction, caughtUp }]
+storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, terminal, lastError, direction, caughtUp }]
 storage.sync.hosted();      // hosting side: [{ node, scopes, since, cursor }] — every live `changes` feed
 await storage.sync.awaitInitialReplication(); // every enabled node greeted and its feed read to its end once
-await storage.sync.awaitInSync();             // …and nothing left to push to any of them, right now
+await storage.sync.awaitInSync();             // …and nothing left to push to any of them, right now (a node whose dial failed, or whose host refused its feed for good — `terminal` — is not waited for)
 await storage.sync.awaitDocumentPushed(id);   // this node's newest op for the record acknowledged by every node it goes to
 
 storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
