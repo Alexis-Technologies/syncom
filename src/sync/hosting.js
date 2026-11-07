@@ -18,6 +18,7 @@ const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js');
 const { SIGNER, CURSOR, DB, SOURCE } = require('../symbols.js');
+const { safeRegex } = require('../query/safe-regex.js');
 const { toBase64 } = require('../crypto/pem.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
@@ -93,7 +94,8 @@ const DEFAULT_ROWS_PER_QUERY = 500;
 // bytes and the rate have no default (the byte count serializes every page).
 const DEFAULT_OPS_PER_PUSH = 10_000;
 
-// `unit({ limits })`: each a positive number (Infinity for none), unknown keys refused.
+// `unit({ limits })`: each a positive number (Infinity for none), unknown keys refused. A limit that is Infinity is
+// kept as such: a reader tests `=== Infinity`, never the key's absence.
 const normalizeLimits = (limits) => {
   const normalized = { opsPerPush: DEFAULT_OPS_PER_PUSH, rowsPerQuery: DEFAULT_ROWS_PER_QUERY };
   if (limits === undefined || limits === null) return normalized;
@@ -105,10 +107,59 @@ const normalizeLimits = (limits) => {
     if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
       throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
     }
-    if (value === Infinity) delete normalized[key];
-    else normalized[key] = value;
+    normalized[key] = value;
   }
   return normalized;
+};
+
+// `unit({ query })`: false (the default: no `query`, no `count` mounted), true, or `{ regex }` — whether a `$regex`
+// is taken from the wire: false (the default under true: refused, 400 REGEX), 'safe' (one `safeRegex` passes), or
+// true (any; a pattern is a denial of the host's event loop — a trusted mesh's).
+const REGEX_MODES = new Set([false, true, 'safe']);
+const normalizeQuery = (query) => {
+  if (query === undefined || query === false) return false;
+  if (query === true) return { regex: false };
+  if (!isPlainObject(query)) {
+    throw new TypeError("unit({ query }): query must be a boolean or { regex: false | true | 'safe' }");
+  }
+  for (const key of Object.keys(query)) {
+    if (key !== 'regex') throw new TypeError(`unit({ query }): unknown key '${key}'`);
+  }
+  const { regex = false } = query;
+  if (!REGEX_MODES.has(regex)) throw new TypeError("unit({ query }): regex must be false, true or 'safe'");
+  return { regex };
+};
+
+// Every `$regex` a query carries, down every branch and nest, judged by the unit's `regex` mode: refused where
+// off, where unsafe under 'safe'. An iterative walk — a query is a peer's — bounded as the cursor bounds it.
+const MAX_QUERY_NODES = 4096;
+const regexRefusal = (query, mode) => {
+  if (mode === true) return null;
+  const stack = [query];
+  let seen = 0;
+  while (stack.length > 0) {
+    const value = stack.pop();
+    if (++seen > MAX_QUERY_NODES) return 'a query too large to read';
+    if (Array.isArray(value)) {
+      for (let i = 0; i < value.length; i++) {
+        if (typeof value[i] === 'object' && value[i] !== null) stack.push(value[i]);
+      }
+      continue;
+    }
+    if (!isPlainObject(value)) continue;
+    for (const key of Object.keys(value)) {
+      const inner = value[key];
+      if (key === '$regex' || key === '$options') {
+        if (mode === false) return 'this host takes no $regex';
+        if (key === '$regex' && !safeRegex(inner)) {
+          return 'the $regex is not safe to run here (a nested quantifier, a backreference, a lookaround)';
+        }
+        continue;
+      }
+      if (typeof inner === 'object' && inner !== null) stack.push(inner);
+    }
+  }
+  return null;
 };
 
 // The scopes a read may cover: what hello granted, narrowed to what the
@@ -705,6 +756,9 @@ const cursorOf = (host, args, procedure, state) => {
   }
   const query = args.query === undefined || args.query === null ? {} : args.query;
   if (!isPlainObject(query)) throw refuseCall(host, procedure, 'query must be an object', 400, BAD_QUERY, state.node);
+  // A pattern from the wire runs on this host's event loop: refused unless the unit takes them (REGEX).
+  const refused = regexRefusal(query, host.query.regex);
+  if (refused !== null) throw refuseCall(host, procedure, refused, 400, 'REGEX', state.node);
   let cursor;
   try {
     // Through the seam as it is: the collection's sealed records are the key holder's and never a peer's.
@@ -724,30 +778,44 @@ const cursorOf = (host, args, procedure, state) => {
   return cursor;
 };
 
-// The rows a peer may read: every one for a grant of everything, else the ones of its scopes.
-const scoped = (host, rows, scopes) => {
-  if (scopes === null) return rows;
-  const out = [];
-  for (let i = 0; i < rows.length; i++) {
-    const row = rows[i];
-    let scope;
-    try {
-      scope = host.scopeOf(row.id, row);
-    } catch (error) {
-      host.logger.warn({ event: 'sync.query.scope', id: row.id, err: error });
-      continue;
-    }
-    if (inScope(scope, scopes)) out.push(row);
-  }
-  return out;
-};
-
 // The peer of a read: greeted before, or — a thin client over a stateless transport, where one request is one
 // client and no hello can come first — greeting with the call itself, `args.hello` the hello's own arguments, taken
 // as a hello is (authorize, the scopes, the revocations) and kept nowhere.
 const greeted = async (host, context, args, procedure) => {
   if (!context?.client?.data?.syncom && isPlainObject(args?.hello)) await greet(host, context, args.hello, false);
   return peerOf(host, context, procedure);
+};
+
+// A scoped read walks the cursor — in its order, `batch` rows a page — until the window is full or the read budget
+// (`limits.rowsPerQuery`: the rows READ, not answered) is spent: a peer whose rows lie past the first ones reads
+// them all the same, and `capped` says when the budget ended the walk before the window was full. A sealed row is
+// never a peer's (the seam leaves them out; the catalog's row is asked once more, belt and braces).
+const SCOPED_BATCH = 100;
+const walkScoped = async (host, cursor, scopes, { limit, offset, budget }) => {
+  const { row } = host.storage[SOURCE];
+  const rows = [];
+  let read = 0;
+  let skipped = 0;
+  const bounded = budget === Infinity ? cursor : cursor.limit(budget);
+  for await (const candidate of bounded.stream({ batch: SCOPED_BATCH })) {
+    read++;
+    if (row(candidate.id)?.encrypted === true) continue;
+    let scope;
+    try {
+      scope = host.scopeOf(candidate.id, candidate);
+    } catch (error) {
+      host.logger.warn({ event: 'sync.query.scope', id: candidate.id, err: error });
+      continue;
+    }
+    if (!inScope(scope, scopes)) continue;
+    if (skipped < offset) {
+      skipped++;
+      continue;
+    }
+    rows.push(candidate);
+    if (rows.length >= limit) break;
+  }
+  return { rows, capped: read >= budget && rows.length < limit };
 };
 
 const query = (host) => async (context, args) => {
@@ -758,11 +826,12 @@ const query = (host) => async (context, args) => {
   const offset = Number.isInteger(args.offset) && args.offset > 0 ? args.offset : 0;
   const scopes = grant(args.scopes, state.scopes);
   try {
-    // A scoped peer's window is cut after its scopes are: the cap bounds what is read, the window what goes out.
-    if (scopes === null) cursor = cursor.limit(limit).offset(offset);
-    else cursor = cursor.limit(cap);
-    const rows = scoped(host, await cursor.fetch(), scopes);
-    return { rows: scopes === null ? rows : rows.slice(offset, offset + limit) };
+    // A grant of everything: the window is the cursor's, the cap the rows answered. A scoped peer: the cap bounds
+    // what is read, the window what goes out.
+    if (scopes !== null) return await walkScoped(host, cursor, scopes, { limit, offset, budget: cap });
+    if (limit !== Infinity) cursor = cursor.limit(limit);
+    if (offset > 0) cursor = cursor.offset(offset);
+    return { rows: await cursor.fetch(), capped: false };
   } catch (error) {
     throw refuseCall(host, 'query', error.message, 400, BAD_QUERY, state.node);
   }
@@ -799,9 +868,12 @@ const count = (host) => async (context, args) => {
   const cursor = cursorOf(host, args, 'count', state);
   const scopes = grant(args.scopes, state.scopes);
   try {
-    if (scopes === null) return { count: await cursor.count() };
-    // A scoped count reads the rows (the catalog knows no scopes), as many as the cap allows.
-    return { count: scoped(host, await cursor.limit(host.limits.rowsPerQuery).fetch(), scopes).length };
+    if (scopes === null) return { count: await cursor.count(), capped: false };
+    // A scoped count reads the rows (the catalog knows no scopes), as many as the budget allows: `capped` says
+    // when it ended the count.
+    const budget = host.limits.rowsPerQuery;
+    const { rows, capped } = await walkScoped(host, cursor, scopes, { limit: Infinity, offset: 0, budget });
+    return { count: rows.length, capped };
   } catch (error) {
     throw refuseCall(host, 'count', error.message, 400, BAD_QUERY, state.node);
   }
@@ -921,8 +993,8 @@ const createUnit = (
     pageBytes = DEFAULT_PAGE_BYTES,
     meta,
     prove: proving = storage.signatures === 'require',
-    query: serveQuery = false,
   } = options;
+  const serveQuery = normalizeQuery(options.query);
   if (authorizeWrite !== null && typeof authorizeWrite !== 'function') {
     throw new TypeError('unit({ authorizeWrite }): authorizeWrite must be a function');
   }
@@ -930,7 +1002,6 @@ const createUnit = (
   if (proving && storage[SIGNER] === null) {
     throw new TypeError('unit({ prove }): a proof of key needs the signing plugin (@alexify/syncom/signing)');
   }
-  if (typeof serveQuery !== 'boolean') throw new TypeError('unit({ query }): query must be a boolean');
   const presenceOptions = options.presence ?? {};
   if (typeof presenceOptions !== 'object' || presenceOptions === null) {
     throw new TypeError('unit({ presence }): presence must be an object');

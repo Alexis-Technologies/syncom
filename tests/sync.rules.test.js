@@ -538,16 +538,17 @@ test('Rules on the host and on the dialer', async (t) => {
       assert.strictEqual(capped.rows.length, 4, 'rowsPerQuery caps the window');
       assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task', query: { status: 'done' } }), {
         count: 3,
+        capped: false,
       });
-      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task' }), { count: 6 });
+      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task' }), { count: 6, capped: false });
       // A scoped peer reads its scope's rows alone — by the host's scope function over the row.
       const scoped = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
       await scoped.call('syncom/hello', { node: 'tenant', version: 1, scopes: ['Task'] });
       assert.strictEqual((await scoped.call('syncom/query', { entity: 'Task' })).rows.length, 6);
       const elsewhere = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
       await elsewhere.call('syncom/hello', { node: 'other', version: 1, scopes: ['Other'] });
-      assert.deepStrictEqual(await elsewhere.call('syncom/query', { entity: 'Task' }), { rows: [] });
-      assert.deepStrictEqual(await elsewhere.call('syncom/count', { entity: 'Task' }), { count: 0 });
+      assert.deepStrictEqual(await elsewhere.call('syncom/query', { entity: 'Task' }), { rows: [], capped: false });
+      assert.deepStrictEqual(await elsewhere.call('syncom/count', { entity: 'Task' }), { count: 0, capped: false });
       // Refusals by code: no entity, a query that is no object, an order that is no field.
       const bad = (error) => error.code === 400 && error.reason === 'BAD_QUERY';
       await assert.rejects(() => link.call('syncom/query', {}), bad);
@@ -581,19 +582,162 @@ test('Rules on the host and on the dialer', async (t) => {
         ordered.rows.map((row) => row.tag),
         ['a'],
       );
-      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Note' }), { count: 1 });
+      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Note' }), { count: 1, capped: false });
       // No oracle: a query by the sealed record's field counts nothing.
       assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Note', query: { secret: 'SEALED' } }), {
         count: 0,
+        capped: false,
       });
-      assert.deepStrictEqual(await link.call('syncom/query', { entity: 'Note', query: { tag: 'b' } }), { rows: [] });
+      assert.deepStrictEqual(await link.call('syncom/query', { entity: 'Note', query: { tag: 'b' } }), {
+        rows: [],
+        capped: false,
+      });
       // A scoped peer the same.
       const scoped = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
       await scoped.call('syncom/hello', { node: 'tenant', version: 1, scopes: ['Note'] });
       assert.strictEqual((await scoped.call('syncom/query', { entity: 'Note' })).rows.length, 1);
-      assert.deepStrictEqual(await scoped.call('syncom/count', { entity: 'Note' }), { count: 1 });
+      assert.deepStrictEqual(await scoped.call('syncom/count', { entity: 'Note' }), { count: 1, capped: false });
     },
   );
+
+  await t.test(
+    'a $regex is refused on the remote path (400 BAD_QUERY, reason REGEX) unless the unit allows it; a nested quantifier is refused under safe',
+    async (t2) => {
+      const host = await createStorage(t2, 'HR', { schema: { entities: { Task: { index: ['status'] } } }, sync: {} });
+      await host.insert({ $type: 'Task', status: 'open', title: 'alpha' });
+      await host.insert({ $type: 'Task', status: 'open', title: 'beta' });
+      const linkTo = async (options) => {
+        const link = new MemoryLink(host.sync.unit({ access: 'public', ...options }));
+        await link.call('syncom/hello', { node: 'thin', version: 1 });
+        return link;
+      };
+      const regex = (error) => error.code === 400 && error.reason === 'REGEX';
+      // Off by default: a $regex anywhere in the query — the top level, under $or, under $not, under $elemMatch.
+      const off = await linkTo({ query: true });
+      await assert.rejects(
+        () => off.call('syncom/query', { entity: 'Task', query: { title: { $regex: '^a' } } }),
+        regex,
+      );
+      await assert.rejects(
+        () =>
+          off.call('syncom/query', { entity: 'Task', query: { $or: [{ status: 'x' }, { title: { $regex: 'a' } }] } }),
+        regex,
+      );
+      await assert.rejects(
+        () => off.call('syncom/count', { entity: 'Task', query: { title: { $not: { $regex: 'a', $options: 'i' } } } }),
+        regex,
+      );
+      assert.deepStrictEqual(await off.call('syncom/count', { entity: 'Task', query: { status: 'open' } }), {
+        count: 2,
+        capped: false,
+      });
+      // Allowed: any pattern runs.
+      const any = await linkTo({ query: { regex: true } });
+      const { rows } = await any.call('syncom/query', { entity: 'Task', query: { title: { $regex: '^(a+)+$' } } });
+      assert.strictEqual(rows.length, 0);
+      assert.strictEqual(
+        (await any.call('syncom/query', { entity: 'Task', query: { title: { $regex: '^al' } } })).rows.length,
+        1,
+      );
+      // Safe: a plain pattern runs, a nested quantifier, a backreference, a lookaround is refused.
+      const safe = await linkTo({ query: { regex: 'safe' } });
+      assert.strictEqual(
+        (await safe.call('syncom/query', { entity: 'Task', query: { title: { $regex: '^al.*a$' } } })).rows.length,
+        1,
+      );
+      await assert.rejects(
+        () => safe.call('syncom/query', { entity: 'Task', query: { title: { $regex: '^(a+)+$' } } }),
+        regex,
+      );
+      await assert.rejects(
+        () => safe.call('syncom/count', { entity: 'Task', query: { title: { $regex: '(a)\\1' } } }),
+        regex,
+      );
+      await assert.rejects(
+        () => safe.call('syncom/count', { entity: 'Task', query: { title: { $regex: 'a(?=b)' } } }),
+        regex,
+      );
+      assert.throws(() => host.sync.unit({ query: { regex: 'maybe' } }), { name: 'TypeError' });
+      assert.throws(() => host.sync.unit({ query: { nope: true } }), { name: 'TypeError' });
+      assert.throws(() => host.sync.unit({ query: 'yes' }), { name: 'TypeError' });
+    },
+  );
+
+  await t.test(
+    'a scoped query walks the cursor until the window is full or the read budget is spent: a tenant past the first rows reads its rows; capped says when the budget ended it',
+    async (t2) => {
+      const schema = { entities: { Task: { index: ['n'] } } };
+      const tenantOf = (id, data) => data.tenant ?? '*';
+      const host = await createStorage(t2, 'HT', { schema, sync: { scope: tenantOf } });
+      // Six hundred rows of B, then five of A: the first rows of the entity are another tenant's.
+      for (let i = 1; i <= 600; i++) await host.insert({ $type: 'Task', tenant: 'B', n: i });
+      for (let i = 601; i <= 605; i++) await host.insert({ $type: 'Task', tenant: 'A', n: i });
+      // A budget that reaches them: the walk goes past the first six hundred and answers A's five, a page of them
+      // too; the budget bounds the rows READ, the window what goes out.
+      const link = new MemoryLink(host.sync.unit({ access: 'public', query: true, limits: { rowsPerQuery: 1000 } }));
+      await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+      const all = await link.call('syncom/query', { entity: 'Task', order: ['n'], limit: 10 });
+      assert.deepStrictEqual(
+        all.rows.map((row) => row.n),
+        [601, 602, 603, 604, 605],
+        'the walk went past the first six hundred',
+      );
+      assert.strictEqual(all.capped, false, 'the cursor ran out before the budget did');
+      const page = await link.call('syncom/query', { entity: 'Task', order: ['n'], limit: 2, offset: 2 });
+      assert.deepStrictEqual(
+        page.rows.map((row) => row.n),
+        [603, 604],
+      );
+      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task' }), { count: 5, capped: false });
+      // The default budget (500) ends the walk before A's rows (read in the index's order): nothing comes, and
+      // capped says so — never a silent zero.
+      const tight = new MemoryLink(host.sync.unit({ access: 'public', query: true }));
+      await tight.call('syncom/hello', { node: 'tenant-a2', version: 1, scopes: ['A'] });
+      const cut = await tight.call('syncom/query', { entity: 'Task', order: ['n'], limit: 10 });
+      assert.deepStrictEqual(cut, { rows: [], capped: true });
+      assert.deepStrictEqual(await tight.call('syncom/count', { entity: 'Task', order: ['n'] }), {
+        count: 0,
+        capped: true,
+      });
+      // A tenant whose rows come first: the walk stops once the window is full, never capped; a count reads to the
+      // budget and says it was cut.
+      const b = new MemoryLink(host.sync.unit({ access: 'public', query: true, limits: { rowsPerQuery: 300 } }));
+      await b.call('syncom/hello', { node: 'tenant-b', version: 1, scopes: ['B'] });
+      const firstB = await b.call('syncom/query', { entity: 'Task', order: ['n'], limit: 3 });
+      assert.deepStrictEqual(
+        firstB.rows.map((row) => row.n),
+        [1, 2, 3],
+      );
+      assert.strictEqual(firstB.capped, false);
+      assert.deepStrictEqual(await b.call('syncom/count', { entity: 'Task', order: ['n'] }), {
+        count: 300,
+        capped: true,
+      });
+    },
+  );
+
+  await t.test('limits.rowsPerQuery Infinity means no cap', async (t2) => {
+    const schema = { entities: { Task: { index: ['n'] } } };
+    const tenantOf = (id, data) => data.tenant ?? '*';
+    const host = await createStorage(t2, 'HI', { schema, sync: { scope: tenantOf } });
+    for (let i = 1; i <= 700; i++) await host.insert({ $type: 'Task', tenant: i <= 650 ? 'B' : 'A', n: i });
+    const unit = host.sync.unit({ access: 'public', query: true, limits: { rowsPerQuery: Infinity } });
+    const every = new MemoryLink(unit);
+    await every.call('syncom/hello', { node: 'all', version: 1 });
+    const all = await every.call('syncom/query', { entity: 'Task' });
+    assert.strictEqual(all.rows.length, 700, 'no cap on the rows answered');
+    assert.strictEqual(all.capped, false);
+    assert.strictEqual((await every.call('syncom/query', { entity: 'Task', limit: 7 })).rows.length, 7);
+    assert.deepStrictEqual(await every.call('syncom/count', { entity: 'Task' }), { count: 700, capped: false });
+    const a = new MemoryLink(unit);
+    await a.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
+    assert.strictEqual(
+      (await a.call('syncom/query', { entity: 'Task' })).rows.length,
+      50,
+      'no budget on the rows read',
+    );
+    assert.deepStrictEqual(await a.call('syncom/count', { entity: 'Task' }), { count: 50, capped: false });
+  });
 
   await t.test(
     'forget(id): the record is gone here with no op — a replay brings nothing back, a peer is untouched, a later op of a peer makes it again',

@@ -551,24 +551,32 @@ transport and base64 on a text one (SSE); the dialer checks the bytes against th
 
 ```
 → { entity, query?, order?: [field | { field, desc }], limit?, offset?, scopes?, hello? }   (query)
-← { rows: [{ id, …fields }] }
+← { rows: [{ id, …fields }], capped }
 → { entity, query?, scopes?, hello? }                                                        (count)
-← { count }
+← { count, capped }
 ```
 
 A thin client's read of the host's records through the query plugin
 (`unit({ query: true })`; a host without it mounts no such procedure): the
 rows are the cursor's — a Mango `query`, the sort keys in order, the window —
-narrowed to the caller's scopes (as the host scopes a record) and capped by
-`limits.rowsPerQuery` (500); a scoped `count` reads the rows (as many as the
-cap allows). A sealed (`encrypted: true`) record is never among the rows nor in
-a count: it is the key holder's alone. An entity or a query the cursor refuses is 400 `BAD_QUERY`. A
-caller that said no hello is 428 `HELLO_FIRST` — unless the call carries one:
-`hello` is the [hello](#hello)'s own arguments, taken as a hello is
-(`authorize`, the scopes, the revocations; `UNPROVEN` under `prove`) and kept
-nowhere — no room, no session, no presence — for a client over a stateless
-transport (plain HTTP, where one request is one client and nothing can come
-first).
+narrowed to the caller's scopes (as the host scopes a record). A caller
+granted everything is answered at most `limits.rowsPerQuery` (500) rows; a
+scoped caller's walk reads at most that many rows, in the cursor's order,
+until its window is full, and `capped` is true where the budget ended the
+walk before it was (a scoped `count` the same: `capped` says it counted what
+the budget allowed) — never a silent zero for a tenant whose rows lie past
+the first ones. `rowsPerQuery: Infinity` is no cap. A sealed (`encrypted:
+true`) record is never among the rows nor in a count: it is the key holder's
+alone. A `$regex` anywhere in the query is 400 `REGEX` unless the unit takes
+them (`unit({ query: { regex: 'safe' } })`: a pattern with no nested
+quantifier, backreference or lookaround; `regex: true`: any — a trusted
+peer's, since a pattern runs on the host's event loop). An entity or a query
+the cursor refuses is 400 `BAD_QUERY`. A caller that said no hello is 428
+`HELLO_FIRST` — unless the call carries one: `hello` is the [hello](#hello)'s
+own arguments, taken as a hello is (`authorize`, the scopes, the revocations;
+`UNPROVEN` under `prove`) and kept nowhere — no room, no session, no presence
+— for a client over a stateless transport (plain HTTP, where one request is
+one client and nothing can come first).
 
 ### `snapshot`
 

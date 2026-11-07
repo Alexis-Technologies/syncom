@@ -14,6 +14,8 @@ src/query/plan.js         plan — how a cursor is answered over the declared in
 src/query/live.js         Live — a live query kept by event-reduce over the catalog's action stream (rows, or a count) — requires shape.js only
 src/query/cache.js        QueryCache, keyOf — a result by its key with the catalog's generation, the one live run every watch() of a
                           key shares, an LRU of unobserved results — no requires
+src/query/safe-regex.js   safeRegex — whether a pattern's source has no nested quantifier, backreference or lookaround: what a host
+                          serving queries under `regex: 'safe'` asks of a `$regex` from the wire (src/sync/hosting.js) — no requires
 ```
 
 ## Rules

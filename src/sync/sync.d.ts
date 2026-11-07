@@ -122,8 +122,13 @@ export interface SyncUnitOptions {
    * `UNPROVEN`. On by default under `sync.signatures: 'require'`; needs the signing plugin.
    */
   prove?: boolean;
-  /** Serve `query` and `count` — a thin client's read of this host's records through the query plugin, in its scopes. */
-  query?: boolean;
+  /**
+   * Serve `query` and `count` — a thin client's read of this host's records through the query plugin, in its scopes —
+   * and whether a `$regex` is taken from the wire: `true` is `{ regex: false }` (refused, 400 `REGEX`); `'safe'` takes
+   * a pattern `safeRegex` passes (no nested quantifier, backreference or lookaround); `true` any (a trusted peer's:
+   * a pattern runs on this host's event loop).
+   */
+  query?: boolean | { regex?: false | true | 'safe' };
 }
 
 export interface SyncLimits {
@@ -132,7 +137,11 @@ export interface SyncLimits {
   bytesPerPush?: number;
   /** A token bucket per peer, refilled at this rate and holding one second's worth. */
   opsPerSecond?: number;
-  /** The rows one `query` answers at most, and a scoped `count` reads (500 by default). */
+  /**
+   * For a peer granted everything, the rows one `query` answers at most; for a scoped peer, the rows one `query` or
+   * `count` READS — the walk goes on until the window is full or the budget is spent, and `capped` says when the
+   * budget ended it (500 by default; `Infinity` for none).
+   */
   rowsPerQuery?: number;
 }
 

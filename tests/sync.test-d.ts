@@ -38,6 +38,9 @@ expectType<Promise<void>>(sync.awaitInSync());
 expectType<Promise<void>>(sync.awaitInitialReplication({ signal: new AbortController().signal }));
 expectType<Promise<void>>(sync.awaitDocumentPushed('id'));
 expectType<SyncUnit>(sync.unit({ allow: { push: false } }));
+expectType<SyncUnit>(sync.unit({ query: { regex: 'safe' }, limits: { rowsPerQuery: Infinity } }));
+expectType<SyncUnit>(sync.unit({ query: true }));
+expectError(sync.unit({ query: { regex: 'maybe' } }));
 expectError(sync.unit({ allow: { hello: false } }));
 // The shared log as this hub stands to it, or null without one.
 expectType<SharedStats | null>(sync.shared());

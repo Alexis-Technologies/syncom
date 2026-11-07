@@ -221,6 +221,53 @@ test('Cursor over a fake source', async (t) => {
   );
 });
 
+test('safeRegex refuses nested quantifiers, backreferences and lookarounds, takes the rest', () => {
+  const { safeRegex } = require('../src/query/safe-regex.js');
+  // The shape of the pattern is judged, never its meaning: a quantified group with a quantifier inside, a
+  // backreference, a lookaround is refused; the rest passes — an overlapping alternation under a quantifier
+  // (`(a|aa)*`) among it, which is why `regex: true` stays a trusted peer's and 'safe' is a door, not a proof.
+  for (const source of [
+    '^al.*a$',
+    'a+b*c?',
+    '(ab)+c',
+    '(a|b)*',
+    '(a|aa)*',
+    '[a+]+',
+    '\\(+\\)',
+    'a{2,3}b{1,}',
+    '(a+)b+',
+    '(?:ab)+',
+    '(?<n>ab)+',
+    'a(?:b)?',
+    '^T-[12]$',
+    'x{',
+    '(a+)(b+)',
+    '(a+)',
+  ]) {
+    assert.strictEqual(safeRegex(source), true, source);
+  }
+  for (const source of [
+    '^(a+)+$',
+    '^(\\w+\\s?)+$',
+    '(a*)*',
+    '(a+){2,}',
+    '(?:a+)+',
+    '(?<n>a+)+',
+    '(a)\\1',
+    '(?<n>a)\\k<n>',
+    'a(?=b)',
+    'a(?!b)',
+    '(?<=a)b',
+    '(?<!a)b',
+    '((a+)b)+',
+    'a\\',
+    '(a+)+?',
+  ]) {
+    assert.strictEqual(safeRegex(source), false, source);
+  }
+  assert.strictEqual(safeRegex(7), false);
+});
+
 test('query guards: a pattern the size of a document, a projection of __proto__', () => {
   const { compileQuery, Cursor } = require('../src/query/cursor.js');
   assert.throws(() => compileQuery({ key: { $regex: 'a'.repeat(1001) } }), /longer than 1000/);

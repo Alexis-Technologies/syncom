@@ -122,7 +122,10 @@ const { count } = await client.call('syncom/count', { hello, entity: 'Task', que
 ```
 
 The rows are the cursor's — a Mango query over an entity, sort keys, a window
-— narrowed to the caller's scopes and capped by `limits.rowsPerQuery` (500).
+— narrowed to the caller's scopes within `limits.rowsPerQuery` (500: the rows
+answered, or for a scoped caller the rows read, `capped` saying when the budget
+ended the walk). A `$regex` is refused unless the unit takes them
+(`unit({ query: { regex: 'safe' } })`).
 Live results are a matter of asking again, or of dialing over SSE and asking
 on every `changes` page. wrpc's express and fastify adapters mount the same
 procedures behind an HTTP framework; the arguments are

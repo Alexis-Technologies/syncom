@@ -55,7 +55,10 @@ A malformed query — an unknown operator, `$in` without an array, an invalid
 regex, a `$text` that is not a string, is over 1000 characters or sits inside
 `$and`/`$or`/`$not`, a `$text` on a collection with no search fields — is a
 `TypeError` at `select()`, not at `fetch()`. A query nests 32 levels at most (`$and`, `$or`, `$nor`, `$not`, `$elemMatch` within one
-another): deeper is a `TypeError`.
+another): deeper is a `TypeError`. A `$regex` is the application's: a pattern runs on this node's event loop, and a
+pathological one (`^(a+)+$` over a long string) runs for minutes — so a host serving queries to peers
+([`unit({ query })`](./sync#hosting)) refuses a `$regex` from the wire unless told to take them, `'safe'` letting
+through what `safeRegex` passes (no nested quantifier, no backreference, no lookaround — the shape, not a proof).
 
 ## The cursor
 
