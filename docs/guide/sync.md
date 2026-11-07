@@ -834,9 +834,11 @@ too, and nowhere else (`sync.unit()` is `READ_ONLY` without a shared log):
 its hello answers the vector as the log moved it, and a push is held to that
 vector and forwarded to the inbox for a hub that writes to land (the answer
 says `forwarded: true`; the writer's refusals — forged, out of scope — are
-the writer's to report); without an inbox (`inbox: false`) a push is 503
-(`READ_ONLY`), and a snapshot the shared log did not answer for in time is
-503 (`SHARED_LOG`).
+the writer's to report); it serves no snapshot (403 `READ_ONLY`: a fresh
+client bootstraps from a hub that writes); without an inbox (`inbox: false`)
+a push is 503 (`READ_ONLY`), and a snapshot the shared log did not answer
+for — the relay behind, the marker not reached in time — is 503
+(`SHARED_LOG`, `detail` says which).
 
 ## The link contract
 

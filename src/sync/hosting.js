@@ -479,19 +479,37 @@ const push = (host) => async (context, args) => {
 };
 
 // Over a shared log a snapshot is positioned in the log, not in this hub's
-// own: a marker appended first, the first page taken once the consumer
-// passed it — so everything the log held before the marker is in the pages,
-// and the client resumes after it — and the vector a hub that cannot write
-// answers is the one the log moved.
-const positioned = async (host) => {
-  const { shared } = host;
+// own: a marker appended first (behind every op the hub offered, refused
+// while its relay is behind), the first page taken once the consumer passed
+// it — so everything the log held before the marker is in the pages, and the
+// client resumes after it — and the vector the page carries is what the hub's
+// reads reflect (`shared.vector()`), never a position reserved but not landed.
+// A hub that cannot write serves none: its shadow runs ahead of its engine,
+// and a page of it could lack what the vector claims — a fresh client
+// bootstraps from a hub that writes (the load balancer's rule).
+const positioned = async (host, node) => {
+  const { shared, storage } = host;
+  if (storage.readOnly) {
+    const message = 'A hub that cannot write serves no snapshot: bootstrap from a hub that writes';
+    throw refuseCall(host, 'snapshot', message, 403, 'READ_ONLY', node);
+  }
   try {
     const id = await shared.mark();
     await shared.reached(id);
     return id;
   } catch (error) {
     host.logger.warn({ event: 'sync.snapshot.failed', err: error });
-    throw refuseCall(host, 'snapshot', `The shared log did not answer: ${error.message}`, 503, 'SHARED_LOG');
+    const refused = refuseCall(
+      host,
+      'snapshot',
+      `The shared log did not answer: ${error.message}`,
+      503,
+      'SHARED_LOG',
+      node,
+    );
+    // What of the log: the relay `behind`, the `marker` not reached in time, a `stopped` consumer.
+    refused.detail = error.reason ?? null;
+    throw refused;
   }
 };
 
@@ -501,7 +519,7 @@ const snapshot = (host) => async (context, args) => {
     throw refuseCall(host, 'snapshot', 'This host serves no snapshots', 403, 'NOT_SERVED', state.node);
   }
   const cursor = args?.cursor ?? null;
-  const position = host.shared !== null && cursor === null ? await positioned(host) : null;
+  const position = host.shared !== null && cursor === null ? await positioned(host, state.node) : null;
   const page = await host.storage.snapshot({
     cursor,
     limit: host.pageSize,
@@ -509,7 +527,7 @@ const snapshot = (host) => async (context, args) => {
   });
   if (position !== null) {
     page.eventId = position;
-    page.vector = host.shared.vector() ?? page.vector;
+    page.vector = host.shared.vector();
   }
   // The vector rides on the first page only: the dialer adopts it as of
   // the start, and a hub's is too large to repeat.

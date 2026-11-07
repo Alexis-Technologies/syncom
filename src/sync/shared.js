@@ -27,7 +27,12 @@
 //     hello answers and what a push it forwards is held to.
 //   the FEED — `changes` on a hub with a shared log reads the topic from the
 //     client's cursor (src/sync/hosting.js), and a snapshot's first page is
-//     positioned at a marker this hub appended and its consumer reached.
+//     positioned at a marker this hub appended — behind every op offered before
+//     it, refused while the relay is behind — and its consumer reached; the
+//     vector it carries is what this hub's reads reflect (`#relayed`: moved by
+//     every op offered, never by a position reserved but not landed), so the
+//     client takes as seen nothing a page could lack. A hub that cannot write
+//     serves no snapshot: its shadow runs ahead of its engine.
 //
 // An entry is one JSON text — `{ v: 1, node, ops: [packed…], scopes? }`, or
 // `{ v: 1, node, mark: true }` — with the appender's token in its headers
@@ -176,6 +181,9 @@ class SharedHub {
   #stuck = { topic: false, inbox: false };
   // A read-only hub's vector, as the topic moves it; null while this hub writes.
   #shadow = null;
+  // A writing hub's vector as its reads reflect it: every op offered (announced, so landed), none merely reserved —
+  // what a hello and a snapshot's first page answer, so a client takes as seen nothing a page could lack.
+  #relayed;
   #stats = { relayed: 0, appendFailures: 0, entries: 0, applied: 0, forwarded: 0, malformed: 0 };
 
   constructor(
@@ -193,6 +201,8 @@ class SharedHub {
     this.#stopWait = stopWait;
     this.#kv = kv;
     this.#pageSize = pageSize;
+    // Nothing is in flight at the open: what the log holds is what the records show.
+    this.#relayed = { ...storage.vector };
   }
 
   get topic() {
@@ -339,6 +349,7 @@ class SharedHub {
   offer(op, via, seq = null) {
     // Nothing of a hub that cannot write is its own to relay (a lost lease: what is announced after it is held).
     if (this.#storage.readOnly) return;
+    vectorAdvance(this.#relayed, op);
     if (via !== null && via !== undefined && via.shared === true) {
       if (seq !== null) this.#cover(seq);
       return;
@@ -623,9 +634,12 @@ class SharedHub {
   // -------------------------------------------------------------------------
   // What the hosting side asks
 
-  /** A read-only hub's vector as the topic moved it; null while this hub writes (its own vector is current). */
+  /**
+   * The vector this hub answers at hello and on a snapshot's first page: a read-only hub's as the topic moved it;
+   * a writing hub's as its reads reflect it — every op announced, none merely reserved in the log.
+   */
   vector() {
-    if (!this.#storage.readOnly) return null;
+    if (!this.#storage.readOnly) return this.#relayed;
     return this.#shadow ?? (this.#shadow = { ...this.#storage.vector });
   }
 
@@ -634,9 +648,23 @@ class SharedHub {
     return this.#log.read(this.#topic, { after, signal });
   }
 
-  /** A marker appended to the topic: the position a snapshot's first page is taken at. */
+  /**
+   * A marker appended to the topic: the position a snapshot's first page is taken at. Behind every op offered so
+   * far (the tick's batch flushed first, the append chained after it), so what the vector claims is in the topic
+   * before the marker or on the page; refused while the relay is behind — the topic lacks ops of this hub then,
+   * and no position in it is the page's.
+   */
   mark() {
-    return this.#log.append(this.#topic, markText(this.#storage.nodeId), { headers: { by: this.#token } });
+    this.#flush();
+    const marked = this.#appending.then(() => {
+      if (this.#behind) {
+        const message = `The relay of the shared log ${this.#topic} is behind: no snapshot can be positioned until it recovers`;
+        throw failed('behind', message, { topic: this.#topic });
+      }
+      return this.#log.append(this.#topic, markText(this.#storage.nodeId), { headers: { by: this.#token } });
+    });
+    this.#appending = marked.catch(NOOP);
+    return marked;
   }
 
   /** Resolves once the consumer passed the entry `id`; rejects after `timeout` ms. */

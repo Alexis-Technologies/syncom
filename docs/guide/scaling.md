@@ -74,15 +74,17 @@ defineRouter({ syncom: follower.sync.unit({ access: 'session', authorize }) });
 
 A **read-only hub** — a follower, or a writer whose lease was lost — hosts
 over the shared log and nowhere else: its hello answers the vector as the log
-moved it (a shadow the topic keeps current), its feed comes from the log, a
-snapshot of it is positioned at a marker, and a client's push is held to that
-vector and forwarded to the **inbox**, which a hub that writes consumes,
-lands and relays to the topic (the push answers `forwarded: true` with the
-vector moved past what went in; what the writer then refuses — a forged op, a
-record out of scope — the writer reports, and the next hello sets the client
-straight). Without an inbox a read-only hub refuses a push with 503
-(`READ_ONLY`), and a client behind a load balancer should land on a hub that
-writes or forwards. Several writers over one inbox each land every entry of
+moved it (a shadow the topic keeps current), its feed comes from the log, and
+a client's push is held to that vector and forwarded to the **inbox**, which
+a hub that writes consumes, lands and relays to the topic (the push answers
+`forwarded: true` with the vector moved past what went in; what the writer
+then refuses — a forged op, a record out of scope — the writer reports, and
+the next hello sets the client straight). It serves no **snapshot** (403
+`READ_ONLY`): its shadow runs ahead of its engine, and a page of it could lack
+what the vector claims — so the load balancer's rule is that a client with no
+cursor lands on a hub that writes, and follows on any hub from then on (the
+epoch is the log's). Without an inbox a read-only hub refuses a push with 503
+(`READ_ONLY`). Several writers over one inbox each land every entry of
 it — correct, wasteful: a mesh of writers needs no inbox (`inbox: false`),
 one writer and its followers need one.
 
@@ -91,8 +93,12 @@ the topic first (what it compacted reaches the others through a snapshot of
 it — dial it once; a log compacted past the watermark is told once, `lost`,
 and what it retains still goes). A **fresh client** of a shared-log hub bootstraps: a
 `changes` subscription with no cursor is told so, and the snapshot's first
-page is positioned at a marker the hub appends and its consumer passes, so
-nothing lands between the pages and the cursor. **Failures** are
+page is positioned at a marker the hub appends — behind every op it offered
+to the topic so far — and its consumer passes, so nothing lands between the
+pages and the cursor; the page's `vector` is what the hub's reads reflect
+(every op announced, none merely reserved in its log), so the client takes
+as seen nothing a page could lack. While the relay is behind the snapshot is
+refused (503 `SHARED_LOG`, `detail: 'behind'`) until it recovers. **Failures** are
 `SHARED_LOG_FAILED` on the manager's `error` event, with a `reason`: an
 append that failed (`append`, once per run) is appended again — everything
 the log holds above the **watermark**, the last position of this hub's log

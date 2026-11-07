@@ -574,9 +574,14 @@ first).
 Records in id order, tombstones included, each with its `meta`; `cursor`
 is the last id of the page and `null` when the page is the last; `vector`
 rides on the first page only. Over a [shared log](#the-shared-log) the
-first page's `eventId` is the id of a marker the host appended and its
-consumer passed before the page was taken, and a read-only hub's `vector`
-is the one the log moved. On a binary-capable transport a page under
+first page's `eventId` is the id of a marker the host appended — behind
+every op it offered to the topic — and its consumer passed before the page
+was taken, and its `vector` is what the host's reads reflect (every op
+announced, none merely reserved in its log). A hub that cannot write serves
+no snapshot: 403 `READ_ONLY` (bootstrap from a hub that writes); a log that
+did not answer is 503 `SHARED_LOG` with `detail` `behind` (the relay has an
+append to recover first), `marker` (the consumer did not reach it in time)
+or `stopped`. On a binary-capable transport a page under
 `pageBytes` (4 MiB) goes as a wrpc stream of NDJSON — one record per line
 — and the answer is `{ id, size, cursor, eventId, vector? }`, `id` the
 stream to read. `scopes` narrows what hello granted (403 `SCOPES` when

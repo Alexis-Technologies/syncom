@@ -66,13 +66,17 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   the inbox entry's scopes, never `adoptFrom`). The topic's ids are the positions a client resumes by, so a hub
   over a shared log answers `epoch: shared:<topic>` at hello, serves `changes` from the topic alone (one page per
   entry, labelled with the entry's id — never split: a resume would skip the rest), tells a subscription with no
-  cursor to bootstrap, and positions a snapshot's first page at a marker it appended and its consumer PASSED —
-  the consumer applies every entry before the marker first, so nothing lands between the pages and the cursor.
-  A read-only hub (`storage.readOnly`: a follower, a lost lease) applies nothing and relays nothing: it shadows
-  the vector from the topic read whole (`vector()`), answers it at hello and in a snapshot's `vector`, holds a
-  push to it and forwards the page to the inbox — the shadow moved only once the append landed, so a failed
-  forward is pushed again — and stops reading the inbox (the next writer takes it from the saved cursor, which
-  only a writer saves). The relay's WATERMARK (`#appendedSeq`, saved as `appended`) is the last log position every
+  cursor to bootstrap, and positions a snapshot's first page at a marker it appended (`mark()`: the tick's batch
+  flushed first and the marker chained behind every append, refused `behind` while the relay is) and its consumer
+  PASSED — the consumer applies every entry before the marker first, so nothing lands between the pages and the
+  cursor — with the vector its reads reflect (`#relayed`: moved by every op offered, never `log.vector`, whose
+  reserved positions are not on any page; `vector()` answers it at hello too). A read-only hub
+  (`storage.readOnly`: a follower, a lost lease) applies nothing and relays nothing: it shadows the vector from
+  the topic read whole (`vector()`), answers it at hello, holds a push to it and forwards the page to the inbox —
+  the shadow moved only once the append landed, so a failed forward is pushed again — serves no snapshot (403
+  `READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
+  bootstraps from a hub that writes) and stops reading the inbox (the next writer takes it from the saved cursor,
+  which only a writer saves). The relay's WATERMARK (`#appendedSeq`, saved as `appended`) is the last log position every
   op at or below which is in the topic: every op is offered with its position (the `change` event's `seq`), a batch
   that landed covers its positions (`#cover`), an op read from the topic covers its own, and the watermark moves
   only over a contiguous run of them (`#advance`) — never to `lastEventId`, which runs ahead of ops still landing

@@ -354,6 +354,104 @@ test('Hubs over a shared log', async (t) => {
     assert.deepStrictEqual(await h2.get(ids[11]), { n: 12 });
   });
 
+  // The memory engine with the log's appends held while the gate is closed: an op reserved in the log, its group
+  // not written — not landed, not announced — what a snapshot taken meanwhile must not claim.
+  const gatedEngine = (inner) => {
+    let gate = Promise.resolve();
+    let release = null;
+    return {
+      close: () => {
+        gate = new Promise((resolve) => {
+          release = resolve;
+        });
+      },
+      open: () => {
+        release?.();
+        release = null;
+      },
+      engine: {
+        name: inner.name,
+        capabilities: inner.capabilities,
+        async open(path) {
+          const db = await inner.open(path);
+          const append = async (...args) => {
+            await gate;
+            return db.log.append(...args);
+          };
+          return { ...db, log: Object.create(db.log, { append: { value: append } }) };
+        },
+        remove: (path) => inner.remove(path),
+      },
+    };
+  };
+
+  await t.test(
+    'a snapshot on a writing hub claims only what its records hold: a write in flight at the marker lands in the topic after it and reaches the client as an op',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const gated = gatedEngine(syncom.memoryEngine());
+      const h = await syncom.createDatabase({
+        engine: gated.engine,
+        path: `${t2.name}/H`,
+        logger: false,
+        defer: 0,
+        sync: { sharedLog: shared },
+      });
+      t2.after(() => h.close().catch(() => {}));
+      const a = await h.insert({ n: 1 });
+      await waitUntil(() => h.sync.shared().relayed >= 1);
+      // A write whose group the engine has not written yet: its position is reserved in the log, the record is not
+      // readable, nothing was announced.
+      gated.close();
+      const pending = h.set('b', { n: 2 });
+      await sleep(20);
+      assert.strictEqual(h.hasRecord('b'), false, 'not landed');
+      assert.ok(h.log.vector[h.nodeId] > (h.sync.shared().appended === null ? 0 : 1), 'reserved in the log');
+      const unit = h.sync.unit({ access: 'public' });
+      const c = await createStorage(t2, 'C', { sync: { connect: () => new MemoryLink(unit) } });
+      await c.sync.addNode({ url: 'mem://H' });
+      await waitUntil(() => c.hasRecord(a), { timeout: 5000 });
+      assert.strictEqual(c.hasRecord('b'), false, 'the page could not hold it');
+      // The vector the client adopted claims nothing of the write in flight.
+      assert.ok((c.vector[h.nodeId] ?? 0) < h.log.vector[h.nodeId], 'the page’s vector is what the records show');
+      gated.open();
+      await pending;
+      // Landed now: announced, relayed after the marker, read by the client as an op it lacks.
+      await waitUntil(() => c.hasRecord('b'), { timeout: 5000 });
+      assert.deepStrictEqual(await c.get('b'), { n: 2 });
+    },
+  );
+
+  await t.test(
+    'a snapshot while the relay is behind is refused (503 SHARED_LOG, reason behind), never positioned on a topic that lacks ops',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const h = await createStorage(t2, 'H', { sync: { sharedLog: shared } });
+      shared.fail(TOPIC, 1);
+      const a = await h.insert({ n: 1 });
+      await waitUntil(() => h.sync.shared().behind === true);
+      const link = new MemoryLink(h.sync.unit({ access: 'public' }));
+      await link.call('syncom/hello', { node: 'probe', version: 1 });
+      await assert.rejects(
+        () => link.call('syncom/snapshot', { cursor: null }),
+        (error) => error.code === 503 && error.reason === 'SHARED_LOG' && error.detail === 'behind',
+      );
+      assert.ok(!shared.entries(TOPIC).some((entry) => JSON.parse(entry.value).mark === true), 'no marker');
+      // Recovered: the snapshot is positioned behind every op the hub offered.
+      await waitUntil(() => h.sync.shared().behind === false, { timeout: 5000 });
+      const page = await link.call('syncom/snapshot', { cursor: null });
+      assert.match(page.eventId, /^[a-z0-9]+\.\d+$/);
+      assert.ok(page.records.some((record) => record.id === a));
+      const entries = shared.entries(TOPIC);
+      const marker = entries.findIndex((entry) => JSON.parse(entry.value).mark === true);
+      assert.ok(
+        entries.slice(0, marker).some((entry) => entry.value.includes(a)),
+        'the op is before the marker',
+      );
+      assert.deepStrictEqual(page.vector[h.nodeId], h.vector[h.nodeId]);
+    },
+  );
+
   await t.test(
     'an entry that fails to apply three times leaves the topic stuck (SHARED_LOG_FAILED stuck); stop() and start() read it again',
     async (t2) => {
