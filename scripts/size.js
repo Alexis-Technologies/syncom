@@ -691,11 +691,13 @@ const ENTRIES = [
   { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2 },
   // Attachments: the plugin over the engine's blobs store — the plan said 2.5 KB; the browser digest half brings its
   // JavaScript SHA-256 along (hashText), 4.1 measured (sync-parity plan, S4). 4.5, raised by name.
+  // 4.5 (at the limit) with the register validated, the bytes checked against it, sweep() and prepare() (review №7,
+  // E7.1–E7.6; 2026-11-07). 5, raised by name.
   {
     label: 'attachments — browser (@alexify/syncom/attachments)',
     entry: 'src/attachments/attachments.js',
     platform: 'browser',
-    budget: 4.5,
+    budget: 5,
   },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
