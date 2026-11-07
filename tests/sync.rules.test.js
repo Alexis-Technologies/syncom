@@ -958,6 +958,41 @@ test('Rules on the host and on the dialer', async (t) => {
   });
 
   await t.test(
+    'forget(id) under defer: the deferred slot goes with the record, a later flush brings nothing back; the scrub runs inside the queue',
+    async (t2) => {
+      // The default window (16 ms), not the tests' defer: 0 — a write stops at the append, its file waits for the flush.
+      const db = await createStorage(t2, 'FD', { defer: 16 });
+      const id = await db.insert({ n: 1 });
+      await db.update(id, { n: 2 });
+      assert.ok(db.stats().deferred >= 1, 'the record waits in the window');
+      await db.forget(id);
+      assert.strictEqual(db.hasRecord(id), false);
+      assert.strictEqual(await db.get(id), null);
+      // The window flushed: nothing of the record came back.
+      await sleep(60);
+      await db.flush();
+      assert.strictEqual(db.hasRecord(id), false, 'the flush laid nothing back');
+      assert.strictEqual(await db.get(id), null);
+      const entries = db.log.entriesOf(id);
+      assert.strictEqual(entries.length, 2);
+      assert.ok(entries.every((entry) => entry.scrubbed === true && entry.skipped === true));
+      // A write between the remove and the scrub cannot slip in: the scrub runs in the same turn of the queue, so a
+      // record made again right after reads as made — never flagged skipped by the scrub of the one before.
+      const again = await createStorage(t2, 'FQ', { defer: 16 });
+      const r = await again.insert({ n: 1 });
+      await Promise.all([again.forget(r), again.set(r, { n: 9 })]);
+      await again.flush();
+      assert.deepStrictEqual(await again.get(r), { n: 9 });
+      const live = again.log.entriesOf(r).filter((entry) => entry.skipped !== true);
+      assert.strictEqual(live.length, 1, 'the write after the forget stands in the log');
+      // A reopen: the forgotten stays forgotten, the remade is there.
+      await db.close();
+      const reopened = await createStorage(t2, 'FD', { defer: 16 });
+      assert.strictEqual(reopened.hasRecord(id), false);
+    },
+  );
+
+  await t.test(
     'forget(id): the record is gone here with no op — a replay brings nothing back, a peer is untouched, a later op of a peer makes it again',
     async (t2) => {
       const mesh = await createMesh(t2, ['H', 'C'], [['C', 'H']], createStorage);

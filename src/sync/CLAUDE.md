@@ -140,7 +140,8 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   saves none) — and shared: a writer over a shared log appends `{ v, node, revoke }` to the topic (`SharedHub.revoke`),
   every hub folds it (`manager.adoptRevocation`: never appended again, `revoke` event `via: 'shared'`). The dialer narrows its registry entry, reports
   `REVOKED`, runs `onRevoke` or forgets the records of those scopes (`storage.forget`: the file and the row gone,
-  the log's entries scrubbed and flagged skipped — never an op, the host would refuse it) and subscribes again (a
+  the deferred slot settled with them — a flush after would lay the record back — and the log's entries scrubbed and
+  flagged skipped in the same turn of the queue; never an op, the host would refuse it) and subscribes again (a
   feed's end never takes a newer handle off the peer: `#subscribe` compares). `query`/`count` are opt-in
   (`unit({ query: true | { regex } })`), read through `storage[CURSOR]` as it is — never a sealed record, which is
   the key holder's (SEC-7) — refuse a `$regex` from the wire unless the unit takes them (`regexRefusal`: 400 `REGEX`;

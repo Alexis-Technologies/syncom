@@ -2323,8 +2323,15 @@ class Database extends Emitter {
    */
   async forget(id) {
     if (!isRecordId(id)) throw typed('INVALID_ID', `forget(): ${String(id)} is not a record id`);
-    await this.#run(() => this.#landing(() => this.#entries.remove(id)));
-    await this.#log.scrub([id], { skip: true });
+    // One turn of the queue: the deferred slot goes with the record (a flush after would lay it back as a file),
+    // then the log's entries are scrubbed and flagged skipped — before the next turn can write the id again.
+    await this.#run(async () => {
+      await this.#landing(() => {
+        this.#window.settle(id, Infinity);
+        return this.#entries.remove(id);
+      });
+      await this.#log.scrub([id], { skip: true });
+    });
     this.#records.delete(id);
     this.#emitUpdate(id, null, {}, null, null);
   }
