@@ -676,7 +676,9 @@ const ENTRIES = [
   // Google Drive speaks four routes (the search by name, the v2 metadata for the ETag, the create, the media upload)
   // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).
   { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.5 },
-  { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2 },
+  // OneDrive's first upload asks Graph to fail where the file is there (conflictBehavior=fail), and a 409 is tried
+  // like a 412: 2.0 measured, at the line (review №7, E5.3; 2026-11-07). 2.25, raised by name.
+  { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2.25 },
   // Attachments: the plugin over the engine's blobs store — the plan said 2.5 KB; the browser digest half brings its
   // JavaScript SHA-256 along (hashText), 4.1 measured (sync-parity plan, S4). 4.5, raised by name.
   { label: 'attachments — browser', entry: 'src/attachments/attachments.js', platform: 'browser', budget: 4.5 },

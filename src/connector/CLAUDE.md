@@ -14,8 +14,9 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
 src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted), kept apart from shape.js's canonical so an
                           adapter weighs nothing of the core — no requires
 src/connector/jsonfile.js jsonFile(store, { poll }) — one JSON file as a backend, what the two drives share: `n` the position of a document's
-                          newest write, the ETag the compare-and-set (412 read again and tried RETRIES times), a probe for the stream;
-                          requester — the fetch with the common headers that throws with the status — requires same.js only
+                          newest write, the ETag the compare-and-set (412 or 409 read again and tried RETRIES times; an empty text an
+                          empty collection), a probe for the stream; requester — the fetch with the common headers that throws with the
+                          status — requires same.js only
 src/connector/couchdb.js  @alexify/syncom/connector/couchdb — couchdb({ url, fetch, headers, longpoll }): the handlers over one CouchDB
                           database through an injected fetch — _changes with the documents, a long poll from the checkpoint as the stream,
                           _bulk_docs with the revisions last seen, a conflict read back, a probe read back, another refusal the row's
@@ -38,11 +39,12 @@ src/connector/appwrite.js @alexify/syncom/connector/appwrite — appwrite({ clie
                           attribute the tombstone, a read then a write the push, a 400 the row's `{ id, error }`, Realtime the signal —
                           requires same.js only
 src/connector/gdrive.js   @alexify/syncom/connector/gdrive — gdrive({ fetch, token, headers, name, fileId, folder, endpoint, poll }): one JSON
-                          file of the collection in the user's Drive (the application data folder) through an injected fetch — the v2
-                          metadata's ETag, alt=media, the media upload under If-Match — requires jsonfile.js only
+                          file of the collection in the user's Drive (the application data folder) through an injected fetch — the oldest
+                          by createdTime, the v2 metadata's ETag, alt=media, the media upload under If-Match (never without: no ETag is
+                          a 428), a create listed again (an older file wins, ours deleted) — requires jsonfile.js only
 src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetch, token, headers, path, drive, endpoint, poll }): one JSON file
                           of the collection in the user's OneDrive through Microsoft Graph — root:/<path> for the eTag, /content, PUT
-                          under If-Match — requires jsonfile.js only
+                          under If-Match or, for a file not known, conflictBehavior=fail (a 409 another device's) — requires jsonfile.js only
 ```
 
 ## Rules
@@ -145,4 +147,9 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   conflict is decided by the backend itself. Appwrite has no such write: the adapter reads, compares and writes, and
   a write landing between is overwritten — the docs say so, as the matrix says it of RxDB's. A drive is one JSON
   file of the collection (`jsonfile.js`), not a file per document with a lock file (RxDB's scheme): one ETag decides,
-  a 412 reads the file again, and the collection stays under the drive's simple-upload size (Graph: 4 MB).
+  a 412 or a 409 reads the file again, and the collection stays under the drive's simple-upload size (Graph: 4 MB).
+  A drive's write is NEVER unconditional: where no file is known, Graph is asked with `conflictBehavior=fail` (a 409
+  is another device's file, judged like a 412) and Drive is asked to list again after the create — the oldest file by
+  `createdTime` is the collection's, ours is deleted, the rows judged against it (a 412) — and a file whose metadata
+  answers no ETag is refused (428). Two devices' first pushes into an empty drive once left the second over the first,
+  then deleted the first's record through "the backend wins".

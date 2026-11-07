@@ -851,6 +851,43 @@ test('Connector adapters', async (t) => {
           });
         },
       );
+      await t2.test(
+        'Google Drive: the oldest file by createdTime is the collection’s — a race of two first pushes keeps one file and judges the other’s rows against it; no ETag is a refusal, never an unconditional write',
+        async () => {
+          const shared = createFakeDrive({ name: 'race.json' });
+          const first = gdrive({ fetch: shared.fetch, token: 't', name: 'race.json' });
+          const second = gdrive({ fetch: shared.fetch, token: 't', name: 'race.json' });
+          // Both devices find no file, both make one: the oldest is the collection's, the other is deleted, and the
+          // second device's rows are judged against the first's file.
+          const [a, b] = await Promise.all([
+            first.push.handler([{ id: 'from-a', data: { a: 1 }, deleted: false, assumed: null }]),
+            second.push.handler([{ id: 'from-b', data: { b: 1 }, deleted: false, assumed: null }]),
+          ]);
+          assert.deepStrictEqual([a, b], [[], []]);
+          assert.strictEqual(shared.store.byName('race.json').length, 1, 'one file of the collection');
+          assert.strictEqual(first.fileId(), second.fileId());
+          assert.deepStrictEqual(shared.read('from-a'), { a: 1 });
+          assert.deepStrictEqual(shared.read('from-b'), { b: 1 }, 'the second device’s row, into the first’s file');
+          assert.strictEqual(shared.store.unconditional, 0, 'never a write without a compare-and-set');
+          // A device that lists later finds the oldest, whatever order the list comes in.
+          shared.store.create('race.json');
+          const third = gdrive({ fetch: shared.fetch, token: 't', name: 'race.json' });
+          assert.deepStrictEqual((await third.pull.handler(null, 10)).documents.map((doc) => doc.id).sort(), [
+            'from-a',
+            'from-b',
+          ]);
+          assert.strictEqual(third.fileId(), first.fileId());
+          // A file whose metadata answers no ETag at all is never written: a refusal (428), not an overwrite.
+          shared.noEtag = true;
+          const blind = gdrive({ fetch: shared.fetch, token: 't', name: 'race.json' });
+          await assert.rejects(
+            () => blind.push.handler([{ id: 'from-c', data: { c: 1 }, deleted: false, assumed: null }]),
+            { status: 428, message: /no ETag/ },
+          );
+          assert.strictEqual(shared.read('from-c'), null);
+          assert.strictEqual(shared.store.unconditional, 0);
+        },
+      );
     },
   );
 
@@ -897,13 +934,43 @@ test('Connector adapters', async (t) => {
           });
         },
       );
+      await t2.test(
+        'OneDrive: a first upload is conditional (conflictBehavior=fail): another device’s file is read and judged, never overwritten',
+        async () => {
+          const shared = createFakeGraph({ path: 'race/tasks.json' });
+          const first = onedrive({ fetch: shared.fetch, token: 't', path: 'race/tasks.json' });
+          const second = onedrive({ fetch: shared.fetch, token: 't', path: 'race/tasks.json' });
+          // Both devices know no file. The first makes it; the second's conditional upload is a 409 — read and
+          // judged like a 412 — and its row goes into the first's file.
+          await first.pull.handler(null, 10);
+          await second.pull.handler(null, 10);
+          assert.deepStrictEqual(
+            await first.push.handler([{ id: 'from-a', data: { a: 1 }, deleted: false, assumed: null }]),
+            [],
+          );
+          assert.deepStrictEqual(
+            await second.push.handler([{ id: 'from-b', data: { b: 1 }, deleted: false, assumed: null }]),
+            [],
+          );
+          assert.deepStrictEqual(shared.read('from-a'), { a: 1 });
+          assert.deepStrictEqual(shared.read('from-b'), { b: 1 });
+          assert.strictEqual(shared.store.byName('race/tasks.json').length, 1);
+          assert.strictEqual(shared.store.unconditional, 0, 'never a write without a compare-and-set');
+          let conditional = false;
+          for (const call of shared.calls) if (call.includes('conflictBehavior=fail')) conditional = true;
+          assert.ok(conditional, 'the first upload asked Graph to fail where the file is there');
+        },
+      );
     },
   );
 
   await t.test(
-    'a collection file: a file that is no collection is refused, never overwritten; a 412 is tried RETRIES times; no probe, no stream',
+    'a collection file: a file that is no collection is refused, never overwritten; an empty file reads as an empty collection; a 412 or a 409 is tried RETRIES times; no probe, no stream',
     async () => {
       assert.throws(() => jsonFile({}), { name: 'TypeError', message: /load/ });
+      // A file made and never written (a drive's create) is an empty collection, not "not JSON".
+      const blank = jsonFile({ load: async () => ({ etag: '"0"', text: '' }), save: async () => ({ etag: '"1"' }) });
+      assert.deepStrictEqual(await blank.pull.handler(null, 10), { documents: [], checkpoint: 0 });
       assert.throws(() => jsonFile({ load() {}, save() {} }, { poll: -1 }), { name: 'TypeError', message: /poll/ });
       const broken = jsonFile({
         load: async () => ({ etag: '"1"', text: 'not json' }),
@@ -931,6 +998,21 @@ test('Connector adapters', async (t) => {
         status: 412,
       });
       assert.strictEqual(saves, RETRIES + 1);
+      // A 409 — another device made the file first — is tried the same way.
+      let made = 0;
+      const raced = jsonFile({
+        load: async () => null,
+        save: async () => {
+          made++;
+          const error = new Error('409');
+          error.status = 409;
+          throw error;
+        },
+      });
+      await assert.rejects(() => raced.push.handler([{ id: 'x', data: { a: 1 }, deleted: false, assumed: null }]), {
+        status: 409,
+      });
+      assert.strictEqual(made, RETRIES + 1);
       const other = jsonFile({
         load: async () => null,
         save: async () => {

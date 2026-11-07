@@ -373,16 +373,22 @@ replicate(db, {
 ```
 
 One JSON file of the collection in the user's Drive — the application data folder by default (the
-`drive.appdata` scope; `folder` a folder's id instead), found by `name` or taken by `fileId` — through `fetch` and the
-OAuth `token` (or `headers` carrying the authorization). The file holds every document with the position of its
-newest write: a pull answers those after the checkpoint, in that order, and downloads the file only when its ETag
-moved; a push writes the file whole under `If-Match` — the compare-and-set — and a 412 (another device wrote first)
-reads it again and judges the rows anew, a few times, before it fails. The ETag comes from the v2 metadata (v3
-answers none), the text from `alt=media`, the write from the media upload, and the file is made at the first push. The
-stream, where `poll` is set, probes the ETag every `poll` ms and says `RESYNC` when it moved; without it a live
-connector pulls every `retryTime`. A file that is no collection file is refused, never overwritten; `fileId()` and
-`positionOf(id)` say what the adapter holds. There is no lock file and no file per document: one ETag decides, and a
-collection stays one upload.
+`drive.appdata` scope; `folder` a folder's id instead), found by `name` (the oldest by `createdTime`, where two
+devices made one each) or taken by `fileId` — through `fetch` and the OAuth `token` (or `headers` carrying the
+authorization). The file holds every document with the position of its newest write: a pull answers those after the
+checkpoint, in that order, and downloads the file only when its ETag moved; a push writes the file whole under
+`If-Match` — the compare-and-set — and a 412 (another device wrote first) reads it again and judges the rows anew, a
+few times, before it fails. The ETag comes from the v2 metadata (v3 answers none), the text from `alt=media`, the
+write from the media upload. The file is made at the first push, and the list is read again after it: a file older
+than ours (another device's first push, made meanwhile) is the collection's — ours is deleted and the rows are judged
+against it — so two devices' first pushes into an empty drive end in one file. The first write goes under the fresh
+file's ETag like every other; a file whose metadata answers no ETag is refused (428), never written. The stream, where
+`poll` is set, probes the ETag every `poll` ms and says `RESYNC` when it moved; without it a live connector pulls
+every `retryTime`. A file that is no collection file is refused, never overwritten; an empty file reads as an empty
+collection; `fileId()` and `positionOf(id)` say what the adapter holds. There is no lock file and no file per
+document: one ETag decides, and a collection stays one upload. (The v2 metadata's ETag against the v3 media upload's
+`If-Match` is what the adapter does by reading the API's documentation; it has not been run against Drive here — if
+the upload answers 412 for every write, the v2 upload endpoint takes the same `If-Match`.)
 
 ### OneDrive
 
@@ -397,6 +403,8 @@ replicate(db, {
 ```
 
 The same file through Microsoft Graph with a `Files.ReadWrite` token: the item at `root:/<path>` gives the eTag,
-`/content` the text, and `PUT root:/<path>:/content` under `If-Match` writes it in place or makes it — a simple
-upload, so the collection file stays under Graph's 4 MB (`drive` names another drive than `me/drive`). Everything
-else — the positions, the retries on a 412, the probe for the stream, `positionOf` — is the Google Drive adapter's.
+`/content` the text, and `PUT root:/<path>:/content` writes it — under `If-Match` in place, or, where no file is known,
+with `@microsoft.graph.conflictBehavior=fail`, so a file another device made first is a 409, read and judged like a
+412 rather than overwritten — a simple upload, so the collection file stays under Graph's 4 MB (`drive` names another
+drive than `me/drive`). Everything else — the positions, the retries on a 412 or a 409, the probe for the stream,
+`positionOf` — is the Google Drive adapter's.

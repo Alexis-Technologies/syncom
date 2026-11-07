@@ -5,8 +5,10 @@
 // an injected `fetch` and the token it is given, in the shape of
 // src/connector/jsonfile.js. The item's metadata (`root:/<path>`) gives the
 // eTag, `/content` the text, and `PUT root:/<path>:/content` under `If-Match`
-// writes it in place (a 412 the conflict) or makes it — a simple upload, so
-// a collection file stays under Graph's 4 MB. Requires jsonfile.js only.
+// writes it in place (a 412 the conflict) or, where no file is known, makes
+// it with `@microsoft.graph.conflictBehavior=fail` (a 409 the conflict: a
+// file another device made first) — a simple upload, so a collection file
+// stays under Graph's 4 MB. Requires jsonfile.js only.
 
 const { jsonFile, requester } = require('./jsonfile.js');
 
@@ -53,10 +55,14 @@ const onedrive = ({
       const response = await request(`${base}/items/${encodeURIComponent(meta.id)}/content`, {}, 'content');
       return { etag: meta.eTag ?? null, text: await response.text() };
     },
+    // In place under `If-Match`, or made where no file is known — `conflictBehavior=fail`: a file another device
+    // made first is a 409, read and judged like a 412 — never an unconditional write.
     async save(text, etag) {
       const init = { method: 'PUT', headers: { 'content-type': 'application/json' }, body: text };
+      let url = `${base}/root:/${at}:/content`;
       if (etag !== null) init.headers['if-match'] = etag;
-      const body = await (await request(`${base}/root:/${at}:/content`, init, 'upload')).json();
+      else url += '?@microsoft.graph.conflictBehavior=fail';
+      const body = await (await request(url, init, 'upload')).json();
       return { etag: body.eTag ?? null };
     },
   };
