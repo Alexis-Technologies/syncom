@@ -117,7 +117,17 @@ const createFakeFirestore = ({ stampField = 'serverTimestamp', deletedField = '_
       limit: (n) => ({ type: 'limit', n }),
       startAfter: (...values) => ({ type: 'startAfter', values }),
       documentId: () => '__name__',
-      doc: (ref, id) => ({ type: 'doc', id }),
+      doc: (ref, id) => {
+        // An id Firestore refuses: a path separator, or the reserved `__name__` form.
+        if (id.includes('/') || /^__.*__$/.test(id)) {
+          const error = new Error(
+            `Invalid document reference. Document references must have an even number of segments, or ${id} is reserved`,
+          );
+          error.code = 'invalid-argument';
+          throw error;
+        }
+        return { type: 'doc', id };
+      },
       serverTimestamp: () => SERVER,
       getDocs: async (q) => ({ docs: run(q), metadata: { hasPendingWrites: false } }),
       waitForPendingWrites: async () => {
@@ -152,12 +162,17 @@ const createFakeFirestore = ({ stampField = 'serverTimestamp', deletedField = '_
         }
         throw new Error('fake-firestore: transaction contended too often');
       },
-      onSnapshot(q, next) {
+      onSnapshot(q, next, error = null) {
         const listener = () => next({ docs: run(q), metadata: { hasPendingWrites: false } });
+        listener.error = error;
         listeners.add(listener);
         queueMicrotask(listener);
         return () => listeners.delete(listener);
       },
+    },
+    /** Every listener told of an error (the SDK's listener erring: permissions, a dropped socket). */
+    failStreams(error = new Error('fake-firestore: listener failed')) {
+      for (const listener of [...listeners]) listener.error?.(error);
     },
     /** A write made on the collection itself (another client's), stamped by the server. */
     write(id, data, { deleted = false, pending = false } = {}) {

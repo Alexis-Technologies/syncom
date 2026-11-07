@@ -116,12 +116,16 @@ const createFakeSupabase = ({ primaryKey = 'id' } = {}) => {
           channel.handler = handler;
           return channel;
         },
-        subscribe() {
+        status: null,
+        subscribe(status = null) {
           channels.add(channel);
+          channel.status = status;
+          status?.('SUBSCRIBED');
           return channel;
         },
         unsubscribe() {
           channels.delete(channel);
+          channel.status?.('CLOSED');
         },
         fire() {
           channel.handler?.({ eventType: 'UPDATE' });
@@ -131,6 +135,11 @@ const createFakeSupabase = ({ primaryKey = 'id' } = {}) => {
     },
     removeChannel(channel) {
       channels.delete(channel);
+      channel.status?.('CLOSED');
+    },
+    /** Every channel told of a status (`CHANNEL_ERROR`, `TIMED_OUT`): what Realtime does when the socket drops. */
+    failChannels(status = 'CHANNEL_ERROR') {
+      for (const channel of [...channels]) channel.status?.(status);
     },
     /** A write on the table itself: another client's. `modified` is set by the "database" (a trigger). */
     write(table, values, { modifiedColumn = 'updated_at', deletedColumn = 'deleted', deleted = false } = {}) {

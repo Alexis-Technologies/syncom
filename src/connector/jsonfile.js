@@ -125,7 +125,8 @@ const jsonFile = (store, { poll = 0 } = {}) => {
             const row = rows[i];
             const doc = file.docs[row.id];
             const current = doc === undefined || doc.deleted === true ? null : doc.data;
-            if (!same(current, row.assumed)) {
+            // A probe is the document as the file holds it; a row that assumed another state the same, a conflict.
+            if (row.assumed === undefined || !same(current, row.assumed)) {
               conflicts.push(current === null ? { id: row.id, deleted: true } : { id: row.id, data: current });
               continue;
             }

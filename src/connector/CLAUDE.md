@@ -17,21 +17,26 @@ src/connector/jsonfile.js jsonFile(store, { poll }) — one JSON file as a backe
                           newest write, the ETag the compare-and-set (412 read again and tried RETRIES times), a probe for the stream;
                           requester — the fetch with the common headers that throws with the status — requires same.js only
 src/connector/couchdb.js  @alexify/syncom/connector/couchdb — couchdb({ url, fetch, headers, longpoll }): the handlers over one CouchDB
-                          database through an injected fetch — _changes with the documents, a long poll as the stream, _bulk_docs with
-                          the revisions last seen, a conflict read back — no requires
+                          database through an injected fetch — _changes with the documents, a long poll from the checkpoint as the stream,
+                          _bulk_docs with the revisions last seen, a conflict read back, a probe read back, another refusal the row's
+                          `{ id, error }`; credentials in the url moved to the Authorization header — no requires
 src/connector/graphql.js  @alexify/syncom/connector/graphql — graphql({ url, fetch, headers, request, pull, push, stream }): the application's
                           queries posted and their answers read by its functions; one adapter for every schema — no requires
 src/connector/mongodb.js  @alexify/syncom/connector/mongodb — mongodb({ collection, changes, now }): the handlers over one collection of the
-                          injected driver — _rev, _deleted, _updated the adapter's fields, a change stream the signal — no requires
-src/connector/supabase.js @alexify/syncom/connector/supabase — supabase({ client, table, primaryKey, modifiedColumn, deletedColumn, channel,
-                          stream, now }): the handlers over one table through the injected client — PostgREST with the modified column
-                          as the compare-and-set, Realtime's postgres_changes the signal — no requires
+                          injected driver — _rev, _deleted, _updated the adapter's fields, a change stream the signal (its error or close
+                          END), a server's code on a document the row's `{ id, error }` — no requires
+src/connector/supabase.js @alexify/syncom/connector/supabase — supabase({ client, table, primaryKey, modifiedColumn, deletedColumn, schema,
+                          channel, stream, now }): the handlers over one table through the injected client — PostgREST with the modified
+                          column as the compare-and-set, Realtime's postgres_changes the signal (the channel's error, timeout or close
+                          END), a code of the database's on a row the row's `{ id, error }` — no requires
 src/connector/firestore.js @alexify/syncom/connector/firestore — firestore({ sdk, database, collection, stampField, deletedField, stream }): the
                           handlers over one collection through the injected modular SDK — the server stamp and a tombstone the adapter's
-                          fields, a cursor after the checkpoint, one transaction a push, onSnapshot the signal — requires same.js only
+                          fields, a cursor after the checkpoint, a transaction per 500 rows a push, onSnapshot the signal (its error END),
+                          an id or a body the SDK refuses the row's `{ id, error }` — requires same.js only
 src/connector/appwrite.js @alexify/syncom/connector/appwrite — appwrite({ client, databases, Query, databaseId, collectionId, deletedField,
                           stream }): the handlers over one collection through the injected SDK — $updatedAt the position, a boolean
-                          attribute the tombstone, a read then a write the push, Realtime the signal — requires same.js only
+                          attribute the tombstone, a read then a write the push, a 400 the row's `{ id, error }`, Realtime the signal —
+                          requires same.js only
 src/connector/gdrive.js   @alexify/syncom/connector/gdrive — gdrive({ fetch, token, headers, name, fileId, folder, endpoint, poll }): one JSON
                           file of the collection in the user's Drive (the application data folder) through an injected fetch — the v2
                           metadata's ETag, alt=media, the media upload under If-Match — requires jsonfile.js only

@@ -851,7 +851,9 @@ class Replication extends Emitter {
   // stream is over (the backend closed it): followed again after the pull's backoff, from the checkpoint as it then
   // stands, and pulled once for what it missed meanwhile.
   #streamed(signal) {
-    if (this.#canceled) return;
+    // A stream stopped (canceled, or ended) may still speak: stale, ignored — an END after our own stop would follow
+    // again without end.
+    if (this.#canceled || !this.#following) return;
     if (signal === 'RESYNC') return void this.#pullAll().catch(NOOP);
     if (signal === 'END') {
       this.#stopFollowing();

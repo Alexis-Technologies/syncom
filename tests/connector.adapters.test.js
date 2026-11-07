@@ -114,26 +114,87 @@ test('Connector adapters', async (t) => {
         write: (id, data, options) => couch.write(id, data, options),
         read: (id) => couch.read(id),
       });
-      await t2.test('the options are checked; a failing request is an error with its status', async () => {
-        assert.throws(() => couchdb({}), { name: 'TypeError', message: /url is required/ });
-        assert.throws(() => couchdb({ url: 'x', fetch: 7 }), { name: 'TypeError' });
-        assert.throws(() => couchdb({ url: 'x', longpoll: 0 }), { name: 'TypeError' });
-        const down = couchdb({
-          url: 'https://couch.test/db',
-          fetch: async () => ({ ok: false, status: 503, text: async () => 'busy' }),
-        });
-        await assert.rejects(() => down.pull.handler(null, 10), {
-          status: 503,
-          message: /_changes answered 503: busy/,
-        });
-        await assert.rejects(() => down.push.handler([{ id: 'x', data: {}, deleted: false, assumed: null }]), {
-          status: 503,
-        });
-        const adapter = couchdb({ url: 'https://couch.test/db/', fetch: couch.fetch });
-        assert.strictEqual(adapter.revisionOf('b1'), undefined);
-        await adapter.pull.handler(null, 100);
-        assert.match(adapter.revisionOf('b1'), /^\d+-/);
-      });
+      await t2.test(
+        'the options are checked; a failing request is an error with its status; an id starting with _ is refused by name; a probe reads the document back; the long poll starts at the checkpoint; credentials in the url move to the header',
+        async () => {
+          assert.throws(() => couchdb({}), { name: 'TypeError', message: /url is required/ });
+          assert.throws(() => couchdb({ url: 'x', fetch: 7 }), { name: 'TypeError' });
+          assert.throws(() => couchdb({ url: 'x', longpoll: 0 }), { name: 'TypeError' });
+          const down = couchdb({
+            url: 'https://couch.test/db',
+            fetch: async () => ({ ok: false, status: 503, text: async () => 'busy' }),
+          });
+          await assert.rejects(() => down.pull.handler(null, 10), {
+            status: 503,
+            message: /_changes answered 503: busy/,
+          });
+          await assert.rejects(() => down.push.handler([{ id: 'x', data: {}, deleted: false, assumed: null }]), {
+            status: 503,
+          });
+          const adapter = couchdb({ url: 'https://couch.test/db/', fetch: couch.fetch });
+          assert.strictEqual(adapter.revisionOf('b1'), undefined);
+          await adapter.pull.handler(null, 100);
+          assert.match(adapter.revisionOf('b1'), /^\d+-/);
+          // An id only CouchDB's own documents may have: refused by row, the rest of the batch written.
+          assert.deepStrictEqual(
+            await adapter.push.handler([
+              { id: '_design-ish', data: { a: 1 }, deleted: false, assumed: null },
+              { id: 'fine', data: { a: 1 }, deleted: false, assumed: null },
+            ]),
+            [
+              {
+                id: '_design-ish',
+                error: { code: 'bad_request', message: 'Only reserved document ids may start with underscore.' },
+              },
+            ],
+          );
+          assert.deepStrictEqual(couch.read('fine'), { a: 1 });
+          // A probe: the document as the database holds it, nothing written; a deletion for none.
+          couch.write('p1', { a: 1 });
+          const probed = couchdb({ url: 'https://couch.test/db', fetch: couch.fetch });
+          assert.deepStrictEqual(
+            await probed.push.handler([
+              { id: 'p1', data: { a: 2 }, deleted: false, assumed: undefined },
+              { id: 'p2', data: { a: 2 }, deleted: false, assumed: undefined },
+            ]),
+            [
+              { id: 'p1', data: { a: 1 } },
+              { id: 'p2', deleted: true },
+            ],
+          );
+          assert.deepStrictEqual(couch.read('p1'), { a: 1 });
+          assert.match(probed.revisionOf('p1'), /^\d+-/, 'the revision learned by the probe');
+          // The long poll starts at the checkpoint the connector hands over.
+          couch.calls.length = 0;
+          const stop = probed.pull.stream(() => {}, { checkpoint: couch.changes.length });
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          stop();
+          let polled = false;
+          for (const call of couch.calls) {
+            if (call.includes('feed=longpoll') && call.includes(`since=${couch.changes.length}`)) polled = true;
+          }
+          assert.ok(polled, `the long poll from the checkpoint: ${couch.calls.join(' ')}`);
+          // Credentials in the url: the Authorization header, never a request's url nor an error's message.
+          const seen = [];
+          const spying = couchdb({
+            url: 'https://user:pa%3Ass@couch.test/db',
+            fetch: async (target, init) => {
+              seen.push([target, init.headers.authorization]);
+              return { ok: false, status: 500, text: async () => 'boom' };
+            },
+          });
+          await assert.rejects(
+            () => spying.pull.handler(null, 10),
+            (error) => {
+              assert.doesNotMatch(error.message, /user|pa:ss|pa%3Ass/);
+              return true;
+            },
+          );
+          assert.deepStrictEqual(seen, [
+            [`https://couch.test/db/_changes?include_docs=true&limit=10`, `Basic ${btoa('user:pa:ss')}`],
+          ]);
+        },
+      );
     },
   );
 
@@ -245,7 +306,7 @@ test('Connector adapters', async (t) => {
         read,
       });
       await t2.test(
-        'the options are checked; without change streams there is no stream; a collision on insert is a conflict',
+        'the options are checked; without change streams there is no stream; a collision on insert is a conflict; a probe reads the document back; a server code refuses the row by name; a change stream that errs says END',
         async () => {
           assert.throws(() => mongodb({}), { name: 'TypeError', message: /collection/ });
           assert.throws(() => mongodb({ collection, changes: 'yes' }), { name: 'TypeError' });
@@ -268,6 +329,62 @@ test('Connector adapters', async (t) => {
             [],
           );
           assert.strictEqual(adapter.revisionOf('taken'), 4);
+          // A probe: the document as the collection holds it, nothing written; a deletion for none.
+          const fresh = mongodb({ collection: other, changes: false });
+          assert.deepStrictEqual(
+            await fresh.push.handler([
+              { id: 'taken', data: { title: 'probe' }, deleted: false, assumed: undefined },
+              { id: 'absent', data: { title: 'probe' }, deleted: false, assumed: undefined },
+            ]),
+            [
+              { id: 'taken', data: { title: 'mine' } },
+              { id: 'absent', deleted: true },
+            ],
+          );
+          assert.strictEqual(fresh.revisionOf('taken'), 4, 'the revision learned by the probe');
+          assert.strictEqual((await other.findOne({ _id: 'taken' })).title, 'mine');
+          // A code of the server's refuses the row by name (a validator, a key too large); without a code (the
+          // network) the push fails whole.
+          const refusing = mongodb({
+            collection: {
+              ...other,
+              findOne: other.findOne.bind(other),
+              replaceOne: async () => {
+                throw Object.assign(new Error('Document failed validation'), { code: 121 });
+              },
+            },
+            changes: false,
+          });
+          assert.deepStrictEqual(
+            await refusing.push.handler([{ id: 'r1', data: { n: 'x' }, deleted: false, assumed: null }]),
+            [{ id: 'r1', error: { code: '121', message: 'Document failed validation' } }],
+          );
+          const offline = mongodb({
+            collection: {
+              ...other,
+              findOne: other.findOne.bind(other),
+              replaceOne: async () => {
+                throw new Error('connection closed');
+              },
+            },
+            changes: false,
+          });
+          await assert.rejects(() => offline.push.handler([{ id: 'r1', data: {}, deleted: false, assumed: null }]), {
+            message: 'connection closed',
+          });
+          // A change stream that errs says END once; stopped, it says nothing more.
+          const signals = [];
+          const streaming = mongodb({ collection });
+          const stop = streaming.pull.stream((signal) => signals.push(signal));
+          collection.breakStreams(new Error('resume token gone'));
+          await new Promise((resolve) => setImmediate(resolve));
+          assert.deepStrictEqual(signals, ['END']);
+          stop();
+          const again = mongodb({ collection }).pull.stream((signal) => signals.push(signal));
+          again();
+          collection.breakStreams(new Error('after the stop'));
+          await new Promise((resolve) => setImmediate(resolve));
+          assert.deepStrictEqual(signals, ['END']);
         },
       );
     },
@@ -289,7 +406,7 @@ test('Connector adapters', async (t) => {
         },
       });
       await t2.test(
-        'the options are checked; a client without channels has no stream; an error answer is a failure',
+        'the options are checked; a client without channels has no stream; an error answer is a failure; a probe reads the row back; a code of the database refuses the row by name; the channel’s error says END',
         async () => {
           assert.throws(() => supabase({ table: 'x' }), { name: 'TypeError', message: /client/ });
           assert.throws(() => supabase({ client }), { name: 'TypeError', message: /table/ });
@@ -318,6 +435,44 @@ test('Connector adapters', async (t) => {
           assert.strictEqual(adapter.stampOf('b1'), undefined);
           await adapter.pull.handler(null, 100);
           assert.strictEqual(typeof adapter.stampOf('b1'), 'string');
+          // A probe: the row as the table holds it, nothing written; a deletion for none.
+          const fresh = supabase({ client, table: 'tasks', now: client.stamp });
+          const held = client.read('tasks', 'b1');
+          const probed = await fresh.push.handler([
+            { id: 'b1', data: { title: 'probe' }, deleted: false, assumed: undefined },
+            { id: 'absent', data: { title: 'probe' }, deleted: false, assumed: undefined },
+          ]);
+          assert.deepStrictEqual(probed[0].id, 'b1');
+          assert.deepStrictEqual(probed[0].data.title, held.title);
+          assert.deepStrictEqual(probed[1], { id: 'absent', deleted: true });
+          assert.deepStrictEqual(client.read('tasks', 'b1'), held);
+          assert.strictEqual(fresh.stampOf('b1'), held.updated_at, 'the stamp learned by the probe');
+          // A code of the database's refuses the row by name (a constraint, a type); an error without a code (the
+          // network) fails the push whole.
+          const answer = (error) => ({ then: (resolve) => resolve({ data: null, error }) });
+          const refusing = supabase({
+            client: { from: () => ({ insert: () => ({ select: () => answer({ code: '23514', message: 'check' }) }) }) },
+            table: 'tasks',
+          });
+          assert.deepStrictEqual(
+            await refusing.push.handler([{ id: 'r1', data: { n: -1 }, deleted: false, assumed: null }]),
+            [{ id: 'r1', error: { code: '23514', message: 'check' } }],
+          );
+          const offline = supabase({
+            client: { from: () => ({ insert: () => ({ select: () => answer({ message: 'fetch failed' }) }) }) },
+            table: 'tasks',
+          });
+          await assert.rejects(() => offline.push.handler([{ id: 'r1', data: {}, deleted: false, assumed: null }]), {
+            message: /fetch failed/,
+          });
+          // The channel's error (or timeout, or close by the server) says END once; stopped, it says nothing more.
+          const signals = [];
+          const stop = adapter.pull.stream((signal) => signals.push(signal));
+          client.failChannels('CHANNEL_ERROR');
+          assert.deepStrictEqual(signals, ['END']);
+          stop();
+          client.failChannels('TIMED_OUT');
+          assert.deepStrictEqual(signals, ['END']);
         },
       );
     },
@@ -333,7 +488,7 @@ test('Connector adapters', async (t) => {
         read: (id) => fake.read(id),
       });
       await t2.test(
-        'the options are checked; without onSnapshot no stream; a pending stamp waits; a transaction run again begins afresh',
+        'the options are checked; without onSnapshot no stream; a pending stamp waits; a transaction run again begins afresh; a probe reads the document back; an id the SDK refuses is the row’s; 600 rows go in two transactions; onSnapshot’s error says END',
         async () => {
           assert.throws(() => firestore({}), { name: 'TypeError', message: /sdk/ });
           assert.throws(() => firestore({ ...options(), sdk: { ...fake.sdk, getDocs: 1 } }), {
@@ -406,6 +561,39 @@ test('Connector adapters', async (t) => {
           own.write('p6', { title: 'after' });
           await new Promise((resolve) => setTimeout(resolve, 5));
           assert.strictEqual(signals.length, count);
+          // A probe: the document as it stands, nothing written; an id the SDK refuses is that row's refusal.
+          own.attempts = 0;
+          conflicts = await adapter.push.handler([
+            { id: 'p3', data: { title: 'probe' }, deleted: false, assumed: undefined },
+            { id: 'p9', data: { title: 'probe' }, deleted: false, assumed: undefined },
+            { id: '__bad__', data: { title: 'x' }, deleted: false, assumed: null },
+            { id: 'p7', data: { title: 'written' }, deleted: false, assumed: null },
+          ]);
+          assert.deepStrictEqual(conflicts, [
+            { id: '__bad__', error: { code: 'invalid-argument', message: conflicts[0].error.message } },
+            { id: 'p3', data: { title: 'there' } },
+            { id: 'p9', deleted: true },
+          ]);
+          assert.deepStrictEqual(own.read('p3'), { title: 'there' });
+          assert.deepStrictEqual(own.read('p7'), { title: 'written' });
+          assert.strictEqual(own.attempts, 1);
+          // Firestore takes 500 writes a transaction: 600 rows go in two.
+          const many = [];
+          for (let i = 0; i < 600; i++) many.push({ id: `m${i}`, data: { i }, deleted: false, assumed: null });
+          own.attempts = 0;
+          assert.deepStrictEqual(await adapter.push.handler(many), []);
+          assert.strictEqual(own.attempts, 2);
+          assert.deepStrictEqual(own.read('m599'), { i: 599 });
+          // The listener's error says END once; stopped, it says nothing more.
+          const ends = [];
+          const off = adapter.pull.stream((signal) => ends.push(signal));
+          await new Promise((resolve) => setTimeout(resolve, 5));
+          ends.length = 0;
+          own.failStreams();
+          assert.deepStrictEqual(ends, ['END']);
+          off();
+          own.failStreams();
+          assert.deepStrictEqual(ends, ['END']);
         },
       );
     },
@@ -428,7 +616,7 @@ test('Connector adapters', async (t) => {
         read: (id) => fake.read(id),
       });
       await t2.test(
-        'the options are checked; without a client no stream; made or taken away between the read and the write is a conflict; another failure is thrown',
+        'the options are checked; without a client no stream; made or taken away between the read and the write is a conflict; another failure is thrown; a probe reads the document back; an id Appwrite cannot carry is refused by name',
         async () => {
           assert.throws(() => appwrite({}), { name: 'TypeError', message: /databases/ });
           assert.throws(() => appwrite({ ...options(), databases: { ...fake.databases, getDocument: 1 } }), {
@@ -506,6 +694,23 @@ test('Connector adapters', async (t) => {
               code: 500,
             },
           );
+          // A probe: the document as it stands, nothing written; an id Appwrite cannot carry (past 36 letters) is
+          // that row's refusal, the rest of the batch written.
+          const long = `a${'x'.repeat(40)}`;
+          conflicts = await adapter.push.handler([
+            { id: 'a3', data: { title: 'probe' }, deleted: false, assumed: undefined },
+            { id: 'a9', data: { title: 'probe' }, deleted: false, assumed: undefined },
+            { id: long, data: { title: 'x' }, deleted: false, assumed: null },
+            { id: 'a4', data: { title: 'written' }, deleted: false, assumed: null },
+          ]);
+          assert.deepStrictEqual(conflicts, [
+            { id: 'a3', data: { title: 'there' } },
+            { id: 'a9', deleted: true },
+            { id: long, error: { code: '400', message: conflicts[2].error.message } },
+          ]);
+          assert.match(conflicts[2].error.message, /36/);
+          assert.deepStrictEqual(own.read('a3'), { title: 'there' });
+          assert.deepStrictEqual(own.read('a4'), { title: 'written' });
         },
       );
     },
@@ -704,6 +909,18 @@ test('Connector adapters', async (t) => {
       assert.ok(seen.length >= 1);
       assert.strictEqual(live.positionOf('y'), 1);
       assert.strictEqual(live.positionOf('z'), undefined);
+      // A probe: the document as the file holds it, nothing saved; a deletion for none.
+      assert.deepStrictEqual(
+        await live.push.handler([
+          { id: 'y', data: { b: 2 }, deleted: false, assumed: undefined },
+          { id: 'z', data: { b: 2 }, deleted: false, assumed: undefined },
+        ]),
+        [
+          { id: 'y', data: { b: 1 } },
+          { id: 'z', deleted: true },
+        ],
+      );
+      assert.strictEqual(loads, 1, 'nothing loaded again, nothing saved');
     },
   );
 });

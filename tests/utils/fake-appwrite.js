@@ -94,6 +94,10 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
       async createDocument(db, col, id, data) {
         check(db, col);
         fake.calls.push('create');
+        // An id Appwrite cannot carry: at most 36 letters, digits, `.`, `-`, `_`, not starting with a special one.
+        if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/.test(id)) {
+          throw new AppwriteException(400, 'Invalid `documentId` param: UID must contain at most 36 chars.');
+        }
         if (docs.has(id)) throw new AppwriteException(409, 'Document with the requested ID already exists.');
         const doc = { $id: id, $updatedAt: stamp(), ...clone(data) };
         docs.set(id, doc);

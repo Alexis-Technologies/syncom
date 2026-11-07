@@ -181,7 +181,13 @@ Every adapter answers `{ pull, push }` to spread into `replicate()`'s options (G
 keeps in memory what a compare-and-set needs — the revision or the stamp it last saw for each document — for the
 connector's life: a connector started anew learns them with its first pull, and a push of a document it has never
 seen lands as a new one, a conflict where one exists, as it should. A conflict is answered as the backend holds the
-document, so the connector sets the record to it ([conflicts](#what-goes-out)).
+document, so the connector sets the record to it ([conflicts](#what-goes-out)). A probe — a row with `assumed:
+undefined`, what the connector sends after a restart for a record whose state it knows by digest alone — is
+answered the same way, as the backend holds the document (a deletion for none), and nothing is written. A document
+the backend refuses by name — an id it cannot carry, an attribute it lacks, a body too large — is answered as `{ id,
+error: { code, message } }` and the connector parks that row ([refused by name](#what-goes-out)); a failure of the
+whole call (the network, a 5xx) is thrown and tried again. A stream that the backend closes says `END`
+([live](#live)), and the connector follows again after a backoff.
 
 ### CouchDB
 
@@ -196,11 +202,15 @@ replicate(db, {
 ```
 
 One database. A pull is `_changes?include_docs=true` since the checkpoint (CouchDB's `last_seq`), `limit` the batch,
-a `_deleted` change a deletion; the stream is `_changes?feed=longpoll` asked again and again (`longpoll` the wait in
-ms, 60 000). A push is `_bulk_docs` with the `_rev` the adapter last saw on each document — the database's
-compare-and-set — and a `conflict` answer is the document read back as the database holds it (a 404 a deletion).
-`fetch` is the platform's unless given, `headers` ride on every request, and `revisionOf(id)` says what the adapter
-holds. A request that fails is an error with its `status`, which the connector tries again after `retryTime`.
+a `_deleted` change a deletion; the stream is `_changes?feed=longpoll` from the checkpoint the connector hands over,
+asked again and again (`longpoll` the wait in ms, 60 000; a poll the server never answers is given up after the wait
+and ten seconds). A push is `_bulk_docs` with the `_rev` the adapter last saw on each document — the database's
+compare-and-set — and a `conflict` answer is the document read back as the database holds it (a 404 a deletion); any
+other refusal of a document — an id starting with `_`, which only CouchDB's own documents may have — is that row's
+`{ id, error }`, parked by the connector. A probe reads the document back. `fetch` is the platform's unless given,
+`headers` ride on every request; credentials in the `url` (`https://user:password@host/db`) move to the
+`Authorization` header, so no request's url and no error's message carries them. `revisionOf(id)` says what the
+adapter holds. A request that fails is an error with its `status`, which the connector tries again after the backoff.
 
 ### GraphQL
 
@@ -236,9 +246,12 @@ replicate(db, {
 `url` and `fetch` post `{ query, variables }` as JSON with `headers`; `request(query, variables)` is the
 application's own client instead, answering the `data`. An answer with `errors` is a failure the connector tries
 again. `pull.read(data)` answers `{ documents, checkpoint }` as a pull handler does, `push.read(data)` the conflicts
-(nothing is none); the stream is the application's subscription client, as `replicate()` takes one. What a
-compare-and-set needs — a revision on every row, say — is the schema's to carry and the readers' to remember: the
-repository's test endpoint answers a `rev` with every document and the rows it refused as it holds them.
+and the rows refused by name (nothing is none); the stream is the application's subscription client, as
+`replicate()` takes one. What a compare-and-set needs — a revision on every row, say — is the schema's to carry and
+the readers' to remember: the repository's test endpoint answers a `rev` with every document and the rows it refused
+as it holds them. A row with `assumed: undefined` is a probe: the `push.variables` should ask the server for the
+document as it stands and `push.read` answer it among the refused, writing nothing (the test endpoint's `assumedRev:
+null` for an unknown row happens to do the same for a row it holds).
 
 ### MongoDB
 
@@ -258,9 +271,11 @@ the driver). Every document carries three fields of the adapter's: `_rev` (a cou
 compare-and-set), `_deleted` (a tombstone, so a pull sees a deletion) and `_updated` (the position, stamped by `now`:
 a pull is the documents `_updated` after the checkpoint, in that order; two writes in one millisecond are read again
 at the next pull, and an equal document makes no op). The stream is a change stream on the collection, every change
-a `RESYNC` — a replica set; `changes: false` without one, and a live connector pulls every `retryTime`. A push is a
-`replaceOne` matched on the `_rev` last seen (an upsert for a document never seen; a duplicate key is a conflict),
-and a conflict is the document read back. `revisionOf(id)` says what the adapter holds.
+a `RESYNC`, its error or close an `END` — a replica set; `changes: false` without one, and a live connector pulls
+every `retryTime`. A push is a `replaceOne` matched on the `_rev` last seen (an upsert for a document never seen; a
+duplicate key is a conflict), a conflict is the document read back, a server's code on the document (a validator's
+no, a key too large) is that row's `{ id, error }` and an error without a code (the network) the push's failure,
+tried again; a probe reads the document back. `revisionOf(id)` says what the adapter holds.
 
 ### Supabase
 
@@ -277,9 +292,12 @@ primary key column (`primaryKey`, `id`), a boolean column of a deletion (`delete
 the database sets on every write (`modifiedColumn`, `updated_at` — a trigger, or the adapter's own stamp, `now`, an
 ISO date). A pull is the rows modified after the checkpoint, in that order; a push is an `update` matched on the
 primary key and the modified value last seen — PostgREST's compare-and-set, no row matched a conflict — or an
-`insert` for a row never seen (a duplicate key a conflict), and a conflict is the row read back. The stream is
-Realtime's `postgres_changes` on the table (`channel`, `syncom:<table>`; `stream: false` for none, and a client
-without channels has none), every change a `RESYNC`. `stampOf(id)` says what the adapter holds.
+`insert` for a row never seen (a duplicate key a conflict), and a conflict is the row read back; a code of the
+database's on the row (a check constraint, a type) is that row's `{ id, error }`, an error without a code (the
+network) the push's failure, tried again; a probe reads the row back. The stream is Realtime's `postgres_changes` on
+the table (`channel`, `syncom:<table>`; `stream: false` for none, and a client without channels has none), every
+change a `RESYNC`, the channel's `CHANNEL_ERROR`, `TIMED_OUT` or `CLOSED` an `END`. `stampOf(id)` says what the
+adapter holds.
 
 ### Firestore
 
@@ -301,11 +319,14 @@ them. Every document carries two fields of the adapter's: the stamp the server s
 `serverTimestamp`) and a tombstone (`deletedField`, `_deleted`), so a pull sees a deletion. A pull is the documents
 ordered by the stamp, then by id, after the checkpoint `{ at, id }` — one cursor, no second query for the documents
 stamped at the same instant; a document whose stamp is still pending (a write of the SDK's own cache not yet on the
-server) is left to the next pull, and `waitForPendingWrites` is awaited first where the SDK has it. A push is one
-transaction: every row's document read, compared with what the row assumed, written where it is the same and
-answered as a conflict where it is not — the transaction's own reads and writes, so a write that lands between them
-makes Firestore run the transaction again, and the second run sees it. The stream is `onSnapshot` over the newest
-document, every change the server confirmed a `RESYNC` (`stream: false` for none).
+server) is left to the next pull, and `waitForPendingWrites` is awaited first where the SDK has it. A push is a
+transaction per 500 rows (Firestore's limit on a transaction's writes): every row's document read, compared with
+what the row assumed, written where it is the same and answered as a conflict where it is not — the transaction's
+own reads and writes, so a write that lands between them makes Firestore run the transaction again, and the second
+run sees it; a probe is answered as the document stands, nothing written; an id or a body the SDK refuses (a `/` in
+the id, the `__name__` form, a nested array) is that row's `{ id, error }`. The stream is `onSnapshot` over the
+newest document, every change the server confirmed a `RESYNC`, the listener's error an `END` (`stream: false` for
+none).
 
 ### Appwrite
 
@@ -327,8 +348,11 @@ position — a pull is the documents updated after the checkpoint `{ updatedAt, 
 `$id` — and a tombstone is a boolean attribute of the collection's (`deletedField`, `deleted`), so a pull sees a
 deletion: add it to the collection's attributes. A push reads the rows' documents in one query and compares each
 with what its row assumed: a row never there is `createDocument` (a 409 the conflict, the document read back), a row
-the same is `updateDocument` (a 404 a deletion), a row that differs a conflict answered as the document stands.
-Appwrite has no compare-and-set write, so a write landing between the read and the update is overwritten — the same
+the same is `updateDocument` (a 404 a deletion), a row that differs a conflict answered as the document stands, a
+probe the document as it stands with nothing written, and a 400 — an id Appwrite cannot carry (past 36 letters, a
+leading `.`), an attribute the collection lacks — that row's `{ id, error }`, parked by the connector (a syncom id is
+up to 128 letters: name the records the collection replicates within Appwrite's 36, or let the application mint
+them). Appwrite has no compare-and-set write, so a write landing between the read and the update is overwritten — the same
 window RxDB's plugin has; where two clients write one document at once, let the backend of record be one with a
 conditional write. The stream is Realtime's channel of the collection's documents, every event a `RESYNC`.
 

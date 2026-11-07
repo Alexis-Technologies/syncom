@@ -11,10 +11,13 @@
 // reads the rows' documents in one query and compares each with what its row
 // assumed: a row never there is `createDocument` (a 409 the conflict, the
 // document read back), a row the same is `updateDocument`, a row that differs
-// a conflict answered as the document stands. Appwrite has no compare-and-set
-// write, so a write landing between the read and the update is overwritten —
-// said in the docs, as RxDB says it. The stream is Realtime's channel of the
-// collection's documents, every event a `RESYNC`. Requires same.js only.
+// a conflict answered as the document stands; a probe (`assumed` undefined)
+// is the document as it stands, nothing written; a 400 (an id Appwrite cannot
+// carry — past 36 letters, a `.`; an attribute the collection lacks) is that
+// row's `{ id, error }`. Appwrite has no compare-and-set write, so a write
+// landing between the read and the update is overwritten — said in the docs,
+// as RxDB says it. The stream is Realtime's channel of the collection's
+// documents, every event a `RESYNC`. Requires same.js only.
 
 const { same } = require('./same.js');
 
@@ -118,7 +121,8 @@ const appwrite = ({
           const row = rows[i];
           const doc = current.get(row.id);
           const data = doc === undefined || doc[deletedField] === true ? null : strip(doc);
-          if (!same(data, row.assumed)) {
+          // A probe is the document as it stands; a row that assumed another state the same, a conflict.
+          if (row.assumed === undefined || !same(data, row.assumed)) {
             conflicts.push(doc === undefined ? { id: row.id, deleted: true } : documentOf(doc));
             continue;
           }
@@ -128,11 +132,14 @@ const appwrite = ({
             if (doc === undefined) await databases.createDocument(databaseId, collectionId, row.id, body);
             else await databases.updateDocument(databaseId, collectionId, row.id, body);
           } catch (error) {
-            // Made meanwhile (409), or taken away meanwhile (404): the document as it stands is the conflict.
+            // Made meanwhile (409), or taken away meanwhile (404): the document as it stands is the conflict. A 400
+            // (an id Appwrite cannot carry, an attribute the collection lacks) is the row refused by name.
             if (error?.code === 409) {
               conflicts.push(documentOf(await databases.getDocument(databaseId, collectionId, row.id)));
             } else if (error?.code === 404) conflicts.push({ id: row.id, deleted: true });
-            else throw error;
+            else if (error?.code === 400) {
+              conflicts.push({ id: row.id, error: { code: '400', message: error.message ?? '' } });
+            } else throw error;
           }
         }
         return conflicts;
