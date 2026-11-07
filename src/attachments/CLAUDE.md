@@ -27,8 +27,12 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   `#entry` takes it only where `validEntry` holds (`isDigest` — 64 lowercase hex, never a path: a digest is the files
   engine's file name — a `type`, a safe `length` within the cap, a known `encoding`), `ATTACHMENT_INVALID` from
   `get`/`has`, left out of `list` with one `attachments.register.invalid`; every engine's store checks the digest at its
-  own door too (`checkDigest`). `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a read:
-  an attachment reaches a node when that node reads it.
+  own door too (`checkDigest`). The bytes read are what the register says or `BLOB_MISMATCH` (`#mismatch`: a plain
+  blob of another `length`, a compressed one that inflates past `length` — `inflate` counts the chunks and cancels the
+  reader there, nothing inflated whole on a register's word — or to another length). A fetched blob is kept ONCE: the
+  dialer's `fetchBlob` puts it (a store that refuses is `sync.blob.keep.failed`, the bytes answered all the same), the
+  plugin never puts what it fetched. `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a
+  read: an attachment reaches a node when that node reads it.
 - **The store is the engine's; the plugin refuses an engine without one.** Every shipped engine keeps `blobs` (memory: a Map;
   IndexedDB: a seventh store, VERSION 2; files: `blobs/<digest>` as base64 text; SQLite: a table; MongoDB: a collection) and
   says so in `capabilities.blobs`; the read-only wrapper reads them, the at-rest wrapper seals them as text at the blob's
@@ -37,4 +41,5 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   database over an engine without blobs opens as before.
 - **Compression is the plugin's, said on the register.** `attachments({ compression })` stores the compressed bytes, whose
   digest is the blob's, with `encoding` on the register and `length` the plain length; `get` inflates by what the register
-  says, so a node without the option reads what a node with it wrote.
+  says — and only as far as it says (`inflate(stored, encoding, limit)`) — so a node without the option reads what a node
+  with it wrote, and a register cannot make a node inflate past its own word.

@@ -1292,7 +1292,14 @@ class SyncManager extends Emitter {
         continue;
       }
       const store = this.#storage[DB]?.blobs;
-      if (store !== undefined) await store.put(digest, bytes);
+      if (store !== undefined) {
+        try {
+          await store.put(digest, bytes);
+        } catch (error) {
+          // Kept next time: the checked bytes are answered all the same.
+          this.#storage.logger.warn({ event: 'sync.blob.keep.failed', digest, err: error });
+        }
+      }
       return bytes;
     }
     throw new SyncomError('BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, {

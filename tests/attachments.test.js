@@ -216,6 +216,103 @@ test('Attachments', async (t) => {
   );
 
   await t.test(
+    'the bytes are what the register says: a blob shorter or longer than length, or one that inflates past it, is BLOB_MISMATCH and is never inflated whole; a fetched blob is kept once, and a store that refuses it is a warning',
+    async (t2) => {
+      // Plain: the register's length is checked against the stored bytes.
+      const plain = await createStorage(t2, 'M');
+      const id = await plain.insert({ title: 'mismatched' });
+      const entry = await plain.attachments.put(id, 'ok.txt', bytesOf('twelve bytes'));
+      assert.strictEqual(entry.length, 12);
+      await plain.transact(async (tx) => {
+        await tx.update(id, { [`${FIELD}/short`]: { ...entry, length: 3 } });
+        await tx.update(id, { [`${FIELD}/long`]: { ...entry, length: 400 } });
+      });
+      for (const name of ['short', 'long']) {
+        await assert.rejects(
+          () => plain.attachments.get(id, name),
+          (error) => {
+            assert.strictEqual(error.code, 'BLOB_MISMATCH');
+            assert.strictEqual(error.reason, 'length');
+            assert.strictEqual(error.id, id);
+            assert.strictEqual(error.attachment, name);
+            assert.strictEqual(error.digest, entry.digest);
+            return true;
+          },
+        );
+      }
+      assert.strictEqual((await plain.attachments.get(id, 'ok.txt')).length, 12);
+      // Compressed: a register that says fewer bytes than the blob inflates to stops the inflating there — a few KiB of
+      // gzip naming a few GiB is never inflated whole; one that says more is a length mismatch after the inflating.
+      const zipped = await createStorage(t2, 'MZ', { plugins: [attachments({ compression: 'gzip' })] });
+      const zid = await zipped.insert({ title: 'zipped' });
+      const big = new Uint8Array(4 * 1024 * 1024);
+      const zentry = await zipped.attachments.put(zid, 'zeros.bin', big);
+      const stored = await zipped[DB].blobs.get(zentry.digest);
+      assert.ok(stored.length < 16 * 1024, `${stored.length} bytes of gzip name 4 MiB`);
+      await zipped.transact(async (tx) => {
+        await tx.update(zid, { [`${FIELD}/bomb`]: { ...zentry, length: 1024 } });
+        await tx.update(zid, { [`${FIELD}/more`]: { ...zentry, length: big.length + 1 } });
+      });
+      const before = process.memoryUsage().heapUsed;
+      await assert.rejects(() => zipped.attachments.get(zid, 'bomb'), { code: 'BLOB_MISMATCH', reason: 'inflated' });
+      assert.ok(process.memoryUsage().heapUsed - before < 2 * 1024 * 1024, 'stopped at the register’s length');
+      await assert.rejects(() => zipped.attachments.get(zid, 'more'), { code: 'BLOB_MISMATCH', reason: 'length' });
+      assert.strictEqual((await zipped.attachments.get(zid, 'zeros.bin')).bytes.length, big.length);
+      // Fetched once: the dialer's fetchBlob keeps the bytes, the plugin does not put them again; a store that refuses
+      // them is a warning, the bytes answered all the same.
+      const inner = syncom.memoryEngine();
+      const puts = [];
+      let refuse = false;
+      const counting = Object.freeze({
+        name: 'counting',
+        capabilities: inner.capabilities,
+        open: async (path, options) => {
+          const db = await inner.open(path, options);
+          const blobs = {
+            ...db.blobs,
+            put: async (digest, bytes) => {
+              puts.push(digest);
+              if (refuse) throw Object.assign(new Error('no room for a blob'), { code: 'ENOSPC' });
+              return db.blobs.put(digest, bytes);
+            },
+          };
+          return Object.freeze({ ...db, blobs });
+        },
+        remove: (path) => inner.remove(path),
+      });
+      const warnings = [];
+      const mesh = await createMesh(t2, ['A', 'B'], [['B', 'A']], async (t3, name, options = {}) => {
+        const db = await syncom.createDatabase({
+          engine: name === 'B' ? counting : engine,
+          path: `${t3.name}/${name}`,
+          logger:
+            name === 'B' ? { warn: (e) => warnings.push(e), error: () => {}, info: () => {}, debug: () => {} } : false,
+          defer: 0,
+          plugins: [attachments()],
+          ...options,
+        });
+        t3.after(() => db.close().catch(() => {}));
+        return db;
+      });
+      const a = mesh.get('A');
+      const b = mesh.get('B');
+      const rid = await a.insert({ title: 'remote' });
+      const first = await a.attachments.put(rid, 'one.bin', new Uint8Array(3000).fill(1));
+      const second = await a.attachments.put(rid, 'two.bin', new Uint8Array(3000).fill(2));
+      await settle([a, b]);
+      assert.strictEqual((await b.attachments.get(rid, 'one.bin')).bytes.length, 3000);
+      assert.deepStrictEqual(puts, [first.digest], 'kept once, by fetchBlob');
+      assert.strictEqual(await b.attachments.has(rid, 'one.bin'), true);
+      refuse = true;
+      const got = await b.attachments.get(rid, 'two.bin');
+      assert.strictEqual(got.bytes.length, 3000);
+      assert.deepStrictEqual(puts, [first.digest, second.digest]);
+      assert.ok(warnings.some((w) => w.event === 'sync.blob.keep.failed' && w.digest === second.digest));
+      assert.strictEqual(await b.attachments.has(rid, 'two.bin'), false, 'fetched again next time');
+    },
+  );
+
+  await t.test(
     'compression: the stored bytes are the compressed ones, the digest theirs, the register says so; get inflates',
     async (t2) => {
       const db = await createStorage(t2, 'Z', { plugins: [attachments({ compression: 'gzip' })] });

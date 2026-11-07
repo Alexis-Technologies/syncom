@@ -627,6 +627,7 @@ export type SyncomErrorCode =
   | 'CALL_UNKNOWN'
   | 'PROMOTE_FAILED'
   | 'BLOB_NOT_FOUND'
+  | 'BLOB_MISMATCH'
   | 'ATTACHMENT_INVALID'
   | 'FOLLOW_LOST'
   | 'SHARED_LOG_FAILED'

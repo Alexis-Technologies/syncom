@@ -55,8 +55,17 @@ naming bytes it lacks asks the peers it dials — `syncom/blob { digest }`,
 answered as a stream where the transport carries one, as base64 otherwise —
 checks the answer against the digest (a peer answering other bytes is not
 believed: `sync.blob.mismatch`, the next peer asked), keeps the bytes in its
-own store and answers them. No peer has them: `BLOB_NOT_FOUND` (`id`,
-`attachment`, `digest`). `get(id, name, { fetch: false })` asks nobody. A host serves blobs
+own store — once, by `fetchBlob`; a store that refuses them is a
+`sync.blob.keep.failed` warning and the bytes are answered all the same — and
+answers them. No peer has them: `BLOB_NOT_FOUND` (`id`, `attachment`,
+`digest`). `get(id, name, { fetch: false })` asks nobody.
+
+The bytes are what the register says, or `BLOB_MISMATCH` (`id`, `attachment`,
+`digest`, `reason`): a plain blob whose length is not the register's `length`
+(`reason: 'length'`), a compressed one that inflates past it (`'inflated'`) or
+to another length. The inflating stops the moment it passes `length` — a
+register is a peer's word, and a few KiB of gzip could name a few GiB
+otherwise — so nothing is ever inflated whole on a register's say-so. A host serves blobs
 by default; `unit({ allow: { blob: false } })` refuses the call (403
 `NOT_SERVED`). `db.sync.fetchBlob(digest)` is the same fetch by digest alone.
 
@@ -73,5 +82,5 @@ plugins: [attachments({ compression: 'gzip' })]; // or 'deflate'
 The bytes are stored compressed through `CompressionStream` (Node 18+, every
 browser): the digest is the stored bytes', `encoding: 'gzip'` rides on the
 register, `length` stays the bytes' length before compression, and `get()`
-inflates. A node without compression reads what a node with it wrote: the
-register says how.
+inflates — as far as `length` and no further (`BLOB_MISMATCH` past it). A node
+without compression reads what a node with it wrote: the register says how.

@@ -59,12 +59,36 @@ const bytesOf = (value) => {
   throw new TypeError('attachments: the bytes are a Uint8Array, an ArrayBuffer or a string');
 };
 
-const through = async (bytes, Stream, encoding) => {
-  const stream = new Blob([bytes]).stream().pipeThrough(new Stream(encoding));
+const compress = async (bytes, encoding) => {
+  const stream = new Blob([bytes]).stream().pipeThrough(new globalThis.CompressionStream(encoding));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 };
-const compress = (bytes, encoding) => through(bytes, globalThis.CompressionStream, encoding);
-const decompress = (bytes, encoding) => through(bytes, globalThis.DecompressionStream, encoding);
+// The stored bytes inflated as far as the register's `length` and no further: the chunks counted as they come, the
+// reader cancelled the moment they pass `limit` — null then. A register is a peer's word; a few KiB of gzip could
+// name a few GiB otherwise.
+const inflate = async (bytes, encoding, limit) => {
+  const stream = new Blob([bytes]).stream().pipeThrough(new globalThis.DecompressionStream(encoding));
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > limit) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(value);
+  }
+  const out = new Uint8Array(total);
+  let at = 0;
+  for (let i = 0; i < chunks.length; i++) {
+    out.set(chunks[i], at);
+    at += chunks[i].length;
+  }
+  return out;
+};
 
 class Attachments {
   #storage;
@@ -136,7 +160,9 @@ class Attachments {
 
   /**
    * The attachment named: `{ bytes, type, length, digest, encoding? }`, or null where the record names none. Bytes
-   * this node lacks are asked of the peers it dials (`fetch: false` to skip); none has them, `BLOB_NOT_FOUND`.
+   * this node lacks are asked of the peers it dials (`fetch: false` to skip); none has them, `BLOB_NOT_FOUND`. The
+   * bytes are what the register says or BLOB_MISMATCH: a plain blob of another length (`reason: 'length'`), a
+   * compressed one that inflates past `length` (`'inflated'`, the inflating stopped there) or to another length.
    */
   async get(id, name, { fetch = true } = {}) {
     const entry = await this.#entry(id, name);
@@ -146,7 +172,9 @@ class Attachments {
       if (fetch !== true) throw this.#missing(id, name, entry.digest);
       stored = await this.#fetch(entry.digest, id, name);
     }
-    const bytes = entry.encoding === undefined ? stored : await decompress(stored, entry.encoding);
+    const bytes = entry.encoding === undefined ? stored : await inflate(stored, entry.encoding, entry.length);
+    if (bytes === null) throw this.#mismatch(id, name, entry.digest, 'inflated');
+    if (bytes.length !== entry.length) throw this.#mismatch(id, name, entry.digest, 'length');
     const out = { bytes, type: entry.type, length: entry.length, digest: entry.digest };
     if (entry.encoding !== undefined) out.encoding = entry.encoding;
     return out;
@@ -184,6 +212,14 @@ class Attachments {
     await this.#storage.unset(id, [this.field(name)]);
   }
 
+  #mismatch(id, name, digest, reason) {
+    return new SyncomError(
+      'BLOB_MISMATCH',
+      `The bytes of attachment ${name} of ${id} (${digest}) are not what the register says (${reason})`,
+      { id, attachment: name, digest, reason },
+    );
+  }
+
   #missing(id, name, digest) {
     return new SyncomError('BLOB_NOT_FOUND', `The bytes of attachment ${name} of ${id} (${digest}) are not here`, {
       id,
@@ -192,7 +228,8 @@ class Attachments {
     });
   }
 
-  // The bytes asked of the peers, through the sync plugin where it runs: checked by digest there, kept here.
+  // The bytes asked of the peers, through the sync plugin where it runs: checked by digest and kept there (once —
+  // `fetchBlob` puts them into this node's store; a store that refuses is its warning), answered here.
   async #fetch(digest, id, name) {
     let sync = null;
     try {
@@ -201,20 +238,12 @@ class Attachments {
       // No sync plugin: nobody to ask.
     }
     if (sync === null || typeof sync.fetchBlob !== 'function') throw this.#missing(id, name, digest);
-    let bytes;
     try {
-      bytes = await sync.fetchBlob(digest);
+      return await sync.fetchBlob(digest);
     } catch (error) {
       if (error?.code !== 'BLOB_NOT_FOUND') throw error;
       throw this.#missing(id, name, digest);
     }
-    try {
-      await this.#blobs.put(digest, bytes);
-    } catch (error) {
-      // Kept next time: the bytes are answered all the same.
-      this.#logger.warn({ event: 'attachments.keep.failed', id, name, digest, err: error });
-    }
-    return bytes;
   }
 }
 
