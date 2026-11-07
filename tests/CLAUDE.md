@@ -26,10 +26,11 @@ and a `*.browser.test.js`
 wrapper); `tests/suites/sync-engine.js` runs the
 convergence properties (a partition, a seeded fuzz over `set`/`update`/`inc`/
 `add`/`remove`/`delete` — a new op kind joins as a branch there — and a late
-joiner) over `tests/utils/memory-link.js` (an in-process link
-that mimics a wrpc client: JSON across the boundary, a reconnect re-opens the
-subscription from its last event id against a fresh server-side client) and
-`tests/utils/mesh.js` (N storages from an adjacency list, `settle()`).
+joiner) over `@alexify/syncom/testing`'s link and mesh (`src/testing/link.js`: an in-process link
+that mimics a wrpc client — JSON across the boundary, a reconnect re-opens the
+subscription from its last event id against a fresh server-side client; `src/testing/mesh.js`: N storages from an
+adjacency list, `settle()`), which `tests/utils/memory-link.js` re-exports and `tests/utils/mesh.js` wraps with the
+test context (`createMesh(t, names, edges, createStorage, options)`).
 `tests/wrpc.integration.test.js` runs two real wrpc `Server`s and a dialer,
 the `onRequest` rate-limit recipe of `docs/guide/scaling.md` (keep the two in
 step), the recipes of `docs/guide/wrpc.md` — a dialer over wrpc's SSE transport

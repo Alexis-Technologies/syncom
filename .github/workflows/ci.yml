@@ -69,3 +69,36 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # A broken docs build (including dead links) should fail the PR, not the deploy.
       - run: pnpm run docs:build
+
+  # The package on the other runtimes: a smoke of a database in memory and two nodes over an in-process link
+  # (tests/smoke/smoke.js, plain node:assert) — what Deno's and Bun's Node compatibility has to carry for
+  # `require('@alexify/syncom')` to work there. Neither runs the suite: node:test is Node's.
+  smoke-deno:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno run --allow-read --allow-write --allow-env --allow-sys tests/smoke/smoke.js
+
+  smoke-bun:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - uses: oven-sh/setup-bun@v2
+      - run: bun tests/smoke/smoke.js

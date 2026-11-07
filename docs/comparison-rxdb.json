@@ -1575,14 +1575,14 @@
           "source": "package.json:134-136; src/fsi.js; .github/workflows/ci.yml:33-34"
         },
         "deno": {
-          "mark": "❌",
-          "text": "not tested; `engines` names Node.js only",
-          "source": "package.json:134-136; .github/workflows/ci.yml"
+          "mark": "⚠️",
+          "text": "a smoke runs in CI (`tests/smoke/smoke.js`: a database in memory, two nodes over the in-process link); the suite is node:test's and runs under Node alone",
+          "source": ".github/workflows/ci.yml (smoke-deno); tests/smoke/smoke.js"
         },
         "bun": {
-          "mark": "❌",
-          "text": "not tested",
-          "source": ".github/workflows/ci.yml"
+          "mark": "⚠️",
+          "text": "a smoke runs in CI (`tests/smoke/smoke.js`); the suite is node:test's and runs under Node alone",
+          "source": ".github/workflows/ci.yml (smoke-bun); tests/smoke/smoke.js"
         },
         "browser": {
           "mark": "✅",
@@ -3011,10 +3011,10 @@
           "source": "src/errors.js; docs/reference/api.md (error codes table)"
         },
         "testing": {
-          "mark": "⚠️",
-          "text": "`memory()` for in-memory stores; contract suites stay in the repo",
-          "source": "src/backend.js:10, 40; package.json#files (no tests/); tests/suites/fsi.js; docs/guide/backends.md#your-own",
-          "detail": "tests/utils/memory-link.js (an in-process link) and tests/utils/mesh.js (N storages, `settle()`) are repo-only."
+          "mark": "✅",
+          "text": "`@alexify/syncom/testing`: the memory engine, an in-process link with a transport's hazards (latency, a page dropped or doubled, a disconnect and reconnect), a mesh of nodes from an adjacency list, `settle()`, `withDatabase()`",
+          "source": "src/testing/testing.js; docs/guide/testing.md",
+          "detail": "The one copy: the repository's own suite runs on it through tests/utils/mesh.js and tests/utils/memory-link.js."
         },
         "ci": {
           "mark": "",

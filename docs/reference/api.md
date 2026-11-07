@@ -815,6 +815,23 @@ in the engine's blobs store, named on it as the register `_attachments/<name>` �
 `FIELD` is `'_attachments'`. The engine must have a blobs store (`capabilities.blobs`); the plugin is refused at
 `createDatabase()` otherwise. `db.sync.fetchBlob(digest)` fetches by digest alone.
 
+## Testing (subpath)
+
+`@alexify/syncom/testing` — what a test over syncom stands on, and what this repository's suite runs on — see
+[Testing](../guide/testing).
+
+| Member | Notes |
+| --- | --- |
+| `memoryEngine()` | The memory engine of `@alexify/syncom/memory`: one engine, a database per path, nothing on disk |
+| `createMesh(names, edges, { createStorage, link, sync, nodes, unit, scopes })` → `Promise<Mesh>` | A database per name through `createStorage(name, options)` (`options` carries `sync.connect` to the mesh's links and `autoStart: false`), each hosting `sync.unit(unit)` (public by default), every edge `['A', 'B']` an `addNode('mem://B')` of A with `scopes[A]`, every manager started; `link` is every link's hazards |
+| `Mesh` — `storages`, `links`, `units`, `servers`, `connect(node)`, `get(name)`, `close()` | The databases by name; the links by the url dialed (two dialers of one host: the last one — the host's `servers.get(name).links` has every one); the units; every database closed |
+| `MemoryLink(unit, { latency, drop, duplicate, server })` | An in-process `SyncLink` over a host's unit: JSON across the boundary, `changes` driven as an async generator, `disconnect()` (calls fail, feeds stop, `close` announced) and `reconnect({ freshClient })` (every subscription re-opened from its last event id, `reconnect` announced — wrpc's restore); `calls` and `sent` record what crossed |
+| `settle(storages, { timeout, step })` | Resolves once every vector is equal and nothing is in flight (no queue holds a turn, no peer has a page pending), three polls in a row; rejects past `timeout` (5000 ms) |
+| `waitUntil(predicate, { timeout, step })`, `sameVectors(storages)`, `prng(seed)` | A poll until `predicate()` is true; whether every vector is the same; deterministic numbers in [0, 1) for a seeded run |
+| `withDatabase(open, fn)` | A database — or what opens one — for `fn`, closed after it whatever `fn` does; `fn`'s answer |
+
+A timeout of `settle()` or `waitUntil()` is a plain `Error` (a test's failure, not a condition a program handles).
+
 ## Cleanup (subpath)
 
 `@alexify/syncom/cleanup` — `cleanup(db, { minimumDeletedTime, runEach, awaitSync, leader, now }?)`: a deleted record

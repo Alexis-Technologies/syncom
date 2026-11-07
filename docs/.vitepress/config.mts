@@ -206,6 +206,7 @@ export default withMermaid({
             items: [
               { text: 'OpenTelemetry', link: '/guide/telemetry' },
               { text: 'Devtools', link: '/guide/devtools' },
+              { text: 'Testing', link: '/guide/testing' },
               { text: 'Dumps and backups', link: '/guide/dump' },
               { text: 'Tombstone cleanup', link: '/guide/cleanup' },
               { text: 'Connectors', link: '/guide/connector' },

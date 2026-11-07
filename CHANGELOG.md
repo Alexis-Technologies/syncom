@@ -134,6 +134,11 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   (the IndexedDB database at version 2, upgraded at its open; the files engine as base64 under `blobs/`), the at-rest
   wrapper seals them, `copyEngine()` carries them, a read-only database reads them. `unit({ allow: { blob } })`,
   `sync.fetchBlob(digest)`.
+- **`@alexify/syncom/testing`.** What a test over syncom stands on — the memory engine, `MemoryLink` (an in-process
+  `SyncLink` with a transport's hazards: latency, a page dropped or doubled, a disconnect and wrpc's reconnect),
+  `createMesh(names, edges, { createStorage })` from an adjacency list, `settle()`, `waitUntil()`, `withDatabase()` —
+  the one copy this repository's suite runs on. A smoke of the package runs under Deno and Bun in CI
+  (`tests/smoke/smoke.js`: a database in memory, two nodes over the link).
 - **Sealed records in queries.** A collection's `encrypted: true` records are read whole at the key holder and
   matched, ordered, windowed and counted like the rest — they join the candidates of every plan over the collection
   (no index knows them: they alone are read, the plain rows answered from the index and the catalog as before, and
