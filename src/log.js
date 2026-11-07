@@ -1,5 +1,7 @@
 'use strict';
 
+const { SyncomError, isQuotaError } = require('./errors.js');
+
 // The persisted operation log: every op this node applied — its own and the
 // ones it accepted from peers — in the order they landed here. Two things read
 // it: a subscriber resuming from an event id (`since`), and the node itself on
@@ -715,15 +717,19 @@ class OpLog {
         else this.#heads.set(key, head);
       }
     }
+    // A medium that is full is said as such: the writer hears QUOTA, with the platform's error as the cause.
+    const reported = isQuotaError(error)
+      ? new SyncomError('QUOTA', 'The medium is full: nothing more can be appended', { cause: error })
+      : error;
     if (this.#onFail !== null) {
       try {
-        this.#onFail(error, group.from);
+        this.#onFail(reported, group.from);
       } catch (thrown) {
         this.#log?.warn?.({ event: 'listener.error', name: 'log', err: thrown });
       }
     }
-    group.reject(error);
-    if (later !== null) later.reject(error);
+    group.reject(reported);
+    if (later !== null) later.reject(reported);
   }
 
   // Sealing: write the segment, then the index, then remove the open files.

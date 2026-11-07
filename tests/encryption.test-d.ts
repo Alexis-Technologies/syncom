@@ -1,6 +1,14 @@
 import type { Engine } from '../index.js';
 import { expectAssignable, expectError, expectType } from 'tsd';
-import { encryption, atRest, generateKeys, encrypt, decrypt, loadKeys } from '../src/encryption/encryption.js';
+import {
+  encryption,
+  atRest,
+  rotateAtRest,
+  generateKeys,
+  encrypt,
+  decrypt,
+  loadKeys,
+} from '../src/encryption/encryption.js';
 import type { Plugin, Fsi, KeyPair, AtRestOptions } from '../src/encryption/encryption.js';
 import { open } from '../index.js';
 import { memory, memoryEngine } from '../src/memory/memory.js';
@@ -11,6 +19,14 @@ expectType<Promise<string>>(storage.insert({ a: 1 }, { encrypted: false }));
 // The wrapper is a backend like the one it wraps.
 expectType<Fsi>(atRest(memory(), { key: new Uint8Array(32) }));
 expectType<Engine>(atRest(memoryEngine(), { key: new Uint8Array(32) }));
+const rotated = await rotateAtRest(memoryEngine(), {
+  path: 'app',
+  from: { key: new Uint8Array(32) },
+  to: { key: new Uint8Array(32) },
+  into: { path: 'app-2' },
+});
+expectType<number>(rotated.records);
+expectType<number>(rotated.blobs);
 await open({ engine: atRest(memoryEngine(), { key: new Uint8Array(32) }) });
 expectType<Fsi>(atRest(memory(), { password: 'pw', salt: 'a salt of eight', iterations: 10_000 }));
 expectAssignable<AtRestOptions>({ password: 'pw', salt: 'salt-salt' });

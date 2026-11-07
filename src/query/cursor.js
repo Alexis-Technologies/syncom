@@ -15,6 +15,18 @@ const { DISTANCES, isVector } = require('../search/distance.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
+const EMPTY = Object.freeze([]);
+// The candidates, then the sealed ids not among them: one array, every id once.
+const withSealed = (found, sealed) => {
+  const out = [];
+  const seen = new Set();
+  for (const id of found) {
+    out.push(id);
+    seen.add(id);
+  }
+  for (let i = 0; i < sealed.length; i++) if (!seen.has(sealed[i])) out.push(sealed[i]);
+  return out;
+};
 const MAX_TEXT = 1000;
 // How deep a query nests ($and/$or/$nor/$not/$elemMatch within one another): past it a TypeError, never a RangeError.
 const MAX_QUERY_DEPTH = 32;
@@ -725,8 +737,15 @@ class Cursor {
     return this.#order.length === 0 && this.#query.$text !== undefined;
   }
 
+  // The sealed records of the collection, where the source knows them (a tag's source does not): read whole.
+  #sealed() {
+    if (this.#ranked() || typeof this.#source.sealed !== 'function') return EMPTY;
+    return this.#source.sealed(this.#entity);
+  }
+
   // Covered: everything the cursor reads — the query's fields, the order's,
-  // the projection's — is in the catalog, and no filter asks for the record.
+  // the projection's — is in the catalog, and no filter asks for the record;
+  // a sealed row, which has no fields there, is read whole even then.
   #covered(needsRows) {
     if (this.#filter !== null) return false;
     if (needsRows && this.#populate !== null) return false;
@@ -759,22 +778,29 @@ class Cursor {
     const wanted = this.#offset + limit;
     // By the plan: an index scanned in its order, the posting lists, or every record of the collection.
     const scanned = made.scan === 'index' ? scan(this.#entity, made, made.sortedByIndex ? this.#after : null) : null;
+    // The collection's sealed records, where there are any: no index knows them, so they join the candidates
+    // and are read whole at the key holder while the plain rows are answered as before — nothing is sorted by an
+    // index then (a TopK sorts), and a posting list decides nothing of them.
+    const sealed = this.#sealed();
+    const hasSealed = sealed.length > 0;
+    const sealedSet = hasSealed ? new Set(sealed) : null;
     // Sorted by the index already (a key that holds arrays is not): enough rows is the window, read as
     // far as it and no further.
-    const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex;
+    const byIndex = needsRows && scanned !== null && scanned.sorted && made.sortedByIndex && !hasSealed;
     const enough = needsRows && (!ordered || byIndex) ? wanted : Infinity;
     const windowed = enough !== Infinity && !byIndex && !this.#ranked();
     let next;
     let byId = false;
-    if (scanned !== null && !windowed) next = scanned.next;
+    if (scanned !== null && !windowed && !hasSealed) next = scanned.next;
     else {
       let found =
         scanned !== null ? drained(scanned.next) : (candidates(this.#entity, this.#query) ?? ids(this.#entity));
+      if (hasSealed) found = withSealed(found, sealed);
       // An unordered cursor that stops at enough rows reads its candidates in id order — the result's
       // order without keys — so what it stops at is the window a run of every candidate would give: a
       // scan's ids come in key order and a posting set in none, both are sorted by id first; the
       // collection's list is in id order already.
-      if (windowed && (scanned !== null || !Array.isArray(found))) found = [...found].sort();
+      if (windowed && (scanned !== null || !Array.isArray(found) || hasSealed)) found = [...found].sort();
       byId = windowed && !ordered;
       // After a page's edge, by id: the first id above it.
       const start = byId && this.#after !== null ? aboveId(found, this.#after.id) : 0;
@@ -791,7 +817,7 @@ class Cursor {
       }
     }
     const admits = (id) => {
-      if (narrowed === null) return true;
+      if (narrowed === null || sealedSet?.has(id) === true) return true;
       for (let i = 0; i < narrowed.length; i++) if (!narrowed[i].has(id)) return false;
       return true;
     };
@@ -813,7 +839,14 @@ class Cursor {
       for (let id = next(); id !== null && sink.size < enough; id = next()) {
         if (!admits(id)) continue;
         const indexed = row(id);
-        if (indexed === null || indexed.encrypted) continue;
+        if (indexed === null) continue;
+        if (indexed.encrypted) {
+          // A sealed row has no fields: the record itself, as the key here opens it — none where it does not.
+          if (sealedSet === null) continue;
+          const record = await load(id);
+          if (record !== null) take(rowOf(id, record));
+          continue;
+        }
         take(rowOf(id, indexed.fields));
       }
       return { rows: sink.rows, sorted: inOrder };
@@ -888,7 +921,8 @@ class Cursor {
   /**
    * How many records match. A sorted index entered by a prefix or a range,
    * with every conjunct decided by it and no filter, answers from its
-   * entries alone — no record is read.
+   * entries alone — no plain record is read; the collection's sealed records,
+   * which no index saw, are read whole and tested one by one.
    */
   async count() {
     if (this.#source.ready !== undefined) await this.#source.ready();
@@ -896,9 +930,20 @@ class Cursor {
     const decided = made.scan === 'index' && !made.residual && made.narrow.length === 0 && this.#filter === null;
     if (decided && (made.prefix.length > 0 || made.range !== null)) {
       const scanned = this.#source.scan(this.#entity, made, null);
-      if (scanned.sorted) return scanned.estimate;
+      if (scanned.sorted) return scanned.estimate + (await this.#sealedMatches());
     }
     return (await this.#matching(false)).rows.length;
+  }
+
+  // How many of the collection's sealed records match: each read whole at the key holder (none elsewhere).
+  async #sealedMatches() {
+    const sealed = this.#sealed();
+    let matched = 0;
+    for (let i = 0; i < sealed.length; i++) {
+      const record = await this.#source.load(sealed[i]);
+      if (record !== null && this.#predicate(rowOf(sealed[i], record))) matched++;
+    }
+    return matched;
   }
 
   // The ids the cursor matches now, in its order and window — what a write

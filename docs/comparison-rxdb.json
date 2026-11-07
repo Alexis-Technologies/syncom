@@ -1767,10 +1767,9 @@
           "detail": "`integrity: 'lazy'` or `chain: false` turn the per-read check off. `repair` needs a whole-record op still in the log, otherwise `UNRECOVERABLE`."
         },
         "quotas": {
-          "mark": "❌",
-          "text": "none; past the log append a failed record file is held in memory and reported (`UNPERSISTED`)",
-          "source": "src/database.js (#land, #unpersisted); src/commit.js (persistLocal); tests/storage.fsi.test.js",
-          "detail": "No `navigator.storage.persist()` request; the docs note the browser may evict OPFS."
+          "mark": "✅",
+          "text": "`db.quota()` (`{ usage, quota }`: the Storage API estimate, a file system's free space) and `db.persist()`; a log append the medium refuses for want of room is `QUOTA` (the platform's error as `cause`), a record file it refuses `UNPERSISTED { quota: true }`",
+          "source": "src/database.js (quota, persist, #unpersisted); src/log.js (#fail); src/errors.js (isQuotaError); tests/storage.quota.test.js; docs/guide/database.md#encryption-at-rest"
         },
         "onDiskFormat": {
           "mark": "✅",
@@ -2271,9 +2270,10 @@
           "source": "src/query/cursor.js (#populated); docs/guide/query.md#the-cursor"
         },
         "encryptedFields": {
-          "mark": "❌",
-          "text": "an `{ encrypted: true }` record is listed, never a query row",
-          "source": "src/catalog.js:10-13; src/query/cursor.js; docs/guide/query.md#the-cursor"
+          "mark": "✅",
+          "text": "a query over a collection with `encrypted: true` records reads them whole at the key holder and matches, orders, windows and counts them with the rest; no index knows them (a full read of the sealed records per query), `$text` leaves them out",
+          "source": "src/query/cursor.js (#sealed, withSealed); src/catalog.js (sealed); src/database.js ([SOURCE].load); tests/query.sealed.test.js; docs/guide/query.md#sealed-records",
+          "detail": "A blind index for an equality on a sealed field is not here yet: the sealed records are a scan."
         },
         "secondaryIndexes": {
           "mark": "✅",
@@ -2789,9 +2789,9 @@
           "source": "src/encryption/encryption.js:12-19, :76-88"
         },
         "keyRotation": {
-          "mark": "❌",
-          "text": "no rotation API; a replaced key pair cannot open sealed records",
-          "source": "src/crypto/keys.js:20-37; docs/guide/database.md#encryption-at-rest"
+          "mark": "⚠️",
+          "text": "the at-rest key: `rotateAtRest(engine, { path, from, to, into })` copies the database whole into another path or engine sealed under the new key (the same node); a sealed record's pair is the directory's and is not rotated — a new pair is a new node",
+          "source": "src/encryption/encryption.js (rotateAtRest); src/engines/copy.js (targetPath); tests/encryption.rotate.test.js; docs/guide/database.md#encryption-at-rest"
         },
         "encAttachments": {
           "mark": "✅",

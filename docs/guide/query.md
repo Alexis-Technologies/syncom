@@ -97,6 +97,20 @@ A cursor at a [tag](./versions#tags) — `storage.at(name).collection(entity).se
 change, so `watch()` on it throws, and it carries no text index, so a `$text`
 query there is a `TypeError`.
 
+## Sealed records
+
+A record written `encrypted: true` ([Encryption at rest](./database#encryption-at-rest)) is stored as one
+ciphertext: the catalog holds a row for it with no fields, and no index knows it. A query still finds it — at the
+key holder. The sealed records of a collection join the candidates of every plan over it, each read and opened
+through the plugin's key and matched, ordered and windowed like the rest; the plain rows are answered as before —
+narrowed by the index, counted from its entries, covered by the catalog where the query asks for indexed fields
+alone — and only an ordered page is sorted after the read rather than taken from the index in its order. `$text`
+queries leave sealed records out: the text index never saw them. A node without the key does not hold sealed
+records (they are not replicated), so a query there sees none of them.
+
+The cost is the sealed records: `n` of them are `n` reads and `n` decryptions per query over the collection,
+whatever the query asks. A blind index — an equality on a sealed field narrowed by a keyed hash — is not here yet.
+
 ## The plan
 
 The entity's `index` — fields, and compound keys of fields: `index: ['boardId', ['boardId', 'rank']]`,

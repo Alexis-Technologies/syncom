@@ -77,17 +77,21 @@ const kvPuts = async (source, ns, { identity }) => {
 };
 
 /**
- * `copyEngine(from, to, { path, batch })` — the database at `path` copied
- * from one engine to another, `batch` records (or log entries) per write set
+ * `copyEngine(from, to, { path, targetPath, batch })` — the database at `path` copied
+ * from one engine to another (at `targetPath` there, `path` by default), `batch` records (or log entries) per write set
  * (500). Answers what was copied: `{ records, pieces, copies, kv, entries, blobs }`.
  */
-const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
+const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {}) => {
   checkEngine(from, 'copyEngine(from)');
   checkEngine(to, 'copyEngine(to)');
   if (typeof path !== 'string' || path.length === 0) throw new TypeError('copyEngine(): path');
+  if (typeof targetPath !== 'string' || targetPath.length === 0) throw new TypeError('copyEngine(): targetPath');
+  if (from === to && targetPath === path) {
+    throw new TypeError('copyEngine(): the target is the source — another engine, or targetPath');
+  }
   if (!Number.isInteger(batch) || batch < 1) throw new TypeError('copyEngine(): batch must be a positive integer');
   const source = checkEngineDb(await from.open(path, {}), 'copyEngine(from)');
-  const target = checkEngineDb(await to.open(path, {}), 'copyEngine(to)');
+  const target = checkEngineDb(await to.open(targetPath, {}), 'copyEngine(to)');
   const held = [];
   const counts = { records: 0, pieces: 0, copies: 0, kv: 0, entries: 0, blobs: 0 };
   // A lease that goes while the copy runs: the next write set fails, nothing lands over another holder's.
@@ -105,9 +109,9 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
   let written = false;
   try {
     held.push(await hold(source, path, onLost));
-    held.push(await hold(target, path, onLost));
+    held.push(await hold(target, targetPath, onLost));
     if ((await target.kv.has('', NODE_FILE)) || (await target.records.ids({ limit: 1 })).length > 0) {
-      throw empty(path);
+      throw empty(targetPath);
     }
     written = true;
     // The kv texts, namespace by namespace — the identity (node.json, the keys) last of all.
@@ -249,7 +253,7 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
     await source.close();
     await target.close();
     // A copy that failed takes what it wrote away: the target was empty, and a retry finds it so.
-    if (written) await to.remove(path);
+    if (written) await to.remove(targetPath);
   }
 };
 

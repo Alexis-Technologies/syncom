@@ -38,6 +38,21 @@ export declare function atRest(fsi: Fsi, options: AtRestOptions): Fsi;
  */
 export declare function atRest(engine: Engine, options: AtRestOptions): Engine;
 
+/**
+ * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole into `into` (`{ path }`
+ * on the same engine, `{ engine }`, or both) sealed under `to` — the same node; never in place. Answers what
+ * `copyEngine` answers.
+ */
+export declare function rotateAtRest(
+  engine: Engine,
+  options: {
+    path: string;
+    from: AtRestOptions;
+    to: AtRestOptions;
+    into: { path?: string; engine?: Engine };
+    batch?: number;
+  },
+): Promise<import('../engines/engines.js').CopyEngineResult>;
 export declare function generateKeys(): Promise<KeyPair>;
 export declare function encrypt(data: unknown, publicKey: string): string;
 export declare function decrypt(data: string, privateKey: string): unknown;

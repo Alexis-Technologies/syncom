@@ -20,7 +20,7 @@ jobs:
       - run: pnpm format:check
       # The package checks first and fast: exports, files, the browser map,
       # the invariants' tests, the error codes, the guides' paths.
-      - run: node --test --test-timeout=60000 tests/package/*.test.js
+      - run: node --test --test-timeout=60000 --test-force-exit tests/package/*.test.js
       # Smoke: keeps the bundle-size script working and its numbers visible in
       # CI logs. It also enforces the browser budget and rejects any bare
       # import that reaches a browser bundle.

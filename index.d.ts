@@ -653,6 +653,7 @@ export type SyncomErrorCode =
   | 'STREAMS_UNSUPPORTED'
   | 'UNRECOVERABLE'
   | 'UNPERSISTED'
+  | 'QUOTA'
   | 'REWOUND'
   | 'UNDELIVERABLE'
   | 'UNLOGGED'
@@ -2107,7 +2108,7 @@ export interface StorageEvents {
           count: number;
         })
       /** Records logged but not written — held in memory until they land (see Health). */
-      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] })
+      | (SyncomError & { code: 'UNPERSISTED'; ids: string[]; quota?: true })
       /** The engine's lease went to another instance: read-only from here on. */
       | (SyncomError & { code: 'LEASE_LOST'; path: string; cause?: unknown })
       /** A follower's change stream ended: subscribed again, every record read again. */
@@ -2668,6 +2669,10 @@ export interface Database {
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
   stats(): StorageStats;
+  /** The room the medium has, in bytes: the browser's Storage API estimate, or a file system's free space (`usage` null); null where the platform says nothing. */
+  quota(): Promise<{ usage: number | null; quota: number | null }>;
+  /** Asks the browser to keep this origin's storage out of eviction; true where nothing need be asked. */
+  persist(): Promise<boolean>;
   /** Lands what waits — the writes in flight, then the deferred record files — so what was written is on disk. */
   flush(): Promise<void>;
   /**

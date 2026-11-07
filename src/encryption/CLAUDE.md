@@ -6,7 +6,7 @@ Encrypted records are local. The rules of the core — the op model, the write p
 
 ```
 src/encryption/encryption.js  @alexify/syncom/encryption — the sealing plugin (encrypted: true) over src/encryption/{rsa,rsa.browser}.js,
-                          and atRest(fsi | engine, …), the AES-256-GCM wrapper of a backend or an engine (the cipher, createCipher)
+                          and atRest(fsi | engine, …), the AES-256-GCM wrapper of a backend or an engine (the cipher, createCipher); rotateAtRest(engine, { path, from, to, into }) — the at-rest key rotated by a copy (engines/copy.js)
 src/encryption/at-rest-engine.js  atRestEngine(engine, cipher): the engine contract over an engine, every value a ciphertext bound to
                           its place — records as text, pieces, copies, kv, the log's entries and index (its floor in the clear);
                           indexes off; a blob's bytes sealed as base64 text at the blob's place (the digest a name, in the clear);
@@ -28,3 +28,8 @@ src/encryption/at-rest-engine.js  atRestEngine(engine, cipher): the engine contr
   key) and the log index's `floor` stay in the clear: a medium tells a sealed seq from an open one by the floor. The
   engine wrapper writes a record as `text` and reads it through `raw` (a medium keeps a text that is no JSON as it
   is); the files engine is never wrapped this way — its journal reads the ops it writes — but at its backend.
+- **A key is rotated by a copy, never in place.** `rotateAtRest` is `copyEngine(atRest(engine, from), atRest(into.engine ??
+engine, to), { path, targetPath: into.path ?? path })`: the whole node — identity, epoch, vector, heads, every value and
+  blob — lands sealed under the new key where `into` says, and a copy cut short leaves the source whole and the target
+  empty; the same engine and path is refused (a TypeError), as `copyEngine` refuses a target that is its source. A sealed
+  record's pair (`encrypted: true`, the `keys/` namespace) is not rotated: a new pair is a new node.

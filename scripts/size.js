@@ -214,7 +214,8 @@ const ENTRIES = [
     label: 'contracts — browser (@alexify/syncom/contracts)',
     entry: 'src/contracts/contracts.js',
     platform: 'browser',
-    budget: 1,
+    // 1.1 with isQuotaError beside the errors it shares with the core (sync-parity plan, S5). 1.2, raised by name.
+    budget: 1.2,
   },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
@@ -440,7 +441,8 @@ const ENTRIES = [
   // 169.6 with the host's rules and the dialer's (authorizeWrite, beforeSend, prove, revoke, query/count, forget;
   // sync-parity plan, S1; 2026-11-06). 170, raised by name.
   // 170.9 with the blobs stores, fetchBlob and the host's blob procedure (sync-parity plan, S4). 172, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 172 },
+  // 173.2 with the sealed records in queries, QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 174 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -478,7 +480,8 @@ const ENTRIES = [
   // once per base, MAX_MARKS) beside the handle's fixes (E2) in one bundle. 43.5, raised by name.
   // 43.5 (over by bytes) with a join that is the same on every node whatever a forged picture differs in under one
   // key (the lesser text wins; SEQ-13). 44, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44 },
+  // 44.1 with isQuotaError in the errors it shares with the core (sync-parity plan, S5). 44.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
@@ -503,7 +506,8 @@ const ENTRIES = [
     platform: 'browser',
     // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
     // 6.6 with the engines' shared errors beside the contract (src/engine.js unreadableRecord, eexist; review №5 M-4). 6.75, raised by name.
-    budget: 6.75,
+    // 6.8 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 6.75. 7, raised by name.
+    budget: 7,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
@@ -523,7 +527,8 @@ const ENTRIES = [
     entry: 'src/encryption/encryption.js',
     platform: 'browser',
     // 6.6 with the blobs sealed at rest (sync-parity plan, S4). 7, raised by name.
-    budget: 7,
+    // 9.2 with rotateAtRest: the copy (engines/copy.js, the lock, the keys) rides along for the rotation by copy (sync-parity plan, S5). 9.5, raised by name.
+    budget: 9.5,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).
@@ -572,7 +577,8 @@ const ENTRIES = [
     // raised by name.
     // 6.6 with the id named by the data, a composite id and the declared references read off a schema's relations
     // (collections plan, C1.2–C1.8). 7, raised by name.
-    budget: 7,
+    // 7.0 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 7. 7.25, raised by name.
+    budget: 7.25,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
@@ -604,7 +610,8 @@ const ENTRIES = [
   // the design estimated 14.5 for all of E4). 17, raised by name.
   // 17.0 with a live run delivering a row that stayed as the copy it was, nearest() streamed into its sink, the
   // cache bounded by rows and the key built once (review №6, E5.2–E5.3; 2026-11-02). 17.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 17.5 },
+  // 17.5 with the sealed records joining a cursor's candidates (sync-parity plan, S5); was 17.5. 18, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 18 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.

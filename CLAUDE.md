@@ -74,10 +74,11 @@ folder's CLAUDE.md.
 ## Gates
 
 Before every commit: `pnpm lint`, `pnpm format:check`, `pnpm test:types`,
-`node scripts/size.js`, `node --test --test-timeout=120000 tests/package/*.test.js`
-and the whole suite with `node --test --test-timeout=120000` (never a run without
-`--test-timeout`: one once hung for hours). Coverage —
-`npx c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000`
+`node scripts/size.js`, `node --test --test-timeout=120000 --test-force-exit tests/package/*.test.js`
+and the whole suite with `node --test --test-timeout=120000 --test-force-exit` (never a run without
+both: a test once hung for hours, and a file whose failed test left a message port open sat for eight
+hours after its last test). Coverage —
+`npx c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000 --test-force-exit`
 — is enforced in CI; see [tests/CLAUDE.md](./tests/CLAUDE.md).
 
 ## Rules for the whole repository

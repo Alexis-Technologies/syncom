@@ -9,7 +9,7 @@
 // beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
-const { Emitter, generateUUID, createLogger, taskScope } = require('./utils.js');
+const { Emitter, generateUUID, createLogger, taskScope, estimateStorage, persistStorage } = require('./utils.js');
 const { sha256 } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
@@ -35,7 +35,7 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR, asJson } = require('./shape.js');
 const { isOperators } = require('./operators.js');
 const { checkOrm, tombstone, operate, modifyIn } = require('./writes.js');
 const { dropDatabase } = require('./drop.js');
@@ -48,7 +48,7 @@ const { compose, composeData } = require('./compose.js');
 const UNPERSISTED_NAMED = 32;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
-const { SyncomError, typed } = require('./errors.js');
+const { SyncomError, typed, isQuotaError } = require('./errors.js');
 const { loadIdentity } = require('./identity.js');
 
 // What a storage without the schema plugin runs with: no entities, version 1.
@@ -1268,22 +1268,29 @@ class Database extends Emitter {
       // Folded tombstones taken away with their rows (`cleanup({ drop: true })`): the catalog forgets the ids.
       forgetMany: (ids) => this.#run(() => this.#landing(() => this.#entries.dropMany(ids))),
       nodes: () => (this.#sync === null ? [] : this.#sync.listNodes()),
+      // A record as a reader of data sees it: the lensed view, or a sealed record's data as the key here opens
+      // it (a copy: registers alone, no meta to compose) — a query over sealed records is answered from the
+      // record at the key holder, never from the catalog.
       load: async (id) => {
         const entry = await this.#entries.load(id);
-        if (entry === null || entry.encrypted || !isAlive(entry)) return null;
-        return this.#view(id, entry);
+        if (entry === null) return null;
+        if (entry.encrypted) return entry.data === null ? null : asJson(entry.data);
+        return isAlive(entry) ? this.#view(id, entry) : null;
       },
       // Several records as `load` reads them, in ONE read of the engine for the ones not cached: a
-      // Map by id, null for one absent, encrypted or gone (a cursor's `populate`, `findByIds`).
+      // Map by id, null for one absent or gone (a cursor's `populate`, `findByIds`).
       loadMany: async (ids) => {
         const entries = await this.#entries.loadMany(ids);
         const out = new Map();
         for (const [id, entry] of entries) {
-          if (entry === null || entry.encrypted || !isAlive(entry)) out.set(id, null);
-          else out.set(id, await this.#view(id, entry));
+          if (entry === null) out.set(id, null);
+          else if (entry.encrypted) out.set(id, entry.data === null ? null : asJson(entry.data));
+          else out.set(id, isAlive(entry) ? await this.#view(id, entry) : null);
         }
         return out;
       },
+      // The sealed records of a collection, by id: what a query reads whole at the key holder.
+      sealed: (entity) => catalog.sealed(entity),
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),
@@ -1480,6 +1487,20 @@ class Database extends Emitter {
   /** Whether every write is refused: opened with `readOnly: true` (a follower), or a writer whose lease was lost. */
   get readOnly() {
     return this.#readOnly;
+  }
+
+  /**
+   * The room the medium has: `{ usage, quota }` in bytes — the browser's Storage API estimate (what this origin
+   * holds, what it may hold), a file system's free space under the path (`usage` null); null where the platform
+   * says nothing.
+   */
+  quota() {
+    return estimateStorage(this.#path);
+  }
+
+  /** Asks the browser to keep this origin's storage out of eviction (`navigator.storage.persist()`); true where nothing need be asked. */
+  persist() {
+    return persistStorage();
   }
 
   /**
@@ -1844,7 +1865,10 @@ class Database extends Emitter {
     const named = ids.length > UNPERSISTED_NAMED ? ids.slice(0, UNPERSISTED_NAMED) : ids;
     this.#logger.error({ event: 'storage.unpersisted', ids: named, count: ids.length, err: error });
     const message = `${ids.join(', ')}: logged, but not written; held until the next open`;
-    notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, { ids, cause: error }));
+    const fields = { ids, cause: error };
+    // A medium that is full: said on the error, so the application can ask for room (`quota()`, `persist()`).
+    if (isQuotaError(error)) fields.quota = true;
+    notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, fields));
   }
 
   async #persistBatch(touched, fromSeq, toSeq) {

@@ -539,6 +539,27 @@ the other records stay plain. To encrypt the directory whole, wrap the
 backend instead — `atRest()` from the same subpath, every file under one
 key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
 
+A query reads sealed records too, at the key holder: see [Sealed records](./query#sealed-records). A sealed
+record's pair is the directory's (`keys/`): it is not rotated — a new pair is a new node. The key of a database
+**encrypted at rest** (`atRest(engine, options)`, [Engines](./backends#encrypted-at-rest)) is rotated by a copy:
+
+```js
+const { rotateAtRest, atRest } = require('@alexify/syncom/encryption');
+
+await rotateAtRest(engine, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
+const db = await createDatabase({ engine: atRest(engine, { key: newKey }), path: 'app-2' });
+await engine.remove('app'); // once the new place reads
+```
+
+The database at `path` is copied whole — every record, piece, copy, kv text, log entry and blob — into `into`
+(another path, another engine, or both) sealed under the new key; it is the same node, so no peer bootstraps. Never
+in place: a copy cut short leaves the source as it was and the target empty.
+
+The room the medium has is `db.quota()` — `{ usage, quota }` in bytes: the browser's Storage API estimate, a file
+system's free space (`usage` null) — and `db.persist()` asks the browser to keep the origin out of eviction. A log
+append refused for want of room is `QUOTA` (the platform's error as `cause`); a record file that could not be
+written for it is `UNPERSISTED` with `quota: true` (held in memory, written at the next open).
+
 ## Documents
 
 `storage.document(id)` returns a live `Document`. It is cached per id, so two

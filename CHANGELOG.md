@@ -134,6 +134,16 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   (the IndexedDB database at version 2, upgraded at its open; the files engine as base64 under `blobs/`), the at-rest
   wrapper seals them, `copyEngine()` carries them, a read-only database reads them. `unit({ allow: { blob } })`,
   `sync.fetchBlob(digest)`.
+- **Sealed records in queries.** A collection's `encrypted: true` records are read whole at the key holder and
+  matched, ordered, windowed and counted like the rest — they join the candidates of every plan over the collection
+  (no index knows them: they alone are read, the plain rows answered from the index and the catalog as before, and
+  an ordered page is sorted after the read; `$text` leaves them out).
+- **Quota.** `db.quota()` (`{ usage, quota }`: the browser's Storage API estimate, a file system's free space) and
+  `db.persist()`; a log append refused for want of room is `QUOTA` (the platform's error as `cause`) and a record
+  file that could not be written for it `UNPERSISTED` with `quota: true`.
+- **Key rotation at rest: `rotateAtRest(engine, { path, from, to, into })`** of `@alexify/syncom/encryption` — the
+  database sealed under one key copied whole into another path or engine sealed under the next, the same node;
+  never in place. `copyEngine()` takes `targetPath` and answers `blobs`.
 - **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the

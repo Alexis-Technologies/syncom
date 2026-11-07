@@ -143,11 +143,13 @@ const runQueryTests = async (t, assert, createStorage) => {
     for await (const row of storage.Project.select({ orgId: 'o4' }).order('name').limit(3)) iterated.push(row.name);
     assert.strictEqual(iterated.length, 3);
     assert.throws(() => storage.Project.select({ orgId: { $nope: 1 } }), { name: 'TypeError' });
-    // Deleted and encrypted records are out; records outside the collection are out.
+    // Deleted records are out, and records outside the collection; a sealed record is read whole at the key
+    // holder and counted like the rest, the plain rows answered from the index as before.
     await storage.delete(all[0].id);
     await storage.insert({ orgId: 'o0', $type: 'Project', sealed: true }, { encrypted: true });
-    assert.strictEqual(await storage.Project.count({ orgId: 'o0' }), 23);
-    assert.strictEqual(await storage.Project.count(), 119, 'the covered path skips a sealed record too');
+    assert.strictEqual(await storage.Project.count({ orgId: 'o0' }), 24, 'the sealed record counts at the key holder');
+    assert.strictEqual(await storage.Project.count({ orgId: 'o1' }), 24, 'and only where it matches');
+    assert.strictEqual(await storage.Project.count(), 120);
   });
 
   await t.test('an indexed array field narrows by element — a set, or any array', async (t2) => {
@@ -1018,7 +1020,6 @@ const runQueryTests = async (t, assert, createStorage) => {
     await storage.insert({ boardId: 'b0', rank: 'ten', $type: 'Task' });
     await storage.insert({ boardId: 'b0', rank: true, $type: 'Task' });
     await storage.insert({ boardId: 'b0', $type: 'Task' });
-    await storage.insert({ boardId: 'b0', rank: 3, secret: true, $type: 'Task' }, { encrypted: true }).catch(() => {});
     fsi.reset();
     assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $gte: 10 } }).count(), 15);
     assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $lt: 10 } }).count(), 5);
@@ -1051,6 +1052,25 @@ const runQueryTests = async (t, assert, createStorage) => {
     fsi.reset();
     assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $gte: 10 }, secret: true }).count(), 0);
     assert.ok(fsi.dataReads() > 0);
+    // A sealed record under the prefix: the index never saw it, so it alone is read — and counted where it matches,
+    // the plain rows from the index as before. Two writes after it leave it out of the cache of two.
+    await storage.insert({ boardId: 'b0', rank: 3, secret: true, $type: 'Task' }, { encrypted: true });
+    await storage.insert({ boardId: 'b1', rank: 100, $type: 'Task' });
+    await storage.insert({ boardId: 'b1', rank: 101, $type: 'Task' });
+    fsi.reset();
+    assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $lt: 10 } }).count(), 6);
+    assert.strictEqual(await storage.Task.select({ boardId: 'b0', rank: { $gte: 10 } }).count(), 15);
+    assert.strictEqual(await storage.Task.select({ boardId: 'b1' }).count(), 22);
+    const sealedReads = fsi.dataReads();
+    assert.ok(sealedReads >= 1 && sealedReads <= 3, `the sealed record alone is read (${sealedReads} reads, not 40)`);
+    assert.deepStrictEqual(
+      (
+        await storage.Task.select({ boardId: 'b0', rank: { $lt: 10 } })
+          .order('rank')
+          .fetch()
+      ).map((row) => row.rank),
+      [0, 2, 3, 4, 6, 8],
+    );
   });
 
   await t.test('an index with fields beyond the order’s keys serves the prefix and sorts after', async (t2) => {

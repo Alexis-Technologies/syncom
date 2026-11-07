@@ -45,3 +45,7 @@ src/engines/copy.js       copyEngine(from, to, { path, batch }): the database at
   (`to.remove(path)`: the target was empty). The sealed entries go as one segment, `batch` entries a group: retention
   compacts it as a whole, which it would have done piece by piece. The kv namespaces copied are `KV_NAMESPACES`
   (src/engine.js) and a tag's — a plugin's namespace of its own is added there.
+- **A copy may land beside its source.** `copyEngine(from, to, { path, targetPath })` opens the target at `targetPath`
+  (`path` by default): the at-rest key's rotation copies a database into another path of the same engine, sealed under
+  the new key; the same engine and the same path is refused (a TypeError) before anything is held. The attachments'
+  blobs are copied one by one where both engines keep them (`counts.blobs`).

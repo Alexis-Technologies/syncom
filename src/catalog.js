@@ -268,6 +268,8 @@ class Catalog {
   #loaded = false;
   #sorted = null;
   #sortedIds = new Map();
+  // A collection's sealed records, sorted, by type — cached until a record of the collection changes.
+  #sealedIds = new Map();
   #text;
   #textPending = new Map();
   #logger;
@@ -584,6 +586,7 @@ class Catalog {
 
   #bump(type) {
     this.#typeGen.set(type, ++this.#generation);
+    this.#sealedIds.delete(type);
   }
 
   /** A number that moves with every definition (`define`): what a plan, and a cached result's key, were made under. */
@@ -604,6 +607,7 @@ class Catalog {
     if (row.gone) return;
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
+    this.#sealedIds.delete(row.type);
     drop(this.#byType, row.type, id);
     this.#index(id, row, false);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
@@ -646,6 +650,7 @@ class Catalog {
     if (row.gone) return;
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
+    this.#sealedIds.delete(row.type);
     add(this.#byType, row.type, id);
     this.#index(id, row, true);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
@@ -842,6 +847,19 @@ class Catalog {
     return sorted;
   }
 
+  /**
+   * The sealed (encrypted) records of a collection, sorted by id — rows with no fields, which no index knows: a
+   * query reads them whole at the key holder. Cached until a record of the collection changes. Shared: read it.
+   */
+  sealed(type) {
+    let sorted = this.#sealedIds.get(type);
+    if (sorted !== undefined) return sorted;
+    sorted = [];
+    for (const id of this.#byType.get(type) ?? []) if (this.#rows.get(id)?.encrypted === true) sorted.push(id);
+    sorted.sort();
+    this.#sealedIds.set(type, sorted);
+    return sorted;
+  }
   /**
    * The ids a query over `entity` can only match, from the indexed fields
    * it names by equality (`field: value`, `{ $eq }`, `{ $in }`) — at the top

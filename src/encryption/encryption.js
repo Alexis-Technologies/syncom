@@ -29,6 +29,7 @@ const { checkFsi } = require('../backend.js');
 const { isEngine } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 const { atRestEngine } = require('./at-rest-engine.js');
+const { copyEngine } = require('../engines/copy.js');
 
 const encryption = Object.freeze({
   name: 'encryption',
@@ -202,4 +203,26 @@ const atRest = (target, options = {}) => {
   return atRestFsi(target, options);
 };
 
-module.exports = { encryption, atRest, generateKeys, encrypt, decrypt, loadKeys };
+/**
+ * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole — every record,
+ * piece, copy, kv text, log entry and blob — into `into` (`{ path }` on the same engine, `{ engine }`, or both)
+ * sealed under `to`; the same node (its identity, epoch, vector and heads go with it), so a peer resumes where it
+ * was. Never in place: a copy cut short leaves the source as it was and the target empty (`TARGET_NOT_EMPTY` where
+ * it was not). Open the database at its new place with `atRest(engine, to)` and take the old one away
+ * (`engine.remove(path)`) once it reads.
+ */
+const rotateAtRest = async (engine, { path, from, to, into, batch } = {}) => {
+  if (!isEngine(engine)) throw new TypeError('rotateAtRest(): an engine (filesEngine(fsi) for a backend)');
+  if (typeof path !== 'string' || path.length === 0) throw new TypeError('rotateAtRest(): path');
+  if (into === null || typeof into !== 'object' || (into.engine === undefined && into.path === undefined)) {
+    throw new TypeError('rotateAtRest(): into names where the rotated database lands — { path }, { engine }, or both');
+  }
+  const target = into.engine ?? engine;
+  const targetPath = into.path ?? path;
+  if (target === engine && targetPath === path) {
+    throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or engine');
+  }
+  return copyEngine(atRest(engine, from), atRest(target, to), { path, targetPath, batch });
+};
+
+module.exports = { encryption, atRest, rotateAtRest, generateKeys, encrypt, decrypt, loadKeys };
