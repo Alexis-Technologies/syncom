@@ -1492,12 +1492,16 @@ class Database extends Emitter {
   }
 
   /**
-   * The room the medium has: `{ usage, quota }` in bytes — the browser's Storage API estimate (what this origin
-   * holds, what it may hold), a file system's free space under the path (`usage` null); null where the platform
-   * says nothing.
+   * The room the medium has: `{ usage, quota }` in bytes — the engine's own estimate where it has one (memory: what
+   * it holds; SQLite: the file and its volume; IndexedDB: the browser's Storage API), the files engine's volume
+   * under the path (`usage` null; the browser's Storage API over OPFS); null where the medium says nothing (MongoDB,
+   * an engine over a port).
    */
   quota() {
-    return estimateStorage(this.#path);
+    const db = this.#db;
+    if (db !== null && typeof db.estimate === 'function') return db.estimate();
+    if (this.#engine.name === 'files') return estimateStorage(this.#path);
+    return Promise.resolve({ usage: null, quota: null });
   }
 
   /** Asks the browser to keep this origin's storage out of eviction (`navigator.storage.persist()`); true where nothing need be asked. */

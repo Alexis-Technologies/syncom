@@ -283,6 +283,7 @@ const atRestEngine = (engine, cipher) => {
 
     const wrapped = { path: db.path, capabilities, kv, records, pieces, copies, log, write, close: () => db.close() };
     if (db.changes !== undefined) wrapped.changes = db.changes;
+    if (typeof db.estimate === 'function') wrapped.estimate = () => db.estimate();
     if (db.blobs !== undefined) {
       // An attachment's bytes: base64, sealed at the blob's place, the ciphertext's bytes stored; the digest stays a name.
       const encoder = new TextEncoder();

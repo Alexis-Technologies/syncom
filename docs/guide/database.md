@@ -555,10 +555,14 @@ The database at `path` is copied whole — every record, piece, copy, kv text, l
 (another path, another engine, or both) sealed under the new key; it is the same node, so no peer bootstraps. Never
 in place: a copy cut short leaves the source as it was and the target empty.
 
-The room the medium has is `db.quota()` — `{ usage, quota }` in bytes: the browser's Storage API estimate, a file
-system's free space (`usage` null) — and `db.persist()` asks the browser to keep the origin out of eviction. A log
-append refused for want of room is `QUOTA` (the platform's error as `cause`); a record file that could not be
-written for it is `UNPERSISTED` with `quota: true` (held in memory, written at the next open).
+The room the medium has is `db.quota()` — `{ usage, quota }` in bytes, what the engine can say: the memory engine
+counts what it holds (no quota), SQLite its file's pages (`page_count × page_size`) and the free space of the file's
+volume (none for `:memory:`), IndexedDB the browser's Storage API estimate for the origin, the files engine the free
+space of its volume (`usage` null; the Storage API over OPFS), MongoDB and an engine over a port nothing (`null`,
+`null`) — and `db.persist()` asks the browser to keep the origin out of eviction. A log append refused for want of
+room is `QUOTA` (the platform's error as `cause`: node:fs's ENOSPC, the browser's QuotaExceededError, SQLite's
+SQLITE_FULL — better-sqlite3's code, node:sqlite's errcode 13 — on the error or a `cause` under it); a record file that could not be written for it is `UNPERSISTED`
+with `quota: true` (held in memory, written at the next open).
 
 ## Documents
 

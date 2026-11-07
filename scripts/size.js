@@ -239,7 +239,9 @@ const ENTRIES = [
     entry: 'src/engines/engines.js',
     platform: 'browser',
     // 10.1 with the blobs store proxied and copied (sync-parity plan, S4). 10.5, raised by name.
-    budget: 10.5,
+    // 10.6 with the blobs' door (src/blobs.js) at the served store and a copy refused into a target without blobs
+    // (BLOBS_UNSUPPORTED; review №7, E7.1/E7.3; 2026-11-07). 11, raised by name.
+    budget: 11,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
@@ -321,7 +323,9 @@ const ENTRIES = [
     entry: 'src/inspect/inspect.js',
     platform: 'browser',
     // 5.0 with own() from shape.js and the checksum's reused buffer (2026-10-27). 5.5, raised by name.
-    budget: 5.5,
+    // 5.6 (over by bytes) with isQuotaError's walk of the cause and SQLITE_FULL in errors.js, which it bundles (review №7,
+    // E7.3; 2026-11-07). 5.75, raised by name.
+    budget: 5.75,
   },
   // Everything in one import: the core with the text and tree plugins
   // registered — what the main entry was before the kinds became plugins.
@@ -444,7 +448,9 @@ const ENTRIES = [
   // sync-parity plan, S1; 2026-11-06). 170, raised by name.
   // 170.9 with the blobs stores, fetchBlob and the host's blob procedure (sync-parity plan, S4). 172, raised by name.
   // 173.2 with the sealed records in queries, QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 174 },
+  // 174.2 with the blobs' door (src/blobs.js) at every store, the engines' estimate(), isQuotaError's walk of the cause
+  // (review №7, E7.1–E7.3; 2026-11-07). 174.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 174.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -530,7 +536,9 @@ const ENTRIES = [
     platform: 'browser',
     // 6.6 with the blobs sealed at rest (sync-parity plan, S4). 7, raised by name.
     // 9.2 with rotateAtRest: the copy (engines/copy.js, the lock, the keys) rides along for the rotation by copy (sync-parity plan, S5). 9.5, raised by name.
-    budget: 9.5,
+    // 9.6 with the blobs' door at the at-rest store, estimate() passed through and the copy's BLOBS_UNSUPPORTED it
+    // bundles (review №7, E7.1/E7.3; 2026-11-07). 10.5, raised by name — E7.4's at-rest blobs as bytes land under it.
+    budget: 10.5,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).
@@ -650,7 +658,9 @@ const ENTRIES = [
   { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 3 },
   // Persistent app state by name and path, over a record or a local document — measured with the paths and the
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
-  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },
+  // 3.1 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
+  // 3.25, raised by name.
+  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3.25 },
   // Dumps: export/import over snapshot pages, a move between engines — measured with the engines' copy it ships
   // (collections plan, C4.3).
   // 6.5 measured; 7.
@@ -701,7 +711,9 @@ const ENTRIES = [
     entry: 'src/pipeline/pipeline.js',
     platform: 'browser',
     // 2.8 measured; 3.
-    budget: 3.25,
+    // 3.3 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
+    // 3.5, raised by name.
+    budget: 3.5,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
   // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.

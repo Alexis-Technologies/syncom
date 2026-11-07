@@ -51,7 +51,7 @@ const INDEXES = {
   log: { p: 1, seq: 1 },
   meta: { p: 1, key: 1 },
   catalog: { p: 1, id: 1 },
-  blobs: { p: 1, digest: 1 },
+  blobs: { p: 1, digest: 1, n: 1 },
 };
 const DUPLICATE = 11000;
 // A duplicate key as the driver reports it: the code on the error, or on the first write error of a bulk.
@@ -77,6 +77,9 @@ const parsed = (id, text) => {
 
 // The `_id` of a document: its key as JSON, the path first.
 const keyOf = (parts) => JSON.stringify(parts);
+// A blob's part: a document holds 16 MiB at most, so a blob goes in parts of BLOB_CHUNK bytes — `[p, digest, n]`,
+// n ≥ 1 the parts, n = 0 the head `{ parts, length }` written last, so a put cut short leaves no blob.
+const BLOB_CHUNK = 15 * 1024 * 1024;
 // The key back from an `_id`, or null for one that is no key of ours.
 const partsOf = (_id) => {
   if (typeof _id !== 'string' || _id[0] !== '[') return null;
@@ -338,17 +341,44 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       return null;
     };
     const blobs = {
-      get: async (digest) =>
-        bytesOf((await one(c.blobs, keyOf([p, checkDigest(digest, 'blobs.get')]), { _id: 0, b: 1 }))?.b),
-      has: async (digest) => (await one(c.blobs, keyOf([p, checkDigest(digest, 'blobs.has')]), { _id: 1 })) !== null,
-      list: async () => sorted(await many(c.blobs, { p }, { projection: { _id: 0, digest: 1 } }), 'digest'),
+      get: async (digest) => {
+        checkDigest(digest, 'blobs.get');
+        const head = await one(c.blobs, keyOf([p, digest, 0]), { _id: 0, parts: 1, length: 1 });
+        if (head === null) return null;
+        const docs = await many(
+          c.blobs,
+          { p, digest, n: { $gte: 1 } },
+          { sort: { n: 1 }, projection: { _id: 0, n: 1, b: 1 } },
+        );
+        const out = new Uint8Array(head.length);
+        let at = 0;
+        for (let i = 0; i < docs.length; i++) {
+          const part = bytesOf(docs[i].b);
+          if (part === null || at + part.length > out.length) return null;
+          out.set(part, at);
+          at += part.length;
+        }
+        // Fewer parts than the head names: a blob removed under the read — none.
+        return docs.length === head.parts && at === head.length ? out : null;
+      },
+      has: async (digest) => (await one(c.blobs, keyOf([p, checkDigest(digest, 'blobs.has'), 0]), { _id: 1 })) !== null,
+      list: async () => sorted(await many(c.blobs, { p, n: 0 }, { projection: { _id: 0, digest: 1 } }), 'digest'),
       put: async (digest, bytes) => {
         checkDigest(digest, 'blobs.put');
-        const copy = checkBlobBytes(typed, bytes, 'blobs.put').slice();
-        return fenced((session) => bulk(c.blobs, [put(keyOf([p, digest]), { p, digest, b: copy })], session));
+        const whole = checkBlobBytes(typed, bytes, 'blobs.put');
+        const ops = [];
+        let n = 0;
+        for (let from = 0; from < whole.length; from += BLOB_CHUNK) {
+          n++;
+          ops.push(put(keyOf([p, digest, n]), { p, digest, n, b: whole.slice(from, from + BLOB_CHUNK) }));
+        }
+        ops.push(put(keyOf([p, digest, 0]), { p, digest, n: 0, parts: n, length: whole.length }));
+        return fenced((session) => bulk(c.blobs, ops, session));
       },
-      remove: async (digest) =>
-        fenced((session) => bulk(c.blobs, [del(keyOf([p, checkDigest(digest, 'blobs.remove')]))], session)),
+      remove: async (digest) => {
+        checkDigest(digest, 'blobs.remove');
+        return fenced((session) => bulk(c.blobs, [{ deleteMany: { filter: { p, digest, ...fence() } } }], session));
+      },
     };
 
     const meta = async (key) => {

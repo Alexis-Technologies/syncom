@@ -199,6 +199,8 @@ export interface EngineDb {
   /** The op log's medium — what `OpLog` writes its groups, segments and index through; its shape is the store's (src/files/journal.js). */
   readonly log: object;
   write(batch: EngineWriteSet): Promise<void>;
+  /** Optional: the room, in bytes — what the medium can say (`db.quota()` asks it). */
+  estimate?(): Promise<{ usage: number | null; quota: number | null }>;
   close(): Promise<void>;
 }
 
@@ -635,6 +637,7 @@ export type SyncomErrorCode =
   | 'UNPROVEN'
   | 'WRITE_REFUSED'
   | 'TARGET_NOT_EMPTY'
+  | 'BLOBS_UNSUPPORTED'
   | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
@@ -2674,7 +2677,7 @@ export interface Database {
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
   stats(): StorageStats;
-  /** The room the medium has, in bytes: the browser's Storage API estimate, or a file system's free space (`usage` null); null where the platform says nothing. */
+  /** The room the medium has, in bytes: the engine's own estimate (memory, SQLite, IndexedDB), the files engine's volume (`usage` null); null where the medium says nothing. */
   quota(): Promise<{ usage: number | null; quota: number | null }>;
   /** Asks the browser to keep this origin's storage out of eviction; true where nothing need be asked. */
   persist(): Promise<boolean>;

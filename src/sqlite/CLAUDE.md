@@ -41,4 +41,7 @@ src/sqlite/sqlite.js      @alexify/syncom/sqlite — sqliteEngine({ file, databa
 synchronous = FULL` for the connection; a connection the engine opened gets `journal_mode = WAL` for a file,
   `synchronous = NORMAL` and a `busy_timeout`.
 - **A blob is a BLOB row.** `blobs (p, digest, bytes)` keeps an attachment's bytes as the driver's binary (`node:sqlite`
-  answers a Uint8Array; an injected driver must take and answer one), outside the write set and the lane's transaction.
+  answers a Uint8Array; an injected driver must take and answer one), outside the write set and the lane's transaction;
+  `blobs` is in `TABLES`, so `remove(path)` sweeps them with the rest (a new database at the path never holds old bytes),
+  and `has` is `SELECT 1 … LIMIT 1` — never the bytes. `estimate()` is `page_count × page_size` (the file, every database
+  in it) and the free space of the file's volume (`statfs`; none for `:memory:` or a connection given).

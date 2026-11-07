@@ -48,4 +48,6 @@ src/engines/copy.js       copyEngine(from, to, { path, batch }): the database at
 - **A copy may land beside its source.** `copyEngine(from, to, { path, targetPath })` opens the target at `targetPath`
   (`path` by default): the at-rest key's rotation copies a database into another path of the same engine, sealed under
   the new key; the same engine and the same path is refused (a TypeError) before anything is held. The attachments'
-  blobs are copied one by one where both engines keep them (`counts.blobs`).
+  blobs are copied one by one where both engines keep them (`counts.blobs`); a target WITHOUT a blobs store while the
+  source holds blobs is `BLOBS_UNSUPPORTED` (`engine`, `blobs`), refused after the emptiness check and before anything
+  is written — a copy that silently dropped every blob would leave registers naming bytes nowhere.

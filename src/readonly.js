@@ -76,6 +76,7 @@ const readOnlyDb = (db, refuse) => {
   if (db.fsi !== undefined) wrapped.fsi = db.fsi;
   if (db.catalog !== undefined) wrapped.catalog = { load: () => db.catalog.load(), save: async () => {} };
   if (db.changes !== undefined) wrapped.changes = db.changes;
+  if (typeof db.estimate === 'function') wrapped.estimate = () => db.estimate();
   if (db.blobs !== undefined) {
     wrapped.blobs = {
       get: (digest) => db.blobs.get(digest),

@@ -350,6 +350,16 @@ const openDb = (path) => {
     }
     announce(ids);
   };
+  // What the database holds, as JSON would (the records are objects): an estimate, with nothing to say of a quota.
+  const estimate = async () => {
+    let usage = 0;
+    for (const keys of spaces.values()) for (const text of keys.values()) usage += text.length;
+    for (const stored of records.values()) usage += JSON.stringify(stored).length;
+    for (const named of pieces.values()) for (const text of named.values()) usage += text.length;
+    for (const tagged of copies.values()) for (const text of tagged.values()) usage += text.length;
+    for (const bytes of blobs.values()) usage += bytes.length;
+    return { usage, quota: null };
+  };
   return Object.freeze({
     path,
     capabilities: CAPABILITIES,
@@ -362,6 +372,7 @@ const openDb = (path) => {
     blobs: blobStore,
     changes,
     write,
+    estimate,
     close: async () => {},
     /** How many records the database holds, tombstones included. */
     get size() {

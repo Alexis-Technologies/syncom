@@ -8,6 +8,11 @@ const test = require('node:test');
 const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { isQuotaError } = require('../src/errors.js');
+const { memory } = require('../src/memory/memory.js');
+const { mongoEngine } = require('../src/mongodb/mongodb.js');
+const { createFakeMongo } = require('./utils/fake-mongo.js');
+require('./utils/quiet-sqlite.js');
+const { sqliteEngine } = require('../src/sqlite/sqlite.js');
 const browserUtils = require('../src/utils.browser.js');
 const { waitUntil } = require('./utils/mesh.js');
 
@@ -98,8 +103,53 @@ test('Quota', async (t) => {
     state.write = null;
   });
 
+  await t.test(
+    'isQuotaError sees SQLITE_FULL and a quota under cause; quota() asks the engine where it can',
+    async (t2) => {
+      const sqliteFull = Object.assign(new Error('database or disk is full'), {
+        code: 'ERR_SQLITE_ERROR',
+        errcode: 13,
+      });
+      assert.strictEqual(isQuotaError(sqliteFull), true);
+      assert.strictEqual(isQuotaError(Object.assign(new Error('x'), { code: 'SQLITE_FULL' })), true, 'better-sqlite3');
+      assert.strictEqual(isQuotaError(Object.assign(new Error('x'), { code: 'ERR_SQLITE_ERROR', errcode: 5 })), false);
+      assert.strictEqual(isQuotaError(new Error('wrapped', { cause: sqliteFull })), true, 'looked for under cause');
+      assert.strictEqual(
+        isQuotaError(new Error('twice', { cause: new Error('once', { cause: { code: 'ENOSPC' } }) })),
+        true,
+      );
+      let deep = { code: 'ENOSPC' };
+      for (let i = 0; i < 9; i++) deep = new Error(`level ${i}`, { cause: deep });
+      assert.strictEqual(isQuotaError(deep), false, 'eight causes deep and no further');
+      assert.strictEqual(isQuotaError(new Error('plain', { cause: new Error('still plain') })), false);
+      // quota(): the engine's estimate where it has one — memory counts what it holds, SQLite its pages — the files
+      // engine its volume, an engine that says nothing (MongoDB) nulls.
+      const mem = await syncom.createDatabase({ engine: syncom.memoryEngine(), path: 'm', logger: false, defer: 0 });
+      t2.after(() => mem.close().catch(() => {}));
+      const before = (await mem.quota()).usage;
+      assert.ok(typeof before === 'number' && before > 0);
+      await mem.insert({ title: 'x'.repeat(1000) });
+      const after = await mem.quota();
+      assert.ok(after.usage > before + 1000, `${after.usage} > ${before}`);
+      assert.strictEqual(after.quota, null);
+      const sqlite = await syncom.createDatabase({ engine: sqliteEngine(), path: 's', logger: false, defer: 0 });
+      t2.after(() => sqlite.close().catch(() => {}));
+      const pages = await sqlite.quota();
+      assert.ok(typeof pages.usage === 'number' && pages.usage > 0, 'page_count × page_size');
+      assert.strictEqual(pages.quota, null, ':memory: has no volume');
+      const mongo = await syncom.createDatabase({
+        engine: mongoEngine({ client: createFakeMongo(), name: 'q' }),
+        path: 'g',
+        logger: false,
+        defer: 0,
+      });
+      t2.after(() => mongo.close().catch(() => {}));
+      assert.deepStrictEqual(await mongo.quota(), { usage: null, quota: null });
+    },
+  );
+
   await t.test('quota() asks the platform for the room; persist() asks the browser to keep the origin', async (t2) => {
-    const db = await syncom.createDatabase({ engine: syncom.memoryEngine(), path: 'r', logger: false });
+    const db = await syncom.createDatabase({ engine: syncom.filesEngine(memory()), path: 'r', logger: false });
     t2.after(() => db.close().catch(() => {}));
     const room = await db.quota();
     assert.strictEqual(room.usage, null, 'a file system does not say what this database holds');

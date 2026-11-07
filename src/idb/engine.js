@@ -503,6 +503,13 @@ const idbEngine = ({
         }
       : undefined;
 
+    // The room: the browser's Storage API estimate for the origin (every database of it), where there is one.
+    const estimate = async () => {
+      const storage = globalThis.navigator?.storage;
+      if (storage === undefined || typeof storage.estimate !== 'function') return { usage: null, quota: null };
+      const { usage = null, quota = null } = await storage.estimate();
+      return { usage, quota };
+    };
     const db = {
       path: p,
       capabilities,
@@ -514,6 +521,7 @@ const idbEngine = ({
       log,
       blobs,
       write,
+      estimate,
       close: async () => {},
     };
     if (changes !== undefined) db.changes = changes;

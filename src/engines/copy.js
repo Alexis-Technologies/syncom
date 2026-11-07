@@ -10,7 +10,9 @@
 // LAST, so a copy cut short is no node of that name, and a copy that fails
 // takes what it wrote away again. The log's sealed entries go as one
 // segment, `batch` entries a group; the open groups as they were. Requires
-// engine.js, errors.js, lock.js and crypto/keys.js (the keys' file mode) only.
+// engine.js, errors.js, lock.js and crypto/keys.js (the keys' file mode) only. A
+// target without a blobs store while the source holds blobs is refused
+// (BLOBS_UNSUPPORTED) before anything is written.
 
 const { checkEngine, checkEngineDb, kvNamespace, KV_NAMESPACES } = require('../engine.js');
 const { KEY_FILE_MODE } = require('../crypto/keys.js');
@@ -24,6 +26,12 @@ const PENDING = '.pending';
 
 const empty = (path) =>
   new SyncomError('TARGET_NOT_EMPTY', `copyEngine(): the target holds a database at ${path}`, { path });
+const noBlobs = (engine, blobs) =>
+  new SyncomError(
+    'BLOBS_UNSUPPORTED',
+    `copyEngine(): the ${engine} engine has no blobs store, and the source holds ${blobs} blob(s)`,
+    { engine, blobs },
+  );
 const lost = (path, cause) =>
   new SyncomError('LEASE_LOST', `copyEngine(): the lease on ${path} was lost during the copy`, { path, cause });
 
@@ -112,6 +120,12 @@ const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {
     held.push(await hold(target, targetPath, onLost));
     if ((await target.kv.has('', NODE_FILE)) || (await target.records.ids({ limit: 1 })).length > 0) {
       throw empty(targetPath);
+    }
+    // A target that cannot keep the attachments' bytes the source holds: refused before anything is written —
+    // a copy that silently lost every blob would leave the registers naming bytes nowhere.
+    if (source.blobs !== undefined && target.blobs === undefined) {
+      const held = (await source.blobs.list()).length;
+      if (held > 0) throw noBlobs(to.name, held);
     }
     written = true;
     // The kv texts, namespace by namespace — the identity (node.json, the keys) last of all.

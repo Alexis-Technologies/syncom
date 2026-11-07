@@ -28,7 +28,7 @@ const { checkDigest, checkBlobBytes } = require('../blobs.js');
 const { SyncomError, typed } = require('../errors.js');
 
 const MEMORY = ':memory:';
-const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
+const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS kv (p TEXT NOT NULL, ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (p, ns, key)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS records (p TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (p, id)) WITHOUT ROWID',
@@ -60,6 +60,9 @@ const SQL = {
   copyRemove: 'DELETE FROM copies WHERE p = ? AND tag = ? AND id = ?',
   copyDrop: 'DELETE FROM copies WHERE p = ? AND tag = ?',
   blobGet: 'SELECT bytes FROM blobs WHERE p = ? AND digest = ?',
+  blobHas: 'SELECT 1 AS held FROM blobs WHERE p = ? AND digest = ? LIMIT 1',
+  pageCount: 'PRAGMA page_count',
+  pageSize: 'PRAGMA page_size',
   blobList: 'SELECT digest FROM blobs WHERE p = ? ORDER BY digest',
   blobPut: 'INSERT OR REPLACE INTO blobs (p, digest, bytes) VALUES (?, ?, ?)',
   blobRemove: 'DELETE FROM blobs WHERE p = ? AND digest = ?',
@@ -292,7 +295,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         const row = await get(SQL.blobGet, [p, checkDigest(digest, 'blobs.get')]);
         return none(row) ? null : new Uint8Array(row.bytes);
       },
-      has: async (digest) => !none(await get(SQL.blobGet, [p, checkDigest(digest, 'blobs.has')])),
+      has: async (digest) => !none(await get(SQL.blobHas, [p, checkDigest(digest, 'blobs.has')])),
       list: async () => names(await all(SQL.blobList, [p]), 'digest'),
       put: async (digest, bytes) =>
         run(SQL.blobPut, [p, checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put')]),
@@ -521,6 +524,26 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         }),
     };
 
+    // The room: what the file holds (`page_count × page_size` — the whole file, every database in it) and the free
+    // space of the file's volume; a `:memory:` database, or a connection given, says nothing of the volume.
+    const estimate = async () => {
+      const pages = await get(SQL.pageCount, []);
+      const size = await get(SQL.pageSize, []);
+      const usage = none(pages) || none(size) ? null : Number(pages.page_count) * Number(size.page_size);
+      let quota = null;
+      if (file !== MEMORY && database === null) {
+        try {
+          const { statfs } = require('node:fs/promises');
+          const { dirname } = require('node:path');
+          const stats = await statfs(dirname(file));
+          quota = Number(stats.bavail) * Number(stats.bsize);
+        } catch {
+          // No volume to ask (a driver over another platform): the usage alone.
+        }
+      }
+      return { usage, quota };
+    };
+
     return Object.freeze({
       path: p,
       capabilities,
@@ -532,6 +555,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       catalog,
       blobs,
       write,
+      estimate,
       close: async () => {},
     });
   };
