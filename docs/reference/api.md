@@ -385,7 +385,7 @@ carries no code, except `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`, `INVALID
 | `BLOBS_UNSUPPORTED` | `copyEngine()` (and `rotateAtRest()`) when the target engine has no blobs store while the source holds blobs — refused before anything is written, never a copy whose registers name bytes nowhere | `engine`, `blobs` |
 | `SCHEMA_MISMATCH` | `importJSON()` (`@alexify/syncom/dump`) of a dump made under another schema hash than this database runs, without `force` | `expected`, `given` |
 | `PIPELINE_FAILED` | the database's `error` event when a pipeline's handler threw (`@alexify/syncom/pipeline`): the pipeline stopped before the turn, its checkpoint stays, `start()` hands the turn over again | `name`, `eventId`, `cause` |
-| `REPLICATION_FAILED` | a connector's `error` event (`@alexify/syncom/connector`): a pull or push handler threw (`direction`), tried again after `retryTime`; `start()` on a canceled connector, `reSync()` on one not active (`direction` null) | `direction`, `name`, `cause` |
+| `REPLICATION_FAILED` | a connector's `error` event (`@alexify/syncom/connector`): a pull or push handler threw, or the landing of what it answered failed (`direction`), tried again after `retryIn` ms (`retryTime` doubled per failure in a row up to `maxRetryTime`, with jitter); `start()` on a canceled connector, `reSync()` on one not active (`direction` null) | `direction`, `name`, `cause`, `retryIn` |
 | `ENGINE_UNREACHABLE` | `remoteEngine()`/`connectEngine()` (`/syncom/engines`): the served side is gone — its port closed or its worker exited (`reason: 'closed'`), or a call waited past `timeout` ms (`reason: 'timeout'`, `ms`) — every call waiting fails so, and every call after | `reason`, `ms` |
 | `NOT_LEADER` | `shared.sync`, `shared.serve()` or a write without a channel on a follower of `@alexify/syncom/shared`: replication, the served writers and a write of its own are the leader's | `path`, `what` |
 | `LEADER_LOST` | a follower's write (`@alexify/syncom/shared`) that reached no leader within `failover` ms — the leader gone and none elected in time, or a channel answering nothing readable (`method`, `id`, `attempts`, `cause`; `maybeApplied` true where a call that may have reached a leader was never answered) — or one tried again at a leader that never saw it (`CALL_UNKNOWN` as the `cause`: the leader changed between the call and its retry, `maybeApplied: true` — read the record before writing again); `openShared()` on a fresh path whose elected instance wrote no identity within `failover` ms (`reason: 'fresh'`) | `path`, `method`, `id`, `attempts`, `maybeApplied`, `reason`, `cause` |
@@ -767,22 +767,26 @@ A handler's write to the source is another turn, handed over again: derive into 
 
 ## Connector (subpath)
 
-`@alexify/syncom/connector` — `replicate(db, { name, collection, pull, push, live, retryTime, batchSize, modifier,
-resolve, autoStart })`: one collection kept in step with a backend of its own through two handlers — see
-[Connectors](../guide/connector).
+`@alexify/syncom/connector` — `replicate(db, { name, collection, pull, push, live, retryTime, maxRetryTime,
+safetyTime, batchSize, modifier, resolve, autoStart })`: one collection kept in step with a backend of its own
+through two handlers — see [Connectors](../guide/connector).
 
 | Member | Notes |
 | --- | --- |
-| `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), a document equal to the record making no op |
-| `pull.stream(emit)` → stop | The backend's live changes: `emit({ documents, checkpoint })`, or `emit('RESYNC')`; without it a live connector pulls every `retryTime` |
-| `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it; answers the rows refused, each as the backend holds it |
-| `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise |
-| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good; pulls and pushes again |
-| `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push through; nothing waiting to go out and nothing in flight either way |
-| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }`; whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `pulls`, `pushes`, `pending`) |
+| `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), each judged against the backend's state as known: an echo makes no op (over an unpushed edit too), another state over an unpushed edit is a conflict (`resolve`, the `conflict` event), another state otherwise lands |
+| `pull.stream(emit, { checkpoint })` → stop | The backend's live changes from the checkpoint: `emit({ documents })` (landed; the checkpoint moves with the pulls alone), `emit('RESYNC')` (pull again), `emit('END')` (followed again after the backoff, pulled); a pull from the checkpoint every `safetyTime` anyway; without a stream a live connector pulls every `retryTime` |
+| `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it (`undefined`: a probe, "tell me what you hold" — answered among the refused as the backend holds it, nothing written); a row that reads as the backend is known to hold it is not pushed; answers the rows refused, each as the backend holds it (a conflict), or `{ id, error }` for one refused by name (parked until a turn of the record or `reSync()`) |
+| `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise, and when `resolve` throws |
+| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good (the database's `close` does the same); pulls and pushes again, the parked rows too |
+| `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push succeeded (a failure keeps it waiting for the retry); nothing waiting to go out and nothing in flight either way |
+| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }` (the kv text `connector/<name>` holds them with `known`, the digest of the backend's state per record); whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`, `parked`) |
 
 Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,
-deleted, resolved })`, `error` (`REPLICATION_FAILED` with `direction`), `active` `(boolean)`.
+deleted, resolved })`, `refused` `({ direction, id, reason, cause })` — a document or a row left out by name: on pull
+`collection`, `sealed`, `value` (no JSON), `modifier`, or the code of the write the engine refused; on push the
+backend's code for a row refused by name (`backend` without one), `modifier`, `answer`, `conflict` (a backend
+refusing a row that assumed exactly what it holds, twice), or the code of a resolution the engine refused — `error`
+(`REPLICATION_FAILED` with `direction` and `retryIn`), `active` `(boolean)`.
 
 ## Shared (subpath)
 
@@ -850,18 +854,18 @@ A timeout of `settle()` or `waitUntil()` is a plain `Error` (a test's failure, n
 
 ## Agent tools (subpath)
 
-`@alexify/syncom/mcp` — `createTools(db, { collections, readOnly, limit, sealed })`: the tools an agent calls over a database,
-in the Model Context Protocol's shape — see [Agent tools](../guide/mcp).
+`@alexify/syncom/mcp` — `createTools(db, { collections, tools, readOnly, limit, sealed, regex })`: the tools an agent calls
+over a database, in the Model Context Protocol's shape — see [Agent tools](../guide/mcp).
 
 | Member | Notes |
 | --- | --- |
-| `createTools(db, options?)` → `AgentTool[]` | A set per collection (every one of `db.collections`, or `collections` by name): `<Collection>_query`, `_count`, `_get`, `_changes`, `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly`; `limit` caps a query's window (1000 by default and at most); the collections' sealed records left out of `_query`, `_count` and `_get` unless `sealed`; a TypeError for a name that is no collection |
-| `tool.name`, `tool.description`, `tool.inputSchema` | The definition as `tools/list` answers it — `inputSchema` is JSON Schema, every object closed (`additionalProperties: false`) |
-| `tool.execute(args?)` → `Promise<json>` | `checkArgs(inputSchema, args)` first — a wrong type, a member not named, a required one missing, a window past the cap is a `TypeError` naming the member — then the collection's call; its own refusals (`NOT_FOUND`, a validator's, `PLUGIN_MISSING` without the query plugin) come through as they are |
+| `createTools(db, options?)` → `AgentTool[]` | A set per collection (every one of `db.collections`, or `collections` by name): `<Collection>_query`, `_count`, `_get`, `_changes`, `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly` (`tools` names the verbs to make); `limit` caps a query's window and a `changes` page (1000 by default and at most); the collections' sealed records left out of `_query`, `_count` and `_get` unless `sealed`; `$regex` refused unless `regex`; a TypeError for a name that is no collection or a verb that is none |
+| `tool.name`, `tool.description`, `tool.inputSchema`, `tool.annotations` | The definition as `tools/list` answers it — `inputSchema` is JSON Schema, every object closed (`additionalProperties: false`); `annotations` the protocol's hints: `title`, `readOnlyHint` and `idempotentHint` (the readers), `destructiveHint` (`upsert`, `delete`), `openWorldHint` false |
+| `tool.execute(args?)` → `Promise<json>` | `checkArgs(inputSchema, args)` first — a wrong type, a member not named as the schema's own (`constructor`, `__proto__` are none), a required one missing, a window past the cap is a `TypeError` naming the member; a `$regex` in a query the same unless `regex` — then the collection's call; its own refusals (`NOT_FOUND`, a validator's, `PLUGIN_MISSING` without the query plugin) come through as they are |
 | `_query { query, order, limit, offset }` → `{ rows }` | A Mango query over the collection, `order` the fields (`'-field'` descending), `limit` (100 by default) and `offset` |
 | `_count { query }` → `{ count }`; `_get { id }` → `{ record }` | How many match; one record by id, or null |
-| `_changes { since? }` → `{ eventId, changes }` | Without `since`: the `eventId` to start from. With one: the collection's records the log touched since, an id once with `deleted`, and the `eventId` to ask from next; `changes: null` where the log cannot resume there (another epoch, a position compacted away) — list again then |
-| `_wait_changes { since, timeout? }` → the same | What `_changes` answers once there is a change after `since`, or at `timeout` ms (30 000 by default, 120 000 at most) with none |
+| `_changes { since?, limit? }` → `{ eventId, changes, more }` | Without `since`: the `eventId` to start from. With one: the collection's records the log touched since, an id once with `deleted`, at most `limit` of them, the `eventId` to ask from next and `more` while the log holds more; `changes: null` where the log cannot resume there (another epoch, a position compacted away) — list again then |
+| `_wait_changes { since, limit?, timeout? }` → the same | What `_changes` answers once there is a change after `since`, or at `timeout` ms (30 000 by default, 120 000 at most) with none |
 | `_insert { data }` → `{ id }`; `_upsert { id?, data }` → `{ id }`; `_delete { id }` → `{ id, deleted }` | A new record; a record written whole under `id` or the id its data names; a delete — `deleted: false` where there is none (no tombstone written), `NOT_FOUND` for a record of another collection |
 | `checkArgs(schema, args)`, `MAX_LIMIT` | The check on its own; 1000 |
 

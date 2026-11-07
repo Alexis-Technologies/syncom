@@ -9,12 +9,16 @@
 // read-modify-write under the file's ETag: every row's document as the file
 // holds it compared with what the row assumed — written where the same
 // (`n = ++seq`), a conflict where not — and the file saved whole with
-// `If-Match`; a 412 (another device wrote first) reads the file again and
-// tries once more, `RETRIES` times in all. The stream, where `poll` is set,
-// probes the ETag every `poll` ms and says `RESYNC` when it moved. The store
-// is the backend's door: `load()` → `{ etag, text }` or null for no file,
-// `save(text, etag)` → `{ etag }` (an error with `status: 412` is the
-// conflict), `probe()` → the ETag or null. `requester` is the fetch the two
+// `If-Match`; a 412 (another device wrote first) or a 409 (another device
+// made the file first) reads the file again and tries once more, `RETRIES`
+// times in all — a write is never unconditional, so two devices' first
+// pushes into an empty drive end in one file. The stream, where `poll` is
+// set, probes the ETag every `poll` ms and says `RESYNC` when it moved. The
+// store is the backend's door: `load()` → `{ etag, text }` or null for no
+// file (an empty text is an empty collection), `save(text, etag)` → `{ etag }`
+// (an error with `status` 412 or 409 is the conflict; `etag` null means no
+// file is known — the store must make it conditionally), `probe()` → the
+// ETag or null. `requester` is the fetch the two
 // drives share: the common headers on every request, an error with the status
 // for every answer that is not ok. Requires same.js only.
 
@@ -69,7 +73,8 @@ const jsonFile = (store, { poll = 0 } = {}) => {
       etag = null;
       file = empty();
     } else {
-      file = parse(got.text);
+      // A file just made and never written (a drive's create answers an empty one) is an empty collection.
+      file = got.text === '' ? empty() : parse(got.text);
       etag = got.etag ?? null;
     }
     loaded = true;
@@ -125,7 +130,8 @@ const jsonFile = (store, { poll = 0 } = {}) => {
             const row = rows[i];
             const doc = file.docs[row.id];
             const current = doc === undefined || doc.deleted === true ? null : doc.data;
-            if (!same(current, row.assumed)) {
+            // A probe is the document as the file holds it; a row that assumed another state the same, a conflict.
+            if (row.assumed === undefined || !same(current, row.assumed)) {
               conflicts.push(current === null ? { id: row.id, deleted: true } : { id: row.id, data: current });
               continue;
             }
@@ -139,8 +145,8 @@ const jsonFile = (store, { poll = 0 } = {}) => {
             file = next;
             return conflicts;
           } catch (error) {
-            // Another device wrote first: its file read, the rows judged again.
-            if (error?.status !== 412 || attempt >= RETRIES) throw error;
+            // Another device wrote first (412), or made the file first (409): its file read, the rows judged again.
+            if ((error?.status !== 412 && error?.status !== 409) || attempt >= RETRIES) throw error;
             await refresh(true);
           }
         }

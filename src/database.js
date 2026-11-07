@@ -10,7 +10,7 @@
 // both over the same lent core: this file keeps a delegate per method.
 
 const { Emitter, generateUUID, createLogger, taskScope, estimateStorage, persistStorage } = require('./utils.js');
-const { sha256 } = require('./crypto/digest.js');
+const { sha256, hashText } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Document } = require('./document.js');
@@ -1303,6 +1303,9 @@ class Database extends Emitter {
       // a counter moves by an inc, a set by adds and removes, a text by its diff — never a register written over
       // another kind, and nothing the host accepted since is touched; `target` null forgets the record.
       revert: (id, target, fields, options) => this.#revert(id, target, fields, options),
+      // SHA-256 of a text as base64url (src/crypto/digest.js hashText): what a connector names the backend's state
+      // by in its checkpoint, so that it bundles no hasher of its own.
+      digest: (text) => hashText(text),
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),

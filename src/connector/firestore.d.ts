@@ -16,14 +16,19 @@ export interface FirestoreSdk {
   doc: (collection: any, id: string) => any;
   runTransaction: (database: any, fn: (tx: any) => Promise<unknown>) => Promise<unknown>;
   serverTimestamp: () => any;
-  Timestamp: { fromMillis(ms: number): any };
+  /** The SDK's `Timestamp`: made of seconds and nanoseconds (the cursor's), or from milliseconds. */
+  Timestamp: { new (seconds: number, nanoseconds: number): any; fromMillis(ms: number): any };
   onSnapshot?: (query: any, next: (snapshot: any) => void, error?: (error: unknown) => void) => () => void;
   waitForPendingWrites?: (database: any) => Promise<void>;
 }
 
+/**
+ * The position of a pull: the server stamp of the last document pulled, whole — `seconds` and `nanoseconds` as the
+ * SDK's `Timestamp` holds them (milliseconds would skip or repeat the rest of a commit's documents) — and its id.
+ */
 export interface FirestoreCheckpoint {
-  /** The server stamp of the last document pulled, in ms. */
-  at: number;
+  seconds: number;
+  nanoseconds: number;
   id: string;
 }
 

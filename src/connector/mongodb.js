@@ -9,10 +9,13 @@
 // `_updated` after the checkpoint, in that order, the checkpoint the last
 // one's `_updated`; two writes in one millisecond are read again at the next
 // pull — an equal document makes no op). The stream is a change stream on
-// the collection, every change a `RESYNC` (a replica set; `changes: false`
-// without one). A push is a `replaceOne` per row matched on the `_rev` this
-// adapter last saw — none matched, nothing upserted, is a conflict, answered
-// as the document stands. No requires.
+// the collection, every change a `RESYNC`, its error or close an `END` (a
+// replica set; `changes: false` without one). A push is a `replaceOne` per
+// row matched on the `_rev` this adapter last saw — none matched, nothing
+// upserted, is a conflict, answered as the document stands; a server refusing
+// the document (a validator, a key too large) is that row's `{ id, error }`;
+// a probe (`assumed` undefined) is the document read back, nothing written.
+// No requires.
 
 const FIELDS = new Set(['_id', '_rev', '_deleted', '_updated']);
 
@@ -38,19 +41,39 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
   if (typeof changes !== 'boolean') throw new TypeError('mongodb(): changes must be a boolean');
   const revs = new Map();
 
+  // The document as the collection holds it now, the revision remembered: a deletion for none.
+  const current = async (id) => {
+    const doc = await collection.findOne({ _id: id });
+    if (doc === null) {
+      revs.delete(id);
+      return { id, deleted: true };
+    }
+    if (typeof doc._rev === 'number') revs.set(id, doc._rev);
+    return documentOf(doc);
+  };
+
   return {
     pull: {
       async handler(checkpoint, batchSize) {
-        const since = typeof checkpoint === 'number' ? checkpoint : 0;
+        // The cursor is (stamp, id): the documents stamped after the checkpoint's, and those stamped the same with a
+        // greater id — a batch written within one millisecond is never skipped at a page's edge.
+        const after =
+          checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.at === 'number'
+            ? checkpoint
+            : { at: typeof checkpoint === 'number' ? checkpoint : 0, id: '' };
+        const filter =
+          after.at === 0 && after.id === ''
+            ? {}
+            : { $or: [{ _updated: { $gt: after.at } }, { _updated: after.at, _id: { $gt: after.id } }] };
         // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
-        const cursor = collection.find({ _updated: { $gt: since } }, { sort: { _updated: 1 }, limit: batchSize });
+        const cursor = collection.find(filter, { sort: { _updated: 1, _id: 1 }, limit: batchSize });
         const docs = await cursor.toArray();
         const documents = [];
-        let last = since;
+        let last = after;
         for (let i = 0; i < docs.length; i++) {
           const doc = docs[i];
           if (typeof doc._rev === 'number') revs.set(String(doc._id), doc._rev);
-          if (typeof doc._updated === 'number' && doc._updated > last) last = doc._updated;
+          if (typeof doc._updated === 'number') last = { at: doc._updated, id: String(doc._id) };
           documents.push(documentOf(doc));
         }
         return { documents, checkpoint: last };
@@ -70,8 +93,14 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
                 }
               };
               stream.on('change', () => emit('RESYNC'));
-              stream.on('error', over);
-              stream.on('close', over);
+              // The stream erring or closing on its own is over: the connector follows again after a backoff.
+              const ended = () => {
+                if (stopped) return;
+                over();
+                emit('END');
+              };
+              stream.on('error', ended);
+              stream.on('close', ended);
               return over;
             },
           }
@@ -82,6 +111,11 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
         const conflicts = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
+          // A probe: the document as it stands, nothing written.
+          if (row.assumed === undefined) {
+            conflicts.push(await current(row.id));
+            continue;
+          }
           const held = revs.get(row.id);
           const next = (held ?? 0) + 1;
           const doc = { _id: row.id, _rev: next, _updated: now(), ...(row.deleted ? { _deleted: true } : row.data) };
@@ -91,22 +125,19 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
           try {
             result = await collection.replaceOne(filter, doc, { upsert: held === undefined });
           } catch (error) {
-            // An upsert on an `_id` another holds: the duplicate key is the conflict.
-            if (error?.code !== 11000) throw error;
-            result = { matchedCount: 0, upsertedCount: 0 };
+            // An upsert on an `_id` another holds: the duplicate key is the conflict. Another code of the server's
+            // is the document refused by name; anything without one (the network) is the push's failure.
+            if (error?.code === 11000) result = { matchedCount: 0, upsertedCount: 0 };
+            else if (typeof error?.code === 'number') {
+              conflicts.push({ id: row.id, error: { code: String(error.code), message: error.message ?? '' } });
+              continue;
+            } else throw error;
           }
           if (result.matchedCount > 0 || result.upsertedCount > 0) {
             revs.set(row.id, next);
             continue;
           }
-          const current = await collection.findOne({ _id: row.id });
-          if (current === null) {
-            revs.delete(row.id);
-            conflicts.push({ id: row.id, deleted: true });
-            continue;
-          }
-          if (typeof current._rev === 'number') revs.set(row.id, current._rev);
-          conflicts.push(documentOf(current));
+          conflicts.push(await current(row.id));
         }
         return conflicts;
       },

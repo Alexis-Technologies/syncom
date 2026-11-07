@@ -713,11 +713,15 @@ const ENTRIES = [
   // Connectors: a collection kept in step with a backend through pull/push handlers, the checkpoint in the `connector`
   // kv namespace (sync-parity plan, S2). The plan said 5; measured alone it brings shape.js (the id check, the canonical
   // JSON it compares a document by) and the emitter — 7.0; 7.5, raised by name.
+  // 7.5 with every pulled document judged by name (another collection's, a sealed one, no JSON, the engine's refusal)
+  // and the rest of the page landing; the model of review №7 E4 — the backend's state assumed and compared on pull,
+  // the digests kept with the checkpoint, the probe, the frontier, one pull queue with END and the safety pull, the
+  // database's close cancelling — measured 9.2 (2026-11-07). 9.5, raised by name (the plan's 9, or 9.5 if over).
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 7.5,
+    budget: 9.5,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
@@ -729,7 +733,9 @@ const ENTRIES = [
   // Google Drive speaks four routes (the search by name, the v2 metadata for the ETag, the create, the media upload)
   // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).
   { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.5 },
-  { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2 },
+  // OneDrive's first upload asks Graph to fail where the file is there (conflictBehavior=fail), and a 409 is tried
+  // like a 412: 2.0 measured, at the line (review №7, E5.3; 2026-11-07). 2.25, raised by name.
+  { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2.25 },
   // Attachments: the plugin over the engine's blobs store — the plan said 2.5 KB; the browser digest half brings its
   // JavaScript SHA-256 along (hashText), 4.1 measured (sync-parity plan, S4). 4.5, raised by name.
   // 4.5 (at the limit) with the register validated, the bytes checked against it, sweep() and prepare() (review №7,
@@ -761,7 +767,9 @@ const ENTRIES = [
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
   { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7 },
   // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
-  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 2.5 },
+  // 2.7 with `$regex` refused at the door, the `tools` allowlist, `annotations` on every tool and `changes` paged by
+  // `limit` through `log.read` (review №7, E5.4; 2026-11-07). 2.75, raised by name — the plan's cap.
+  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 2.75 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.

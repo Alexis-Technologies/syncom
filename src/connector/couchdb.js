@@ -4,16 +4,23 @@
 // `replicate()` takes, over one CouchDB database reached through an injected
 // `fetch`. A pull is `_changes` with the documents included (`since` the
 // checkpoint, `limit` the batch), a `_deleted` change a deletion, `last_seq`
-// the checkpoint; the stream is `_changes?feed=longpoll` asked again and
-// again (stopped by the function returned). A push is `_bulk_docs` with the
-// `_rev` this adapter last saw for each document — CouchDB's compare-and-set
-// — and a `conflict` answer is the document read back as the database holds
-// it (a 404 a deletion). The revisions live in memory for the connector's
+// the checkpoint; the stream is `_changes?feed=longpoll` from the checkpoint
+// the connector hands over, asked again and again (stopped by the function
+// returned; a poll the server never answers is given up after the wait and a
+// grace). A push is `_bulk_docs` with the `_rev` this adapter last saw for
+// each document — CouchDB's compare-and-set — and a `conflict` answer is the
+// document read back as the database holds it (a 404 a deletion); any other
+// refusal of a document (an id starting with `_`, a forbidden write) is that
+// row's `{ id, error }`. A probe (`assumed` undefined) is the document read
+// back, nothing written. The revisions live in memory for the connector's
 // life: a connector that starts anew learns them with its first pull, and a
 // push of a document whose revision it does not know lands as a new document
-// — a conflict where one exists, as it should. No requires.
+// — a conflict where one exists, as it should. Credentials in the url move
+// to the Authorization header, so no message ever carries them. No requires.
 
 const DEFAULT_LONGPOLL = 60_000;
+// A long poll the server never answers (a proxy holding the connection) is given up after the wait and this much.
+const LONGPOLL_GRACE = 10_000;
 
 const strip = (doc) => {
   const data = {};
@@ -33,18 +40,38 @@ const failed = async (response, what) => {
   return error;
 };
 
+// `user:password` as base64 of its UTF-8, for a Basic authorization.
+const basic = (user, password) => {
+  const bytes = new TextEncoder().encode(`${user}:${password}`);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return `Basic ${btoa(binary)}`;
+};
+
 /**
  * `{ pull, push }` for `replicate()`, over the CouchDB database at `url`
- * (`https://host/db`). `fetch` is the platform's unless given; `headers` ride
- * on every request (an `Authorization`); `longpoll` is the stream's wait in
- * ms (60 000).
+ * (`https://host/db`; credentials in it become the Authorization header).
+ * `fetch` is the platform's unless given; `headers` ride on every request (an
+ * `Authorization`); `longpoll` is the stream's wait in ms (60 000).
  */
 const couchdb = ({ url, fetch = globalThis.fetch, headers = {}, longpoll = DEFAULT_LONGPOLL } = {}) => {
   if (typeof url !== 'string' || url.length === 0) throw new TypeError('couchdb(): url is required');
   if (typeof fetch !== 'function') throw new TypeError('couchdb(): fetch must be a function');
   if (!Number.isFinite(longpoll) || longpoll <= 0) throw new TypeError('couchdb(): longpoll must be a positive number');
-  const base = url.replace(/\/+$/, '');
   const common = { accept: 'application/json', ...headers };
+  let base = url.replace(/\/+$/, '');
+  try {
+    // Credentials in the url become the header: no request's url, and no error's message, carries them.
+    const parsed = new URL(base);
+    if (parsed.username !== '' || parsed.password !== '') {
+      common.authorization = basic(decodeURIComponent(parsed.username), decodeURIComponent(parsed.password));
+      parsed.username = '';
+      parsed.password = '';
+      base = parsed.href.replace(/\/+$/, '');
+    }
+  } catch {
+    // Not a url the platform parses: taken as it is.
+  }
   const revs = new Map();
 
   const request = async (path, init = {}) => {
@@ -92,16 +119,17 @@ const couchdb = ({ url, fetch = globalThis.fetch, headers = {}, longpoll = DEFAU
   return {
     pull: {
       handler: (checkpoint, batchSize) => changes(checkpoint, batchSize),
-      // Long polls from the checkpoint the connector moved to last: every answer is a page for `emit`.
-      stream(emit) {
-        let since = null;
+      // Long polls from the checkpoint the connector hands over: every answer is a page for `emit`.
+      stream(emit, { checkpoint = null } = {}) {
+        let since = checkpoint;
         let stopped = false;
         const controller = new AbortController();
         const loop = async () => {
           for (;;) {
             if (stopped) return;
             try {
-              const page = await changes(since, 100, { feed: 'longpoll', signal: controller.signal });
+              const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(longpoll + LONGPOLL_GRACE)]);
+              const page = await changes(since, 100, { feed: 'longpoll', signal });
               if (stopped) return;
               since = page.checkpoint;
               if (page.documents.length > 0) emit(page);
@@ -122,13 +150,20 @@ const couchdb = ({ url, fetch = globalThis.fetch, headers = {}, longpoll = DEFAU
     push: {
       async handler(rows) {
         const docs = [];
+        const answers = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
+          // A probe: the document as it stands, nothing written.
+          if (row.assumed === undefined) {
+            answers.push(await current(row.id));
+            continue;
+          }
           const doc = { _id: row.id, ...(row.deleted ? { _deleted: true } : row.data) };
           const rev = revs.get(row.id);
           if (rev !== undefined) doc._rev = rev;
           docs.push(doc);
         }
+        if (docs.length === 0) return answers;
         const response = await request('/_bulk_docs', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -136,19 +171,19 @@ const couchdb = ({ url, fetch = globalThis.fetch, headers = {}, longpoll = DEFAU
         });
         if (!response.ok) throw await failed(response, '_bulk_docs');
         const results = await response.json();
-        const conflicts = [];
         for (let i = 0; i < results.length; i++) {
           const result = results[i];
           if (result.ok === true && typeof result.rev === 'string') {
             revs.set(result.id, result.rev);
             continue;
           }
-          if (result.error === 'conflict') conflicts.push(await current(result.id));
-          else {
-            throw new Error(`CouchDB refused ${result.id}: ${result.error ?? 'unknown'} ${result.reason ?? ''}`.trim());
+          if (result.error === 'conflict') {
+            answers.push(await current(result.id));
+            continue;
           }
+          answers.push({ id: result.id, error: { code: result.error ?? 'refused', message: result.reason ?? '' } });
         }
-        return conflicts;
+        return answers;
       },
     },
     /** The revision this adapter last saw for a document, or undefined. */

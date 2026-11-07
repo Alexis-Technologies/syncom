@@ -89,6 +89,15 @@ const createFakeCouch = ({ url = 'https://couch.test/db' } = {}) => {
         const body = JSON.parse(init.body);
         const results = [];
         for (const given of body.docs) {
+          // An id only CouchDB's own documents may have: refused by row, as CouchDB answers it.
+          if (typeof given._id === 'string' && given._id.startsWith('_')) {
+            results.push({
+              id: given._id,
+              error: 'bad_request',
+              reason: 'Only reserved document ids may start with underscore.',
+            });
+            continue;
+          }
           const held = docs.get(given._id);
           const current = held?._rev;
           if (

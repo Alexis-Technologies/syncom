@@ -2530,27 +2530,27 @@
         },
         "couchdb": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/couchdb`: `_changes` with the documents as the pull, a long poll as the stream, `_bulk_docs` with the revisions last seen as the push, a conflict read back as the database holds it",
+          "text": "`@alexify/syncom/connector/couchdb`: `_changes` with the documents as the pull, a long poll from the checkpoint as the stream, `_bulk_docs` with the revisions last seen as the push, a conflict read back as the database holds it, a probe read back and written nothing, an id CouchDB refuses that row's `{ id, error }`",
           "source": "src/connector/couchdb.js; docs/guide/connector.md#couchdb; tests/connector.adapters.test.js"
         },
         "firestore": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/firestore`: the injected modular SDK — the server stamp and a tombstone the adapter's fields, one cursor after the checkpoint, one transaction a push whose own reads decide a conflict, `onSnapshot` the signal",
+          "text": "`@alexify/syncom/connector/firestore`: the injected modular SDK — the server stamp and a tombstone the adapter's fields, one cursor `{ seconds, nanoseconds, id }` after the checkpoint (the stamp whole: milliseconds skipped a commit's documents), a transaction per 500 rows whose own reads decide a conflict, `onSnapshot` the signal and its error `END`",
           "source": "src/connector/firestore.js; docs/guide/connector.md#firestore; tests/connector.adapters.test.js"
         },
         "supabase": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/supabase`: one table through the injected client — PostgREST with the modified column as the compare-and-set, Realtime's `postgres_changes` the signal",
+          "text": "`@alexify/syncom/connector/supabase`: one table through the injected client — PostgREST with the modified column as the compare-and-set (the value the database stored kept for the next match, a trigger's included), a `(stamp, key)` cursor so a transaction's rows are never skipped at a page's edge, Realtime's `postgres_changes` the signal and the channel's error `END`",
           "source": "src/connector/supabase.js; docs/guide/connector.md#supabase; tests/connector.adapters.test.js"
         },
         "appwrite": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/appwrite`: the injected `Databases`, `Query` and client — `$updatedAt` the position, a boolean attribute the tombstone, a read then a write the push (Appwrite has no compare-and-set: said), Realtime the signal; Node and the browser alike",
+          "text": "`@alexify/syncom/connector/appwrite`: the injected `Databases`, `Query` and client — `$updatedAt` the position, a boolean attribute the tombstone, a read then a write the push (Appwrite has no compare-and-set: said), a 400 (an id past 36 letters) that row's `{ id, error }`, Realtime the signal; Node and the browser alike",
           "source": "src/connector/appwrite.js; docs/guide/connector.md#appwrite; tests/connector.adapters.test.js"
         },
         "mongodb": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/mongodb`: one collection of the injected driver — `_rev`, `_deleted`, `_updated` the adapter's fields, a change stream the signal — beside the engine and the hubs' shared log over the same driver",
+          "text": "`@alexify/syncom/connector/mongodb`: one collection of the injected driver — `_rev`, `_deleted`, `_updated` the adapter's fields, a `(stamp, id)` cursor, a change stream the signal and its error or close `END` — beside the engine and the hubs' shared log over the same driver",
           "source": "src/connector/mongodb.js; docs/guide/connector.md#mongodb; tests/connector.adapters.test.js"
         },
         "nats": {
@@ -2561,12 +2561,12 @@
         },
         "gdrive": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/gdrive`: one JSON file of the collection in the application data folder through an injected `fetch` — the ETag the compare-and-set (a 412 read again), a probe of the ETag the stream; no lock file",
+          "text": "`@alexify/syncom/connector/gdrive`: one JSON file of the collection in the application data folder through an injected `fetch` — the oldest by `createdTime`, the ETag the compare-and-set (a 412 read again; no ETag a refusal, never an unconditional write), a create listed again so two devices' first pushes end in one file, a probe of the ETag the stream; no lock file",
           "source": "src/connector/gdrive.js; src/connector/jsonfile.js; docs/guide/connector.md#google-drive; tests/connector.adapters.test.js"
         },
         "onedrive": {
           "mark": "✅",
-          "text": "`@alexify/syncom/connector/onedrive`: the same file over Microsoft Graph — `root:/<path>` for the eTag, `PUT …:/content` under `If-Match`",
+          "text": "`@alexify/syncom/connector/onedrive`: the same file over Microsoft Graph — `root:/<path>` for the eTag, `PUT …:/content` under `If-Match`, or under `conflictBehavior=fail` where no file is known (a 409 another device's, read and judged)",
           "source": "src/connector/onedrive.js; src/connector/jsonfile.js; docs/guide/connector.md#onedrive; tests/connector.adapters.test.js"
         },
         "conflictDetect": {

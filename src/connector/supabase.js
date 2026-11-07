@@ -10,8 +10,13 @@
 // primary key and the `modified` this adapter last saw (PostgREST's
 // compare-and-set: no row matched is a conflict), or an `insert` for a row
 // never seen (a duplicate key is a conflict); a conflict is answered as the
-// row stands. The stream is Realtime's `postgres_changes` on the table,
-// every change a `RESYNC`. No requires.
+// row stands; an error of the database's with a code (a constraint, a type)
+// is that row's `{ id, error }`; a probe (`assumed` undefined) is the row
+// read back, nothing written. The stream is Realtime's `postgres_changes` on
+// the table, every change a `RESYNC`, the channel's error, timeout or close
+// an `END`. No requires.
+
+const OVER = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']);
 
 /**
  * `{ pull, push }` for `replicate()`. `client.from(table)` is the table;
@@ -82,16 +87,28 @@ const supabase = ({
   return {
     pull: {
       async handler(checkpoint, batchSize) {
+        // The cursor is (stamp, id): the rows modified after the checkpoint's stamp, and those modified at it with
+        // a greater key — a transaction's rows share one `now()`, and a page's edge never skips the rest of them.
+        const after =
+          checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.at === 'string'
+            ? checkpoint
+            : { at: typeof checkpoint === 'string' ? checkpoint : null, id: '' };
         let query = client.from(table).select('*');
-        if (typeof checkpoint === 'string') query = query.gt(modifiedColumn, checkpoint);
-        query = query.order(modifiedColumn, { ascending: true }).limit(batchSize);
+        if (after.at !== null) {
+          const m = modifiedColumn;
+          query = query.or(`${m}.gt."${after.at}",and(${m}.eq."${after.at}",${primaryKey}.gt."${after.id}")`);
+        }
+        query = query
+          .order(modifiedColumn, { ascending: true })
+          .order(primaryKey, { ascending: true })
+          .limit(batchSize);
         const rows = answered(await query, 'select') ?? [];
         const documents = [];
-        let last = typeof checkpoint === 'string' ? checkpoint : null;
+        let last = after.at === null ? null : after;
         for (let i = 0; i < rows.length; i++) {
           documents.push(documentOf(rows[i]));
           const stamp = rows[i][modifiedColumn];
-          if (typeof stamp === 'string' && (last === null || stamp > last)) last = stamp;
+          if (typeof stamp === 'string') last = { at: stamp, id: String(rows[i][primaryKey]) };
         }
         return { documents, checkpoint: last };
       },
@@ -99,11 +116,16 @@ const supabase = ({
         ? {
             stream(emit) {
               const name = channel ?? `syncom:${table}`;
+              let stopped = false;
               const subscription = client
                 .channel(name)
                 .on('postgres_changes', { event: '*', schema, table }, () => emit('RESYNC'))
-                .subscribe();
+                // The channel erring, timing out or closing on its own is over: followed again after a backoff.
+                .subscribe((status) => {
+                  if (!stopped && OVER.has(status)) emit('END');
+                });
               return () => {
+                stopped = true;
                 if (typeof client.removeChannel === 'function') client.removeChannel(subscription);
                 else subscription.unsubscribe?.();
               };
@@ -116,6 +138,11 @@ const supabase = ({
         const conflicts = [];
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
+          // A probe: the row as it stands, nothing written.
+          if (row.assumed === undefined) {
+            conflicts.push(await current(row.id));
+            continue;
+          }
           const stamp = now();
           const values = {
             ...(row.deleted ? {} : row.data),
@@ -124,21 +151,24 @@ const supabase = ({
             [modifiedColumn]: stamp,
           };
           const held = stamps.get(row.id);
+          const result =
+            held === undefined
+              ? await client.from(table).insert(values).select()
+              : await client.from(table).update(values).eq(primaryKey, row.id).eq(modifiedColumn, held).select();
           let landed;
-          if (held === undefined) {
-            const result = await client.from(table).insert(values).select();
-            if (result?.error && (result.error.code === '23505' || /duplicate/i.test(result.error.message ?? ''))) {
-              landed = [];
-            } else landed = answered(result, 'insert') ?? [];
-          } else {
-            landed =
-              answered(
-                await client.from(table).update(values).eq(primaryKey, row.id).eq(modifiedColumn, held).select(),
-                'update',
-              ) ?? [];
-          }
+          if (result?.error && typeof result.error.code === 'string') {
+            // A duplicate key is the conflict (the row read back); another code of the database's — a constraint,
+            // a type — is the row refused by name. An error without a code (the network) is the push's failure.
+            if (result.error.code === '23505' || /duplicate/i.test(result.error.message ?? '')) landed = [];
+            else {
+              conflicts.push({ id: row.id, error: { code: result.error.code, message: result.error.message ?? '' } });
+              continue;
+            }
+          } else landed = answered(result, held === undefined ? 'insert' : 'update') ?? [];
           if (landed.length > 0) {
-            stamps.set(row.id, stamp);
+            // The stamp as the database stored it — a trigger's, not this adapter's — is what the next update matches.
+            const stored = landed[0]?.[modifiedColumn];
+            stamps.set(row.id, typeof stored === 'string' ? stored : stamp);
             continue;
           }
           conflicts.push(await current(row.id));

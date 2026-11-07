@@ -15,6 +15,8 @@ const db = await createDatabase({ path: 'data', schema: { entities: { Task: { in
 const tools = createTools(db, { collections: ['Task'], readOnly: false, limit: 100 });
 tools.map((tool) => tool.name);
 // ['Task_query', 'Task_count', 'Task_get', 'Task_changes', 'Task_wait_changes', 'Task_insert', 'Task_upsert', 'Task_delete']
+tools[7].annotations;
+// { title: 'Task_delete', readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
 const { id } = await tools[5].execute({ data: { title: 'write the guide', done: false } });
 await tools[0].execute({ query: { done: false }, order: ['title'], limit: 10 }); // { rows: [{ id, title, done, $type }] }
 ```
@@ -26,25 +28,36 @@ await tools[0].execute({ query: { done: false }, order: ['title'], limit: 10 });
 | `<Collection>_query` | `query` (a [Mango query](./query)), `order` (fields, `'-field'` descending), `limit` (100 by default, `limit` of the options at most), `offset` | `{ rows }` |
 | `<Collection>_count` | `query` | `{ count }` |
 | `<Collection>_get` | `id` | `{ record }` — null where there is none |
-| `<Collection>_changes` | `since` (optional) | `{ eventId, changes }`: without `since`, the `eventId` to start from; with one, the collection's records the log touched since — an id once, `deleted` as it stands now — and the `eventId` to ask from next. `changes: null` where the log cannot resume at `since` (another epoch, a position compacted away): list the collection again |
-| `<Collection>_wait_changes` | `since`, `timeout` (30 000 ms by default, 120 000 at most) | What `_changes` answers once there is a change after `since`, or at the timeout with none — the long poll an agent waits on |
+| `<Collection>_changes` | `since` (optional), `limit` (the options' `limit` by default and at most) | `{ eventId, changes, more }`: without `since`, the `eventId` to start from; with one, the collection's records the log touched since — an id once, `deleted` as it stands now, at most `limit` of them — the `eventId` to ask from next, and `more` while the log holds more after it. `changes: null` where the log cannot resume at `since` (another epoch, a position compacted away): list the collection again |
+| `<Collection>_wait_changes` | `since`, `limit`, `timeout` (30 000 ms by default, 120 000 at most) | What `_changes` answers once there is a change after `since`, or at the timeout with none — the long poll an agent waits on |
 | `<Collection>_insert` | `data` | `{ id }` |
 | `<Collection>_upsert` | `id` (optional), `data` | `{ id }`: the record written whole under `id`, or under the id its data names (the entity's id field) |
 | `<Collection>_delete` | `id` | `{ id, deleted }` — `false` where there is none (nothing is written); a record of another collection is `NOT_FOUND` |
 
-`createTools(db, { collections, readOnly, limit, sealed })`: `collections` names the collections to serve (every one
-of `db.collections` by default), `readOnly` makes no writer at all, `limit` caps a query's window (1000 by default
-and at most), and `sealed` lets the agent read the collections' [sealed records](./query#sealed-records) too — left
-out of `query`, `count` and `get` by default: an agent is a reader of the plain rows unless the application says
-otherwise.
+Every tool carries the protocol's `annotations` — `title` (its name), `readOnlyHint`, `destructiveHint`,
+`idempotentHint` and `openWorldHint: false`: the five readers are read-only and idempotent, `insert` is neither,
+`upsert` and `delete` are destructive (one overwrites a record whole, the other takes it away) and idempotent — so a
+client knows what to confirm with the user before it calls.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `collections` | every one of `db.collections` | The collections to serve |
+| `tools` | all eight | The verbs to make: `query`, `count`, `get`, `changes`, `wait_changes`, `insert`, `upsert`, `delete` |
+| `readOnly` | `false` | No writer at all, whatever `tools` names — the writers are on by default on purpose: a server that serves a model it does not trust says so |
+| `limit` | `1000` | The most rows a `query` answers and the most records a `changes` page holds (1000 at most) |
+| `sealed` | `false` | Read the collections' [sealed records](./query#sealed-records) too — left out of `query`, `count` and `get` by default: an agent is a reader of the plain rows unless the application says otherwise |
+| `regex` | `false` | Allow `$regex` in a query — refused at the door by default (below) |
 
 ## Checked at the door
 
 A tool is called by a model. `execute(args)` checks `args` against the tool's `inputSchema` before anything runs:
-a member of another type, one the schema does not name (every object is closed), a required one missing, a window
-past the cap, a wait past two minutes is a `TypeError` naming the member — `args.id is required`,
-`args.limit: 100 at most` — and the server reports it as the tool's error. What passes the schema runs the
-collection's own call, whose refusals come through as they are: `NOT_FOUND` for a delete of what is not there, a
+a member of another type, one the schema does not name as its own (every object is closed, and `constructor`,
+`toString` or `__proto__` are not members), a required one missing, a window past the cap, a wait past two minutes
+is a `TypeError` naming the member — `args.id is required`, `args.limit: 100 at most` — and the server reports it
+as the tool's error. A `$regex` anywhere in a query is refused the same way unless `createTools(db, { regex: true })`:
+the query plugin bounds a pattern's length, not its backtracking, and `^(a+)+$` over a few dozen letters holds the
+event loop for seconds — a model's pattern never runs unless the application allows it. What passes the schema runs
+the collection's own call, whose refusals come through as they are: `NOT_FOUND` for a delete of what is not there, a
 validator's `ValidationError`, `PLUGIN_MISSING` where the database has no query plugin. `checkArgs(schema, args)`
 is the check on its own.
 
@@ -88,7 +101,8 @@ The SDK and WebMCP are not dependencies of this repository; the two recipes foll
 
 ## Checked how
 
-`tests/mcp.test.js`: the set of tools per collection and `readOnly` without writers; every argument refused as the
-schema says, before anything runs; the writers and readers round-trip; `changes` from an `eventId`, an id once, a
-deleted record said so, `null` where the log cannot resume; `wait_changes` resolving on a change, at once where
-there is something, at its timeout with nothing.
+`tests/mcp.test.js`: the set of tools per collection, `tools` naming the verbs and `readOnly` without writers; every
+argument refused as the schema says, before anything runs — inherited members among them; `$regex` refused at the
+door unless allowed; the writers and readers round-trip; `changes` from an `eventId`, an id once, a deleted record
+said so, paged by `limit` with `more`, `null` where the log cannot resume; `wait_changes` resolving on a change, at
+once where there is something, at its timeout with nothing; the annotations of every tool.

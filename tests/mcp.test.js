@@ -215,6 +215,7 @@ test('@alexify/syncom/mcp', async (t) => {
       assert.deepStrictEqual(await tools.Task_changes.execute({ since: start.eventId }), {
         eventId: start.eventId,
         changes: [],
+        more: false,
       });
       const { id: a } = await tools.Task_insert.execute({ data: { title: 'a', done: false } });
       const { id: n } = await tools.Note_insert.execute({ data: { text: 'not a task' } });
@@ -246,8 +247,135 @@ test('@alexify/syncom/mcp', async (t) => {
         'at once: there is something',
       );
       const quiet = await tools.Task_wait_changes.execute({ since: heard.eventId, timeout: 30 });
-      assert.deepStrictEqual(quiet, { eventId: heard.eventId, changes: [] });
+      assert.deepStrictEqual(quiet, { eventId: heard.eventId, changes: [], more: false });
       assert.deepStrictEqual((await tools.Task_wait_changes.execute({ since: '999.1', timeout: 10 })).changes, null);
+    },
+  );
+
+  await t.test('$regex is refused at the door unless createTools({ regex: true })', async (t2) => {
+    const db = await open(t2);
+    await db.Task.insert({ title: 'aaaaaaaaaaaaaaaaaaaaaaaaaaa!', done: false });
+    const tools = named(createTools(db, { collections: ['Task'] }));
+    // A pattern that backtracks for seconds: refused before anything runs, in no time.
+    const started = Date.now();
+    for (const query of [
+      { title: { $regex: '^(a+)+$' } },
+      { $or: [{ done: true }, { title: { $regex: 'x' } }] },
+      { $and: [{ $not: { title: { $regex: 'x' } } }] },
+      { nested: { deep: { $regex: 'x', $options: 'i' } } },
+    ]) {
+      await assert.rejects(tools.Task_query.execute({ query }), {
+        name: 'TypeError',
+        message: /args\.query.*\$regex is not allowed: createTools\(\{ regex: true \}\)/,
+      });
+      await assert.rejects(tools.Task_count.execute({ query }), { name: 'TypeError', message: /\$regex/ });
+    }
+    assert.ok(Date.now() - started < 500, 'refused at the door, never evaluated');
+    assert.strictEqual((await tools.Task_count.execute({ query: { done: false } })).count, 1, 'other queries run');
+    // Allowed by the application: the pattern runs.
+    const allowed = named(createTools(db, { collections: ['Task'], regex: true }));
+    assert.strictEqual((await allowed.Task_count.execute({ query: { title: { $regex: '^a+!$' } } })).count, 1);
+    assert.throws(() => createTools(db, { regex: 'yes' }), { name: 'TypeError', message: /regex/ });
+  });
+
+  await t.test('checkArgs refuses constructor, toString and __proto__ as members not named', async (t2) => {
+    const db = await open(t2);
+    const tools = named(createTools(db, { collections: ['Task'] }));
+    for (const key of ['constructor', 'toString', 'hasOwnProperty', '__proto__']) {
+      const args = JSON.parse(`{"id":"a","${key}":{"polluted":true}}`);
+      await assert.rejects(tools.Task_get.execute(args), {
+        name: 'TypeError',
+        message: new RegExp(`args\\.${key} is not a member`),
+      });
+      assert.throws(() => checkArgs({ type: 'object', properties: { n: {} }, additionalProperties: false }, args), {
+        message: /is not a member/,
+      });
+    }
+    assert.strictEqual(Object.prototype.polluted, undefined);
+    // A schema that names such a member takes it, as its own.
+    checkArgs({ type: 'object', properties: { constructor: { type: 'string' } } }, { constructor: 'x' });
+  });
+
+  await t.test(
+    'changes answers at most limit records and the eventId to continue from, more while there are; wait_changes the same',
+    async (t2) => {
+      const db = await open(t2);
+      const tools = named(createTools(db, { collections: ['Task'], limit: 10 }));
+      const start = await tools.Task_changes.execute();
+      assert.strictEqual(start.more, false);
+      const ids = [];
+      for (let i = 0; i < 25; i++) ids.push((await db.Task.insert({ title: `t${i}`, done: false })).id);
+      await db.Note.insert({ text: 'not a task' });
+      // Paged: ten, ten, five — every id once, in the log's order, `more` until the end.
+      const seen = [];
+      let page = await tools.Task_changes.execute({ since: start.eventId, limit: 10 });
+      while (true) {
+        for (const change of page.changes) seen.push(change.id);
+        if (!page.more) break;
+        assert.strictEqual(page.changes.length, 10);
+        page = await tools.Task_changes.execute({ since: page.eventId, limit: 10 });
+      }
+      assert.deepStrictEqual(seen, ids);
+      assert.strictEqual(page.eventId, db.log.lastEventId);
+      // The options' limit caps a page; the default page is that limit.
+      await assert.rejects(tools.Task_changes.execute({ since: start.eventId, limit: 11 }), {
+        name: 'TypeError',
+        message: /args\.limit: 10 at most/,
+      });
+      const whole = await tools.Task_changes.execute({ since: start.eventId });
+      assert.strictEqual(whole.changes.length, 10);
+      assert.strictEqual(whole.more, true);
+      // A record changed twice is one change; the page's eventId resumes after the last record answered.
+      await db.Task.update(ids[0], { done: true });
+      const after = await tools.Task_changes.execute({ since: page.eventId, limit: 10 });
+      assert.deepStrictEqual(after, {
+        eventId: db.log.lastEventId,
+        changes: [{ id: ids[0], deleted: false }],
+        more: false,
+      });
+      // wait_changes pages the same way.
+      const waited = await tools.Task_wait_changes.execute({ since: start.eventId, limit: 3, timeout: 10 });
+      assert.strictEqual(waited.changes.length, 3);
+      assert.strictEqual(waited.more, true);
+    },
+  );
+
+  await t.test(
+    'every tool carries annotations — the readers readOnlyHint, the writers destructiveHint as they are — and tools names the verbs made',
+    async (t2) => {
+      const db = await open(t2);
+      const tools = createTools(db, { collections: ['Task'] });
+      const hints = {};
+      for (const tool of tools) {
+        assert.strictEqual(tool.annotations.title, tool.name);
+        assert.strictEqual(tool.annotations.openWorldHint, false);
+        const { readOnlyHint, destructiveHint, idempotentHint } = tool.annotations;
+        hints[tool.name.slice('Task_'.length)] = [readOnlyHint, destructiveHint, idempotentHint];
+      }
+      assert.deepStrictEqual(hints, {
+        query: [true, false, true],
+        count: [true, false, true],
+        get: [true, false, true],
+        changes: [true, false, true],
+        wait_changes: [true, false, true],
+        insert: [false, false, false],
+        upsert: [false, true, true],
+        delete: [false, true, true],
+      });
+      // `tools` names the verbs to make; `readOnly` still leaves the writers out of them.
+      const some = createTools(db, { collections: ['Task'], tools: ['query', 'get', 'delete'] });
+      assert.deepStrictEqual(
+        some.map((tool) => tool.name),
+        ['Task_query', 'Task_get', 'Task_delete'],
+      );
+      const readers = createTools(db, { collections: ['Task'], tools: ['query', 'delete'], readOnly: true });
+      assert.deepStrictEqual(
+        readers.map((tool) => tool.name),
+        ['Task_query'],
+      );
+      assert.throws(() => createTools(db, { tools: ['drop'] }), { name: 'TypeError', message: /no tool drop/ });
+      assert.throws(() => createTools(db, { tools: 'query' }), { name: 'TypeError', message: /array of verbs/ });
+      assert.throws(() => createTools(db, { readOnly: 1 }), { name: 'TypeError', message: /readOnly/ });
     },
   );
 });

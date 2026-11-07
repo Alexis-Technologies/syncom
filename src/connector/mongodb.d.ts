@@ -27,8 +27,14 @@ export interface MongodbConnectorOptions {
   now?: () => number;
 }
 
+/** The position of a pull: the `_updated` stamp of the last document and its `_id` (the ties at one stamp by id). */
+export interface MongodbCheckpoint {
+  at: number;
+  id: string;
+}
+
 export interface MongodbHandlers<T = RecordData> {
-  pull: PullHandlers<T, number>;
+  pull: PullHandlers<T, MongodbCheckpoint>;
   push: PushHandlers<T>;
   /** The `_rev` this adapter last saw for a document, or undefined. */
   revisionOf(id: string): number | undefined;
