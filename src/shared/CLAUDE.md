@@ -9,7 +9,8 @@ src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase
                           facade over the current instance (the leader's Database, or a follower's read-only one), the writers forwarded, the
                           recorded transaction, live things made again at a failover, serve() — requires emitter.js, errors.js, hooks.js,
                           election.js, channel.js only
-src/shared/election.js    elect({ name, locks, channel, heartbeat, misses }) — Web Locks, or a heartbeat over a BroadcastChannel, or alone — no requires
+src/shared/election.js    elect({ name, locks, channel, follower, heartbeat, misses }) — Web Locks, or a heartbeat over a BroadcastChannel, a
+                          follower that never leads, or alone; re-armable: onLead at every grant, yield(), request() — no requires
 src/shared/channel.js     the follower's channel to the leader: describe/revive an error across JSON, answerOf, unwrap, callLeader — requires errors.js only
 ```
 
@@ -36,16 +37,26 @@ readOnly: true })` — `sync` and `lock` left out: a follower neither dials nor 
   leader validates every name of a recorded batch against `TX_WRITERS` and the transaction's api.
 - **A promotion opens the leader beside the follower, then swaps.** Granted the lock, the instance opens the
   database as the leader (the follower holds no lock, so both stand; `LOCKED` — the old leader still letting go —
-  is tried LOCKED_RETRIES times), moves `#db` to it, counts `generation` up, makes every live thing again
-  (`live`, `document`), says `leader`, and only then closes the follower: `shared.db` is never null. A leader that
-  yields (the heartbeat's two-leaders rule) opens a follower and swaps the other way. The leadership waiters resolve
-  at the promotion and reject `CLOSED` at `close()`. An elected instance that cannot open says `LEADER_LOST` on
-  `error` and stays a follower.
-- **The election is Web Locks first.** `navigator.locks.request('syncom:leader:<path>', { mode: 'exclusive' })` —
-  a name apart from the database's own `syncom:<path>` lock, which the leader's `createDatabase` takes — resolves
-  when granted and lets go with the tab. The heartbeat (a BroadcastChannel-shaped `channel`) is for platforms
-  without locks: claim, lead, bye, the smaller token stays; its two leaders at once are settled by the database's
-  lock, never by writes racing. Neither given: `mode: 'alone'`, the instance leads at once.
+  is tried LOCKED_RETRIES times), checks the election still names it (two heartbeat leaders settling: the writer
+  goes), moves `#db` to it, counts `generation` up, makes every live thing again (`live`, `document`), says
+  `leader`, and only then closes the follower: `shared.db` is never null. A leader that lost the election (the
+  heartbeat's two-leaders rule, a lock stolen) opens a follower and swaps the other way — after a promotion in
+  flight, never under it. The leadership waiters resolve at the promotion and reject `CLOSED` at `close()`. An
+  elected instance that cannot open says `PROMOTE_FAILED` on `error` (`attempt`, `cause`), YIELDS the election so
+  the next in line leads, and asks again after `min(LOCKED_STEP · 2^attempt, MAX_BACKOFF)` ms — it never holds a
+  lock it cannot use. `[START]` is honest the same way: a first open that fails releases the election and throws
+  (`openShared` never resolves with `db === null`); a follower on a fresh path waits for the elected instance's
+  identity (READ_ONLY tried again every step, `LEADER_LOST` `fresh` past `failover`); `close()` stops the live
+  things, rejects the waiters, closes the channel, waits for a promotion in flight, closes the database and
+  releases the election LAST, so the next leader never meets this one's database lock.
+- **The election is Web Locks first, and re-armable.** `navigator.locks.request('syncom:leader:<path>', { mode:
+'exclusive' })` — a name apart from the database's own `syncom:<path>` lock, which the leader's `createDatabase`
+  takes — resolves when granted and lets go with the tab. The heartbeat (a BroadcastChannel-shaped `channel`) is
+  for platforms without locks: claim, lead, bye (a claim round: the smallest token leads at the next beat), the
+  smaller token stays; its two leaders at once are settled by the database's lock, never by writes racing. Either
+  way `onLead` fires at EVERY grant (never a one-shot promise), `yield()` steps aside and `request()` asks again;
+  a lock stolen (`AbortError`) is `onLost`. `follower: true` never leads (`mode: 'follower'`: a tab beside a
+  SharedWorker that holds the election). Neither given: `mode: 'alone'`, the instance leads at once.
 - **The wire is wrpc's.** `createSharedChannel(client)` of the wrpc subpath is the follower's channel; the leader's
   `serve()` is a router unit (`syncom-db`); a SharedWorker attaches each tab's port on its `wrpc:connect`
   (`rpc.attachPort(event.ports[0])`) — the handshake of wrpc's worker transport, run in

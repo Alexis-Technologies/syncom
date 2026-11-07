@@ -35,6 +35,8 @@ export interface ElectionOptions {
   locks?: LocksLike | null;
   /** The heartbeat's wire, where there are no locks. */
   channel?: BroadcastLike | null;
+  /** This instance never leads (a tab beside a SharedWorker that does): `mode: 'follower'`. */
+  follower?: boolean;
   /** ms between beats; 1000 by default. */
   heartbeat?: number;
   /** Beats missed before a candidate claims; 3 by default. */
@@ -42,13 +44,18 @@ export interface ElectionOptions {
   token?: string;
 }
 
-/** What `elect()` answers: `lead` resolves when this instance leads. */
+/** What `elect()` answers: re-armable — `onLead` fires at every grant, `yield()` steps aside, `request()` asks again. */
 export interface Election {
   readonly token: string;
-  readonly mode: 'locks' | 'heartbeat' | 'alone';
-  readonly lead: Promise<void>;
+  readonly mode: 'locks' | 'heartbeat' | 'follower' | 'alone';
   readonly leader: boolean;
+  /** Called at every grant; answers the off. */
+  onLead(listener: () => void): () => void;
+  /** Called when the lead is lost: a smaller token leads, the lock was stolen. */
   onLost(listener: () => void): () => void;
+  /** Lets the lock (or the lead) go; `request()` asks for it again. */
+  yield(): void;
+  request(): void;
   release(): void;
 }
 
@@ -74,13 +81,14 @@ export interface SharedEvents {
   follower: (event: { path: string; generation: number }) => void;
   /** Every live thing was made again over a new instance. */
   rebind: (event: { path: string; generation: number }) => void;
-  /** The current instance's `error` events, and `LEADER_LOST` when the elected instance could not open. */
+  /** The current instance's `error` events, and `PROMOTE_FAILED` when the elected instance could not open. */
   error: (error: Error & { code: string }) => void;
 }
 
 /** A Document that follows the instance: re-read once after a failover (`update` with the data, delta null). */
 export interface SharedDocument<R = RecordData> {
   readonly id: string;
+  /** The record as the current instance reads it; rejects with what the bind threw where it failed. */
   data(): Promise<R | null>;
   /** The current instance's Document behind this one (null until the first is read). */
   readonly document: Document<R> | null;
@@ -105,7 +113,9 @@ export interface Shared {
   readonly nodeId: string;
   /** Counted up at every change of instance. */
   readonly generation: number;
-  readonly mode: 'locks' | 'heartbeat' | 'alone';
+  readonly mode: 'locks' | 'heartbeat' | 'follower' | 'alone';
+  /** The election's token: what names this instance's calls to the leader. */
+  readonly token: string;
   /** The leader's replication; `NOT_LEADER` on a follower. */
   readonly sync: FullDatabase['sync'];
   waitForLeadership(options?: { signal?: AbortSignal | null }): Promise<void>;
@@ -149,7 +159,7 @@ export interface Shared {
   compact: Database['compact'];
   /** The leader's transaction; on a follower a recorded one, carried whole (no `insert`, no read of its own writes). */
   transact: Database['transact'];
-  /** The procedures a leader mounts for its followers; `NOT_LEADER` on a follower. */
+  /** The procedures a leader mounts for its followers (`access` `'session'` by default); `NOT_LEADER` on a follower. */
   serve(options?: { access?: string }): Record<string, ServedProcedure>;
   close(): Promise<void>;
   on<E extends keyof SharedEvents>(event: E, listener: SharedEvents[E]): this;

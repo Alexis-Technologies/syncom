@@ -22,7 +22,7 @@ const shared = await openShared({
 expectType<Shared>(shared);
 expectType<Database>(shared.db);
 expectType<boolean>(shared.leader);
-expectType<'locks' | 'heartbeat' | 'alone'>(shared.mode);
+expectType<'locks' | 'heartbeat' | 'follower' | 'alone'>(shared.mode);
 expectType<string>(await shared.insert({ title: 'x' }));
 await shared.set('t1', { title: 'y' });
 await shared.transact(async (tx) => {
@@ -47,5 +47,14 @@ await shared.close();
 
 const election = elect({ name: 'syncom:leader:data', heartbeat: 500 });
 expectType<Election>(election);
-await election.lead;
+const off = election.onLead(() => {});
+expectType<boolean>(election.leader);
+expectType<'locks' | 'heartbeat' | 'follower' | 'alone'>(election.mode);
+election.yield();
+election.request();
+off();
 election.release();
+expectType<string>(shared.token);
+const tab = await openShared({ createDatabase, engine: memoryEngine(), path: 'data', election: { follower: true } });
+expectType<'locks' | 'heartbeat' | 'follower' | 'alone'>(tab.mode);
+expectType<string>(shared.serve().set.access);

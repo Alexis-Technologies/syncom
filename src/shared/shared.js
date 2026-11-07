@@ -1,27 +1,29 @@
 'use strict';
 
 // Several instances over one database (@alexify/syncom/shared): the tabs of
-// one browser profile over one IndexedDB, the windows of one Electron app
-// over one SQLite file, the workers of one process over one memory engine.
-// One of them leads — a full `Database`, the one that writes, dials and
-// hosts — and the others follow: each a `createDatabase({ readOnly: true })`
-// over the same engine, reading what the leader lands and hearing it through
-// the engine's change stream (a record whole: a follower's live Document says
-// `update`, but a follower raises no `transaction` event and `observe()`
-// hears nothing there — the facade has no `observe`), its writes forwarded to
-// the leader over a channel (`{ call(method, args) }`: a wrpc client over a worker port, or
-// anything carrying JSON). Leadership is an election (src/shared/election.js:
-// Web Locks, or a heartbeat); when the leader goes, a follower is granted the
-// lock and opens the database as the leader in its place — the same node id,
-// the same log — and every live thing made through this facade (`live`,
-// `document`, `observe`) is made again over the new instance. A write a
+// one browser profile over one IndexedDB, the workers of one process over one
+// memory engine, the instances of one service over one MongoDB. One of them
+// leads — a full `Database`, the one that writes, dials and hosts — and the
+// others follow: each a `createDatabase({ readOnly: true })` over the same
+// engine (one that is `shared`), reading what the leader lands and hearing it
+// through the engine's change stream (a record whole: a follower's live
+// Document says `update`, but a follower raises no `transaction` event and
+// `observe()` hears nothing there — the facade has no `observe`), its writes
+// forwarded to the leader over a channel (`{ call(method, args) }`: a wrpc
+// client over a worker port, or anything carrying JSON). Leadership is an
+// election (src/shared/election.js: Web Locks, or a heartbeat), re-armable:
+// when the leader goes, a follower is granted the lock and opens the
+// database as the leader in its place — the same node id, the same log —
+// and every live thing made through this facade (`live`, `document`) is made
+// again over the new instance; an elected instance that cannot open says
+// PROMOTE_FAILED, yields the lock and asks again after a backoff. A write a
 // follower sent while the leader went is tried again once a leader answers,
 // within `failover` ms; past it, `LEADER_LOST`. `openShared({ createDatabase,
 // ...options, channel, election })` — the database options are what
-// `createDatabase` takes (the engine must be `shared`), `createDatabase` the
-// one of the flavour in use (the core's or `/all`'s: nothing of the core is
-// bundled here, as /branch opens through the parent's constructor) —
-// requires emitter.js, errors.js, hooks.js, election.js, channel.js only.
+// `createDatabase` takes, `createDatabase` the one of the flavour in use (the
+// core's or `/all`'s: nothing of the core is bundled here, as /branch opens
+// through the parent's constructor) — requires emitter.js, errors.js,
+// hooks.js, election.js, channel.js only.
 
 const { Emitter } = require('../emitter.js');
 const { SyncomError } = require('../errors.js');
@@ -96,6 +98,8 @@ const DEFAULT_GRACE = 50;
 const DEFAULT_FAILOVER = 10_000;
 const LOCKED_RETRIES = 40;
 const LOCKED_STEP = 50;
+// A promotion that failed asks for the lock again after LOCKED_STEP · 2^attempt ms, MAX_BACKOFF at most.
+const MAX_BACKOFF = 5000;
 const NOOP = () => {};
 const QUIET = { warn: NOOP, error: NOOP, info: NOOP, debug: NOOP };
 
@@ -103,12 +107,15 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const notLeader = (path, what) =>
   new SyncomError('NOT_LEADER', `${what} is the leader's: the instance at ${path} follows`, { path, what });
+const closed = (path) => new SyncomError('CLOSED', `The shared database at ${path} is closed`, { path });
 
 // A live Document of the current instance, made again over the next: `data()`, the `update` event (data, delta)
-// — and once after a failover, with the data as the new instance reads it (delta null).
+// — and once after a failover, with the data as the new instance reads it (delta null). A bind that failed is
+// what `data()` throws, never a read of nothing.
 class SharedDocument extends Emitter {
   #id;
   #doc = null;
+  #error = null;
   #ready;
   #off;
   constructor(shared, id, logger) {
@@ -118,30 +125,34 @@ class SharedDocument extends Emitter {
     this.#off = shared.live((db) => {
       const bound = db.document(id).then((doc) => {
         this.#doc = doc;
+        this.#error = null;
         const listener = (data, delta) => notify(this, logger(), 'update', data, delta);
         doc.on('update', listener);
         if (!first) {
           doc
             .data()
             .then((data) => notify(this, logger(), 'update', data, null))
-            .catch((error) => logger().warn({ event: 'shared.rebind.failed', id, err: error }));
+            .catch((error) => logger().warn({ event: 'tabs.rebind.failed', id, err: error }));
         }
         first = false;
         return () => doc.off('update', listener);
       });
-      this.#ready = bound.then(NOOP, NOOP);
+      this.#ready = bound.then(NOOP, (error) => {
+        this.#error = error;
+      });
       return bound;
     });
   }
   get id() {
     return this.#id;
   }
-  /** The record as the current instance reads it. */
+  /** The record as the current instance reads it; what the bind threw where it failed. */
   async data() {
     await this.#ready;
+    if (this.#doc === null) throw this.#error ?? new TypeError(`document(${this.#id}): not bound`);
     return this.#doc.data();
   }
-  /** The instance's Document behind this one now (null until the first is read). */
+  /** The instance's Document behind this one (null until the first is read). */
   get document() {
     return this.#doc;
   }
@@ -157,7 +168,7 @@ const stopOf = (stop, logger) => {
     .then((fn) => {
       if (typeof fn === 'function') fn();
     })
-    .catch((error) => logger().warn({ event: 'shared.rebind.failed', err: error }));
+    .catch((error) => logger().warn({ event: 'tabs.rebind.failed', err: error }));
 };
 
 class Shared extends Emitter {
@@ -169,12 +180,18 @@ class Shared extends Emitter {
   #grace;
   #failover;
   #election = null;
+  #offLead = NOOP;
+  #offLost = NOOP;
   #db = null;
   #leader = false;
   #closed = false;
   #promoting = false;
+  #promotion = null;
+  #attempts = 0;
+  #retry = null;
   #generation = 0;
   #channel = null;
+  #dialing = null;
   #lives = new Set();
   #waiters = [];
 
@@ -214,19 +231,39 @@ class Shared extends Emitter {
     this.#failover = failover;
   }
 
-  // The election, then the first instance: the leader where the grant comes within `grace` ms, a follower else.
+  // The election, then the first instance: the leader where the grant comes within `grace` ms, a follower else —
+  // one that waits for the leader's identity on a fresh path, and is promoted the moment the grant comes. A first
+  // open that fails leaves nothing behind: the election released, the error thrown — `shared.db` is never null.
   async [START]() {
     this.#election = elect({ name: `syncom:leader:${this.#path}`, ...this.#electionOptions });
-    const granted =
-      this.#election.mode === 'alone' ||
-      (await Promise.race([this.#election.lead.then(() => true), sleep(this.#grace).then(() => false)]));
-    if (granted) await this.#promote(true);
-    else {
-      await this.#follow();
-      this.#election.lead.then(() => this.#promote(false)).catch(NOOP);
+    try {
+      let granted = this.#election.leader;
+      if (!granted && this.#election.mode !== 'follower') {
+        let grant = NOOP;
+        const lead = new Promise((resolve) => {
+          grant = resolve;
+        });
+        const off = this.#election.onLead(grant);
+        granted = await Promise.race([lead.then(() => true), sleep(this.#grace).then(() => false)]);
+        off();
+      }
+      if (granted) await this.#promote(true);
+      else {
+        await this.#follow(true);
+        // The grant may have come while the follower opened: the facade promotes now, and at every grant after.
+        if (this.#election.leader) await this.#promote(true);
+      }
+      this.#offLead = this.#election.onLead(() => void this.#promote(false).catch(NOOP));
+      this.#offLost = this.#election.onLost(() => void this.#demote().catch(NOOP));
+      return this;
+    } catch (error) {
+      this.#closed = true;
+      this.#election.release();
+      const db = this.#db;
+      this.#db = null;
+      if (db !== null) await db.close().catch(NOOP);
+      throw error;
     }
-    this.#election.onLost(() => this.#demote().catch(NOOP));
-    return this;
   }
 
   #logger() {
@@ -234,18 +271,40 @@ class Shared extends Emitter {
   }
 
   #check() {
-    if (this.#closed) {
-      throw new SyncomError('CLOSED', `The shared database at ${this.#path} is closed`, { path: this.#path });
-    }
+    if (this.#closed) throw closed(this.#path);
   }
 
-  // A follower: read-only over the same engine, nothing of `sync` (a follower neither dials nor hosts), no lock.
-  async #follow() {
+  // A follower: read-only over the same engine, nothing of `sync` (a follower neither dials nor hosts), no lock. A
+  // fresh path reads as READ_ONLY until the elected instance writes the identity — tried again every step while
+  // this instance is not the one elected, within `failover` ms; past it, LEADER_LOST (reason `fresh`).
+  async #follow(first) {
     const options = { readOnly: true };
     for (const key of Object.keys(this.#options)) {
       if (key !== 'sync' && key !== 'lock') options[key] = this.#options[key];
     }
-    const db = await this.#make(options);
+    const deadline = Date.now() + this.#failover;
+    let db = null;
+    for (let attempt = 0; db === null; attempt++) {
+      if (this.#closed) return;
+      if (first && this.#election.leader) return;
+      try {
+        db = await this.#make(options);
+      } catch (error) {
+        if (error?.code !== 'READ_ONLY') throw error;
+        if (Date.now() >= deadline) {
+          throw new SyncomError(
+            'LEADER_LOST',
+            `No leader wrote the database at ${this.#path} within ${this.#failover} ms`,
+            {
+              path: this.#path,
+              reason: 'fresh',
+              cause: error,
+            },
+          );
+        }
+        await sleep(Math.min(this.#grace, LOCKED_STEP) || LOCKED_STEP);
+      }
+    }
     if (this.#closed) return void (await db.close().catch(NOOP));
     this.#db = db;
     this.#leader = false;
@@ -259,10 +318,15 @@ class Shared extends Emitter {
 
   // Granted the lock: the database opened as the leader beside the follower (which holds no lock), the facade
   // moved to it, the live things made again, the follower closed. The database's own lock may still be the old
-  // leader's for a moment: `LOCKED` is tried again, LOCKED_RETRIES times.
+  // leader's for a moment: `LOCKED` is tried again, LOCKED_RETRIES times. An open that fails past the first is
+  // PROMOTE_FAILED on `error`: the lock yielded (the next in line leads), asked for again after a backoff.
   async #promote(first) {
     if (this.#closed || this.#leader || this.#promoting) return;
     this.#promoting = true;
+    let done = NOOP;
+    this.#promotion = new Promise((resolve) => {
+      done = resolve;
+    });
     try {
       let writer = null;
       for (let attempt = 0; writer === null; attempt++) {
@@ -274,12 +338,14 @@ class Shared extends Emitter {
           await sleep(LOCKED_STEP);
         }
       }
-      if (this.#closed) return void (await writer.close().catch(NOOP));
+      // Closed, or the election lost while the writer opened (two heartbeat leaders settling): the writer goes.
+      if (this.#closed || !this.#election.leader) return void (await writer.close().catch(NOOP));
       const old = this.#db;
       const channel = this.#channel;
       this.#db = writer;
       this.#leader = true;
       this.#channel = null;
+      this.#attempts = 0;
       if (!first) this.#generation++;
       this.#relay(writer);
       if (!first) this.#rebind();
@@ -290,26 +356,45 @@ class Shared extends Emitter {
       if (old !== null) await old.close().catch(NOOP);
       if (channel !== null) await Promise.resolve(channel.close?.()).catch(NOOP);
     } catch (error) {
-      const lost = new SyncomError(
-        'LEADER_LOST',
-        `Elected, but the database at ${this.#path} could not be opened as the leader`,
-        {
-          path: this.#path,
-          cause: error,
-        },
+      if (first) throw error;
+      const attempt = this.#attempts++;
+      const failed = new SyncomError(
+        'PROMOTE_FAILED',
+        `Elected, but the database at ${this.#path} could not be opened as the leader (attempt ${attempt + 1})`,
+        { path: this.#path, attempt, cause: error },
       );
-      this.#logger().error({ event: 'shared.promote.failed', path: this.#path, err: error });
-      notify(this, this.#logger(), 'error', lost);
+      this.#logger().error({ event: 'tabs.promote.failed', path: this.#path, attempt, err: error });
+      this.#election.yield();
+      notify(this, this.#logger(), 'error', failed);
+      if (!this.#closed) {
+        this.#retry = setTimeout(
+          () => {
+            this.#retry = null;
+            if (!this.#closed) this.#election.request();
+          },
+          Math.min(LOCKED_STEP * 2 ** attempt, MAX_BACKOFF),
+        );
+      }
     } finally {
       this.#promoting = false;
+      this.#promotion = null;
+      done();
     }
   }
 
-  // A leader that yielded (the heartbeat election's two-leaders rule): a follower again over the same engine.
+  // A leader that lost the election (the heartbeat's two-leaders rule, a lock stolen): a follower again over the
+  // same engine, the live things made again.
   async #demote() {
-    if (this.#closed || !this.#leader) return;
+    // A loss while a promotion is in flight: the promotion sees it (the writer goes) or the swap is undone here.
+    if (this.#promotion !== null) await this.#promotion;
+    if (this.#closed || !this.#leader || this.#election.leader) return;
     const old = this.#db;
-    await this.#follow();
+    try {
+      await this.#follow(false);
+    } catch (error) {
+      notify(this, this.#logger(), 'error', error);
+      return;
+    }
     if (this.#closed) return;
     this.#generation++;
     this.#rebind();
@@ -324,7 +409,7 @@ class Shared extends Emitter {
         entry.stop = entry.make(this.#db) ?? null;
       } catch (error) {
         entry.stop = null;
-        this.#logger().warn({ event: 'shared.rebind.failed', path: this.#path, err: error });
+        this.#logger().warn({ event: 'tabs.rebind.failed', path: this.#path, err: error });
       }
     }
     notify(this, this.#logger(), 'rebind', { path: this.#path, generation: this.#generation });
@@ -349,9 +434,13 @@ class Shared extends Emitter {
   get generation() {
     return this.#generation;
   }
-  /** How leadership is decided: `'locks'`, `'heartbeat'` or `'alone'`. */
+  /** How leadership is decided: `'locks'`, `'heartbeat'`, `'follower'` or `'alone'`. */
   get mode() {
     return this.#election.mode;
+  }
+  /** The election's: what names this instance's calls to the leader. */
+  get token() {
+    return this.#election.token;
   }
   get nodeId() {
     return this.db.nodeId;
@@ -425,8 +514,31 @@ class Shared extends Emitter {
     return this.#forward(name, args);
   }
 
+  // The channel to the leader, dialed once for every write waiting on it: concurrent forwards share one dial.
+  #channelOf() {
+    if (this.#channel !== null) return Promise.resolve(this.#channel);
+    this.#dialing ??= Promise.resolve()
+      .then(() => this.#dial({ path: this.#path, generation: this.#generation }))
+      .then((channel) => {
+        this.#channel = channel;
+        return channel;
+      })
+      .finally(() => {
+        this.#dialing = null;
+      });
+    return this.#dialing;
+  }
+
+  async #dropChannel() {
+    const channel = this.#channel;
+    this.#channel = null;
+    if (channel !== null) await Promise.resolve(channel.close?.()).catch(NOOP);
+  }
+
   // A follower's write: carried to the leader, tried again while a leader comes within `failover` ms — this
-  // instance's own, where the election made it so meanwhile — then `LEADER_LOST`.
+  // instance's own, where the election made it so meanwhile — then `LEADER_LOST`. A dial that fails sent
+  // nothing; a call that rejects — a transport's error, a `TypeError` of a fetch among them — is tried again, as is
+  // a NOT_LEADER, LEADER_LOST or CLOSED answer (the instance that answered follows, or is going).
   async #forward(name, args) {
     if (this.#dial === null) throw notLeader(this.#path, `${name}() without a channel to the leader`);
     const deadline = Date.now() + this.#failover;
@@ -434,33 +546,37 @@ class Shared extends Emitter {
     for (let attempt = 0; ; attempt++) {
       this.#check();
       if (this.#leader) return Reflect.apply(this.#db[name], this.#db, args);
-      let answer;
+      let channel = null;
       try {
-        if (this.#channel === null) {
-          this.#channel = await this.#dial({ path: this.#path, generation: this.#generation });
-          if (!isChannel(this.#channel)) {
-            this.#channel = null;
-            throw new TypeError('openShared(): channel() must answer { call(method, args) }');
-          }
-        }
-        answer = await this.#channel.call(name, args);
+        channel = await this.#channelOf();
       } catch (error) {
-        if (error instanceof TypeError) throw error;
+        // The dial failed: nothing reached a leader.
         cause = error;
-        answer = null;
       }
-      if (answer !== null) {
+      if (channel !== null && !isChannel(channel)) {
+        this.#channel = null;
+        throw new TypeError('openShared(): channel() must answer { call(method, args) }');
+      }
+      if (channel !== null) {
+        let answer = null;
         try {
-          return unwrap(answer, name);
+          answer = await channel.call(name, args);
         } catch (error) {
-          // The instance that answered follows now: the leader is another, dialed again.
-          if (error?.code !== 'NOT_LEADER' && error?.code !== 'LEADER_LOST') throw error;
           cause = error;
+        }
+        if (answer !== null) {
+          try {
+            return unwrap(answer, name);
+          } catch (error) {
+            // The instance that answered follows now, or is closing: the leader is another, dialed again.
+            const code = error?.code;
+            if (code !== 'NOT_LEADER' && code !== 'LEADER_LOST' && code !== 'CLOSED') throw error;
+            cause = error;
+          }
         }
       }
       // The leader went: the channel dropped, a new one dialed once a leader answers.
-      await Promise.resolve(this.#channel?.close?.()).catch(NOOP);
-      this.#channel = null;
+      await this.#dropChannel();
       if (Date.now() >= deadline) {
         throw new SyncomError(
           'LEADER_LOST',
@@ -509,9 +625,10 @@ class Shared extends Emitter {
   /**
    * The procedures a leader mounts for its followers (`defineRouter({ 'syncom-db': shared.serve() })`): one per
    * writer and `transact`, each answering a value — the result, or the error described — never throwing; an
-   * instance that follows again answers `NOT_LEADER`. `NOT_LEADER` here on a follower.
+   * instance that follows again answers `NOT_LEADER`. `NOT_LEADER` here on a follower. `access` is wrpc's:
+   * `'session'` by default — the leader's writers are the application's own tabs', never a router's public face.
    */
-  serve({ access = 'public' } = {}) {
+  serve({ access = 'session' } = {}) {
     this.#check();
     if (!this.#leader) throw notLeader(this.#path, 'serve()');
     const run = (fn) => async (context, args) => {
@@ -543,26 +660,35 @@ class Shared extends Emitter {
     return procedures;
   }
 
-  /** The instance closed, the election left, the channel closed; the leadership waiters rejected (`CLOSED`). */
+  /**
+   * The live things stopped, the leadership waiters rejected (`CLOSED`), the channel closed, a promotion in flight
+   * waited for, the instance closed — and the election let go of LAST, so the next leader opens after this one's
+   * lock is gone.
+   */
   async close() {
     if (this.#closed) return;
     this.#closed = true;
-    this.#election?.release();
+    if (this.#retry !== null) {
+      clearTimeout(this.#retry);
+      this.#retry = null;
+    }
+    this.#offLead();
+    this.#offLost();
     for (const entry of this.#lives) stopOf(entry.stop, () => QUIET);
     this.#lives.clear();
     const waiters = this.#waiters;
     this.#waiters = [];
-    for (let i = 0; i < waiters.length; i++) {
-      waiters[i].reject(
-        new SyncomError('CLOSED', `The shared database at ${this.#path} is closed`, { path: this.#path }),
-      );
-    }
-    await Promise.resolve(this.#channel?.close?.()).catch(NOOP);
-    this.#channel = null;
+    for (let i = 0; i < waiters.length; i++) waiters[i].reject(closed(this.#path));
+    await this.#dropChannel();
+    if (this.#promotion !== null) await this.#promotion;
     const db = this.#db;
     this.#db = null;
     this.#leader = false;
-    if (db !== null) await db.close();
+    try {
+      if (db !== null) await db.close();
+    } finally {
+      this.#election?.release();
+    }
   }
 
   static {

@@ -678,7 +678,9 @@ const ENTRIES = [
   { label: 'attachments — browser', entry: 'src/attachments/attachments.js', platform: 'browser', budget: 4.5 },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
-  { label: 'shared — browser', entry: 'src/shared/shared.js', platform: 'browser', budget: 6 },
+  // 6.2 with the re-armable election (onLead/yield/request), a promotion that yields and asks again (PROMOTE_FAILED),
+  // an honest START and close, one dial shared by the writes waiting on it (review №7, E6.1; 2026-11-07). 6.5, raised by name.
+  { label: 'shared — browser', entry: 'src/shared/shared.js', platform: 'browser', budget: 6.5 },
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
   { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7 },

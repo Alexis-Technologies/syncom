@@ -79,7 +79,14 @@ go. With neither locks nor channel the instance leads at once (`mode:
 'alone'`).
 
 `openShared` waits `grace` ms (50) for the grant before opening as a follower:
-the first tab leads at once, the second follows without a pause.
+the first tab leads at once, the second follows without a pause. On a fresh
+path the follower waits for the elected instance to write the identity
+(`node.json`) — a heartbeat election takes `misses` beats to settle, and the
+loser follows once it is there (`LEADER_LOST` with `reason: 'fresh'` past
+`failover` ms). `openShared` never resolves with `db` null: a first open that
+fails rejects and lets the election go. `election: { follower: true }` is an
+instance that never leads (`mode: 'follower'`) — a tab beside a SharedWorker
+that holds the election, see [the channel](#the-channel).
 `waitForLeadership({ signal })` resolves when this instance leads;
 `leader`, `isLeader()`, `mode` and the `leader`/`follower` events say which
 it is.
@@ -100,9 +107,19 @@ follows the instance (its `update` event, and once after a failover with the
 data as the new instance reads it, delta `null`). A follower's write sent
 while the leader went is tried again while a leader comes — `channel()` is
 called again for a fresh channel — within `failover` ms (10 000); past it, or
-when the channel answers nothing readable, `LEADER_LOST`. An instance that
-was elected but could not open the database reports `LEADER_LOST` on its
-`error` event and stays a follower.
+when the channel answers nothing readable, `LEADER_LOST`. Concurrent writes
+waiting on a channel share one dial; a dial that fails sent nothing and is
+tried again, as is a call the transport rejects (a `fetch`'s `TypeError`
+among them) or a `NOT_LEADER`/`CLOSED` answer from an instance that follows
+again or is going.
+
+An instance that was elected but could not open the database — `LOCKED` past
+the retries, the engine's error — reports `PROMOTE_FAILED` on its `error`
+event (`attempt`, `cause`), **yields** the election so the next in line leads,
+and asks for it again after a backoff (50 ms doubling to 5 s): it leads once
+the database frees, and never holds a lock it cannot use. `close()` closes the
+database first and lets the election go last, so the next leader's open never
+finds the old lock still held.
 
 ## The channel
 
@@ -110,7 +127,8 @@ The channel is `{ call(method, args) }`, anything that carries JSON both
 ways; the leader answers every call as a value — `{ ok, value }` or `{ ok,
 error }` — so a refusal round-trips whatever the wire does with a thrown
 error. The leader mounts its writers with `shared.serve()` (one procedure per
-writer and `transact`), and the wrpc subpath wraps a `WrpcClient` as the
+writer and `transact`, `access: 'session'` by default — the tabs' own, never a
+router's public face), and the wrpc subpath wraps a `WrpcClient` as the
 follower's channel. In a browser the leader's server runs where every tab can
 reach it — a SharedWorker — and each tab's `connect(url, { worker })` opens a
 port to it, which the worker attaches:
