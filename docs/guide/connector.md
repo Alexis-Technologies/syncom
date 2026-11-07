@@ -22,7 +22,8 @@ const tasks = replicate(db, {
     stream: (emit, { checkpoint }) => api.subscribe({ since: checkpoint }, (page) => emit({ documents: page.rows })),
   },
   push: {
-    // This node's records, with what the backend was assumed to hold; answer the rows the backend refused.
+    // This node's records, with what the backend was assumed to hold; answer the rows the backend refused as it
+    // holds them — a row with `assumed: undefined` is a probe: answer it the same way and write nothing.
     handler: async (rows) => api.bulk(rows.map(({ id, data, deleted, assumed }) => ({ id, data, deleted, ifMatch: assumed }))),
   },
 });
@@ -170,7 +171,7 @@ newer push) is judged again by the next pull run.
 
 Where the far end speaks a protocol of its own, an adapter beside this module writes the two handlers over an
 injected client or `fetch` — nothing of the backend's SDK ships with syncom, every adapter is a subpath of its own
-under 2 KB, and each is tested over a fake of its backend. Where the far end is reachable over a wire wrpc already
+of about 2 KB (the two drives 2.5), and each is tested over a fake of its backend. Where the far end is reachable over a wire wrpc already
 carries — HTTP and Server-Sent Events, WebSocket, WebRTC, a worker port, a broker (NATS, Redis, Kafka, AMQP) — no
 connector is needed: the other side runs a syncom node and the protocol goes over wrpc as it is — the recipes are
 [HTTP and Server-Sent Events](./wrpc#over-http-and-server-sent-events), [thin clients over HTTP](./wrpc#thin-clients-over-http),

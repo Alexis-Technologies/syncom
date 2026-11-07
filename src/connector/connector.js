@@ -7,9 +7,11 @@
 //
 //   pull.handler(checkpoint, batchSize) → { documents: [{ id, data, deleted }], checkpoint }
 //     the backend's documents changed since `checkpoint`, a page at a time, and
-//     the position after them; `pull.stream(emit)` → stop, when the backend
-//     tells of changes: `emit({ documents, checkpoint })`, or `emit('RESYNC')`
-//     to pull again from the checkpoint.
+//     the position after them; `pull.stream(emit, { checkpoint })` → stop, when
+//     the backend tells of changes: `emit({ documents })` (landed; the
+//     checkpoint moves with the pulls alone), `emit('RESYNC')` to pull again
+//     from the checkpoint, `emit('END')` when the stream is over (followed
+//     again after a backoff).
 //   push.handler(rows) → conflicts
 //     rows `[{ id, data, deleted, assumed }]` — the record as this node reads it
 //     (`deleted` for a tombstone) and `assumed`, the backend's state as this
@@ -29,10 +31,13 @@
 // lands. What goes out follows
 // the `transaction` events of the collection — every turn but a pull of this
 // connector's — pages of `batchSize` rows, in order, one push in flight. The
-// checkpoint (`{ pull, pushed }`: the backend's position, and this node's log
-// position pushed through) lives in the `connector` kv namespace under the
-// name: a restart pulls from `pull` and pushes what the log holds since
-// `pushed` — every record of the collection once where the log cannot resume.
+// checkpoint text (`{ pull, pushed, known }`: the backend's position, this
+// node's log position pushed through — a frontier before the oldest pending
+// turn — and the digest of the backend's state per record) lives in the
+// `connector` kv namespace under the name: a restart pulls from `pull` and
+// pushes what the log holds since `pushed` — a record known by digest alone
+// as a probe — or every record of the collection once where the log cannot
+// resume.
 // A handler that fails is told (`error`, REPLICATION_FAILED with the direction
 // and `retryIn`) and tried again after a backoff; nothing is skipped. Requires
 // symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only.
