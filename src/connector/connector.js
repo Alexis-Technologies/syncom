@@ -161,6 +161,9 @@ class Replication extends Emitter {
   // The push in flight; the pull in flight.
   #pushing = null;
   #pulling = null;
+  // One judgement at a time: a page landing and a push (the rows read, the answer judged, the conflicts landed) take
+  // turns, so neither judges a record against a state the other is changing under it.
+  #turn = Promise.resolve();
   // The backend's state of each record as this node last knew it, as the canonical text of the backend's shape
   // (null: it holds nothing) — what a push says it assumed, what a pull is judged against.
   #known = new Map();
@@ -489,6 +492,13 @@ class Replication extends Emitter {
     }
   }
 
+  // `task` run after the judgement in flight, if any, and before the next.
+  #exclusive(task) {
+    const run = this.#turn.then(task);
+    this.#turn = run.catch(NOOP);
+    return run;
+  }
+
   // A document, a row, that cannot land here or go to the backend: said once (`refused`, with the direction and
   // why), counted, and left out — the rest of its page is not held up by it.
   #refuse(direction, id, reason, cause) {
@@ -544,35 +554,105 @@ class Replication extends Emitter {
     }
     this.#stats.pulled += documents.length;
     const collection = this.#collection;
+    const conflicts = [];
     let applied = 0;
     if (docs.length > 0) {
-      await this.#db.transact(
-        async (tx) => {
-          for (let i = 0; i < docs.length; i++) {
-            const { id, deleted, data, text } = docs[i];
-            try {
-              const local = await tx.get(id);
-              this.#learn(id, text);
-              if (deleted) {
-                if (local === null) continue;
-                await tx.delete(id);
-              } else {
-                if (local !== null && same(plain(local), plain(data))) continue;
-                await tx.set(id, { ...data, $type: collection });
+      // Each document against what the backend was known to hold and whether an edit of the record waits to go:
+      // (1) the state known already is an echo — nothing to learn, and over a pending edit nothing to write: the
+      // edit is compared against it by the push — unless the record reads otherwise with no edit pending (a landing
+      // that never happened), which lands; (2) another state over a pending edit is a conflict — the backend moved
+      // under the edit: `resolve` or the backend wins, landed here under the resolve actor, told; (3) another state
+      // over a record with nothing pending is the backend's newer state: landed unless the record reads so already.
+      await this.#exclusive(() =>
+        this.#db.transact(
+          async (tx) => {
+            for (let i = 0; i < docs.length; i++) {
+              const { id, deleted, data, text } = docs[i];
+              try {
+                const local = await tx.get(id);
+                const pending = this.#pending.has(id);
+                const echo = this.#assumedText(id, text);
+                if (
+                  echo &&
+                  (pending || (deleted ? local === null : local !== null && same(plain(local), plain(data))))
+                ) {
+                  continue;
+                }
+                if (!echo && pending) {
+                  const decided = await this.#decide(id, plain(local), { data, deleted });
+                  this.#learn(id, text);
+                  await this.#landResolution(tx, decided);
+                  conflicts.push(decided.event);
+                  continue;
+                }
+                this.#learn(id, text);
+                if (deleted) {
+                  if (local === null) continue;
+                  await tx.delete(id);
+                } else {
+                  if (local !== null && same(plain(local), plain(data))) continue;
+                  await tx.set(id, { ...data, $type: collection });
+                }
+                applied++;
+              } catch (error) {
+                refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
               }
-              applied++;
-            } catch (error) {
-              refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
             }
-          }
-        },
-        { source: this.#source, actor: this.#actor },
+          },
+          { source: this.#source, actor: this.#actor },
+        ),
       );
     }
     for (let i = 0; i < refusals.length; i++) this.#refuse('pull', refusals[i][0], refusals[i][1], refusals[i][2]);
+    for (let i = 0; i < conflicts.length; i++) notify(this, this.#logger, 'conflict', conflicts[i]);
     if (docs.length === 0) return;
     this.#stats.applied += applied;
     notify(this, this.#logger, 'received', { documents: docs.length, applied });
+  }
+
+  // Whether `text` is the backend's state as this node knows it.
+  #assumedText(id, text) {
+    return this.#known.has(id) && this.#known.get(id) === text;
+  }
+
+  // A conflict decided: the document as the backend holds it (`remote`, its shape — through `modifier.pull` for the
+  // application) against the record here (`local`, plain). The backend wins — unless `resolve` answers the data to
+  // keep or `null` to delete; a `resolve` that throws is said and the backend wins. Answers what to land and the
+  // `conflict` event to tell once it has.
+  async #decide(id, local, remote) {
+    let remoteData = remote.deleted ? null : remote.data;
+    if (remoteData !== null && this.#modifier.pull !== null) remoteData = this.#modifier.pull(remoteData, id);
+    let resolved = remoteData;
+    let deleted = remote.deleted;
+    if (this.#resolve !== null) {
+      try {
+        const answer = await this.#resolve({ id, local, remote: remoteData, deleted: remote.deleted });
+        if (answer === null) {
+          resolved = null;
+          deleted = true;
+        } else if (isPlainObject(answer)) {
+          resolved = answer;
+          deleted = false;
+        }
+      } catch (error) {
+        this.#logger.warn({ event: 'connector.resolve.failed', name: this.#name, id, err: error });
+      }
+    }
+    this.#stats.conflicts++;
+    return { id, data: resolved, deleted, event: { id, local, remote: remoteData, deleted: remote.deleted, resolved } };
+  }
+
+  // A resolution landed through `tx` under the resolve actor (what a restart's `log.since` keeps, unlike a pull's
+  // writes): a deletion, or the data unless the record reads so already.
+  async #landResolution(tx, { id, data, deleted }) {
+    const actor = `${this.#actor}:resolve`;
+    const local = await tx.get(id);
+    if (deleted) {
+      if (local !== null) await tx.delete(id, { actor });
+      return;
+    }
+    if (local !== null && same(plain(local), plain(data))) return;
+    await tx.set(id, { ...data, $type: this.#collection }, { actor });
   }
 
   // The live half of the pull: the backend's stream where it has one, a pull every `retryTime` otherwise.
@@ -726,28 +806,14 @@ class Replication extends Emitter {
         if (ids.length >= this.#batchSize) break;
       }
       let rows;
-      let texts;
       try {
-        ({ rows, texts } = await this.#rowsOf(ids));
+        rows = await this.#exclusive(() => this.#pushBatch(ids));
       } catch (error) {
+        this.#inflight.clear();
+        this.#redo.clear();
+        this.#conflicted.clear();
         this.#failed('push', error, () => this.#flush());
         return;
-      }
-      if (rows.length > 0) {
-        for (let i = 0; i < rows.length; i++) this.#inflight.add(rows[i].id);
-        let answers;
-        try {
-          answers = await this.#push.handler(rows);
-          this.#stats.pushes++;
-          this.#attempts.push = 0;
-          await this.#answered(rows, texts, answers);
-        } catch (error) {
-          this.#inflight.clear();
-          this.#redo.clear();
-          this.#failed('push', error, () => this.#flush());
-          return;
-        }
-        this.#stats.pushed += rows.length;
       }
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
@@ -766,6 +832,19 @@ class Replication extends Emitter {
       this.#checkpoint.pushed = eventId;
       await this.#save();
     }
+  }
+
+  // One batch, in its turn: the rows read, the handler asked, the answer judged. Answers the rows pushed.
+  async #pushBatch(ids) {
+    const { rows, texts } = await this.#rowsOf(ids);
+    if (rows.length === 0) return rows;
+    for (let i = 0; i < rows.length; i++) this.#inflight.add(rows[i].id);
+    const answers = await this.#push.handler(rows);
+    this.#stats.pushes++;
+    this.#attempts.push = 0;
+    await this.#answered(rows, texts, answers);
+    this.#stats.pushed += rows.length;
+    return rows;
   }
 
   // The rows of `ids` as the backend is to hold them — the data in the backend's shape (`modifier.push`), or
@@ -869,51 +948,31 @@ class Replication extends Emitter {
   // is said (`refused`, `direction: 'push'`) and the record stands. The ids stay pending: a resolution equal to
   // the backend's state has nothing to say, another goes back with the backend's state assumed.
   async #resolveConflicts(conflicts) {
-    const docs = [];
-    const events = [];
+    const decided = [];
     for (let i = 0; i < conflicts.length; i++) {
       const [row, remote] = conflicts[i];
-      const { id } = row;
       let local = null;
       try {
-        local = plain(await this.#db.get(id));
+        local = plain(await this.#db.get(row.id));
       } catch {
         local = null;
       }
-      let resolved = remote.data;
-      let deleted = remote.deleted;
-      if (this.#resolve !== null) {
-        try {
-          const answer = await this.#resolve({ id, local, remote: remote.data, deleted: remote.deleted });
-          if (answer === null) {
-            resolved = null;
-            deleted = true;
-          } else if (isPlainObject(answer)) {
-            resolved = answer;
-            deleted = false;
-          }
-        } catch (error) {
-          this.#logger.warn({ event: 'connector.resolve.failed', name: this.#name, id, err: error });
-        }
+      try {
+        decided.push(await this.#decide(row.id, local, remote));
+      } catch (error) {
+        // `modifier.pull` threw over the backend's state: the row cannot be judged — parked, said.
+        this.#park(row.id, { code: 'modifier', message: error?.message ?? String(error) });
+        conflicts[i] = null;
       }
-      events.push({ id, local, remote: remote.data, deleted: remote.deleted, resolved });
-      docs.push({ id, data: resolved, deleted });
     }
     const refusals = [];
     await this.#db.transact(
       async (tx) => {
-        for (let i = 0; i < docs.length; i++) {
-          const { id, data, deleted } = docs[i];
+        for (let i = 0; i < decided.length; i++) {
           try {
-            const local = await tx.get(id);
-            if (deleted) {
-              if (local !== null) await tx.delete(id);
-              continue;
-            }
-            if (local !== null && same(plain(local), plain(data))) continue;
-            await tx.set(id, { ...data, $type: this.#collection });
+            await this.#landResolution(tx, decided[i]);
           } catch (error) {
-            refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
+            refusals.push([decided[i].id, error?.code ?? error?.name ?? 'error', error]);
           }
         }
       },
@@ -922,13 +981,13 @@ class Replication extends Emitter {
     // Landed: the backend's state is what the next push assumes, the ids stay pending for it. A landing that failed
     // whole learned nothing — the rows go again with what they assumed, and the backend answers the conflict again.
     for (let i = 0; i < conflicts.length; i++) {
+      if (conflicts[i] === null) continue;
       const [row, , text] = conflicts[i];
-      this.#stats.conflicts++;
       this.#conflicted.add(row.id);
       this.#learn(row.id, text);
     }
     for (let i = 0; i < refusals.length; i++) this.#refuse('push', refusals[i][0], refusals[i][1], refusals[i][2]);
-    for (let i = 0; i < events.length; i++) notify(this, this.#logger, 'conflict', events[i]);
+    for (let i = 0; i < decided.length; i++) notify(this, this.#logger, 'conflict', decided[i].event);
   }
 }
 

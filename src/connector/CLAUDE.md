@@ -42,13 +42,20 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
 
 ## Rules
 
-- **A pull is a write of this node; an echo is no write.** What the backend hands over lands through `db.transact`
-  as `set`/`delete` stamped here — a pulled record reaches every peer like a local one, and the backend never sees
-  an op or a meta — under `source: 'connector:<name>'`, which the connector's own `transaction` listener passes
-  (never pushed back). A document that reads as the record already does (`same` over the canonical JSON, `$type`
-  left out) makes no op: that is how this node's own writes, come back from the backend, make no echo and no
-  stamp; a hash table of what was pushed would be lost at a restart. `$type` never leaves (`plain`) and is laid
-  back on what comes in. A pulled document that is no document (`documentOf`: an id, an object or `deleted`) is
+- **A pull is a write of this node; an echo is no write; the backend's state is what a document is judged against.**
+  What the backend hands over lands through `db.transact` as `set`/`delete` stamped here — a pulled record reaches
+  every peer like a local one, and the backend never sees an op or a meta — under `source: 'connector:<name>'`,
+  which the connector's own `transaction` listener passes (never pushed back). A document is judged against
+  `#known` (the backend's state as the canonical text of ITS shape, before `modifier.pull`), never against the
+  record alone (`#land`, in one `#exclusive` turn with the push so neither judges under the other): the text known
+  is an echo (`#assumedText`) — this node's own write come back — and makes no op; over a pending edit it changes
+  nothing (the push compares the edit against it), and over a record that reads otherwise with nothing pending it
+  lands after all (a landing that never happened); another text over a pending edit is a conflict (`#decide`: the
+  backend wins or `resolve`; `#landResolution` in the page's transaction under the `:resolve` actor, the `conflict`
+  event after it) — never a silent write over the edit; another text over a record with nothing pending lands
+  unless the record reads so already (`same`). Comparing the document with the record instead (as the first
+  version did) overwrote an unpushed edit with the backend's older state. `$type` never leaves (`plain`) and is
+  laid back on what comes in. A pulled document that is no document (`documentOf`: an id, an object or `deleted`) is
   said (`connector.document.malformed`) and left out, never the page. A document is judged one by one, before
   the transaction and inside it (`#land`): another collection's record (`seam.row(id).type`, a tombstone's too —
   a backend's tombstone never deletes a record of another collection), a sealed one (`row.encrypted`: a connector

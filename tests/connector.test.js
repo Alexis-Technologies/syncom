@@ -618,4 +618,132 @@ test('Connectors', async (t) => {
       assert.strictEqual(replication.stats().pushed, 2, 'the insert and the edit went; nothing else');
     },
   );
+
+  await t.test(
+    'a pull over an unpushed local change: an echo of what was assumed is skipped, a backend that moved is a conflict (resolve, the conflict event), never a silent overwrite',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      // The retry is late enough for the stream to land a page while the row waits.
+      const replication = connect(t2, a, backend, { retryTime: 1500 });
+      const conflicts = [];
+      const errors = [];
+      replication.on('conflict', (event) => conflicts.push(event));
+      replication.on('error', (error) => errors.push(error));
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await replication.awaitInSync();
+      // A local edit whose push fails: the row waits for the retry. Meanwhile the backend's stream hands the
+      // record back as it was assumed to be (an echo): skipped — the local edit stands, no conflict.
+      backend.fail('push', 1);
+      await a.Task.update(id, { title: 'v2-local' });
+      await waitUntil(() => errors.length === 1);
+      const pulled = replication.stats().pulled;
+      backend.write(id, { title: 'v1' });
+      await waitUntil(() => replication.stats().pulled > pulled);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      assert.deepStrictEqual(await a.get(id), { title: 'v2-local', $type: 'Task' }, 'the echo did not overwrite');
+      assert.deepStrictEqual(conflicts, []);
+      // The retry pushes the edit against what was assumed: it lands.
+      await waitUntil(() => backend.read(id)?.title === 'v2-local', { timeout: 5000 });
+      await replication.awaitInSync();
+      // The same, with a backend that moved meanwhile: a conflict — the backend wins, told — never a silent write
+      // of the backend's state over the edit, and the edit never pushed over the backend.
+      backend.fail('push', 1);
+      await a.Task.update(id, { title: 'v3-local' });
+      await waitUntil(() => errors.length === 2);
+      backend.write(id, { title: 'backend v3' });
+      await waitUntil(() => conflicts.length === 1);
+      assert.deepStrictEqual(conflicts[0], {
+        id,
+        local: { title: 'v3-local' },
+        remote: { title: 'backend v3' },
+        deleted: false,
+        resolved: { title: 'backend v3' },
+      });
+      assert.deepStrictEqual(await a.get(id), { title: 'backend v3', $type: 'Task' });
+      const pushes = backend.calls.push;
+      await waitUntil(() => replication.stats().pending === 0, { timeout: 5000 });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read(id), { title: 'backend v3' });
+      assert.strictEqual(backend.calls.push, pushes, 'nothing to say after the backend won');
+      // With `resolve`, the application decides over the pull path too, and its answer goes to the backend.
+      await replication.cancel();
+      const resolving = connect(t2, a, backend, {
+        name: 'resolving',
+        retryTime: 1500,
+        resolve: ({ local, remote }) => ({ title: `${local.title}+${remote.title}` }),
+      });
+      const resolved = [];
+      const failures = [];
+      resolving.on('conflict', (event) => resolved.push(event));
+      resolving.on('error', (error) => failures.push(error));
+      await resolving.awaitInitialReplication();
+      backend.fail('push', 1);
+      await a.Task.update(id, { title: 'v4-local' });
+      await waitUntil(() => failures.length === 1);
+      backend.write(id, { title: 'backend v4' });
+      await waitUntil(() => resolved.length === 1);
+      assert.deepStrictEqual(resolved[0].resolved, { title: 'v4-local+backend v4' });
+      assert.deepStrictEqual(await a.get(id), { title: 'v4-local+backend v4', $type: 'Task' });
+      await waitUntil(() => backend.read(id)?.title === 'v4-local+backend v4', { timeout: 5000 });
+      assert.strictEqual(resolved.length, 1);
+    },
+  );
+
+  await t.test(
+    'with a modifier the backend’s shape is what is assumed and compared; a conflict’s remote comes through modifier.pull and the resolution goes back through modifier.push',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const replication = connect(t2, a, backend, {
+        retryTime: 1500,
+        modifier: { push: (data) => ({ ...data, shaped: true }), pull: ({ shaped: _, ...data }) => data },
+        resolve: ({ local, remote }) => ({ title: `${local.title}|${remote.title}` }),
+      });
+      const conflicts = [];
+      const errors = [];
+      const rows = [];
+      replication.on('conflict', (event) => conflicts.push(event));
+      replication.on('error', (error) => errors.push(error));
+      const { handler } = backend.handlers().push;
+      backend.handlers = () => ({ pull: backend.handlers().pull, push: { handler } });
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read(id), { title: 'v1', shaped: true });
+      // The backend's write comes down the stream in its shape: an echo of what was pushed, no op.
+      await replication.reSync();
+      assert.deepStrictEqual(await a.get(id), { title: 'v1', $type: 'Task' });
+      // An edit after the pull assumes the backend's shape: the compare-and-set lands, no conflict.
+      await a.Task.update(id, { title: 'v2' });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read(id), { title: 'v2', shaped: true });
+      assert.deepStrictEqual(conflicts, []);
+      // A conflict on the push path: the remote through modifier.pull, the resolution landed in the local shape and
+      // pushed back through modifier.push.
+      backend.set(id, { title: 'backend v3', shaped: true });
+      await a.Task.update(id, { title: 'v3' });
+      await waitUntil(() => conflicts.length === 1);
+      assert.deepStrictEqual(conflicts[0].remote, { title: 'backend v3' });
+      assert.deepStrictEqual(conflicts[0].local, { title: 'v3' });
+      assert.deepStrictEqual(conflicts[0].resolved, { title: 'v3|backend v3' });
+      await waitUntil(() => backend.read(id)?.title === 'v3|backend v3', { timeout: 5000 });
+      assert.deepStrictEqual(await a.get(id), { title: 'v3|backend v3', $type: 'Task' });
+      assert.deepStrictEqual(backend.read(id), { title: 'v3|backend v3', shaped: true });
+      // A conflict on the pull path (the backend moved under an unpushed edit): the same shapes.
+      backend.fail('push', 1);
+      await a.Task.update(id, { title: 'v4' });
+      await waitUntil(() => errors.length === 1);
+      backend.write(id, { title: 'backend v4', shaped: true });
+      await waitUntil(() => conflicts.length === 2);
+      assert.deepStrictEqual(conflicts[1].remote, { title: 'backend v4' });
+      assert.deepStrictEqual(conflicts[1].resolved, { title: 'v4|backend v4' });
+      assert.deepStrictEqual(await a.get(id), { title: 'v4|backend v4', $type: 'Task' });
+      await waitUntil(() => backend.read(id)?.title === 'v4|backend v4', { timeout: 5000 });
+      assert.deepStrictEqual(backend.read(id), { title: 'v4|backend v4', shaped: true });
+      assert.strictEqual(conflicts.length, 2);
+      assert.deepStrictEqual(rows, []);
+    },
+  );
 });

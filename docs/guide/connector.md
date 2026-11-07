@@ -33,11 +33,21 @@ await tasks.awaitInitialReplication();
 
 A pulled document — `{ id, data, deleted }` — lands as an ordinary write of this node: one transaction per page of
 `set`s and `delete`s, stamped here, so the record reaches every peer the way a local write does, and the backend
-never sees an op or a meta. A document that reads as the record already does makes no op at all: that is how this
-node's own writes, come back from the backend, leave no echo and no stamp (a hash of what was pushed would be lost
-at a restart; a comparison is not). `$type` is laid on what comes in and taken off what goes out: the backend holds
-the fields alone. A document that is no document — no id, no object where one is due — is left out and said
-(`connector.document.malformed`), never the page.
+never sees an op or a meta. Every document is judged against the backend's state as the connector knows it (what
+it pulled, pushed or was told in a conflict), never against the record alone:
+
+- the state known already is an **echo** — this node's own write come back, or a write of another client that left
+  the document as it was — and makes no op and no stamp; over a local edit not yet pushed it changes nothing either:
+  the push compares the edit against that very state;
+- another state over a local edit not yet pushed is a **conflict**: the backend moved under the edit, and the edit
+  is neither silently overwritten nor pushed over the backend — `resolve` decides, or the backend wins, the
+  resolution lands in the page's transaction and the `conflict` event tells of it ([conflicts](#what-goes-out));
+- another state over a record with nothing pending is the backend's **newer state** and lands (a document that reads
+  as the record already does makes no op).
+
+`$type` is laid on what comes in and taken off what goes out: the backend holds the fields alone. A document that
+is no document — no id, no object where one is due — is left out and said (`connector.document.malformed`), never
+the page.
 
 A document that cannot land is refused by name — the `refused` event, `{ direction: 'pull', id, reason, cause }` —
 and the rest of its page lands, the checkpoint moving past it: `collection` for a record of another collection (a
@@ -50,6 +60,9 @@ fails whole (the engine, the database closing under it) is the pull's failure: `
 unmoved, tried again.
 
 `modifier.pull(data, id)` reshapes a document before it lands, `modifier.push(data, id)` a record before it goes.
+The backend's shape is what the connector remembers and compares: a document as it came (before `modifier.pull`), a
+row as it went (after `modifier.push`); a conflict's `remote` comes through `modifier.pull`, the application's
+resolution goes back through `modifier.push`.
 
 ## What goes out
 

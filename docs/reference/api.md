@@ -765,7 +765,7 @@ handlers — see [Connectors](../guide/connector).
 
 | Member | Notes |
 | --- | --- |
-| `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), a document equal to the record making no op |
+| `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), each judged against the backend's state as known: an echo makes no op (over an unpushed edit too), another state over an unpushed edit is a conflict (`resolve`, the `conflict` event), another state otherwise lands |
 | `pull.stream(emit)` → stop | The backend's live changes: `emit({ documents, checkpoint })`, or `emit('RESYNC')`; without it a live connector pulls every `retryTime` |
 | `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it; a row that reads as the backend is known to hold it is not pushed; answers the rows refused, each as the backend holds it (a conflict), or `{ id, error }` for one refused by name (parked until a turn of the record or `reSync()`) |
 | `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise, and when `resolve` throws |
