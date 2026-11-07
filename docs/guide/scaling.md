@@ -88,20 +88,26 @@ one writer and its followers need one.
 
 A hub **joins** the log with its state: everything its log retains goes to
 the topic first (what it compacted reaches the others through a snapshot of
-it — dial it once). A **fresh client** of a shared-log hub bootstraps: a
+it — dial it once; a log compacted past the watermark is told once, `lost`,
+and what it retains still goes). A **fresh client** of a shared-log hub bootstraps: a
 `changes` subscription with no cursor is told so, and the snapshot's first
 page is positioned at a marker the hub appends and its consumer passes, so
 nothing lands between the pages and the cursor. **Failures** are
 `SHARED_LOG_FAILED` on the manager's `error` event, with a `reason`: an
 append that failed (`append`, once per run) is appended again — everything
-the log holds since the last entry that landed — once the broker answers; a
+the log holds above the **watermark**, the last position of this hub's log
+every op at or below which is in the topic (moved only by a whole run of
+appended positions, never by a position still landing) — once the broker
+answers, and every start does the same, so a hub stopped or closed with ops
+waiting appends them at its next start (`stop()` waits `stopWait`, 5 s, for
+an append in flight, then lets go of it); a
 cursor the log trimmed past, or another log's (`gone`), is read from the
 oldest entry, and what fell between is a gap of its streams until a bootstrap
 from another hub fills it (`addNode` a hub, once); an entry that fails to
 apply three times leaves its topic `stuck` (`sync.shared().stuck`) and
 nothing past it is taken until `sync.stop()` and `start()`. `sync.shared()`
-is the cursors, the watermark (`appended`: this hub's own log position
-appended through) and the counts. Retention is the log's — a broker's
+is the cursors, the watermark (`appended`, and `covered`: the positions
+above it known to be in the topic) and the counts. Retention is the log's — a broker's
 `maxEntries`, `mongoSharedLog({ retention })` or `trim()` — and a client
 whose cursor was trimmed bootstraps.
 

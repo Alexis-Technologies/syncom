@@ -748,7 +748,7 @@ once `close()` was called is refused at once.
 | `log.rollAfter` | `64` | Groups of appends per sealed segment |
 | `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
-| `sharedLog` | — | A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`) or `mongoSharedLog()` — alone or as `{ log, topic, inbox }`: every op this node accepts goes to the topic, the other hubs' are applied from it, `changes` is served from it, a read-only hub hosts over it — see [Scaling](./scaling#hubs) |
+| `sharedLog` | — | A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`) or `mongoSharedLog()` — alone or as `{ log, topic, inbox, stopWait }`: every op this node accepts goes to the topic, the other hubs' are applied from it, `changes` is served from it, a read-only hub hosts over it — see [Scaling](./scaling#hubs) |
 
 The `telemetry` option sits beside `sync` on `createDatabase()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.

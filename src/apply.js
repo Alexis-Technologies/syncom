@@ -591,6 +591,8 @@ const persist = async (batch) => {
   });
   await ticket.done;
   const { entries } = ticket;
+  // One entry per accepted op, in order: the positions the announce names.
+  batch.entries = entries;
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (batch.adopted) await core.log.advance(batch.adopted);
@@ -621,9 +623,11 @@ const announce = async (batch, result) => {
     }
     core.emit('apply', { via, peer, ops: accepted, ...result });
     const changes = [];
-    for (const op of accepted) {
+    const { entries } = batch;
+    for (let i = 0; i < accepted.length; i++) {
+      const op = accepted[i];
       const own = batch.changes.get(op) ?? [];
-      core.emit('change', op, via, { changes: own });
+      core.emit('change', op, via, { changes: own, seq: entries === undefined ? null : entries[i].seq });
       for (const change of own) changes.push({ id: op.id, ...change });
     }
     if (accepted.length > 0 && core.listening('transaction')) {

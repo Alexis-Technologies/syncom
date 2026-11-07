@@ -149,7 +149,7 @@ class SyncManager extends Emitter {
     this.#nodes = await this.#registry.load();
     // One listener for both halves: the dialing side's fan-out to its
     // links, and the hosting side's wake-up of every live `changes` feed.
-    this.#onChange = (op, via) => this.#fanOut(op, via);
+    this.#onChange = (op, via, detail) => this.#fanOut(op, via, detail);
     this.#storage.on('change', this.#onChange);
     const { connect, autoStart = typeof connect === 'function' } = this.#options;
     // A node that dials keeps its own ops until every node it syncs with has
@@ -1366,9 +1366,10 @@ class SyncManager extends Emitter {
 
   // One op landed here (locally or from a peer): wake the hosting feeds, and
   // queue it for every dialed peer except the one it came from.
-  #fanOut(op, via) {
-    // To the shared log first: what the other hubs, and every feed read from it, learn of this op.
-    if (this.#shared !== null) this.#shared.offer(op, via);
+  #fanOut(op, via, detail) {
+    // To the shared log first: what the other hubs, and every feed read from it, learn of this op — offered with
+    // its log position, which the relay's watermark is kept by.
+    if (this.#shared !== null) this.#shared.offer(op, via, detail?.seq ?? null);
     if (this.#wakers.size > 0) for (const wake of [...this.#wakers]) wake();
     if (this.#peers.size === 0) return;
     const key = opKey(op);

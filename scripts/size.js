@@ -442,7 +442,9 @@ const ENTRIES = [
   // sync-parity plan, S1; 2026-11-06). 170, raised by name.
   // 170.9 with the blobs stores, fetchBlob and the host's blob procedure (sync-parity plan, S4). 172, raised by name.
   // 173.2 with the sealed records in queries, QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 174 },
+  // 173.9 with the sealed seam and the merged sealed page, the relay's watermark by log position (review №7, E1–E2.1;
+  // 2026-11-07). 174.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 174.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -563,7 +565,9 @@ const ENTRIES = [
   // prove, revoke, query/count — and the dialer's beforeSend and revert (sync-parity plan, S0–S1; 2026-11-06).
   // 25.5, raised by name.
   // 26.4 with the host's `blob` procedure and the dialer's `fetchBlob` (sync-parity plan, S4). 27, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 27 },
+  // 27.0 with the relay's watermark kept by log position, the recovery at every start and a bounded stop (review №7,
+  // E2.1; 2026-11-07). 27.5, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 27.5 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

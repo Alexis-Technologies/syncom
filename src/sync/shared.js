@@ -8,10 +8,16 @@
 //   the RELAY — every op this hub accepts (its own writes, a client's push, a
 //     joined snapshot, an inbox entry) goes to the topic, a batch per tick (what
 //     one announce leaves), `pageSize` ops an entry at most; what came from the
-//     topic itself (`via.shared`) does not go back. An append that fails leaves
-//     the relay `behind`, and the recovery appends everything the log holds
-//     since the last entry that landed (`log.since`), backed off — the first
-//     start the same way, from the oldest op retained (`appended` null).
+//     topic itself (`via.shared`) does not go back. Every op is offered with its
+//     log position (the `change` event's `seq`), and the WATERMARK is the last
+//     position every op at or below which is in the topic — moved only by a
+//     contiguous run of positions appended or read from the topic, never by
+//     `lastEventId`, which runs ahead of ops still landing. An append that fails
+//     leaves the relay `behind`, and the recovery appends everything the log
+//     holds above the watermark (`log.since`), backed off; every start does the
+//     same (a stop may leave ops above it), and a watermark the log compacted
+//     past is told once and moved to the log's floor — what the log retains
+//     joins the topic, what fell below reaches the others through a snapshot.
 //   the CONSUMER — a hub that writes reads the topic from its saved cursor and
 //     applies what it lacks (one `applyRemote` per entry, the appender as `via`),
 //     and the inbox — what a read-only hub forwarded of its clients' pushes —
@@ -34,7 +40,7 @@
 const { packOps, unpackOps } = require('./wire.js');
 const { DEFAULT_PAGE_SIZE } = require('./protocol.js');
 const { isSharedLog } = require('./shared-log.js');
-const { vectorAdvance, opKey } = require('../vector.js');
+const { vectorAdvance, opKey, parseEventId } = require('../vector.js');
 const { isPlainObject, wellFormed } = require('../shape.js');
 const { SyncomError } = require('../errors.js');
 const { notify } = require('../hooks.js');
@@ -53,6 +59,9 @@ const MAX_BACKOFF = 60_000;
 const MAX_APPLY_RETRIES = 3;
 // How long a snapshot waits for the consumer to reach its marker.
 const REACH_TIMEOUT = 30_000;
+// How long `stop()` waits for an append in flight before it lets go of it (`sharedLog.stopWait`): what it carried
+// is above the watermark, so the next start appends it again.
+const DEFAULT_STOP_WAIT = 5000;
 const NOOP = () => {};
 
 const token = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -71,14 +80,14 @@ const sleep = (ms, signal = null) =>
     signal?.addEventListener?.('abort', done, { once: true });
   });
 
-/** `createDatabase({ sync: { sharedLog } })` checked: `{ log, topic, inbox }`, or null when none was given. */
+/** `createDatabase({ sync: { sharedLog } })` checked: `{ log, topic, inbox, stopWait }`, or null when none was given. */
 const normalizeShared = (value) => {
   if (value === undefined || value === null) return null;
   const given = isSharedLog(value) ? { log: value } : value;
   if (!isPlainObject(given) || !isSharedLog(given.log)) {
-    throw new TypeError('sync.sharedLog: a shared log (append, read, parseId), or { log, topic, inbox }');
+    throw new TypeError('sync.sharedLog: a shared log (append, read, parseId), or { log, topic, inbox, stopWait }');
   }
-  const { topic = DEFAULT_TOPIC } = given;
+  const { topic = DEFAULT_TOPIC, stopWait = DEFAULT_STOP_WAIT } = given;
   if (typeof topic !== 'string' || topic.length === 0) {
     throw new TypeError('sync.sharedLog.topic must be a non-empty string');
   }
@@ -86,7 +95,10 @@ const normalizeShared = (value) => {
   if (inbox !== false && (typeof inbox !== 'string' || inbox.length === 0 || inbox === topic)) {
     throw new TypeError('sync.sharedLog.inbox must be a non-empty string other than the topic, or false');
   }
-  return { log: given.log, topic, inbox };
+  if (!Number.isInteger(stopWait) || stopWait < 0) {
+    throw new TypeError('sync.sharedLog.stopWait must be a non-negative integer of milliseconds');
+  }
+  return { log: given.log, topic, inbox, stopWait };
 };
 
 const entryText = (node, ops, scopes = null) => {
@@ -135,13 +147,16 @@ class SharedHub {
   #inbox;
   #kv;
   #pageSize;
+  #stopWait;
   #token = token();
-  // The relay: the ops of this tick, the chain every append runs on, the local
-  // event id appended through, and the recovery after a failed append.
+  // The relay: the ops of this tick with their log positions, the chain every append runs on, the watermark (the
+  // last position every op at or below which is in the topic; 0 for none), the positions above it that are (sorted),
+  // and the recovery after a failed append.
   #buffer = [];
   #flushQueued = false;
   #appending = Promise.resolve();
-  #appended = null;
+  #appendedSeq = 0;
+  #covered = [];
   #behind = false;
   #backoff = 0;
   #recoverTimer = null;
@@ -163,13 +178,19 @@ class SharedHub {
   #shadow = null;
   #stats = { relayed: 0, appendFailures: 0, entries: 0, applied: 0, forwarded: 0, malformed: 0 };
 
-  constructor(manager, storage, { log, topic, inbox }, { kv, pageSize = DEFAULT_PAGE_SIZE }) {
+  constructor(
+    manager,
+    storage,
+    { log, topic, inbox, stopWait = DEFAULT_STOP_WAIT },
+    { kv, pageSize = DEFAULT_PAGE_SIZE },
+  ) {
     this.#manager = manager;
     this.#storage = storage;
     this.#logger = storage.logger;
     this.#log = log;
     this.#topic = topic;
     this.#inbox = inbox;
+    this.#stopWait = stopWait;
     this.#kv = kv;
     this.#pageSize = pageSize;
   }
@@ -211,8 +232,9 @@ class SharedHub {
     this.#launching = null;
     if (!this.#running) return;
     const readOnly = this.#storage.readOnly;
-    // Nothing appended yet: everything the log retains goes to the topic — a hub joins the log with its state.
-    if (!readOnly && this.#appended === null) {
+    // Every start recovers: what the log holds above the watermark goes to the topic — a hub joins the log with
+    // its state, a hub stopped with ops waiting appends them, a hub whose last run ended behind catches up.
+    if (!readOnly) {
       this.#behind = true;
       this.#recover();
     }
@@ -241,7 +263,10 @@ class SharedHub {
     this.#waiters.clear();
     await Promise.allSettled(this.#loops);
     this.#loops = [];
-    await this.#appending;
+    // An append the broker never answers does not hold the stop: what it carried is above the watermark, and the
+    // next start appends it again — on a chain of its own, never behind the one that hung.
+    await Promise.race([this.#appending, sleep(this.#stopWait)]);
+    this.#appending = Promise.resolve();
     await this.#saving;
   }
 
@@ -252,7 +277,8 @@ class SharedHub {
       inbox: this.#inbox,
       running: this.#running,
       cursor: { ...this.#cursor },
-      appended: this.#appended,
+      appended: this.#watermark(),
+      covered: this.#covered.length,
       behind: this.#behind,
       stuck: { ...this.#stuck },
       shadow: this.#shadow !== null,
@@ -275,7 +301,14 @@ class SharedHub {
     if (!isPlainObject(parsed) || this.#storage.readOnly) return;
     this.#cursor.topic = this.#log.parseId(parsed.topic);
     this.#cursor.inbox = this.#log.parseId(parsed.inbox);
-    this.#appended = typeof parsed.appended === 'string' ? parsed.appended : null;
+    // The watermark is a position of this log: another epoch's (the log began anew) is none.
+    const appended = parseEventId(parsed.appended);
+    this.#appendedSeq = appended !== null && appended.epoch === this.#storage.log.epoch ? appended.seq : 0;
+  }
+
+  // The watermark as an event id of this log, null while nothing is known to be in the topic.
+  #watermark() {
+    return this.#appendedSeq > 0 ? this.#storage.log.formatId(this.#appendedSeq) : null;
   }
 
   #saveCursor() {
@@ -283,7 +316,11 @@ class SharedHub {
     this.#saveQueued = true;
     this.#saving = this.#saving.then(async () => {
       this.#saveQueued = false;
-      const text = JSON.stringify({ topic: this.#cursor.topic, inbox: this.#cursor.inbox, appended: this.#appended });
+      const text = JSON.stringify({
+        topic: this.#cursor.topic,
+        inbox: this.#cursor.inbox,
+        appended: this.#watermark(),
+      });
       try {
         await this.#kv.put(SHARED, CURSOR, text, { atomic: true });
       } catch (error) {
@@ -295,11 +332,18 @@ class SharedHub {
   // -------------------------------------------------------------------------
   // The relay
 
-  /** An op this hub accepted (`#fanOut`): appended with the others of its tick, unless it came from the topic. */
-  offer(op, via) {
+  /**
+   * An op this hub accepted (`#fanOut`), with its log position: appended with the others of its tick — unless it
+   * came from the topic, which holds it already: covered, never appended back.
+   */
+  offer(op, via, seq = null) {
     // Nothing of a hub that cannot write is its own to relay (a lost lease: what is announced after it is held).
-    if (this.#storage.readOnly || (via !== null && via !== undefined && via.shared === true)) return;
-    this.#buffer.push(op);
+    if (this.#storage.readOnly) return;
+    if (via !== null && via !== undefined && via.shared === true) {
+      if (seq !== null) this.#cover(seq);
+      return;
+    }
+    this.#buffer.push({ op, seq });
     if (this.#flushQueued) return;
     this.#flushQueued = true;
     queueMicrotask(() => this.#flush());
@@ -307,19 +351,25 @@ class SharedHub {
 
   #flush() {
     this.#flushQueued = false;
-    const ops = this.#buffer;
+    const items = this.#buffer;
     this.#buffer = [];
-    // Everything in `ops` is at or below this position: what the recovery appends again from.
-    const eventId = this.#storage.log.lastEventId;
-    this.#appending = this.#appending.then(() => this.#append(ops, eventId)).catch(NOOP);
+    if (items.length === 0) return;
+    this.#appending = this.#appending.then(() => this.#append(items)).catch(NOOP);
   }
 
-  async #append(ops, eventId) {
-    // Stopped, or behind: the ops are in the log since `appended`; the next start or the recovery carries them.
+  async #append(items) {
+    // Stopped, or behind: the ops are in the log above the watermark; the next start or the recovery carries them.
     if (!this.#running || this.#behind) return;
+    const ops = [];
+    for (let i = 0; i < items.length; i++) {
+      // At or below the watermark: a recovery carried it already.
+      if (items[i].seq !== null && items[i].seq <= this.#appendedSeq) continue;
+      ops.push(items[i].op);
+    }
+    if (ops.length === 0) return;
     try {
       await this.#appendPages(ops);
-      this.#landed(ops.length, eventId);
+      this.#landed(items);
     } catch (error) {
       this.#fallBehind(error);
     }
@@ -333,17 +383,58 @@ class SharedHub {
     }
   }
 
-  #landed(count, eventId) {
-    this.#appended = eventId;
+  // A batch landed in the topic: its positions are covered; the watermark moves as far as the run from it is whole.
+  #landed(items) {
+    if (!this.#running) return;
     this.#behind = false;
     this.#backoff = 0;
     this.#told = false;
-    this.#stats.relayed += count;
+    this.#stats.relayed += items.length;
+    for (let i = 0; i < items.length; i++) if (items[i].seq !== null) this.#cover(items[i].seq);
+  }
+
+  // A position known to be in the topic: kept above the watermark, sorted, until the run from the watermark
+  // reaches it — then the watermark moves over it (`#advance`). An op whose position the log holds but that was
+  // never offered would hold the watermark; the recovery sets it straight from what the log holds.
+  #cover(seq) {
+    if (seq <= this.#appendedSeq) return;
+    const list = this.#covered;
+    let low = 0;
+    let high = list.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (list[mid] < seq) low = mid + 1;
+      else high = mid;
+    }
+    if (low < list.length && list[low] === seq) return;
+    list.splice(low, 0, seq);
+    this.#advance();
+  }
+
+  #advance() {
+    const list = this.#covered;
+    let moved = false;
+    while (list.length > 0 && list[0] === this.#appendedSeq + 1) {
+      list.shift();
+      this.#appendedSeq++;
+      moved = true;
+    }
+    if (moved) this.#saveCursor();
+  }
+
+  // Everything the log holds above `seq` was appended: the watermark is there, what was covered above it is let go.
+  #reached(seq) {
+    if (seq <= this.#appendedSeq) return;
+    this.#appendedSeq = seq;
+    const list = this.#covered;
+    let kept = 0;
+    while (kept < list.length && list[kept] <= seq) kept++;
+    if (kept > 0) list.splice(0, kept);
     this.#saveCursor();
   }
 
   // An append that failed: nothing more is appended until the recovery lands
-  // what the log holds since the watermark — told once per run of failures.
+  // what the log holds above the watermark — told once per run of failures.
   #fallBehind(error) {
     this.#behind = true;
     this.#stats.appendFailures++;
@@ -359,36 +450,43 @@ class SharedHub {
     this.#recoverTimer.unref?.();
   }
 
-  // Everything the log holds since the watermark, appended again — ops that
+  // Everything the log holds above the watermark, appended again — ops that
   // came from the topic among them, duplicates there that every consumer
-  // drops. A watermark the log no longer reaches (compacted: a first start on
-  // a log that rolled, a long outage) is told: what fell below it reaches the
-  // other hubs through a snapshot of this one.
+  // drops — and the watermark moved to the last of them. A watermark the log
+  // no longer reaches (compacted: a first start on a log that rolled, a long
+  // outage) is told once and moved to the log's floor: what the log retains
+  // joins the topic, what fell below reaches the other hubs through a snapshot
+  // of this one.
   #recover() {
     this.#recoverTimer = null;
     if (!this.#running) return;
     this.#appending = this.#appending
       .then(async () => {
         if (!this.#running || !this.#behind) return;
-        const eventId = this.#storage.log.lastEventId;
-        const entries = this.#storage.log.since(this.#appended);
+        const { log } = this.#storage;
+        let entries = log.since(this.#watermark());
         if (entries === null) {
-          this.#logger.warn({ event: 'shared.recover.lost', topic: this.#topic, appended: this.#appended });
-          const message = `The log no longer reaches ${this.#appended ?? 'its first op'}: what fell below is not in the shared log ${this.#topic}`;
-          notify(
-            this.#manager,
-            this.#logger,
-            'error',
-            failed('lost', message, { topic: this.#topic, appended: this.#appended }),
-          );
-          this.#landed(0, eventId);
-          return;
+          const appended = this.#watermark();
+          this.#logger.warn({ event: 'shared.recover.lost', topic: this.#topic, appended });
+          const message = `The log no longer reaches ${appended ?? 'its first op'}: what fell below is not in the shared log ${this.#topic}`;
+          notify(this.#manager, this.#logger, 'error', failed('lost', message, { topic: this.#topic, appended }));
+          this.#reached(log.floor - 1);
+          entries = log.since(this.#watermark()) ?? [];
         }
         const ops = [];
-        for (let i = 0; i < entries.length; i++) ops.push(entries[i].op);
+        let last = this.#appendedSeq;
+        for (let i = 0; i < entries.length; i++) {
+          ops.push(entries[i].op);
+          if (entries[i].seq > last) last = entries[i].seq;
+        }
         try {
           await this.#appendPages(ops);
-          this.#landed(ops.length, eventId);
+          if (!this.#running) return;
+          this.#behind = false;
+          this.#backoff = 0;
+          this.#told = false;
+          this.#stats.relayed += ops.length;
+          this.#reached(last);
         } catch (error) {
           this.#fallBehind(error);
         }

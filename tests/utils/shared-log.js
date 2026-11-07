@@ -5,8 +5,9 @@
 // `parseId`), with the memory broker's rules: ids `<epoch>.<n>`, a read after
 // an id of another epoch or one trimmed past is 410, a malformed id or one past
 // the tip 400, a read tails live until its signal aborts. `fail(topic)` makes
-// the next appends to a topic throw (what a broker outage looks like),
-// `trim(topic, keep)` drops the oldest, `entries(topic)` is what a test asserts on.
+// the next appends to a topic throw (what a broker outage looks like), `hang(topic)` makes the next
+// append wait until `release()` (a broker that never answers), `trim(topic, keep)` drops the oldest,
+// `entries(topic)` is what a test asserts on.
 
 const LOG_ID = /^[A-Za-z0-9_-]{1,64}\.\d{1,16}$/;
 
@@ -16,6 +17,8 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
   const topics = new Map();
   let closed = false;
   const failing = new Map();
+  const hanging = new Set();
+  const held = [];
   const state = (topic) => {
     let found = topics.get(topic);
     if (!found) topics.set(topic, (found = { entries: [], first: 1, next: 1, waiters: new Set() }));
@@ -49,6 +52,10 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     epoch,
     async append(topic, value, { headers = {} } = {}) {
       if (closed) throw coded('closed', 503);
+      if (hanging.has(topic)) {
+        hanging.delete(topic);
+        await new Promise((resolve) => held.push(resolve));
+      }
       const remaining = failing.get(topic);
       if (remaining !== undefined) {
         if (remaining === 1) failing.delete(topic);
@@ -103,6 +110,15 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     /** The next `count` appends to `topic` fail with 503. */
     fail(topic, count = 1) {
       failing.set(topic, count);
+    },
+    /** The next append to `topic` waits until `release()`. */
+    hang(topic) {
+      hanging.add(topic);
+    },
+    /** Every append held by `hang` goes on. */
+    release() {
+      const waiting = held.splice(0);
+      for (const resolve of waiting) resolve();
     },
     entries: (topic) =>
       (topics.get(topic)?.entries ?? []).map((entry) => ({ ...entry, headers: { ...entry.headers } })),

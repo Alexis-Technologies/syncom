@@ -42,6 +42,8 @@ expectType<SharedStats | null>(sync.shared());
 const shared = sync.shared()!;
 expectType<string>(shared.topic);
 expectType<string | false>(shared.inbox);
+expectType<string | null>(shared.appended);
+expectType<number>(shared.covered);
 expectType<string | null>(shared.cursor.topic);
 expectType<string | null>(shared.appended);
 expectType<boolean>(shared.behind);

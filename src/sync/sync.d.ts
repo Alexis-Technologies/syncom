@@ -300,14 +300,17 @@ export interface SyncManager {
   unit(options?: SyncUnitOptions): SyncUnit;
 }
 
-/** `sync.shared()`: the topics, the consumer's cursors, the relay's watermark (this node's own log position appended through) and the counts. */
+/** `sync.shared()`: the topics, the consumer's cursors, the relay's watermark (the last log position every op at or below which is in the topic) and the counts. */
 export interface SharedStats {
   topic: string;
   inbox: string | false;
   running: boolean;
   cursor: { topic: string | null; inbox: string | null };
+  /** The watermark: the last position of this node's log every op at or below which is in the topic; null while none is. */
   appended: string | null;
-  /** An append failed: nothing more goes out until the recovery appends what the log holds since `appended`. */
+  /** Positions above the watermark known to be in the topic, waiting for the run from it to be whole. */
+  covered: number;
+  /** An append failed: nothing more goes out until the recovery appends what the log holds above `appended`. */
   behind: boolean;
   /** A topic whose entry failed to apply three times: nothing past it is taken until `stop()` and `start()`. */
   stuck: { topic: boolean; inbox: boolean };

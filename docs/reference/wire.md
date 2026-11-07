@@ -660,8 +660,9 @@ hub granted the client, what the landing hub bounds the ops to. A `mark`
 positions a snapshot: the id its append answered is the first page's
 `eventId`. `by` lets a hub pass its own entries without parsing them. The
 ids are the log's (`<epoch>.<n>` on wrpc's brokers and `mongoSharedLog`);
-a hub keeps its consumer's cursors and the watermark of what it appended
-in `shared/cursor.json`:
+a hub keeps its consumer's cursors and the relay's watermark — the last
+position of its own log every op at or below which is in the topic — in
+`shared/cursor.json`:
 
 ```json
 {"topic":"k1x9ab.42","inbox":null,"appended":"mvqe40dinmi2cx.17"}

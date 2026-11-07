@@ -1326,6 +1326,8 @@ export interface SharedLogOptions {
   topic?: string;
   /** The topic a read-only hub forwards its clients' pushes to, consumed by a hub that writes; `<topic>.inbox` by default, `false` for none (a read-only hub then refuses a push with 503). */
   inbox?: string | false;
+  /** How long `stop()` (and `close()`) waits for an append in flight before letting go of it, in ms (5000 by default): what it carried is above the watermark and the next start appends it again. */
+  stopWait?: number;
 }
 
 /** What a write hook sees: the op being made, and the record it lands on. */
@@ -2061,7 +2063,7 @@ export interface ApplyRemoteResult {
 /** The events a Storage emits; listeners are contained. */
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
-  change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[] }) => void;
+  change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[]; seq: number | null }) => void;
   /** A local document written or removed (`db.local`, a collection's): its full key and the value (null once deleted). */
   local: (event: { key: string; value: unknown }) => void;
   /** A local op is durable: what it changed, as copies — built only when someone listens. */

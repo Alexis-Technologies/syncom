@@ -72,10 +72,17 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   the vector from the topic read whole (`vector()`), answers it at hello and in a snapshot's `vector`, holds a
   push to it and forwards the page to the inbox — the shadow moved only once the append landed, so a failed
   forward is pushed again — and stops reading the inbox (the next writer takes it from the saved cursor, which
-  only a writer saves). A failure is told once and recovered from (`SHARED_LOG_FAILED`, `reason`): the relay
-  falls `behind` and re-appends `log.since(appended)` (duplicates in the topic are every consumer's to drop); a
-  cursor gone reads from the oldest; an entry that will not apply three times leaves its topic `stuck` — never
-  skipped, a skipped entry is a gap for good. The loops begin a turn after `start()` (setImmediate), so a listener
+  only a writer saves). The relay's WATERMARK (`#appendedSeq`, saved as `appended`) is the last log position every
+  op at or below which is in the topic: every op is offered with its position (the `change` event's `seq`), a batch
+  that landed covers its positions (`#cover`), an op read from the topic covers its own, and the watermark moves
+  only over a contiguous run of them (`#advance`) — never to `lastEventId`, which runs ahead of ops still landing
+  (a batch that failed behind one that landed was lost that way). A failure is told once and recovered from
+  (`SHARED_LOG_FAILED`, `reason`): the relay falls `behind` and re-appends `log.since(watermark)` — every start
+  does the same, so a stop with ops waiting loses none — and moves the watermark to the last of them (`#reached`;
+  duplicates in the topic are every consumer's to drop); a watermark the log compacted past is told once (`lost`)
+  and moved to the floor, what the log retains going to the topic; `stop()` waits `stopWait` for an append in
+  flight, then lets go of it; a cursor gone reads from the oldest; an entry that will not apply three times leaves
+  its topic `stuck` — never skipped, a skipped entry is a gap for good. The loops begin a turn after `start()` (setImmediate), so a listener
   attached right after the open hears the first read's failure. A read's 410/400 means the position is not the
   log's — the codes wrpc's brokers and `mongoSharedLog` answer; a log of another shape must answer them too.
 - **A rule never withholds an op; it scrubs it.** `beforeSend` on the dialer (`#outgoing`, a copy of the op) and

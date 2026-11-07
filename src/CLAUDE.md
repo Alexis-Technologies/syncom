@@ -304,7 +304,8 @@ fi }` — what is the op's own origin's named short (a run by its stamp, an elem
   `changesOf` completes the rest from
   `delta` as a `reset` with a copy of the value, or an `unset`; `delete` and
   `purge` are one change each. Never diff two readings on the op path. Every
-  announce hands them on: `change(op, via, { changes })`, `commit.changes`
+  announce hands them on: `change(op, via, { changes, seq })` (`seq` the op's log position — a
+  relay's watermark is kept by it, src/sync/shared.js), `commit.changes`
   and `commit.txn`, and ONE `transaction` event per turn (a commit, a
   transaction, a peer's page, a joined snapshot) with the changes tagged by
   id — built only while something listens.

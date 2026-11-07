@@ -137,7 +137,7 @@ test('Hosting limits', async (t) => {
     for (const value of [null, 'log', {}, { append() {}, read() {} }, { ...log, parseId: 'nope' }]) {
       assert.strictEqual(isSharedLog(value), false, String(value));
     }
-    const message = /a shared log \(append, read, parseId\), or \{ log, topic, inbox \}/;
+    const message = /a shared log \(append, read, parseId\), or \{ log, topic, inbox, stopWait \}/;
     for (const sharedLog of ['log', {}, { log: {} }, { topic: 'x' }]) {
       await assert.rejects(async () => openTemp(t2, { sync: { sharedLog } }), { name: 'TypeError', message });
     }
@@ -149,6 +149,12 @@ test('Hosting limits', async (t) => {
       await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, topic: 'ops', inbox } } }), {
         name: 'TypeError',
         message: /inbox must be a non-empty string other than the topic, or false/,
+      });
+    }
+    for (const stopWait of [-1, 1.5, 'soon']) {
+      await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, stopWait } } }), {
+        name: 'TypeError',
+        message: /stopWait must be a non-negative integer/,
       });
     }
   });

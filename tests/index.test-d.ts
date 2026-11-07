@@ -518,6 +518,10 @@ expectAssignable<syncom.SharedLog>(sharedLog);
 expectAssignable<StorageOptions>({ sync: { sharedLog } });
 expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, topic: 'ops', inbox: 'ops.in' } } });
 expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, inbox: false } } });
+expectAssignable<StorageOptions>({ sync: { sharedLog: { log: sharedLog, stopWait: 200 } } });
+storage.on('change', (op, via, detail) => {
+  expectType<number | null>(detail.seq);
+});
 expectError(syncom.open({ sync: { sharedLog: { topic: 'ops' } } }));
 expectError(syncom.open({ sync: { sharedLog: { log: sharedLog, inbox: 7 } } }));
 expectAssignable<syncom.SharedLogOptions>({ log: sharedLog });

@@ -219,6 +219,141 @@ test('Hubs over a shared log', async (t) => {
     },
   );
 
+  // The memory log with the appends to the topic counted, the `nth` one failing: a batch that fails AFTER another
+  // landed, which is where a watermark taken from lastEventId lies.
+  const failingNth = (shared, nth) => {
+    let appends = 0;
+    return {
+      ...shared,
+      async append(topic, value, options) {
+        if (topic === TOPIC && ++appends === nth) throw Object.assign(new Error('broker down'), { code: 503 });
+        return shared.append(topic, value, options);
+      },
+    };
+  };
+
+  await t.test(
+    'the relay’s watermark is the last op the topic holds in log order: a batch that fails leaves what came after it for the recovery, nothing is lost from the bus',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const h1 = await createStorage(t2, 'H1', { sync: { sharedLog: failingNth(shared, 2) } });
+      const errors = [];
+      h1.sync.on('error', (error) => errors.push(error));
+      await waitUntil(() => h1.sync.shared().behind === false);
+      // Two writes without awaiting the first: the second's position is reserved while the first lands, so the
+      // first's announce sees lastEventId at the second's position — the second's append is the one that fails.
+      const [a, b] = await Promise.all([h1.insert({ n: 1 }), h1.insert({ n: 2 })]);
+      await waitUntil(() => errors.length >= 1, { timeout: 5000 });
+      assert.strictEqual(errors[0].reason, 'append');
+      // The recovery (after a second): both in the topic, the watermark at the last of them.
+      await waitUntil(() => h1.sync.shared().behind === false && h1.sync.shared().relayed >= 2, { timeout: 10_000 });
+      const texts = shared.entries(TOPIC).map((entry) => entry.value);
+      assert.ok(
+        texts.some((text) => text.includes(a)),
+        'the first op is in the topic',
+      );
+      assert.ok(
+        texts.some((text) => text.includes(b)),
+        'the second op is in the topic',
+      );
+      const h2 = await createStorage(t2, 'H2', { sync: { sharedLog: shared } });
+      await waitUntil(() => h2.hasRecord(a) && h2.hasRecord(b), { timeout: 5000 });
+      assert.deepStrictEqual(await h2.get(b), { n: 2 });
+      const stats = h1.sync.shared();
+      assert.strictEqual(stats.covered, 0, 'nothing covered above the watermark once the run is whole');
+      assert.strictEqual(
+        stats.appended,
+        h1.log.lastEventId,
+        'the watermark is the last op, every op below it in the topic',
+      );
+    },
+  );
+
+  await t.test(
+    'a hub stopped with ops waiting to be relayed appends them at its next start, from the saved watermark',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const h1 = await createStorage(t2, 'H1', { sync: { sharedLog: shared } });
+      const h2 = await createStorage(t2, 'H2', { sync: { sharedLog: shared } });
+      const x = await h1.insert({ n: 0 });
+      await waitUntil(() => h2.hasRecord(x));
+      // The broker goes down for one append: the relay falls behind; a second write waits for the recovery — and
+      // the hub is stopped before it runs.
+      shared.fail(TOPIC, 1);
+      const a = await h1.insert({ n: 1 });
+      await waitUntil(() => h1.sync.shared().behind === true);
+      const b = await h1.insert({ n: 2 });
+      await h1.sync.stop();
+      assert.strictEqual(h2.hasRecord(a), false);
+      assert.strictEqual(h2.hasRecord(b), false);
+      await h1.sync.start();
+      await waitUntil(() => h2.hasRecord(a) && h2.hasRecord(b), { timeout: 5000 });
+      assert.deepStrictEqual(await h2.get(b), { n: 2 });
+      // The same across a close: the watermark saved names what the topic holds, the rest goes at the next open.
+      shared.fail(TOPIC, 1);
+      const c = await h1.insert({ n: 3 });
+      await waitUntil(() => h1.sync.shared().behind === true);
+      await h1.close();
+      const again = await createStorage(t2, 'H1', { sync: { sharedLog: shared } });
+      await waitUntil(() => h2.hasRecord(c), { timeout: 5000 });
+      await waitUntil(() => again.sync.shared().behind === false);
+    },
+  );
+
+  await t.test(
+    'a stop() does not wait for an append the broker never answers; the next start recovers from the watermark',
+    async (t2) => {
+      const shared = createMemorySharedLog();
+      const h1 = await createStorage(t2, 'H1', { sync: { sharedLog: { log: shared, stopWait: 200 } } });
+      const h2 = await createStorage(t2, 'H2', { sync: { sharedLog: shared } });
+      shared.hang(TOPIC);
+      const a = await h1.insert({ n: 1 });
+      await sleep(20);
+      const started = Date.now();
+      await h1.sync.stop();
+      assert.ok(Date.now() - started < 2000, 'stop() let go of the hung append');
+      assert.strictEqual(h2.hasRecord(a), false);
+      await h1.sync.start();
+      await waitUntil(() => h2.hasRecord(a), { timeout: 5000 });
+      shared.release();
+      const b = await h1.insert({ n: 2 });
+      await waitUntil(() => h2.hasRecord(b), { timeout: 5000 });
+    },
+  );
+
+  await t.test('a hub joins the log with the history it retains after compaction, from the log’s floor', async (t2) => {
+    const shared = createMemorySharedLog();
+    // A hub alone, its log rolled and compacted: the oldest ops are gone, the floor is above 1.
+    const alone = await createStorage(t2, 'H5', { sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
+    const ids = [];
+    for (let i = 1; i <= 12; i++) ids.push(await alone.insert({ n: i }));
+    await waitUntil(() => alone.log.floor > 1, { timeout: 5000 });
+    await alone.close();
+    const errors = [];
+    const h5 = await createStorage(t2, 'H5', {
+      sync: { sharedLog: shared, log: { rollAfter: 1 }, retention: { ops: 4 } },
+    });
+    h5.sync.on('error', (error) => errors.push(error));
+    await waitUntil(() => h5.sync.shared().behind === false && h5.sync.shared().relayed >= 1, { timeout: 5000 });
+    const lost = errors.filter((error) => error.code === 'SHARED_LOG_FAILED' && error.reason === 'lost');
+    assert.strictEqual(lost.length, 1, 'told once: what fell below the floor is not in the topic');
+    const texts = shared.entries(TOPIC).map((entry) => entry.value);
+    assert.ok(
+      texts.some((text) => text.includes(ids[11])),
+      'what the log retains is in the topic',
+    );
+    assert.ok(!texts.some((text) => text.includes(ids[0])), 'what fell below the floor is not');
+    assert.strictEqual(h5.sync.shared().appended, h5.log.lastEventId, 'the watermark is at the last op');
+    // Another hub reads them as a gap of the stream (nothing of it before them) until a bootstrap from H5 fills it.
+    const h5unit = h5.sync.unit({ access: 'public' });
+    const h2 = await createStorage(t2, 'H2', { sync: { sharedLog: shared, connect: () => new MemoryLink(h5unit) } });
+    await waitUntil(() => h2.sync.shared().entries >= 1);
+    assert.strictEqual(h2.hasRecord(ids[11]), false, 'a gap of the stream until the hole is filled');
+    await h2.sync.addNode({ url: 'mem://H5' });
+    await waitUntil(() => h2.hasRecord(ids[11]) && h2.hasRecord(ids[0]), { timeout: 5000 });
+    assert.deepStrictEqual(await h2.get(ids[11]), { n: 12 });
+  });
+
   await t.test(
     'an entry that fails to apply three times leaves the topic stuck (SHARED_LOG_FAILED stuck); stop() and start() read it again',
     async (t2) => {
