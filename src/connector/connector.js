@@ -22,7 +22,10 @@
 // `set`/`delete` per page, stamped here, `source: 'connector:<name>'` — so a
 // pulled record reaches every peer like a local one; a document equal to
 // what the record reads as is left alone (no op), which is how this node's
-// own writes, come back from the backend, make no echo. What goes out follows
+// own writes, come back from the backend, make no echo; a document that
+// cannot land (another collection's record, a sealed one, no JSON, a
+// validator's no) is refused by name (`refused`) and the rest of the page
+// lands. What goes out follows
 // the `transaction` events of the collection — every turn but a pull of this
 // connector's — pages of `batchSize` rows, in order, one push in flight. The
 // checkpoint (`{ pull, pushed }`: the backend's position, and this node's log
@@ -67,6 +70,26 @@ const documentOf = (doc) => {
   const deleted = doc.deleted === true;
   if (!deleted && !isPlainObject(doc.data)) return null;
   return { id: doc.id, data: deleted ? null : doc.data, deleted };
+};
+
+// JSON alone crosses: null, booleans, finite numbers, strings, arrays and plain objects of them. A Date, a Decimal, a
+// Timestamp or a reference of a backend's SDK is refused on pull (`reason: 'value'`) — never flattened into a record
+// and written back as a string.
+const MAX_DEPTH = 64;
+const isJson = (value, depth = 0) => {
+  if (value === null || value === undefined) return true;
+  const type = typeof value;
+  if (type === 'string' || type === 'boolean') return true;
+  if (type === 'number') return Number.isFinite(value);
+  if (type !== 'object' || depth >= MAX_DEPTH) return false;
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i++) if (!isJson(value[i], depth + 1)) return false;
+    return true;
+  }
+  const proto = Object.getPrototypeOf(value);
+  if (proto !== Object.prototype && proto !== null) return false;
+  for (const key of Object.keys(value)) if (!isJson(value[key], depth + 1)) return false;
+  return true;
 };
 
 const failed = (direction, message, cause, name) =>
@@ -119,7 +142,7 @@ class Replication extends Emitter {
   #assumed = new Map();
   #errors = [];
   #waiters = new Set();
-  #stats = { pulled: 0, applied: 0, pushed: 0, conflicts: 0, pulls: 0, pushes: 0 };
+  #stats = { pulled: 0, applied: 0, pushed: 0, conflicts: 0, refused: 0, pulls: 0, pushes: 0 };
 
   constructor(db, options) {
     super();
@@ -350,12 +373,12 @@ class Replication extends Emitter {
     }
   }
 
-  // A handler failed: kept, told, tried again after `retryTime`.
+  // A handler, or the landing of what it answered, failed: kept, told, tried again after `retryTime`.
   #failed(direction, error, retry) {
     if (this.#errors.length >= MAX_ERRORS) this.#errors.shift();
     this.#errors.push(error);
     this.#logger.warn({ event: 'connector.failed', name: this.#name, direction, err: error });
-    const message = `Connector ${this.#name}: the ${direction} handler failed (${error?.message ?? error})`;
+    const message = `Connector ${this.#name}: the ${direction} failed (${error?.message ?? error})`;
     notify(this, this.#logger, 'error', failed(direction, message, error, this.#name));
     if (this.#canceled || retry === null || direction === null) return;
     if (this.#retry[direction] !== null) clearTimeout(this.#retry[direction]);
@@ -395,59 +418,107 @@ class Replication extends Emitter {
         this.#failed('pull', new TypeError('pull.handler must answer { documents, checkpoint }'), null);
         return;
       }
-      const moved = !same(page.checkpoint ?? null, this.#checkpoint.pull);
-      await this.#apply(page.documents);
-      this.#checkpoint.pull = page.checkpoint ?? null;
-      await this.#save();
-      if (page.documents.length < this.#batchSize) return;
-      // A full page at a position that does not move: asked a few times more, then left to the stream.
-      if (moved) stalls = 0;
-      else if (++stalls >= MAX_STALLS) return;
+      // The page landed and the checkpoint moved past it, or neither: a landing that fails whole (the engine, the
+      // database closing under it) is the pull's failure — told, tried again from the checkpoint as it stands.
+      try {
+        const moved = !same(page.checkpoint ?? null, this.#checkpoint.pull);
+        await this.#land(page.documents);
+        this.#checkpoint.pull = page.checkpoint ?? null;
+        await this.#save();
+        if (page.documents.length < this.#batchSize) return;
+        // A full page at a position that does not move: asked a few times more, then left to the stream.
+        if (moved) stalls = 0;
+        else if (++stalls >= MAX_STALLS) return;
+      } catch (error) {
+        this.#failed('pull', error, () => this.#pullAll());
+        return;
+      }
     }
   }
 
+  // A document, a row, that cannot land here or go to the backend: said once (`refused`, with the direction and
+  // why), counted, and left out — the rest of its page is not held up by it.
+  #refuse(direction, id, reason, cause) {
+    this.#stats.refused++;
+    this.#logger.warn({ event: 'connector.document.refused', name: this.#name, direction, id, reason, err: cause });
+    notify(this, this.#logger, 'refused', { direction, id, reason, cause });
+  }
+
   // The backend's documents, landed as this node's writes — one transaction a page, under the connector's source so
-  // its own listener passes them — a document that reads as the record already does left alone.
-  async #apply(documents) {
+  // its own listener passes them — a document that reads as the record already does left alone. A document is
+  // judged before the transaction (no document at all, a value that is no JSON, another collection's record, a
+  // sealed one, a modifier that throws) and inside it (a validator's no, a field the engine refuses): one refused
+  // is said and left out, the rest of the page lands and the checkpoint moves.
+  async #land(documents) {
     const docs = [];
+    const refusals = [];
+    const modify = this.#modifier.pull;
     for (let i = 0; i < documents.length; i++) {
       const doc = documentOf(documents[i]);
       if (doc === null) {
-        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i });
+        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i, id: documents[i]?.id });
         continue;
+      }
+      const { id } = doc;
+      const row = this.#seam.row(id);
+      if (row !== null && row.type !== this.#collection) {
+        refusals.push([id, 'collection']);
+        continue;
+      }
+      if (row?.encrypted === true) {
+        refusals.push([id, 'sealed']);
+        continue;
+      }
+      if (!isJson(doc.data)) {
+        refusals.push([id, 'value']);
+        continue;
+      }
+      if (!doc.deleted && modify !== null) {
+        try {
+          doc.data = modify(doc.data, id);
+        } catch (error) {
+          refusals.push([id, 'modifier', error]);
+          continue;
+        }
+        if (!isPlainObject(doc.data)) {
+          refusals.push([id, 'modifier']);
+          continue;
+        }
       }
       docs.push(doc);
     }
     this.#stats.pulled += documents.length;
-    if (docs.length === 0) return 0;
     const collection = this.#collection;
-    const modify = this.#modifier.pull;
     let applied = 0;
-    await this.#db.transact(
-      async (tx) => {
-        for (let i = 0; i < docs.length; i++) {
-          const { id, deleted } = docs[i];
-          const local = await tx.get(id);
-          if (deleted) {
-            this.#assumed.set(id, null);
-            if (local === null) continue;
-            await tx.delete(id);
-            applied++;
-            continue;
+    if (docs.length > 0) {
+      await this.#db.transact(
+        async (tx) => {
+          for (let i = 0; i < docs.length; i++) {
+            const { id, deleted, data } = docs[i];
+            try {
+              const local = await tx.get(id);
+              if (deleted) {
+                this.#assumed.set(id, null);
+                if (local === null) continue;
+                await tx.delete(id);
+              } else {
+                this.#assumed.set(id, data);
+                if (local !== null && same(plain(local), plain(data))) continue;
+                await tx.set(id, { ...data, $type: collection });
+              }
+              applied++;
+            } catch (error) {
+              refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
+            }
           }
-          const data = modify === null ? docs[i].data : modify(docs[i].data, id);
-          if (!isPlainObject(data)) continue;
-          this.#assumed.set(id, data);
-          if (local !== null && same(plain(local), plain(data))) continue;
-          await tx.set(id, { ...data, $type: collection });
-          applied++;
-        }
-      },
-      { source: this.#source, actor: this.#actor },
-    );
+        },
+        { source: this.#source, actor: this.#actor },
+      );
+    }
+    for (let i = 0; i < refusals.length; i++) this.#refuse('pull', refusals[i][0], refusals[i][1], refusals[i][2]);
+    if (docs.length === 0) return;
     this.#stats.applied += applied;
     notify(this, this.#logger, 'received', { documents: docs.length, applied });
-    return applied;
   }
 
   // The live half of the pull: the backend's stream where it has one, a pull every `retryTime` otherwise.
@@ -493,7 +564,7 @@ class Replication extends Emitter {
     }
     // In order, behind a pull in flight.
     const run = async () => {
-      await this.#apply(signal.documents);
+      await this.#land(signal.documents);
       if (signal.checkpoint !== undefined) {
         this.#checkpoint.pull = signal.checkpoint;
         await this.#save();
@@ -519,8 +590,10 @@ class Replication extends Emitter {
     let any = false;
     for (let i = 0; i < changes.length; i++) {
       const { id } = changes[i];
-      const type = this.#seam.row(id)?.type ?? changes[i].type ?? null;
-      if (type !== this.#collection || this.#pending.has(id)) continue;
+      const row = this.#seam.row(id);
+      const type = row?.type ?? changes[i].type ?? null;
+      // A sealed record is the key holder's: it never goes to a backend.
+      if (type !== this.#collection || row?.encrypted === true || this.#pending.has(id)) continue;
       this.#pending.add(id);
       any = true;
     }
@@ -535,7 +608,9 @@ class Replication extends Emitter {
       const ids = this.#seam.ids(this.#collection);
       this.#logger.info({ event: 'connector.rebuild', name: this.#name, records: ids.length });
       for (let i = 0; i < ids.length; i++) {
-        // A record that reads as the backend was just seen to hold it (pulled, unchanged) has nothing to push.
+        // A sealed record never goes; a record that reads as the backend was just seen to hold it (pulled,
+        // unchanged) has nothing to push.
+        if (this.#seam.row(ids[i])?.encrypted === true) continue;
         const assumed = this.#assumed.get(ids[i]);
         if (assumed !== undefined && assumed !== null && same(plain(await this.#db.get(ids[i])), plain(assumed))) {
           continue;
@@ -547,7 +622,9 @@ class Replication extends Emitter {
         const { op } = entries[i];
         // This connector's own writes — what it pulled, what a conflict set — are the backend's already.
         if (op.actor === this.#actor) continue;
-        if (typeof op.id !== 'string' || this.#seam.row(op.id)?.type !== this.#collection) continue;
+        if (typeof op.id !== 'string') continue;
+        const row = this.#seam.row(op.id);
+        if (row === null || row.type !== this.#collection || row.encrypted === true) continue;
         this.#pending.add(op.id);
       }
     }
@@ -593,7 +670,7 @@ class Replication extends Emitter {
       for (let i = 0; i < rows.length; i++) this.#assumed.set(rows[i].id, rows[i].deleted ? null : rows[i].data);
       this.#stats.pushed += rows.length;
       notify(this, this.#logger, 'sent', { rows: rows.length });
-      if (Array.isArray(conflicts) && conflicts.length > 0) await this.#conflicted(conflicts);
+      if (Array.isArray(conflicts) && conflicts.length > 0) await this.#conflicted(conflicts, new Set(ids));
       this.#checkpoint.pushed = eventId;
       await this.#save();
     }
@@ -613,11 +690,19 @@ class Replication extends Emitter {
 
   // Rows the backend refused: each as the backend holds it. The backend wins — the record is set to its state here
   // (a turn of its own, so a resolution that differs goes back to the backend) — unless `resolve` says otherwise.
-  async #conflicted(conflicts) {
+  // An answer for a row the push did not carry is no conflict of this node's: said, left alone.
+  async #conflicted(conflicts, ids) {
     const docs = [];
     for (let i = 0; i < conflicts.length; i++) {
       const remote = documentOf(conflicts[i]);
-      if (remote === null) continue;
+      if (remote === null) {
+        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i, id: conflicts[i]?.id });
+        continue;
+      }
+      if (!ids.has(remote.id)) {
+        this.#logger.warn({ event: 'connector.conflict.unexpected', name: this.#name, id: remote.id });
+        continue;
+      }
       this.#stats.conflicts++;
       let local = null;
       try {
@@ -655,21 +740,27 @@ class Replication extends Emitter {
     // Landed under another source than a pull's: a resolution that differs from the backend's state is a turn this
     // connector hears, and goes back to the backend with the backend's state as what it assumed.
     const resolving = `${this.#source}:resolve`;
+    const refusals = [];
     await this.#db.transact(
       async (tx) => {
         for (let i = 0; i < docs.length; i++) {
           const { id, data, deleted } = docs[i];
-          const local = await tx.get(id);
-          if (deleted) {
-            if (local !== null) await tx.delete(id);
-            continue;
+          try {
+            const local = await tx.get(id);
+            if (deleted) {
+              if (local !== null) await tx.delete(id);
+              continue;
+            }
+            if (local !== null && same(plain(local), plain(data))) continue;
+            await tx.set(id, { ...data, $type: this.#collection });
+          } catch (error) {
+            refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
           }
-          if (local !== null && same(plain(local), plain(data))) continue;
-          await tx.set(id, { ...data, $type: this.#collection });
         }
       },
       { source: resolving, actor: this.#actor },
     );
+    for (let i = 0; i < refusals.length; i++) this.#refuse('push', refusals[i][0], refusals[i][1], refusals[i][2]);
   }
 }
 

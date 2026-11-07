@@ -48,7 +48,15 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   left out) makes no op: that is how this node's own writes, come back from the backend, make no echo and no
   stamp; a hash table of what was pushed would be lost at a restart. `$type` never leaves (`plain`) and is laid
   back on what comes in. A pulled document that is no document (`documentOf`: an id, an object or `deleted`) is
-  said (`connector.document.malformed`) and left out, never the page.
+  said (`connector.document.malformed`) and left out, never the page. A document is judged one by one, before
+  the transaction and inside it (`#land`): another collection's record (`seam.row(id).type`, a tombstone's too —
+  a backend's tombstone never deletes a record of another collection), a sealed one (`row.encrypted`: a connector
+  never reads it through the decrypting `get`), a value that is no JSON (`isJson`: a Date or an SDK's class is never
+  flattened), a `modifier.pull` that throws, and the engine's own refusal at `tx.set`/`tx.delete` (a validator's,
+  a field's) are each `#refuse('pull', id, reason, cause)` — the `refused` event, `connector.document.refused`,
+  `stats.refused` — and the rest of the page lands, the checkpoint moving past it. Only a landing that fails WHOLE
+  (the engine, the database closing) is the pull's failure (`#failed('pull')`): the checkpoint stays, the page is
+  tried again. Never let a throw of one document stop a page, and never let a page's failure move the checkpoint.
 - **A push follows the turns and assumes the backend's state.** Every `transaction` event but this connector's own
   pulls hands the records of the collection it changed (the row's type, a purge's `type`) to `#pending`; one push is
   in flight at a time, `batchSize` rows a call, a row `{ id, data, deleted, assumed }` — `assumed` the backend's state

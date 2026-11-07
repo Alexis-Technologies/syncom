@@ -59,6 +59,8 @@ expectType<number>(replication.stats().pending);
 replication.on('received', ({ documents, applied }) => expectType<number>(documents + applied));
 replication.on('conflict', ({ id, resolved }) => expectType<string>(id + String(resolved)));
 replication.on('error', (error) => expectType<'REPLICATION_FAILED'>(error.code));
+replication.on('refused', ({ direction, id, reason }) => expectType<string>(direction + id + reason));
+expectType<number>(replication.stats().refused);
 expectAssignable<PullResult>({ documents: [], checkpoint: null });
 expectAssignable<ConnectorDocument>({ id: 'x', deleted: true });
 expectError(replicate(db, { collection: 'Task' }));

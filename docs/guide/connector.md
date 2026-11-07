@@ -39,6 +39,16 @@ at a restart; a comparison is not). `$type` is laid on what comes in and taken o
 the fields alone. A document that is no document — no id, no object where one is due — is left out and said
 (`connector.document.malformed`), never the page.
 
+A document that cannot land is refused by name — the `refused` event, `{ direction: 'pull', id, reason, cause }` —
+and the rest of its page lands, the checkpoint moving past it: `collection` for a record of another collection (a
+backend's tombstone never deletes a `Note` through a `Task` connector, a document never adopts one), `sealed` for a
+record encrypted here (a connector reads none and sends none), `value` for a value that is no JSON (a Date, a
+Decimal, a Timestamp or a reference of a backend's SDK is never flattened into a string field; the adapters strip
+their own fields, the application's `modifier.pull` converts the rest), `modifier` for a modifier that threw, and
+the code of a write the engine refused — a validator's `VALIDATION_FAILED`, a field's `TypeError`. A landing that
+fails whole (the engine, the database closing under it) is the pull's failure: `REPLICATION_FAILED`, the checkpoint
+unmoved, tried again.
+
 `modifier.pull(data, id)` reshapes a document before it lands, `modifier.push(data, id)` a record before it goes.
 
 ## What goes out
@@ -71,7 +81,7 @@ kept (`errors`, the newest twenty) and tried again after `retryTime`; nothing is
 past it. `awaitInitialReplication()` resolves once the first pull and push are through, `awaitInSync()` once
 nothing waits to go out and nothing is in flight either way (`{ signal }` cuts a wait short). `cancel()` stops for
 good; `reSync()` pulls and pushes again. `stats()` counts the documents pulled and applied, the rows pushed, the
-conflicts, and what is pending.
+conflicts, the documents and rows refused, and what is pending.
 
 | Option | Default | Meaning |
 | --- | --- | --- |

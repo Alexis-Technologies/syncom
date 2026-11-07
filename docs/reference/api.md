@@ -771,10 +771,12 @@ resolve, autoStart })`: one collection kept in step with a backend of its own th
 | `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise |
 | `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good; pulls and pushes again |
 | `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push through; nothing waiting to go out and nothing in flight either way |
-| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }`; whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `pulls`, `pushes`, `pending`) |
+| `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }`; whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`) |
 
 Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,
-deleted, resolved })`, `error` (`REPLICATION_FAILED` with `direction`), `active` `(boolean)`.
+deleted, resolved })`, `refused` `({ direction, id, reason, cause })` — a document or a row left out by name: on pull
+`collection`, `sealed`, `value` (no JSON), `modifier`, or the code of the write the engine refused; on push the code
+of a resolution the engine refused — `error` (`REPLICATION_FAILED` with `direction`), `active` `(boolean)`.
 
 ## Shared (subpath)
 

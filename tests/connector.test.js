@@ -312,4 +312,115 @@ test('Connectors', async (t) => {
     await assert.rejects(idle.awaitInSync(), { code: 'REPLICATION_FAILED' });
     await assert.rejects(idle.reSync(), { code: 'REPLICATION_FAILED' });
   });
+
+  await t.test(
+    'a pulled document that cannot land is refused and said — another collection’s record, a sealed one, a validator’s no, a field the engine refuses — and the rest of the page lands; the checkpoint moves',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const validated = {
+        '~standard': {
+          version: 1,
+          vendor: 'test',
+          validate: (value) => (value.title === 'bad' ? { issues: [{ message: 'no', path: ['title'] }] } : { value }),
+        },
+      };
+      const a = await open(t2, 'A', { schema: { entities: { Task: { schema: validated }, Note: {} } } });
+      const note = (await a.Note.insert({ text: 'mine' })).id;
+      const sealed = await a.insert({ $type: 'Task', title: 'secret' }, { encrypted: true });
+      backend.write('t1', { title: 'fine' });
+      backend.write(note, { title: 'adopt me' });
+      backend.write(sealed, { title: 'leaked' });
+      backend.write('t2', { title: 'bad' });
+      backend.write('t3', { title: 'ok', ['__proto__']: { polluted: true } });
+      backend.write(note, null, { deleted: true });
+      backend.write('ghost', null, { deleted: true });
+      backend.write('t4', { title: 'last' });
+      const replication = connect(t2, a, backend, { live: false });
+      const refused = [];
+      const errors = [];
+      replication.on('refused', (event) => refused.push(event));
+      replication.on('error', (error) => errors.push(error));
+      await replication.awaitInitialReplication();
+      assert.deepStrictEqual(errors, []);
+      assert.deepStrictEqual((await a.get('t1')).title, 'fine', 'the page landed around the refusals');
+      assert.deepStrictEqual((await a.get('t4')).title, 'last');
+      assert.strictEqual(await a.get('t2'), null, 'the validator said no');
+      assert.strictEqual(await a.get('t3'), null, 'the engine refused the field');
+      assert.strictEqual(Object.prototype.polluted, undefined);
+      assert.deepStrictEqual(await a.get(note), { text: 'mine', $type: 'Note' }, 'another collection’s record, kept');
+      assert.deepStrictEqual((await a.get(sealed)).title, 'secret', 'the sealed record, kept');
+      assert.strictEqual(replication.checkpoint.pull, backend.changes.length, 'the checkpoint moved past the page');
+      const seen = [];
+      for (const event of refused) seen.push([event.direction, event.id, event.reason]);
+      seen.sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
+      const expected = [
+        ['pull', note, 'collection'],
+        ['pull', note, 'collection'],
+        ['pull', sealed, 'sealed'],
+        ['pull', 't2', 'VALIDATION_FAILED'],
+        ['pull', 't3', 'TypeError'],
+      ].sort((x, y) => (x[1] < y[1] ? -1 : x[1] > y[1] ? 1 : 0));
+      assert.deepStrictEqual(seen, expected);
+      assert.ok(refused.every((event) => event.cause === undefined || event.cause instanceof Error));
+      assert.strictEqual(replication.stats().refused, 5);
+      await replication.cancel();
+      // A value that is no JSON (a Date, a class instance) is refused on pull, never flattened into the record.
+      const typed = replicate(a, {
+        name: 'typed',
+        collection: 'Task',
+        live: false,
+        pull: {
+          handler: async () => ({
+            documents: [
+              { id: 'd1', data: { when: new Date(0) } },
+              { id: 'd2', data: { n: 1 } },
+            ],
+            checkpoint: 1,
+          }),
+        },
+      });
+      t2.after(() => typed.cancel().catch(() => {}));
+      const typedRefusals = [];
+      typed.on('refused', (event) => typedRefusals.push(event));
+      await typed.awaitInitialReplication();
+      assert.strictEqual(await a.get('d1'), null);
+      assert.deepStrictEqual((await a.get('d2')).n, 1);
+      assert.deepStrictEqual(
+        typedRefusals.map(({ direction, id, reason }) => ({ direction, id, reason })),
+        [{ direction: 'pull', id: 'd1', reason: 'value' }],
+      );
+    },
+  );
+
+  await t.test(
+    'a landing that fails whole is a pull failure: told as REPLICATION_FAILED, tried again, the checkpoint unmoved, active still true',
+    async (t2) => {
+      const backend = createFakeBackend();
+      backend.write('t1', { title: 'one' });
+      const a = await open(t2, 'A');
+      const original = a.transact.bind(a);
+      let failures = 1;
+      a.transact = async (...args) => {
+        if (failures > 0) {
+          failures--;
+          throw new Error('engine hiccup');
+        }
+        return original(...args);
+      };
+      const replication = connect(t2, a, backend, { live: false });
+      const errors = [];
+      replication.on('error', (error) => errors.push(error));
+      await waitUntil(() => errors.length === 1);
+      assert.strictEqual(errors[0].code, 'REPLICATION_FAILED');
+      assert.strictEqual(errors[0].direction, 'pull');
+      assert.match(errors[0].cause.message, /engine hiccup/);
+      assert.strictEqual(replication.checkpoint.pull, null, 'the checkpoint did not move past the page');
+      assert.strictEqual(replication.active, true);
+      assert.strictEqual(await a.get('t1'), null);
+      // Tried again after retryTime: the page lands and the checkpoint moves.
+      await waitUntil(async () => (await a.get('t1')) !== null, { timeout: 5000 });
+      await waitUntil(() => replication.checkpoint.pull === 1);
+      assert.strictEqual(replication.errors.length, 1);
+    },
+  );
 });

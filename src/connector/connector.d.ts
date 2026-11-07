@@ -88,6 +88,12 @@ export interface ConnectorEvents {
     deleted: boolean;
     resolved: RecordData | null;
   }) => void;
+  /**
+   * A document or a row left out, and why: on pull `'collection'` (another collection's record), `'sealed'`,
+   * `'value'` (no JSON), `'modifier'` (it threw) or the code of the write the engine refused (a validator's
+   * `VALIDATION_FAILED`, a `TypeError`); on push the code of a resolution the engine refused.
+   */
+  refused: (event: { direction: 'pull' | 'push'; id: string; reason: string; cause?: unknown }) => void;
   /** A handler failed (`REPLICATION_FAILED`, `direction` `'pull'` or `'push'`); tried again after `retryTime`. */
   error: (
     error: Error & { code: 'REPLICATION_FAILED'; direction: 'pull' | 'push' | null; name: string; cause?: unknown },
@@ -101,6 +107,8 @@ export interface ConnectorStats {
   applied: number;
   pushed: number;
   conflicts: number;
+  /** Documents and rows refused by name (the `refused` event). */
+  refused: number;
   pulls: number;
   pushes: number;
   pending: number;
