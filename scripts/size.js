@@ -450,7 +450,9 @@ const ENTRIES = [
   // 173.2 with the sealed records in queries, QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
   // 174.2 with the blobs' door (src/blobs.js) at every store, the engines' estimate(), isQuotaError's walk of the cause
   // (review №7, E7.1–E7.3; 2026-11-07). 174.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 174.5 },
+  // 174.8 with the at-rest blobs as bytes, the copy's mark and the moved source's fence (review №7, E7.4; 2026-11-07).
+  // 175, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 175 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -664,7 +666,9 @@ const ENTRIES = [
   // Dumps: export/import over snapshot pages, a move between engines — measured with the engines' copy it ships
   // (collections plan, C4.3).
   // 6.5 measured; 7.
-  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
+  // 7.0 (over by bytes) with the copy's mark and the moved source's fence in engines/copy.js, which it bundles (review №7,
+  // E7.4; 2026-11-07). 7.25, raised by name.
+  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7.25 },
   // Connectors: a collection kept in step with a backend through pull/push handlers, the checkpoint in the `connector`
   // kv namespace (sync-parity plan, S2). The plan said 5; measured alone it brings shape.js (the id check, the canonical
   // JSON it compares a document by) and the emitter — 7.0; 7.5, raised by name.

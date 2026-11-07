@@ -544,16 +544,26 @@ record's pair is the directory's (`keys/`): it is not rotated — a new pair is 
 **encrypted at rest** (`atRest(engine, options)`, [Engines](./backends#encrypted-at-rest)) is rotated by a copy:
 
 ```js
+const { createDatabase, dropDatabase, filesEngine } = require('@alexify/syncom');
 const { rotateAtRest, atRest } = require('@alexify/syncom/encryption');
 
+// over an engine (memory, IndexedDB, SQLite, MongoDB)
 await rotateAtRest(engine, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
 const db = await createDatabase({ engine: atRest(engine, { key: newKey }), path: 'app-2' });
-await engine.remove('app'); // once the new place reads
+await dropDatabase('app', { engine: atRest(engine, { key: oldKey }) }); // once the new place reads
+
+// over a backend — the default medium: the files engine, wrapped at its backend under each key
+await rotateAtRest({ fsi, filesEngine }, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
+const moved = await createDatabase({ fsi: atRest(fsi, { key: newKey }), path: 'app-2' });
 ```
 
 The database at `path` is copied whole — every record, piece, copy, kv text, log entry and blob — into `into`
-(another path, another engine, or both) sealed under the new key; it is the same node, so no peer bootstraps. Never
-in place: a copy cut short leaves the source as it was and the target empty.
+(another path, another engine or backend, or a path with either) sealed under the new key; it is the same node, so
+no peer bootstraps. Never in place. Once copied the source is **fenced**: `moved.json` in its root namespace names
+where it went, and `createDatabase()` there is `MOVED` (`to: { path, engine }`) until `dropDatabase()` takes it —
+the same node id never writes in two places. A copy cut short leaves the source as it was and its target marked
+(`copy.json`, written first and removed last): the next copy into that target takes the leftovers away first, while
+a target that holds a database is `TARGET_NOT_EMPTY`.
 
 The room the medium has is `db.quota()` — `{ usage, quota }` in bytes, what the engine can say: the memory engine
 counts what it holds (no quota), SQLite its file's pages (`page_count × page_size`) and the free space of the file's

@@ -309,7 +309,9 @@ const sealed = await createDatabase({ path: 'data', engine: atRest(memoryEngine(
 Over an engine (memory, IndexedDB, SQLite, MongoDB) the wrapper seals every
 value the stores hold — a record as one text, its pieces, a tag's copies, the
 kv texts, each entry of the op log and the log's index — and leaves the keys
-in the clear: an id, a seq, a tag's name, a kv key, the index's `floor`. The
+in the clear: an id, a seq, a tag's name, a kv key, the index's `floor`. An
+attachment's blob is sealed as **bytes** at the blob's place — iv ‖ ciphertext,
+28 bytes over the blob's own size, no base64 — and its digest stays a name. The
 engine keeps no index of its own over ciphertext (`capabilities.indexes` is
 false; the core's catalog is saved sealed, as kv). The files engine is wrapped
 at its backend — `filesEngine(atRest(fsi, options))` — since its journal reads
@@ -327,8 +329,13 @@ the key can tell.
 
 The key is never written. A file that is not the key's is refused as
 `DECRYPT_FAILED` with a `reason` — `'key'` (another key, or a torn
-ciphertext), `'plain'` (a file that was never encrypted), `'torn'` (not
-base64) — and the first such file fails `createDatabase()`. `exists`, `remove`, `list`,
+ciphertext; a blob never sealed or moved to another place too, since bytes
+carry nothing to tell plain from sealed), `'plain'` (a text that was never
+encrypted), `'torn'` (not base64) — and the first such file fails
+`createDatabase()`. The key is rotated by a copy — `rotateAtRest()`, over an
+engine or over a backend with `{ fsi, filesEngine }` — and the source is then
+fenced with `moved.json` (`MOVED` at `createDatabase()`), see
+[Encryption at rest](./database#encryption-at-rest). `exists`, `remove`, `list`,
 `sync` and `create` pass through, so a lock and a `durable` open work as they
 do on the bare backend. There is no `append` — a file is one ciphertext — so
 the log under the wrapper writes a sealed file per group. The wrapper

@@ -40,8 +40,10 @@ export declare function atRest(engine: Engine, options: AtRestOptions): Engine;
 
 /**
  * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole into `into` (`{ path }`
- * on the same engine, `{ engine }`, or both) sealed under `to` — the same node; never in place. Answers what
- * `copyEngine` answers.
+ * on the same engine or backend, `{ engine }`, `{ fsi }`, or a path with either) sealed under `to` — the same node;
+ * never in place. Over a backend (the files engine, wrapped at its backend) give `{ fsi, filesEngine }`: the files
+ * engine's factory, `filesEngine` of the main entry. The source is then fenced (`moved.json`): `createDatabase` there
+ * is `MOVED` until `dropDatabase` takes it. Answers what `copyEngine` answers.
  */
 export declare function rotateAtRest(
   engine: Engine,
@@ -50,6 +52,16 @@ export declare function rotateAtRest(
     from: AtRestOptions;
     to: AtRestOptions;
     into: { path?: string; engine?: Engine };
+    batch?: number;
+  },
+): Promise<import('../engines/engines.js').CopyEngineResult>;
+export declare function rotateAtRest(
+  backend: { fsi: Fsi; filesEngine: (fsi: Fsi) => Engine },
+  options: {
+    path: string;
+    from: AtRestOptions;
+    to: AtRestOptions;
+    into: { path?: string; fsi?: Fsi };
     batch?: number;
   },
 ): Promise<import('../engines/engines.js').CopyEngineResult>;

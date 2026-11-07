@@ -42,7 +42,10 @@ src/engines/copy.js       copyEngine(from, to, { path, batch }): the database at
   lost on the way, the copy fails `LEASE_LOST`), the lock key itself is not copied, and a target that holds
   `node.json` or a record is refused. The identity — the keys (with their file mode, `KEY_FILE_MODE`), then
   `node.json` — lands LAST, so a copy cut short is no node of that name, and a copy that fails removes what it wrote
-  (`to.remove(path)`: the target was empty). The sealed entries go as one segment, `batch` entries a group: retention
+  (`to.remove(path)`: the target was empty). A copy MARKS its target first — `copy.json` `{ from, started }` in the
+  root namespace, removed last — so one cut short by a crash (the mark without `node.json`) is taken away by the next
+  copy into that target before it begins; `lock.json`, `copy.json` and `moved.json` (a rotated source's fence,
+  src/identity.js) are never copied. The sealed entries go as one segment, `batch` entries a group: retention
   compacts it as a whole, which it would have done piece by piece. The kv namespaces copied are `KV_NAMESPACES`
   (src/engine.js) and a tag's — a plugin's namespace of its own is added there.
 - **A copy may land beside its source.** `copyEngine(from, to, { path, targetPath })` opens the target at `targetPath`

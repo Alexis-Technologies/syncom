@@ -12,13 +12,37 @@
 // names the kind plugins the directory ran with: a reopen without one of
 // them would hold fields it cannot apply and lose them at the next write,
 // so it is refused (PLUGIN_MISSING, naming the plugin); more plugins than
-// before is fine and is recorded. `store` is the database's root namespace
-// (node.json a key of it). Requires errors.js and shape.js only.
+// before is fine and is recorded. A directory whose database was moved by
+// `rotateAtRest` (src/encryption) carries `moved.json` naming where: it is
+// refused (MOVED) until `dropDatabase` takes it — the same node never writes
+// in two places. `store` is the database's root namespace (node.json a key
+// of it). Requires errors.js and shape.js only.
 
 const { SyncomError, typed } = require('./errors.js');
 const { isStreamName, isKeyId } = require('./shape.js');
 
 const NODE_FILE = 'node.json';
+const MOVED_FILE = 'moved.json';
+
+// The fence a rotated source carries: `{ to: { path, engine }, at }`, read for the refusal alone.
+const moved = async (store) => {
+  const text = await store.get(MOVED_FILE);
+  if (text === null) return;
+  let to = null;
+  try {
+    to = JSON.parse(text)?.to ?? null;
+  } catch {
+    // A fence that does not read is a fence still.
+  }
+  const where = to === null ? '' : ` to ${to.path} on the ${to.engine} engine`;
+  throw new SyncomError(
+    'MOVED',
+    `This database was moved${where} (rotateAtRest): open it there, and dropDatabase this one`,
+    {
+      to,
+    },
+  );
+};
 
 // A service file a storage wrote itself and cannot read any more.
 const corruptFile = (file, cause) =>
@@ -32,6 +56,7 @@ const corruptFile = (file, cause) =>
  * a fresh id. Writes node.json when it changed.
  */
 const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
+  await moved(store);
   let nodeId = null;
   const text = await store.get(NODE_FILE);
   if (text !== null) {
@@ -83,4 +108,4 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
   return nodeId;
 };
 
-module.exports = { NODE_FILE, loadIdentity, corruptFile };
+module.exports = { NODE_FILE, MOVED_FILE, loadIdentity, corruptFile };

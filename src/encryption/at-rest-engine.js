@@ -13,10 +13,13 @@
 // `floor`, which the medium reads to tell a sealed seq from an open one; a
 // native engine keeps no index of its own over it (`indexes: false` — the
 // core's catalog is saved sealed, as kv). A record goes in as text (the
-// medium keeps a text that is no JSON as it is, `raw(id)` hands it back),
-// and the files engine is not wrapped this way: its journal reads the ops it
-// writes, so it is the backend that is wrapped there — `filesEngine(atRest(fsi))`.
-// Requires engine.js, blobs.js, errors.js and crypto/pem.js only; the cipher is handed in.
+// medium keeps a text that is no JSON as it is, `raw(id)` hands it back); a
+// blob's bytes go in as BYTES — `sealBytes`/`openBytes` of the cipher, iv ‖
+// ciphertext at the blob's place, the size its own (a cipher of text alone
+// seals them as base64 text) — and the files engine is not wrapped this way:
+// its journal reads the ops it writes, so it is the backend that is wrapped
+// there — `filesEngine(atRest(fsi))`. Requires engine.js, blobs.js, errors.js
+// and crypto/pem.js only; the cipher is handed in.
 
 const { checkEngine, capabilitiesOf, unreadableRecord } = require('../engine.js');
 const { checkDigest, checkBlobBytes } = require('../blobs.js');
@@ -56,8 +59,12 @@ const placeOf = (path) => {
 /**
  * An engine whose every value is encrypted at rest under one key —
  * `atRest(engine, options)` from the encryption subpath makes one with the
- * cipher (`seal(name, text)`, `open(name, text)`) of the options given.
+ * cipher (`seal(name, text)`, `open(name, text)`; `sealBytes(name, bytes)`,
+ * `openBytes(name, bytes)` for the blobs) of the options given.
  */
+
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 const atRestEngine = (engine, cipher) => {
   const inner = checkEngine(engine, 'atRest()');
@@ -65,6 +72,15 @@ const atRestEngine = (engine, cipher) => {
     throw new TypeError('atRest(): wrap the backend, not the files engine — filesEngine(atRest(fsi, options))');
   }
   const { seal, open } = cipher;
+  // A blob's cipher: bytes in, bytes out; a cipher of text alone seals the bytes as base64 text.
+  const sealBytes =
+    typeof cipher.sealBytes === 'function'
+      ? cipher.sealBytes
+      : async (name, bytes) => encoder.encode(await seal(name, toBase64(bytes)));
+  const openBytes =
+    typeof cipher.openBytes === 'function'
+      ? cipher.openBytes
+      : async (name, stored) => fromBase64(await open(name, decoder.decode(stored)));
   const capabilities = capabilitiesOf({ ...inner.capabilities, indexes: false });
 
   const openDb = (db) => {
@@ -285,21 +301,20 @@ const atRestEngine = (engine, cipher) => {
     if (db.changes !== undefined) wrapped.changes = db.changes;
     if (typeof db.estimate === 'function') wrapped.estimate = () => db.estimate();
     if (db.blobs !== undefined) {
-      // An attachment's bytes: base64, sealed at the blob's place, the ciphertext's bytes stored; the digest stays a name.
-      const encoder = new TextEncoder();
-      const decoder = new TextDecoder();
+      // An attachment's bytes: sealed as bytes at the blob's place (iv ‖ ciphertext, the size its own); the digest
+      // stays a name. A blob that is not the key's — another key, never sealed — is DECRYPT_FAILED `key`.
       wrapped.blobs = {
         get: async (digest) => {
           const stored = await db.blobs.get(checkDigest(digest, 'blobs.get'));
           if (stored === null) return null;
-          return fromBase64(await open(blobKey(digest), decoder.decode(stored)));
+          return openBytes(blobKey(digest), stored);
         },
         has: async (digest) => db.blobs.has(checkDigest(digest, 'blobs.has')),
         list: () => db.blobs.list(),
         put: async (digest, bytes) => {
           checkDigest(digest, 'blobs.put');
           checkBlobBytes(typed, bytes, 'blobs.put');
-          return db.blobs.put(digest, encoder.encode(await seal(blobKey(digest), toBase64(bytes))));
+          return db.blobs.put(digest, await sealBytes(blobKey(digest), bytes));
         },
         remove: async (digest) => db.blobs.remove(checkDigest(digest, 'blobs.remove')),
       };

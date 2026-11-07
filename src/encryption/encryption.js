@@ -22,7 +22,13 @@
 //   (DECRYPT_FAILED, reason 'plain' the other way round). Given an engine
 //   (memory, IndexedDB, SQLite, MongoDB), the same over its stores — every
 //   record, piece, copy, kv text and log entry a ciphertext bound to its
-//   place (./at-rest-engine.js); the files engine is wrapped at its backend.
+//   place, a blob's bytes as bytes (iv ‖ ciphertext, no base64:
+//   `sealBytes`/`openBytes`) (./at-rest-engine.js); the files engine is
+//   wrapped at its backend.
+// - `rotateAtRest(engine | { fsi, filesEngine }, { path, from, to, into })` —
+//   the key rotated by a copy (engines/copy.js) into another path, engine or
+//   backend; the source is then fenced with `moved.json` (createDatabase
+//   refuses it as MOVED, naming where it went) until it is dropped.
 
 const { generateKeys, encrypt, decrypt, loadKeys } = require('./rsa.js');
 const { checkFsi } = require('../backend.js');
@@ -51,6 +57,9 @@ const encryption = Object.freeze({
 // AES-GCM): a file copied over another one of the store does not decrypt.
 const PREFIX = 'enc1:';
 const IV_BYTES = 12;
+const TAG_BYTES = 16;
+// The fence a rotated source carries in its root namespace (src/identity.js reads it: MOVED).
+const MOVED_FILE = 'moved.json';
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
 
@@ -127,45 +136,54 @@ const keyOf = async ({ key, password, salt, iterations }) => {
   return subtle().deriveKey(params, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 };
 
-// The cipher of one key: `seal(name, text)` → `enc1:…` bound to `name` (the
-// additional data of AES-GCM), `open(where, name, text)` the text back, or
-// DECRYPT_FAILED naming `where`. The key is imported or derived once, at the
-// first call (a failed import surfaces there, not as an unhandled rejection).
+// The cipher of one key: `sealBytes(name, bytes)` → iv ‖ ciphertext (the tag
+// inside) bound to `name` (the additional data of AES-GCM), `openBytes(where,
+// name, bytes)` the bytes back or DECRYPT_FAILED `key` naming `where` — what a
+// blob is sealed as, its size its own; `seal(name, text)` → `enc1:` and the
+// base64 of the same, `open(where, name, text)` the text back ('plain' for a
+// text without the prefix, 'torn' for one that is no base64). The key is
+// imported or derived once, at the first call (a failed import surfaces
+// there, not as an unhandled rejection).
 const createCipher = (options) => {
   const ready = keyOf(checkOptions(options));
   ready.catch(() => {});
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const bound = (name) => ({ additionalData: encoder.encode(name) });
-  const seal = async (name, text) => {
+  const sealBytes = async (name, bytes) => {
     const key = await ready;
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
     const params = { name: 'AES-GCM', iv, ...bound(name) };
-    const body = new Uint8Array(await subtle().encrypt(params, key, encoder.encode(text)));
+    const body = new Uint8Array(await subtle().encrypt(params, key, bytes));
     const out = new Uint8Array(iv.length + body.length);
     out.set(iv, 0);
     out.set(body, iv.length);
-    return PREFIX + toBase64(out);
+    return out;
   };
+  const openBytes = async (where, name, bytes) => {
+    // Too short for an iv and a tag: never sealed here (a plain blob under the wrapper), or torn.
+    if (!(bytes instanceof Uint8Array) || bytes.length < IV_BYTES + TAG_BYTES) throw failed(where, 'key');
+    const key = await ready;
+    try {
+      const iv = bytes.subarray(0, IV_BYTES);
+      const params = { name: 'AES-GCM', iv, ...bound(name) };
+      return new Uint8Array(await subtle().decrypt(params, key, bytes.subarray(IV_BYTES)));
+    } catch (error) {
+      throw failed(where, 'key', error);
+    }
+  };
+  const seal = async (name, text) => PREFIX + toBase64(await sealBytes(name, encoder.encode(text)));
   const open = async (where, name, text) => {
     if (typeof text !== 'string' || !text.startsWith(PREFIX)) throw failed(where, 'plain');
-    const key = await ready;
     let bytes;
     try {
       bytes = fromBase64(text.slice(PREFIX.length));
     } catch (error) {
       throw failed(where, 'torn', error);
     }
-    try {
-      const iv = bytes.subarray(0, IV_BYTES);
-      const params = { name: 'AES-GCM', iv, ...bound(name) };
-      const plain = await subtle().decrypt(params, key, bytes.subarray(IV_BYTES));
-      return decoder.decode(plain);
-    } catch (error) {
-      throw failed(where, 'key', error);
-    }
+    return decoder.decode(await openBytes(where, name, bytes));
   };
-  return { seal, open };
+  return { seal, open, sealBytes, openBytes };
 };
 
 // A backend whose every file is encrypted: the name, not the directory,
@@ -197,32 +215,85 @@ const atRestFsi = (fsi, options) => {
  */
 const atRest = (target, options = {}) => {
   if (isEngine(target)) {
-    const { seal, open } = createCipher(options);
-    return atRestEngine(target, { seal, open: (name, text) => open(name, name, text) });
+    const { seal, open, sealBytes, openBytes } = createCipher(options);
+    return atRestEngine(target, {
+      seal,
+      open: (name, text) => open(name, name, text),
+      sealBytes,
+      openBytes: (name, bytes) => openBytes(name, name, bytes),
+    });
   }
   return atRestFsi(target, options);
 };
 
 /**
  * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole — every record,
- * piece, copy, kv text, log entry and blob — into `into` (`{ path }` on the same engine, `{ engine }`, or both)
- * sealed under `to`; the same node (its identity, epoch, vector and heads go with it), so a peer resumes where it
- * was. Never in place: a copy cut short leaves the source as it was and the target empty (`TARGET_NOT_EMPTY` where
- * it was not). Open the database at its new place with `atRest(engine, to)` and take the old one away
- * (`engine.remove(path)`) once it reads.
+ * piece, copy, kv text, log entry and blob — into `into` (`{ path }` on the same engine or backend, `{ engine }`,
+ * `{ fsi }`, or a path with either) sealed under `to`; the same node (its identity, epoch, vector and heads go with
+ * it), so a peer resumes where it was. Over an engine (memory, IndexedDB, SQLite, MongoDB) `rotateAtRest(engine, …)`;
+ * over a backend — the files engine, wrapped at its backend — `rotateAtRest({ fsi, filesEngine }, …)` with the files
+ * engine's factory (`filesEngine` of the main entry: nothing of it is bundled here). Never in place: a copy cut short
+ * leaves the source as it was and the target marked (`copy.json`), which the next copy takes away first
+ * (`TARGET_NOT_EMPTY` for a target that holds a database). Once copied, the source is FENCED: `moved.json` in its root
+ * namespace names where it went, and `createDatabase` there refuses `MOVED` until `dropDatabase` takes it — the same
+ * node id never writes in two places. Open the database at its new place with `atRest(…, to)`.
  */
-const rotateAtRest = async (engine, { path, from, to, into, batch } = {}) => {
-  if (!isEngine(engine)) throw new TypeError('rotateAtRest(): an engine (filesEngine(fsi) for a backend)');
+const rotateAtRest = async (target, { path, from, to, into, batch } = {}) => {
+  const overBackend = target !== null && typeof target === 'object' && !isEngine(target) && 'fsi' in target;
+  if (!overBackend && !isEngine(target)) {
+    throw new TypeError('rotateAtRest(): an engine, or { fsi, filesEngine } for a backend');
+  }
   if (typeof path !== 'string' || path.length === 0) throw new TypeError('rotateAtRest(): path');
-  if (into === null || typeof into !== 'object' || (into.engine === undefined && into.path === undefined)) {
-    throw new TypeError('rotateAtRest(): into names where the rotated database lands — { path }, { engine }, or both');
+  const named = into !== null && typeof into === 'object';
+  if (!named || (into.engine === undefined && into.path === undefined && into.fsi === undefined)) {
+    throw new TypeError(
+      'rotateAtRest(): into names where the rotated database lands — { path }, { engine } or { fsi }',
+    );
   }
-  const target = into.engine ?? engine;
   const targetPath = into.path ?? path;
-  if (target === engine && targetPath === path) {
-    throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or engine');
+  let source;
+  let destination;
+  let engineName;
+  if (overBackend) {
+    const { fsi, filesEngine } = target;
+    checkFsi(fsi, 'rotateAtRest({ fsi })');
+    if (typeof filesEngine !== 'function') {
+      throw new TypeError(
+        "rotateAtRest({ fsi, filesEngine }): the files engine's factory — filesEngine of '@alexify/syncom'",
+      );
+    }
+    if (into.engine !== undefined) {
+      throw new TypeError('rotateAtRest({ fsi }): into names a path or a backend (fsi), not an engine');
+    }
+    const other = into.fsi === undefined ? fsi : checkFsi(into.fsi, 'rotateAtRest(into.fsi)');
+    if (other === fsi && targetPath === path) {
+      throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or backend');
+    }
+    source = filesEngine(atRestFsi(fsi, from));
+    destination = filesEngine(atRestFsi(other, to));
+    engineName = 'files';
+  } else {
+    if (into.fsi !== undefined) {
+      throw new TypeError('rotateAtRest(engine): into names a path or an engine, not a backend');
+    }
+    const engine = into.engine ?? target;
+    if (engine === target && targetPath === path) {
+      throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or engine');
+    }
+    source = atRest(target, from);
+    destination = atRest(engine, to);
+    engineName = engine.name;
   }
-  return copyEngine(atRest(engine, from), atRest(target, to), { path, targetPath, batch });
+  const counts = await copyEngine(source, destination, { path, targetPath, batch });
+  // The fence: the source says where it went (sealed under its own key), and opens nowhere until dropped.
+  const moved = JSON.stringify({ to: { path: targetPath, engine: engineName }, at: Date.now() });
+  const db = await source.open(path, {});
+  try {
+    await db.kv.put('', MOVED_FILE, moved, { atomic: true });
+  } finally {
+    await db.close();
+  }
+  return counts;
 };
 
 module.exports = { encryption, atRest, rotateAtRest, generateKeys, encrypt, decrypt, loadKeys };
