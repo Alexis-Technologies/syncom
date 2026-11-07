@@ -24,7 +24,7 @@
 //   catalog  (p, id)            row — the catalog's row of a record (JSON), a row at a time
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { SyncomError, typed } = require('../errors.js');
 
 const MEMORY = ':memory:';
@@ -298,7 +298,11 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       has: async (digest) => !none(await get(SQL.blobHas, [p, checkDigest(digest, 'blobs.has')])),
       list: async () => names(await all(SQL.blobList, [p]), 'digest'),
       put: async (digest, bytes) =>
-        run(SQL.blobPut, [p, checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put')]),
+        run(SQL.blobPut, [
+          p,
+          checkDigest(digest, 'blobs.put'),
+          checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES),
+        ]),
       remove: async (digest) => run(SQL.blobRemove, [p, checkDigest(digest, 'blobs.remove')]),
     };
 

@@ -32,7 +32,7 @@
 // port is the platform's (worker_threads, a browser's MessageChannel).
 
 const { checkEngine, checkEngineDb, capabilitiesOf, isKvKey, isKvNamespace } = require('../engine.js');
-const { isDigest, checkBlobBytes } = require('../blobs.js');
+const { isDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
 const { SyncomError, typed } = require('../errors.js');
@@ -156,7 +156,7 @@ const CHECKS = Object.freeze({
     put: (name, bytes) => {
       digest(name);
       if (!(bytes instanceof Uint8Array)) throw refused('a blob is a Uint8Array');
-      checkBlobBytes(typed, bytes, 'serveEngine() blobs.put');
+      checkBlobBytes(typed, bytes, 'serveEngine() blobs.put', MAX_STORED_BYTES);
     },
     remove: digest,
   }),

@@ -247,7 +247,9 @@ const ENTRIES = [
     // 10.1 with the blobs store proxied and copied (sync-parity plan, S4). 10.5, raised by name.
     // 10.6 with the blobs' door (src/blobs.js) at the served store and a copy refused into a target without blobs
     // (BLOBS_UNSUPPORTED; review №7, E7.1/E7.3; 2026-11-07). 11, raised by name.
-    budget: 11,
+    // 11.0 (at the line) with the served store taking the seal's bytes past the cap (MAX_STORED_BYTES; review №7, E12;
+    // 2026-11-07). 11.25, raised by name.
+    budget: 11.25,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
@@ -615,7 +617,9 @@ const ENTRIES = [
   // 2026-11-07). 31, raised by name.
   // 31.1 with the blobs' door (src/blobs.js) the dialer's fetchBlob checks a digest by (review №7, E7.1 merged;
   // 2026-11-07). 31.5, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 31.5 },
+  // 31.5 (at the line) with proveMessage the protocol's and the blobs' MAX_STORED_BYTES (review №7, E11–E12; 2026-11-07).
+  // 31.75, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 31.75 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

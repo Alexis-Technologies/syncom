@@ -7,7 +7,7 @@
 
 const assert = require('node:assert');
 const { isEngine, checkEngineDb } = require('../../src/engine.js');
-const { MAX_BLOB_BYTES } = require('../../src/blobs.js');
+const { MAX_STORED_BYTES } = require('../../src/blobs.js');
 
 const stored = (data, meta = { clock: {}, base: 0, deleted: 0 }, extra = {}) => ({
   data,
@@ -246,8 +246,9 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
       const d = 'd'.repeat(64);
       await assert.rejects(() => db.blobs.put(d, 'text'), { name: 'TypeError', message: /Uint8Array/ });
       await assert.rejects(() => db.blobs.put(d, [1, 2]), { name: 'TypeError', message: /Uint8Array/ });
-      // The one cap: a blob past MAX_BLOB_BYTES is BLOB_TOO_LARGE (a TypeError with the code: the size is data).
-      await assert.rejects(() => db.blobs.put(d, new Uint8Array(MAX_BLOB_BYTES + 1)), {
+      // The one cap, as a store holds it: a blob past MAX_STORED_BYTES (the plain cap and the at-rest seal's 28 bytes) is
+      // BLOB_TOO_LARGE (a TypeError with the code: the size is data).
+      await assert.rejects(() => db.blobs.put(d, new Uint8Array(MAX_STORED_BYTES + 1)), {
         name: 'TypeError',
         code: 'BLOB_TOO_LARGE',
       });

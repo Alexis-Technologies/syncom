@@ -25,7 +25,7 @@
 // has one. The lock stays the database's (Web Locks in a browser).
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { SyncomError, typed } = require('../errors.js');
 
 const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'blobs'];
@@ -303,7 +303,7 @@ const idbEngine = ({
         }),
       put: async (digest, bytes) => {
         checkDigest(digest, 'blobs.put');
-        const copy = checkBlobBytes(typed, bytes, 'blobs.put').slice();
+        const copy = checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES).slice();
         return transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.put({ p, digest, bytes: copy }));
       },
       remove: async (digest) => {

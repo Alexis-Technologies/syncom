@@ -10,7 +10,7 @@
 // Requires engine.js and errors.js only.
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { SyncomError, typed } = require('../errors.js');
 
 const CAPABILITIES = capabilitiesOf({
@@ -167,7 +167,7 @@ const openDb = (path) => {
       return sorted(blobs.keys());
     },
     async put(digest, bytes) {
-      blobs.set(checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put').slice());
+      blobs.set(checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES).slice());
     },
     async remove(digest) {
       blobs.delete(checkDigest(digest, 'blobs.remove'));

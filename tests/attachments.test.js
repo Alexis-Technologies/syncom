@@ -10,6 +10,7 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { attachments, FIELD } = require('../src/attachments/attachments.js');
 const { atRestEngine } = require('../src/encryption/at-rest-engine.js');
+const { atRest } = require('../src/encryption/encryption.js');
 const { copyEngine } = require('../src/engines/copy.js');
 const { DB } = require('../src/symbols.js');
 const { hashBytes } = require('../src/crypto/digest.js');
@@ -34,6 +35,36 @@ test('Attachments', async (t) => {
     t2.after(() => storage.close().catch(() => {}));
     return storage;
   };
+
+  await t.test(
+    "a blob at the cap is stored at rest — the seal's 28 bytes are the store's to hold — and one past it is BLOB_TOO_LARGE at the door",
+    async (t2) => {
+      const sealed = atRest(syncom.memoryEngine(), { key: new Uint8Array(32).fill(3) });
+      const db = await syncom.createDatabase({
+        engine: sealed,
+        path: 'cap',
+        logger: false,
+        defer: 0,
+        plugins: [attachments()],
+      });
+      t2.after(() => db.close().catch(() => {}));
+      const id = await db.insert({ title: 'at the cap' });
+      const atCap = new Uint8Array(MAX_BLOB_BYTES);
+      atCap[0] = 1;
+      atCap[MAX_BLOB_BYTES - 1] = 2;
+      const entry = await db.attachments.put(id, 'cap.bin', atCap, { type: 'application/octet-stream' });
+      assert.strictEqual(entry.length, MAX_BLOB_BYTES);
+      const got = await db.attachments.get(id, 'cap.bin', { fetch: false });
+      assert.strictEqual(got.bytes.length, MAX_BLOB_BYTES);
+      assert.deepStrictEqual([got.bytes[0], got.bytes[MAX_BLOB_BYTES - 1]], [1, 2]);
+      await assert.rejects(db.attachments.put(id, 'over.bin', new Uint8Array(MAX_BLOB_BYTES + 1)), {
+        code: 'BLOB_TOO_LARGE',
+      });
+      await assert.rejects(db[DB].blobs.put('a'.repeat(64), new Uint8Array(MAX_BLOB_BYTES + 1)), {
+        code: 'BLOB_TOO_LARGE',
+      });
+    },
+  );
 
   await t.test(
     'put keeps the bytes under their digest and names them on the record; get, has, list, remove; a name shared by two records is one blob',

@@ -35,7 +35,7 @@
 // index (`{ p, id: { $gt } }` sorted by `id` over `{ p: 1, id: 1 }`).
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { SyncomError, typed } = require('../errors.js');
 const { mongoSharedLog } = require('./shared-log.js');
 
@@ -365,7 +365,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       list: async () => sorted(await many(c.blobs, { p, n: 0 }, { projection: { _id: 0, digest: 1 } }), 'digest'),
       put: async (digest, bytes) => {
         checkDigest(digest, 'blobs.put');
-        const whole = checkBlobBytes(typed, bytes, 'blobs.put');
+        const whole = checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES);
         const ops = [];
         let n = 0;
         for (let from = 0; from < whole.length; from += BLOB_CHUNK) {

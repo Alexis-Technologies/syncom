@@ -89,7 +89,9 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   register's length), a fetched blob is kept once (`sync.blob.keep.failed` where the store refuses). SQLite's
   `remove(path)` sweeps the blobs, `copyEngine` refuses a target without blobs while the source holds some
   (`BLOBS_UNSUPPORTED`), MongoDB blobs are chunked at 15 MiB, `quota()` asks the engine (`estimate()`),
-  `isQuotaError` sees `SQLITE_FULL` and looks through `cause`. At rest a blob is iv ‖ ciphertext bytes;
+  `isQuotaError` sees `SQLITE_FULL` and looks through `cause`. At rest a blob is iv ‖ ciphertext bytes — the
+  cap is the plain bytes' and a store takes the seal's 28 bytes more (`MAX_STORED_BYTES`), so a blob at the cap is
+  stored sealed (the bench found a 64 MiB put refused there);
   `rotateAtRest` takes a backend (`{ fsi, filesEngine }`), fences the source (`moved.json`, `MOVED`) and marks a
   copy in flight (`copy.json`). `attachments.sweep({ dryRun, tags })` collects the bytes nothing names; `put` on a
   sealed record is `ENCRYPTED`; `BLOB_NOT_FOUND`'s field is `attachment`.

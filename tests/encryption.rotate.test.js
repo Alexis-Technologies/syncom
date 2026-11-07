@@ -158,7 +158,8 @@ test('Key rotation at rest', async (t) => {
         },
       );
       const files = fsi.dump();
-      assert.ok(typeof files['p/moved.json'] === 'string' && !files['p/moved.json'].includes('p2'), 'sealed');
+      // Sealed: the JSON's keys are not in the text (a random ciphertext's base64 may hold any two letters, `p2` once).
+      assert.ok(typeof files['p/moved.json'] === 'string' && !files['p/moved.json'].includes('"to"'), 'sealed');
       assert.strictEqual(files['p2/moved.json'], undefined, 'the fence is the source’s alone');
       assert.strictEqual(files['p2/copy.json'], undefined, 'the mark of the copy went with its end');
       await assert.rejects(() => open(atRest(fsi, { key: KEY_A }), 'p'), { code: 'MOVED' });

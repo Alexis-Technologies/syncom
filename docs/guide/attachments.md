@@ -40,7 +40,7 @@ integer within 64 MiB, an `encoding` the plugin does not know, is
 with one `attachments.register.invalid` warning. Every engine's blobs store
 checks the digest at its own door too (a `TypeError` before the medium sees
 it), and every store takes a blob of at most `MAX_BLOB_BYTES` (64 MiB —
-`BLOB_TOO_LARGE`, the one cap `syncom/blob` answers within as well): `put`
+`BLOB_TOO_LARGE`, the one cap `syncom/blob` answers within as well) — the cap is on the plain bytes; a store under the at-rest wrapper holds 28 bytes more, the seal's iv and tag, so a blob at the cap is stored sealed: `put`
 refuses a larger one before hashing it.
 
 The engine must keep blobs (`capabilities.blobs`): the memory, IndexedDB

@@ -13,7 +13,7 @@
 
 const { checkFsi } = require('../backend.js');
 const { capabilitiesOf, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
-const { checkDigest, checkBlobBytes } = require('../blobs.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { toBase64, fromBase64 } = require('../crypto/pem.js');
 const { DIRS, tagDirs } = require('../layout.js');
 const { checkWriteSet } = require('../write-set.js');
@@ -195,7 +195,11 @@ const openDb = (fsi, path, capabilities, logger) => {
       return (await fsi.list(blobsDir)).sort();
     },
     put: async (digest, bytes) =>
-      fsi.write(blobsDir, checkDigest(digest, 'blobs.put'), toBase64(checkBlobBytes(typed, bytes, 'blobs.put'))),
+      fsi.write(
+        blobsDir,
+        checkDigest(digest, 'blobs.put'),
+        toBase64(checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES)),
+      ),
     remove: async (digest) => fsi.remove(blobsDir, checkDigest(digest, 'blobs.remove')),
   };
 
