@@ -26,10 +26,11 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 ## What the table shows
 
 - **RxDB is the broader toolkit.** It has storages for more runtimes (Deno KV, FoundationDB,
-  localStorage), replication plugins for nine backends and handlers that sync with one you already
-  run, attachments, several tabs writing one database, a backup writer, conditional ops that replay
-  on every replica, and packages for Vue, Angular and signals. In 4 rows RxDB has something where
-  syncom has nothing; the rows are not equal in weight, so read the sections that matter to you.
+  localStorage), a package per UI framework (Vue, Angular, signals) where syncom has one store and
+  recipes, example apps for a dozen platforms, conditional ops that replay on every replica, a
+  merge rule written per document, and commercial support. In 1 row RxDB has something where
+  syncom has nothing — that merge rule, which syncom leaves to a kind plugin by design; the rows
+  are not equal in weight, so read the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
   counters add up, sets keep every concurrent add. Every op is signed by the key that is the
@@ -38,12 +39,14 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
   included; the host limits, validates and reports. Its storage engines — memory, IndexedDB, SQLite
   and MongoDB in the MIT package, every one over the same contract, a database moved between them
   with `copyEngine()`, an engine served from a worker — are where RxDB sells its premium storages.
-  In 24 rows syncom has something where RxDB has nothing: signatures, a tamper-evident log,
+  In 26 rows syncom has something where RxDB has nothing: signatures, a tamper-evident log,
   collaborative text, multi-record transactions, unique keys, multi-entry and combined indexes,
-  projection, keyset streaming and paging, text search inside a query, OpenTelemetry, stats among
-  them. The write API — bulk writes, `modify()`, the update operators, writes by query — sorted
-  compound indexes with `explain()`, live queries kept by event-reduce, local documents, dumps,
-  pipelines and tombstone cleanup are in both.
+  projection, keyset streaming and paging, text search inside a query, queries over sealed records,
+  a quota said as such, revocation, OpenTelemetry, stats among them. The write API — bulk writes,
+  `modify()`, the update operators, writes by query — sorted compound indexes with `explain()`, live
+  queries kept by event-reduce, local documents, dumps, pipelines, tombstone cleanup, connectors to
+  CouchDB, GraphQL, Firestore, Supabase, MongoDB, Appwrite, Google Drive and OneDrive, attachments,
+  several tabs over one database, write rules on the host and test helpers are in both.
 - **Several RxDB guarantees depend on a switch.** Without a `validate-*` storage wrapper,
   production RxDB stores documents with wrong types, unknown fields and missing required fields.
   `final` fields, frozen documents and the checks on queries and ids run only in dev-mode, and
@@ -64,20 +67,26 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
 - **Encryption ends at the device in both.** RxDB's free plugin is AES-CBC through crypto-js
   with an MD5 key derivation and no MAC, stores an unsalted hash of the password, and replicates
   encrypted fields in plain text. syncom seals a record with AES-GCM under an RSA key, but that key
-  sits in the same directory, and a sealed record never syncs. Neither has end-to-end encryption
-  built in or rotates a key.
-- **Where syncom's checks stop.** A host that skips a peer's op (a failed validator or
-  `beforeApply`) still relays it — a withheld op would be a gap in its origin's stream — so the
-  peers behind it decide for themselves; what stops at the host is an op outside the peer's
-  scopes (by the scope it declares or by its record's), a malformed or skewed one and a refused
-  signature. A nested object merges as one register. Writes made offline before the first node
+  sits in the same directory, and a sealed record never syncs — a query reads it at the key holder
+  alone. Neither has end-to-end encryption built in (syncom's guides show wrpc's sealer and opener
+  in the hooks). RxDB rotates no key; syncom rotates the key at rest by a copy — `rotateAtRest()`
+  seals the database whole into another path or engine under the new key, never in place.
+- **Where syncom's checks stop.** A host's `authorizeWrite` refuses a peer's op before it spreads:
+  the op goes on as a scrubbed header — a no-op everywhere behind the host, no gap in its origin's
+  stream — and the pusher is told (`WRITE_REFUSED`) and reverts to what the host holds. What a
+  validator or `beforeApply` skips is still relayed whole, so the peers behind decide for
+  themselves; what stops at the host is an op outside the peer's scopes (by the scope it declares
+  or by its record's), a malformed or skewed one, a refused signature, and every call of a peer
+  that has not proved its key where the host asks (`prove`). A nested object merges as one
+  register. Writes made offline before the first node
   was registered, and compacted since, cannot reach a host (it is reported). Making this page
   turned up a dozen syncom bugs, among them scopes a peer could write around, offline writes past
   retention that never arrived and a restored directory that forked its node in silence; they are
   fixed, with tests, and the cells describe the code as it is now.
-- **Neither has** multi-record transactions, aggregation or joins. syncom has list, text and
-  tree fields that merge by position, with rich-text marks, cursors, history, tags, undo and
-  branches; RxDB's CRDT plugin has none of them.
+- **Neither has** aggregation or joins — syncom answers `distinct()` and `countBy()` from its
+  indexes and populates the references a schema declares. syncom has list, text and tree fields
+  that merge by position, with rich-text marks, cursors, history, tags, undo and branches;
+  RxDB's CRDT plugin has none of them.
 - **Maturity.** RxDB has been on npm since 2016, ships a minor about every month and a major
   about once a year (four of the last five asked users of some storages to migrate their stored
   data), and offers paid support. syncom is a pre-release with no users yet.
@@ -186,13 +195,13 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Language and module format</td><td>JavaScript, CommonJS, no build step; <code>src/</code> ships as is</td><td>TypeScript, built by Babel into CommonJS and ESM; <code>sideEffects: false</code></td></tr>
 <tr><td>Entry points</td><td>the core plus 26 subpaths: <code>/text</code>, <code>/tree</code>, <code>/signing</code>, <code>/chain</code>, <code>/encryption</code>, <code>/sync</code>, <code>/schema</code>, <code>/query</code>, <code>/versions</code>, <code>/telemetry</code>, <code>/memory</code>, <code>/layered</code>, <code>/idb</code>, <code>/wrpc</code>, <code>/search</code>, <code>/order</code>, <code>/undo</code>, <code>/branch</code>, <code>/presence</code>, <code>/inspect</code>, <code>/editor</code>, <code>/store</code>, <code>/prosemirror</code>, <code>/codemirror</code>, <code>/contracts</code>, <code>/all</code></td><td>54 subpath exports, one per plugin (<code>rxdb/plugins/*</code>)</td></tr>
 <tr><td>TypeScript types</td><td>✅ hand-written <code>.d.ts</code>, tsd-tested; a collection's records typed from its Standard Schema or <code>Schema&lt;Shapes&gt;</code></td><td>✅ generated from the source; document type inferred from the schema</td></tr>
-<tr><td>Browser bundle, minimal store</td><td>75.4 KB min+gzip the core (browser); 162.4 KB <code>@alexify/syncom/all</code>, everything</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
-<tr><td>Browser bundle with sync</td><td>89.3 KB min+gzip: the core, the sync plugin and the wrpc link adapter</td><td>92.3 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
-<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 75.5 KB, <code>/all</code> 162.5 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
+<tr><td>Browser bundle, minimal store</td><td>76.8 KB min+gzip the core (browser); 173.2 KB <code>@alexify/syncom/all</code>, everything</td><td>80.4 KB min+gzip: <code>createRxDatabase</code> with Dexie; 44.9 KB with localStorage</td></tr>
+<tr><td>Browser bundle with sync</td><td>96.1 KB min+gzip: the core, the sync plugin and the wrpc link adapter</td><td>92.3 KB min+gzip with Dexie and <code>replicateRxCollection</code></td></tr>
+<tr><td>Size budget in CI</td><td>✅ <code>pnpm size</code> fails CI when any entry passes its budget (the core 77 KB, <code>/all</code> 174 KB, each subpath its own)</td><td>⚠️ CI prints a webpack build size; no limit in 17.6.0</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Runtimes</strong></td></tr>
 <tr><td>Node.js</td><td>✅ ≥24; persists with <code>node:fs</code>; CI on Node 24 and 26</td><td>⚠️ ≥20; free disk persistence only via MongoDB or FoundationDB servers, or the capped SQLite trial<sup>4</sup></td></tr>
-<tr><td>Deno</td><td>❌ not tested; <code>engines</code> names Node.js only</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>
-<tr><td>Bun</td><td>❌ not tested</td><td>⚠️ CI runs the memory-storage suite on Bun 1.4.2; no Bun-specific storage</td></tr>
+<tr><td>Deno</td><td>⚠️ a smoke runs in CI (<code>tests/smoke/smoke.js</code>: a database in memory, two nodes over the in-process link); the suite is node:test's and runs under Node alone</td><td>✅ <code>rxdb/plugins/storage-denokv</code>; CI runs the Dexie and DenoKV suites on Deno 2.6.5</td></tr>
+<tr><td>Bun</td><td>⚠️ a smoke runs in CI (<code>tests/smoke/smoke.js</code>); the suite is node:test's and runs under Node alone</td><td>⚠️ CI runs the memory-storage suite on Bun 1.4.2; no Bun-specific storage</td></tr>
 <tr><td>Browser persistence</td><td>✅ OPFS (default), IndexedDB (<code>/idb</code>), memory</td><td>✅ free: Dexie (IndexedDB), localStorage, memory; native IndexedDB and OPFS Premium (Pro)</td></tr>
 <tr><td>Browser requirements</td><td>secure context, OPFS, Web Crypto with Ed25519 and RSA-OAEP</td><td><code>crypto.subtle</code> (secure context) or your own <code>hashFunction</code>; some bundlers need a <code>global</code> shim</td></tr>
 <tr><td>Web Worker and SharedWorker</td><td>✅ the leader in a SharedWorker: wrpc's server attaches each tab's port on its <code>wrpc:connect</code>, the tabs follow over <code>createSharedChannel(connect(url, { worker }))</code>; run over a MessageChannel in the integration test</td><td>⚠️ Worker and SharedWorker storages are Premium (Pro Plus); the free core runs inside a worker</td></tr>
@@ -477,7 +486,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>Conflicts and clocks</strong></td></tr>
 <tr><td>Conflict detection</td><td>— no compare step: every op merges by its field's kind</td><td>✅ the master compares <code>assumedMasterState</code> with its own (<code>isEqual</code>, deep-equal)</td></tr>
 <tr><td>Conflict resolution</td><td>built in: per-field LWW by <code>(ts, origin)</code>, per-origin counter sums, OR-sets</td><td><code>conflictHandler.resolve</code> on the client; the default keeps the master's document<sup>42</sup></td></tr>
-<tr><td>Custom merge logic</td><td>❌ none: the rules are fixed; <code>beforeApply</code> can only skip an op</td><td>✅ any function per collection; the <code>crdt</code> plugin brings its own</td></tr>
+<tr><td>Custom merge logic</td><td>❌ none: the rules are fixed — a merge rule is a kind plugin on every node; <code>beforeApply</code> skips an op, a host's <code>authorizeWrite</code> refuses one</td><td>✅ any function per collection; the <code>crdt</code> plugin brings its own</td></tr>
 <tr><td>Where conflicts are settled</td><td>on every node, by the same deterministic rules</td><td>on the client (fork); the server only detects</td></tr>
 <tr><td>Conflicts reported</td><td>✅ <code>conflict</code> of kind <code>unique</code> (a key shared by two records) and kind <code>register</code> (a peer's field write stamped below the one held: the op, the winner, the loser)</td><td>✅ <code>conflict$</code>: each conflict the server reported, with the handler's output</td></tr>
 <tr><td>Atomic compare on the server</td><td>— nothing to compare: ops commute</td><td>⚠️ per plugin: atomic on RxDB storages, CouchDB, Supabase, MongoDB; not Firestore, Appwrite</td></tr>
@@ -599,13 +608,13 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr class="sc-matrix-group"><td colspan="3"><strong>UI bindings</strong></td></tr>
 <tr><td>React</td><td>✅ <code>/store</code>: <code>useSyncExternalStore(store.subscribe, store.getSnapshot)</code> over a query, a record or a presence</td><td>✅ <code>rxdb/plugins/react</code>: <code>RxDatabaseProvider</code>, <code>useRxQuery</code>, <code>useLiveRxQuery</code>, <code>useRxDocument</code>…</td></tr>
 <tr><td>Vue</td><td>⚠️ a documented three-line <code>shallowRef</code> over <code>/store</code>; no package of its own</td><td>✅ <code>rxdb/plugins/reactivity-vue</code>: shallow refs through the <code>$$</code> accessors</td></tr>
-<tr><td>Angular</td><td>❌ none</td><td>✅ <code>rxdb/plugins/reactivity-angular</code> (signals); observables fit the <code>async</code> pipe</td></tr>
+<tr><td>Angular</td><td>⚠️ <code>toObservable(store)</code> of <code>/store</code> fits the <code>async</code> pipe and <code>toSignal()</code> (a documented recipe over the <code>Subscribable</code> contract, not run here); no Angular package</td><td>✅ <code>rxdb/plugins/reactivity-angular</code> (signals); observables fit the <code>async</code> pipe</td></tr>
 <tr><td>Svelte</td><td>✅ <code>/store</code>: a store is a Svelte store (<code>$store</code>)</td><td>⚠️ no plugin; a Svelte 5 example app runs in CI</td></tr>
-<tr><td>Signals and custom reactivity</td><td>⚠️ Solid's <code>from(store)</code> over <code>/store</code>; another signal library wraps <code>subscribe</code> the same way</td><td>✅ <code>reactivity</code> option: Preact signals plugin, or your own factory; no Solid adapter</td></tr>
+<tr><td>Signals and custom reactivity</td><td>⚠️ Solid's <code>from(store)</code>, Preact's <code>signal</code> fed by <code>subscribe</code>, Angular's <code>toSignal(toObservable(store))</code> — recipes over <code>/store</code>, no package per library</td><td>✅ <code>reactivity</code> option: Preact signals plugin, or your own factory; no Solid adapter</td></tr>
 <tr><td>TanStack DB</td><td>❌ none</td><td>⚠️ <code>@tanstack/rxdb-db-collection</code>, published by TanStack (0.1.111)</td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>Developer tooling</strong></td></tr>
 <tr><td>Development mode</td><td>— no separate mode: argument checks and full error messages always on</td><td>✅ <code>rxdb/plugins/dev-mode</code>: readable errors, deep-freeze, schema and query checks<sup>67</sup></td></tr>
-<tr><td>Test helpers</td><td>⚠️ <code>memory()</code> for in-memory stores; contract suites stay in the repo</td><td>✅ memory storage; <code>rxdb/plugins/test-utils</code> (fixtures, replication test suite); <code>using</code> closes databases<sup>68</sup></td></tr>
+<tr><td>Test helpers</td><td>✅ <code>@alexify/syncom/testing</code>: the memory engine, an in-process link with a transport's hazards (latency, a page dropped or doubled, a disconnect and reconnect), a mesh of nodes from an adjacency list, <code>settle()</code>, <code>withDatabase()</code></td><td>✅ memory storage; <code>rxdb/plugins/test-utils</code> (fixtures, replication test suite); <code>using</code> closes databases<sup>68</sup></td></tr>
 <tr><td>Own test suite and CI</td><td>1,849 <code>node:test</code> tests; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux</td><td>74 test files per storage; Linux, Windows, browsers, Bun, Deno, 11 example apps; no coverage gate</td></tr>
 <tr><td>Documentation</td><td>21 pages, about 41,500 words, with an API reference</td><td>271 pages, about 463,000 words: 98 articles, 46 landing pages</td></tr>
 <tr><td>Example apps</td><td>⚠️ two Node.js scripts (<code>examples/main.js</code>, <code>domain.js</code>), linted but not run</td><td>✅ 13 example apps; 11 run in CI: Angular, React, React Native, Electron, Tauri, Vue, Svelte…</td></tr>
@@ -641,7 +650,7 @@ The closest syncom counterpart of each RxDB building block. Where there is none,
 <tr><td>Import from other databases</td><td>⚠️ <code>importJSON(db, { records: [{ id, data }] }, { mode: 'insert' })</code> takes any JSON of ids and data; no per-database importer or guide</td><td>⚠️ migration guides only; <code>importJSON()</code> takes an RxDB dump of the same schema<sup>72</sup></td></tr>
 <tr><td>Published benchmarks</td><td>✅ nine libraries, nine scenarios, memory and disk; machine and date stated</td><td>⚠️ its own storages only; no machine, browser or date given<sup>73</sup></td></tr>
 <tr class="sc-matrix-group"><td colspan="3"><strong>AI and coding agents</strong></td></tr>
-<tr><td>WebMCP agent tools</td><td>❌ none</td><td>✅ <code>rxdb/plugins/webmcp</code>: query, count, changes, insert, upsert, delete tools per collection; <code>readOnly</code><sup>74</sup></td></tr>
+<tr><td>WebMCP agent tools</td><td>✅ <code>@alexify/syncom/mcp</code>: <code>createTools(db, { collections, readOnly })</code> — query, count, get, changes, wait_changes, insert, upsert, delete per collection as tool definitions (<code>inputSchema</code> checked at <code>execute</code>); <code>navigator.modelContext.registerTool(tool)</code> or an MCP server registers them</td><td>✅ <code>rxdb/plugins/webmcp</code>: query, count, changes, insert, upsert, delete tools per collection; <code>readOnly</code><sup>74</sup></td></tr>
 <tr><td>Docs for coding agents</td><td>✅ <code>llms.txt</code> on the docs site; <code>CLAUDE.md</code> in the repository</td><td>✅ <code>llms.txt</code> plus three topic files; <code>ERROR-MESSAGES.md</code>, <code>CLAUDE.md</code>, <code>AGENTS.md</code> in the package<sup>75</sup></td></tr>
 </tbody>
 </table>

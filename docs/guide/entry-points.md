@@ -121,30 +121,29 @@ const { createDatabase } = require('@alexify/syncom/all'); // every plugin: text
 
 | Entry | min+gzip | Entry | min+gzip |
 | --- | ---: | --- | ---: |
-| the core | 75.4 KB | `/all` | 162.4 KB |
-| `/text` | 44.0 KB | `/tree` | 8.6 KB |
-| `/sync` | 16.9 KB | `/versions` | 40.6 KB |
-| `/signing` | 6.6 KB | `/chain` | 3.8 KB |
-| `/encryption` | 6.4 KB | `/schema` | 7.0 KB |
-| `/query` | 17.3 KB | `/telemetry` | 4.1 KB |
-| `/undo` | 8.8 KB | `/branch` | 4.7 KB |
-| `/presence` | 4.5 KB | `/inspect` | 5.4 KB |
-| `/editor` | 4.6 KB | `/store` | 1.2 KB |
-| `/prosemirror` | 7.8 KB | `/codemirror` | 6.4 KB |
-| `/memory` | 3.3 KB | `/layered` | 1.5 KB |
-| `/local` | 2.8 KB | `/state` | 2.9 KB |
-| `/dump` | 6.6 KB | `/pipeline` | 3.1 KB |
-| `/connector` | 7.0 KB | `/connector/couchdb` | 1.4 KB |
-| `/connector/graphql` | 0.8 KB | `/connector/mongodb` | 0.9 KB |
-| `/connector/supabase` | 1.2 KB | `/connector/firestore` | 1.3 KB |
-| `/connector/appwrite` | 1.4 KB | `/connector/gdrive` | 2.1 KB |
-| `/connector/onedrive` | 1.9 KB | `/shared` | 5.5 KB |
-| `/attachments` | 4.1 KB | `/testing` | 6.5 KB |
-| `/mcp` | 2.2 KB | | |
-| `/cleanup` | 3.0 KB | `/engines` | 9.9 KB |
-| `/idb` | 4.9 KB | `/search` | 1.1 KB |
-| `/order` | 1.0 KB | `/contracts` | 1.0 KB |
-| `/wrpc` | 0.7 KB | | |
+| the core | 76.8 KB | `/all` | 173.2 KB |
+| `/wrpc` | 0.8 KB | `/contracts` | 1.1 KB |
+| `/idb` | 5.1 KB | `/engines` | 10.2 KB |
+| `/search` | 1.1 KB | `/order` | 1.0 KB |
+| `/undo` | 8.9 KB | `/branch` | 4.7 KB |
+| `/presence` | 4.6 KB | `/editor` | 4.6 KB |
+| `/codemirror` | 6.4 KB | `/prosemirror` | 7.8 KB |
+| `/store` | 1.2 KB | `/inspect` | 5.5 KB |
+| `/text` | 44.1 KB | `/tree` | 8.6 KB |
+| `/signing` | 6.8 KB | `/chain` | 3.8 KB |
+| `/encryption` | 9.2 KB | `/memory` | 3.6 KB |
+| `/layered` | 1.5 KB | `/sync` | 26.6 KB |
+| `/schema` | 7.0 KB | `/telemetry` | 4.1 KB |
+| `/query` | 17.6 KB | `/versions` | 40.9 KB |
+| `/local` | 2.8 KB | `/state` | 3.0 KB |
+| `/dump` | 6.8 KB | `/connector` | 7.1 KB |
+| `/connector/couchdb` | 1.4 KB | `/connector/graphql` | 0.8 KB |
+| `/connector/mongodb` | 0.9 KB | `/connector/supabase` | 1.2 KB |
+| `/connector/firestore` | 1.3 KB | `/connector/appwrite` | 1.4 KB |
+| `/connector/gdrive` | 2.1 KB | `/connector/onedrive` | 1.9 KB |
+| `/attachments` | 2.9 KB | `/shared` | 5.5 KB |
+| `/testing` | 6.5 KB | `/mcp` | 2.2 KB |
+| `/pipeline` | 3.2 KB | `/cleanup` | 3.0 KB |
 
 A block measured alone carries the core modules it stands on, so the rows do
 not add up: in an app bundle those are counted once, and the script checks

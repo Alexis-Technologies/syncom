@@ -1556,17 +1556,17 @@
         },
         "size": {
           "mark": "",
-          "text": "75.4 KB min+gzip the core (browser); 162.4 KB `@alexify/syncom/all`, everything",
+          "text": "76.8 KB min+gzip the core (browser); 173.2 KB `@alexify/syncom/all`, everything",
           "source": "scripts/size.js; pnpm size"
         },
         "sizeSync": {
           "mark": "",
-          "text": "89.3 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
+          "text": "96.1 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
           "source": "bench/compare/size.js; bench/results/size.json"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when any entry passes its budget (the core 75.5 KB, `/all` 162.5 KB, each subpath its own)",
+          "text": "`pnpm size` fails CI when any entry passes its budget (the core 77 KB, `/all` 174 KB, each subpath its own)",
           "source": "scripts/size.js"
         },
         "node": {
@@ -2581,7 +2581,7 @@
         },
         "customMerge": {
           "mark": "❌",
-          "text": "none: the rules are fixed; `beforeApply` can only skip an op",
+          "text": "none: the rules are fixed — a merge rule is a kind plugin on every node; `beforeApply` skips an op, a host's `authorizeWrite` refuses one",
           "source": "src/apply.js:253-258; docs/guide/hooks.md (Skipping a peer's op)"
         },
         "conflictWhere": {
