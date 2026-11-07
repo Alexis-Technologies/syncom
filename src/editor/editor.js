@@ -32,7 +32,7 @@
 // the edits around them, and a presence room's cursors resolved to
 // indices. For an adapter: `createFit` (what its document differs from the
 // field by), `undoSteps` (its undo commands), `failureReporter`.
-// Requires the text plugin's Myers diff and src/text/quill.js only.
+// Requires src/text/myers.js (the text plugin's Myers diff) and src/text/quill.js only.
 // The delta algebra is src/text/quill.js's (quill-delta's rules, BSD-3-Clause;
 // THIRD_PARTY_NOTICES.md); what is exported here checks what it is handed.
 

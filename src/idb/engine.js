@@ -9,7 +9,7 @@
 // transaction over the `log` store, and a listing or a range is one
 // `getAll`/`getAllKeys` over a key range — where the file store
 // (`createIdbFsi`) spent a transaction per file and the catalog a rewrite
-// of one whole file. No requires beyond engine.js and errors.js: it ships
+// of one whole file. No requires beyond engine.js, blobs.js and errors.js: it ships
 // to the browser on its own.
 //
 //   store     keyPath            holds

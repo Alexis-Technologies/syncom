@@ -87,55 +87,56 @@ with every plugin registered (see
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
-| main entry — browser (@alexify/syncom) | 579.2 KB | 224.6 KB | 76.8 KB | 77.0 KB |
-| main entry — node (@alexify/syncom) | 553.0 KB | 224.1 KB | 76.4 KB | — |
+| main entry — browser (@alexify/syncom) | 587.8 KB | 227.6 KB | 77.9 KB | 78.0 KB |
+| main entry — node (@alexify/syncom) | 561.3 KB | 227.2 KB | 77.5 KB | — |
 | wrpc adapter — browser (@alexify/syncom/wrpc) | 4.5 KB | 2.0 KB | 0.8 KB | 2.0 KB |
-| contracts — browser (@alexify/syncom/contracts) | 4.4 KB | 2.1 KB | 1.1 KB | 1.2 KB |
-| idb backend — browser (@alexify/syncom/idb) | 30.7 KB | 13.8 KB | 5.1 KB | 6.0 KB |
-| sqlite engine — node (@alexify/syncom/sqlite) | 27.5 KB | 14.7 KB | 5.2 KB | — |
-| mongodb engine — node (@alexify/syncom/mongodb) | 46.8 KB | 22.2 KB | 8.5 KB | — |
-| engines — browser (@alexify/syncom/engines) | 60.6 KB | 27.5 KB | 10.2 KB | 10.5 KB |
+| contracts — browser (@alexify/syncom/contracts) | 4.8 KB | 2.2 KB | 1.1 KB | 1.2 KB |
+| idb backend — browser (@alexify/syncom/idb) | 33.1 KB | 14.8 KB | 5.5 KB | 6.0 KB |
+| sqlite engine — node (@alexify/syncom/sqlite) | 30.0 KB | 16.0 KB | 5.7 KB | — |
+| mongodb engine — node (@alexify/syncom/mongodb) | 52.4 KB | 24.8 KB | 9.4 KB | — |
+| engines — browser (@alexify/syncom/engines) | 63.8 KB | 29.0 KB | 10.7 KB | 11.0 KB |
 | search — browser (@alexify/syncom/search) | 5.9 KB | 2.5 KB | 1.1 KB | 2.0 KB |
 | order — browser (@alexify/syncom/order) | 5.0 KB | 2.4 KB | 1.0 KB | 1.5 KB |
-| undo — browser (@alexify/syncom/undo) | 53.2 KB | 24.4 KB | 8.9 KB | 9.0 KB |
-| branch — browser (@alexify/syncom/branch) | 22.8 KB | 11.1 KB | 4.7 KB | 5.0 KB |
-| presence — browser (@alexify/syncom/presence) | 26.3 KB | 11.1 KB | 4.6 KB | 4.8 KB |
+| undo — browser (@alexify/syncom/undo) | 53.5 KB | 24.5 KB | 8.9 KB | 9.0 KB |
+| branch — browser (@alexify/syncom/branch) | 23.2 KB | 11.3 KB | 4.8 KB | 5.0 KB |
+| presence — browser (@alexify/syncom/presence) | 26.6 KB | 11.3 KB | 4.6 KB | 4.8 KB |
 | editor — browser (@alexify/syncom/editor) | 27.4 KB | 12.3 KB | 4.6 KB | 6.5 KB |
 | codemirror — browser (@alexify/syncom/codemirror) | 38.3 KB | 17.1 KB | 6.4 KB | 8.0 KB |
 | prosemirror — browser (@alexify/syncom/prosemirror) | 47.1 KB | 20.6 KB | 7.8 KB | 9.5 KB |
 | store — browser (@alexify/syncom/store) | 7.3 KB | 3.0 KB | 1.2 KB | 1.5 KB |
-| inspect — browser (@alexify/syncom/inspect) | 27.5 KB | 12.9 KB | 5.5 KB | 5.5 KB |
-| all — browser (@alexify/syncom/all) | 1227.7 KB | 503.7 KB | 173.2 KB | 174.0 KB |
-| text — browser (@alexify/syncom/text) | 279.5 KB | 125.8 KB | 44.1 KB | 44.5 KB |
-| tree — browser (@alexify/syncom/tree) | 47.0 KB | 22.7 KB | 8.6 KB | 9.0 KB |
-| signing — browser (@alexify/syncom/signing) | 34.6 KB | 16.6 KB | 6.8 KB | 7.0 KB |
-| chain — browser (@alexify/syncom/chain) | 20.6 KB | 9.0 KB | 3.8 KB | 4.0 KB |
-| encryption — browser (@alexify/syncom/encryption) | 52.5 KB | 24.1 KB | 9.2 KB | 9.5 KB |
-| memory — browser (@alexify/syncom/memory) | 22.1 KB | 9.0 KB | 3.6 KB | 4.0 KB |
+| inspect — browser (@alexify/syncom/inspect) | 27.8 KB | 13.0 KB | 5.6 KB | 5.8 KB |
+| all — browser (@alexify/syncom/all) | 1283.5 KB | 526.1 KB | 180.6 KB | 181.0 KB |
+| text — browser (@alexify/syncom/text) | 279.8 KB | 125.9 KB | 44.1 KB | 44.5 KB |
+| tree — browser (@alexify/syncom/tree) | 47.3 KB | 22.8 KB | 8.7 KB | 9.0 KB |
+| signing — browser (@alexify/syncom/signing) | 35.1 KB | 16.7 KB | 6.9 KB | 7.0 KB |
+| chain — browser (@alexify/syncom/chain) | 21.1 KB | 9.1 KB | 3.9 KB | 4.0 KB |
+| encryption — browser (@alexify/syncom/encryption) | 57.6 KB | 26.7 KB | 9.9 KB | 10.5 KB |
+| memory — browser (@alexify/syncom/memory) | 24.4 KB | 10.1 KB | 4.0 KB | 4.0 KB |
 | layered — browser (@alexify/syncom/layered) | 8.3 KB | 3.5 KB | 1.5 KB | 1.5 KB |
-| sync — browser (@alexify/syncom/sync) | 178.2 KB | 73.8 KB | 26.6 KB | 27.0 KB |
-| schema — browser (@alexify/syncom/schema) | 39.5 KB | 19.5 KB | 7.0 KB | 7.3 KB |
-| telemetry — browser (@alexify/syncom/telemetry) | 24.8 KB | 11.2 KB | 4.1 KB | 4.5 KB |
-| query — browser (@alexify/syncom/query) | 139.3 KB | 51.9 KB | 17.6 KB | 18.0 KB |
-| versions — browser (@alexify/syncom/versions) | 270.0 KB | 113.1 KB | 40.9 KB | 41.0 KB |
-| local — browser (@alexify/syncom/local) | 16.3 KB | 6.8 KB | 2.8 KB | 3.0 KB |
-| state — browser (@alexify/syncom/state) | 15.1 KB | 7.3 KB | 3.0 KB | 3.0 KB |
-| dump — browser (@alexify/syncom/dump) | 35.4 KB | 17.2 KB | 6.8 KB | 7.0 KB |
-| connector — browser (@alexify/syncom/connector) | 47.4 KB | 19.9 KB | 7.1 KB | 7.5 KB |
-| connector/couchdb — browser | 6.2 KB | 2.7 KB | 1.4 KB | 2.0 KB |
+| sync — browser (@alexify/syncom/sync) | 215.6 KB | 88.1 KB | 31.4 KB | 31.5 KB |
+| schema — browser (@alexify/syncom/schema) | 39.8 KB | 19.7 KB | 7.1 KB | 7.3 KB |
+| telemetry — browser (@alexify/syncom/telemetry) | 30.2 KB | 14.3 KB | 5.0 KB | 5.0 KB |
+| query — browser (@alexify/syncom/query) | 142.8 KB | 52.8 KB | 17.9 KB | 18.0 KB |
+| versions — browser (@alexify/syncom/versions) | 271.0 KB | 113.6 KB | 41.1 KB | 41.5 KB |
+| local — browser (@alexify/syncom/local) | 16.7 KB | 6.9 KB | 2.9 KB | 3.0 KB |
+| state — browser (@alexify/syncom/state) | 15.4 KB | 7.5 KB | 3.1 KB | 3.3 KB |
+| dump — browser (@alexify/syncom/dump) | 37.5 KB | 18.1 KB | 7.1 KB | 7.3 KB |
+| connector — browser (@alexify/syncom/connector) | 73.5 KB | 27.3 KB | 9.4 KB | 9.5 KB |
+| connector/couchdb — browser | 7.2 KB | 3.2 KB | 1.6 KB | 2.0 KB |
 | connector/graphql — browser | 3.3 KB | 1.8 KB | 0.8 KB | 2.0 KB |
-| connector/mongodb — browser | 4.4 KB | 1.8 KB | 0.9 KB | 2.0 KB |
-| connector/supabase — browser | 5.6 KB | 2.3 KB | 1.2 KB | 2.0 KB |
-| connector/firestore — browser | 6.6 KB | 2.9 KB | 1.3 KB | 2.0 KB |
-| connector/appwrite — browser | 6.7 KB | 3.1 KB | 1.4 KB | 2.0 KB |
-| connector/gdrive — browser | 10.0 KB | 4.7 KB | 2.1 KB | 2.5 KB |
-| connector/onedrive — browser | 9.0 KB | 4.1 KB | 1.9 KB | 2.0 KB |
-| attachments — browser | 14.0 KB | 6.3 KB | 2.9 KB | 4.5 KB |
-| shared — browser | 36.0 KB | 14.8 KB | 5.5 KB | 6.0 KB |
-| testing — browser | 40.7 KB | 16.7 KB | 6.5 KB | 7.0 KB |
-| mcp — browser | 9.8 KB | 5.0 KB | 2.2 KB | 2.5 KB |
-| pipeline — browser (@alexify/syncom/pipeline) | 17.4 KB | 7.5 KB | 3.2 KB | 3.3 KB |
-| cleanup — browser (@alexify/syncom/cleanup) | 15.5 KB | 6.7 KB | 3.0 KB | 3.3 KB |
+| connector/mongodb — browser | 5.2 KB | 2.1 KB | 1.1 KB | 2.0 KB |
+| connector/supabase — browser | 6.5 KB | 2.8 KB | 1.4 KB | 2.0 KB |
+| connector/firestore — browser | 8.4 KB | 3.7 KB | 1.6 KB | 2.0 KB |
+| connector/appwrite — browser | 6.8 KB | 3.2 KB | 1.4 KB | 2.0 KB |
+| connector/gdrive — browser | 11.1 KB | 5.2 KB | 2.4 KB | 2.5 KB |
+| connector/onedrive — browser | 9.3 KB | 4.2 KB | 2.0 KB | 2.3 KB |
+| attachments — browser (@alexify/syncom/attachments) | 30.8 KB | 13.2 KB | 5.6 KB | 5.8 KB |
+| shared — browser (@alexify/syncom/shared) | 59.1 KB | 23.4 KB | 8.3 KB | 8.5 KB |
+| testing — browser | 43.2 KB | 17.9 KB | 6.9 KB | 7.0 KB |
+| mcp — browser | 12.8 KB | 6.4 KB | 2.8 KB | 3.0 KB |
+| pipeline — browser (@alexify/syncom/pipeline) | 17.9 KB | 7.6 KB | 3.3 KB | 3.5 KB |
+| cleanup — browser (@alexify/syncom/cleanup) | 16.0 KB | 7.0 KB | 3.1 KB | 3.3 KB |
+| core + every block, in one bundle (= /all) | — | — | 180.6 KB | 180.6 KB ± 0.3 |
 
 ## Quick Start
 

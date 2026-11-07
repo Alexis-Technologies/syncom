@@ -92,6 +92,49 @@ test('what a CLAUDE.md layout line says a file requires, it requires', () => {
   assert.deepStrictEqual(wrong, []);
 });
 
+// A module's header says what it requires — "Requires a.js, b.js and c.js only", "No requires beyond ../a.js and
+// ./b.js", "No requires" — and the file does: a require added without its word in the header is caught here, as a
+// layout line's is above. A clause that names no file ("no requires beyond the core's") is prose, not checked.
+test("what a module's header says it requires, it requires", () => {
+  const wrong = [];
+  let checked = 0;
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const full = path.join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (full.endsWith('.js')) check(full);
+    }
+  };
+  const check = (full) => {
+    const lines = readFileSync(full, 'utf8').split('\n');
+    const header = [];
+    for (let i = 1; i < lines.length; i++) {
+      if (lines[i].startsWith('//')) header.push(lines[i].slice(2).trim());
+      else if (header.length > 0 || lines[i].trim() !== '') break;
+    }
+    const text = header.join(' ');
+    const only = text.match(/\bRequires ([^.;]*?\.js[^.;]*?) (?:only|alone)\b/);
+    const beyond = text.match(/(?:^|[.;:—] )[Nn]o requires(?: beyond ([^.;:]*))?(?=[.;:]|$)/);
+    let listed = null;
+    if (only !== null) listed = only[1];
+    else if (beyond !== null && (beyond[1] === undefined || /\.js/.test(beyond[1]))) listed = beyond[1] ?? '';
+    if (listed === null) return;
+    checked++;
+    const names = new Set();
+    for (const match of listed.matchAll(/([a-z0-9-]+)\.js/g)) names.add(match[1]);
+    for (const match of readFileSync(full, 'utf8').matchAll(/require\('(\.[^']+)'\)/g)) {
+      const required = path.basename(match[1], '.js');
+      if (!names.has(required)) {
+        const said = (only ?? beyond)[0].trim();
+        wrong.push(`${path.relative(ROOT, full)}: the header says "${said}", requires ${required} too`);
+      }
+    }
+  };
+  walk(path.join(ROOT, 'src'));
+  assert.ok(checked >= 20, `${checked} headers checked`);
+  assert.deepStrictEqual(wrong, []);
+});
+
 test('every src/ path a comment in src/ or a declaration file names exists', () => {
   const missing = [];
   const check = (full) => {

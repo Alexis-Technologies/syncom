@@ -1597,7 +1597,7 @@
         },
         "worker": {
           "mark": "✅",
-          "text": "the leader in a SharedWorker: wrpc's server attaches each tab's port on its `wrpc:connect`, the tabs follow over `createSharedChannel(connect(url, { worker }))`; run over a MessageChannel in the integration test",
+          "text": "the leader in a SharedWorker: `openShared({ election: { locks } })` there, its `serve()` on wrpc's router; every tab `openShared({ election: { follower: true } })` (never a leader) over `createSharedChannel(connect(url, { worker }))` — nothing crosses a realm but the wrpc calls; run over a MessageChannel in the integration test",
           "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js",
           "detail": "Free; the SharedWorker's server is wrpc's."
         },
@@ -1768,8 +1768,8 @@
         },
         "quotas": {
           "mark": "✅",
-          "text": "`db.quota()` (`{ usage, quota }`: the Storage API estimate, a file system's free space) and `db.persist()`; a log append the medium refuses for want of room is `QUOTA` (the platform's error as `cause`), a record file it refuses `UNPERSISTED { quota: true }`",
-          "source": "src/database.js (quota, persist, #unpersisted); src/log.js (#fail); src/errors.js (isQuotaError); tests/storage.quota.test.js; docs/guide/database.md#encryption-at-rest"
+          "text": "`db.quota()` (`{ usage, quota }`: the engine's own `estimate()` — the Storage API's for IndexedDB, a file system's free space for the files engine, the texts and blobs held for memory, the pages and the file's disk for SQLite; `null` where the medium says nothing, MongoDB) and `db.persist()`; a log append the medium refuses for want of room is `QUOTA` (the platform's error as `cause`, SQLite's `SQLITE_FULL` and a cause's quota seen too), a record file it refuses `UNPERSISTED { quota: true }`",
+          "source": "src/database.js (quota, persist, #unpersisted); src/engine.js (estimate); src/log.js (#fail); src/errors.js (isQuotaError); tests/storage.quota.test.js; tests/attachments.test.js; docs/guide/database.md#encryption-at-rest"
         },
         "onDiskFormat": {
           "mark": "✅",
@@ -2686,8 +2686,8 @@
         },
         "revoke": {
           "mark": "✅",
-          "text": "`sync.revoke(node, scopes)`: the peer's feeds end, `syncom/revoke` reaches it, its next hello grants less; the peer forgets the records of those scopes (`forget(id)`, no op) unless `onRevoke` decides otherwise",
-          "source": "src/sync/manager.js (revoke, #revoked); src/sync/hosting.js (remember); tests/sync.rules.test.js",
+          "text": "`sync.revoke(node, scopes)`: the peer's live feeds end, `syncom/revoke` reaches it, its next hello grants less; the peer forgets the records of those scopes (`forget(id)`, no op) unless `onRevoke` decides otherwise. Revocations are durable (`revoked.json`) and shared (appended to the shared log, folded by every hub); a session goes with its socket, so every live one is one a revoke reaches (`sync.sessions()`)",
+          "source": "src/sync/manager.js (revoke, adoptRevocation, #saveRevoked, sessions); src/sync/rules.js (remember); src/sync/shared.js (revoke); tests/sync.rules.test.js",
           "detail": "A grant of everything ('*') is not narrowed by a scope: revoke what hello granted."
         },
         "oneWay": {
@@ -2757,8 +2757,8 @@
         },
         "remoteQuery": {
           "mark": "✅",
-          "text": "`unit({ query: true })`: `syncom/query` and `syncom/count` — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, capped by `limits.rowsPerQuery`; a thin client over plain HTTP carries its hello in the call; live results = ask again on `changes`",
-          "source": "src/sync/hosting.js (query, count, greeted); tests/sync.rules.test.js; tests/wrpc.integration.test.js; docs/guide/wrpc.md#thin-clients-over-http; docs/reference/wire.md#query-and-count",
+          "text": "`unit({ query: true | { regex } })`: `syncom/query` and `syncom/count` — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, walked until the window is full or `limits.rowsPerQuery` rows were read (`capped` says so); never a sealed record; a `$regex` from the wire refused unless the unit takes them (`'safe'` rejects nested quantifiers, backreferences and lookarounds); a thin client over plain HTTP carries its hello in the call; live results = ask again on `changes`",
+          "source": "src/sync/reads.js (query, count, walkScoped, regexRefusal); src/query/safe-regex.js; tests/sync.rules.test.js; tests/wrpc.integration.test.js; docs/guide/wrpc.md#thin-clients-over-http; docs/reference/wire.md#query-and-count",
           "detail": "A REST face is wrpc's (its express/fastify adapters over the same procedures)."
         },
         "serverStorage": {
@@ -2795,8 +2795,9 @@
         },
         "encAttachments": {
           "mark": "✅",
-          "text": "the at-rest wrapper seals a blob's bytes at the blob's place as it seals a record; the digest stays a name",
-          "source": "src/encryption/at-rest-engine.js; tests/attachments.test.js"
+          "text": "the at-rest wrapper seals a blob as bytes — iv ‖ ciphertext bound to the blob's place, the size its own — as it seals a record's text; the digest stays a name; `rotateAtRest` re-seals the blobs under the new key with the rest",
+          "source": "src/encryption/at-rest-engine.js (blobs); src/encryption/encryption.js (sealBytes, openBytes, rotateAtRest); tests/attachments.test.js",
+          "detail": "A blob of a record that is not sealed lies in the clear without the at-rest wrapper, and attachments.put on a sealed record is refused (ENCRYPTED): the register's key does not cover the bytes."
         },
         "encExport": {
           "mark": "—",
@@ -2852,8 +2853,8 @@
         },
         "writeRules": {
           "mark": "✅",
-          "text": "`unit({ authorizeWrite({ op, peer, current, after }) })`: a refused op is scrubbed (a no-op everywhere behind the host, no gap), named in the push's answer, and the pusher reverts (`WRITE_REFUSED`); scopes bound what a peer writes beside it",
-          "source": "src/sync/hosting.js; src/apply.js; tests/sync.rules.test.js; docs/guide/sync.md#hosting"
+          "text": "`unit({ authorizeWrite({ op, peer, current, after }) })` — or `createDatabase({ sync: { authorizeWrite } })`, every unit's rule and the writer's over a shared log's inbox: a refused op is scrubbed (a no-op everywhere behind the host, no gap), named in the push's answer with the fields it touched, and the pusher brings those fields back through the kinds' patches (`WRITE_REFUSED`), so what the host accepted since stands; scopes bound what a peer writes beside it",
+          "source": "src/sync/rules.js; src/sync/manager.js (authorizeWrite, #refused); src/apply.js (refused); src/sync/shared.js (#apply, #judged); tests/sync.rules.test.js; docs/guide/sync.md#hosting"
         },
         "serverValidation": {
           "mark": "✅",

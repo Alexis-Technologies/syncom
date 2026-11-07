@@ -2,7 +2,7 @@
 
 // An fsi over IndexedDB — the `@alexify/syncom/idb` subpath, for browsers
 // where OPFS is unavailable or unwanted (a worker without it, a profile
-// that evicts it, a test that wants a mock). No requires: it ships to the
+// that evicts it, a test that wants a mock). No requires beyond ../engine.js: it ships to the
 // browser on its own.
 //
 // One object store, `files`, keyed by `[dir, name]`, with an index on `dir`:
