@@ -39,11 +39,15 @@ export interface PullHandlers<T = RecordData, C = unknown> {
   /** The backend's documents changed since `checkpoint`, at most `batchSize`, and the checkpoint after them. */
   handler: (checkpoint: C | null, batchSize: number) => PullResult<T, C> | Promise<PullResult<T, C>>;
   /**
-   * The backend's live changes: call `emit({ documents, checkpoint })` for a page, `emit('RESYNC')` to have the
-   * connector pull again from its checkpoint. Returns what stops the stream. Without it a live connector pulls every
-   * `retryTime` ms.
+   * The backend's live changes, from `checkpoint` (the position the last pull left): call `emit({ documents })` for a
+   * page (landed; the checkpoint stays where the pulls move it), `emit('RESYNC')` to have the connector pull again
+   * from its checkpoint, `emit('END')` when the stream is over (followed again after a backoff, and pulled). Returns
+   * what stops the stream. Without it a live connector pulls every `retryTime` ms; with it, every `safetyTime` ms too.
    */
-  stream?: (emit: (signal: PullResult<T, C> | 'RESYNC') => void) => (() => void) | void;
+  stream?: (
+    emit: (signal: PullResult<T, C> | 'RESYNC' | 'END') => void,
+    context: { checkpoint: C | null },
+  ) => (() => void) | void;
 }
 
 /** A row the backend refuses by name (an id it cannot carry, a body too large): parked until a turn of the record or `reSync()`. */
@@ -75,6 +79,8 @@ export interface ReplicateOptions<T = RecordData, C = unknown> {
   retryTime?: number;
   /** The most a retry waits, in ms: the backoff doubles from `retryTime` up to it, with jitter; default 60 000. */
   maxRetryTime?: number;
+  /** With a stream, a pull from the checkpoint this often anyway, in ms (a stream gone quiet); 0 for none; default 60 000. */
+  safetyTime?: number;
   /** Documents asked for per pull, rows per push; default 100. */
   batchSize?: number;
   /** Reshape what comes in and what goes out. */

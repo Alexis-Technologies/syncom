@@ -105,10 +105,21 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   (`errors`, the newest twenty) and tried again after a backoff (`#failed`: `retryTime · 2^n` up to `maxRetryTime`,
   ±25 % jitter, `#attempts` per direction reset by a success); nothing is skipped and no checkpoint moves past it. A
   pull whose checkpoint does not move while it answers full pages is asked `MAX_STALLS` times, then left to the stream.
-- **Live is the backend's stream or a timer, never a hook on the peers.** `pull.stream(emit)` hands pages or
-  `'RESYNC'`; without one a live connector pulls every `retryTime`. `cancel()` is for good (the stream stopped, the
-  listener off, what is in flight awaited, the waiters rejected); `reSync()` pulls and pushes again. Under `/shared`
-  the leader runs the connector (`leader` is the plan's; not here yet).
+- **Live is the backend's stream or a timer, never a hook on the peers; one queue lands everything.** The live half
+  begins when the first pull run comes through (`#pullRun` → `#follow`, once: `#following`), never before.
+  `pull.stream(emit, { checkpoint })` hands pages, `'RESYNC'` or `'END'`: a page is `#enqueue`d on the pull side's
+  one queue (`#queue`, `#queued`) behind the runs and pages before it and NEVER moves `checkpoint.pull` — a pull run
+  does (`#pullPages`), so a page that fails to land (`#failed('pull')`, a run after the backoff) is pulled again,
+  never passed over; `RESYNC` is `#pullAll()`, which runs once more after the run in flight where one is (`#stale`,
+  checked in the loop and in the run's `finally` — a RESYNC between the last check and `#pulling = null` was lost
+  once); `END` stops following and `#later('pull')` follows again from the checkpoint as it stands (a page stream
+  re-reads from there: no gap) and pulls once. With a stream `#safety` pulls every `safetyTime` (0: none); without
+  one `#timer` pulls every `retryTime`. The initial replication is `#initialPull && #initialPush`, each set on success
+  alone (a run through; a drain without failure). `cancel()` is for good (the stream stopped, the timers cleared,
+  the listeners off — `transaction` and the database's `close`, which cancels the connector — the queue's tail and
+  the push awaited, what is dirty saved, the waiters rejected); `reSync()` pulls and pushes again. Under `/shared`
+  the leader runs the connector (`leader` is the plan's; not here yet). On a mesh, one connector per backend: two
+  nodes each pushing what the other pulled make a conflict of every write.
 - **An adapter is the two handlers over an injected client, and nothing of the backend's.** No SDK, no HTTP client
   and no protocol of the backend's ships with syncom: an adapter takes `fetch`, the driver's collection or the
   vendor's client as it is given, answers `{ pull, push }` to spread into `replicate()`'s options, and requires nothing

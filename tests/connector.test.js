@@ -928,4 +928,211 @@ test('Connectors', async (t) => {
       assert.ok(text.pull > 35);
     },
   );
+
+  await t.test(
+    'stream pages and pulls run one after another: a RESYNC during a pull pulls again after it; a stream page never moves the checkpoint, the next pull does; awaitInSync and cancel wait for all of it',
+    async (t2) => {
+      const backend = createFakeBackend();
+      backend.write('t1', { title: 'one' });
+      const a = await open(t2, 'A');
+      const { pull, push } = backend.handlers();
+      let gate = null;
+      let emitter = null;
+      const gated = {
+        pull: {
+          handler: async (checkpoint, batchSize) => {
+            if (gate !== null) await gate;
+            return pull.handler(checkpoint, batchSize);
+          },
+          stream: (emit, context) => {
+            emitter = emit;
+            assert.ok(Object.hasOwn(context, 'checkpoint'), 'the stream is told the checkpoint');
+            return pull.stream(emit, context);
+          },
+        },
+        push,
+      };
+      const replication = connect(t2, a, backend, { ...gated, retryTime: 30 });
+      await replication.awaitInitialReplication();
+      assert.strictEqual(replication.checkpoint.pull, 1);
+      // A page of the stream lands; the checkpoint stays where the last pull left it.
+      backend.write('s1', { title: 'streamed' });
+      await waitUntil(async () => (await a.get('s1')) !== null);
+      assert.strictEqual(replication.checkpoint.pull, 1, 'a stream page never moves the checkpoint');
+      // A pull held at the backend: a stream page and a RESYNC come meanwhile. The page waits behind the pull, the
+      // RESYNC makes the pull run again after it, and the checkpoint ends past everything.
+      let release = null;
+      gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      const pulls = backend.calls.pull;
+      const resync = replication.reSync();
+      let inSync = false;
+      replication.awaitInSync().then(() => {
+        inSync = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      backend.write('s2', { title: 'behind the pull' });
+      emitter('RESYNC');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(await a.get('s2'), null, 'the stream page waits for the pull in flight');
+      assert.strictEqual(inSync, false, 'awaitInSync waits for the queue');
+      gate = null;
+      release();
+      await resync;
+      await waitUntil(() => inSync);
+      assert.deepStrictEqual((await a.get('s2')).title, 'behind the pull');
+      assert.strictEqual(replication.checkpoint.pull, backend.changes.length, 'the pull after the RESYNC moved it');
+      assert.ok(backend.calls.pull - pulls >= 2, `the RESYNC pulled again: ${backend.calls.pull - pulls} pulls`);
+      // cancel() waits for the run in flight too.
+      gate = new Promise((resolve) => {
+        release = resolve;
+      });
+      replication.reSync().catch(() => {});
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      let canceled = false;
+      const canceling = replication.cancel().then(() => {
+        canceled = true;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.strictEqual(canceled, false);
+      gate = null;
+      release();
+      await canceling;
+      assert.strictEqual(replication.canceled, true);
+    },
+  );
+
+  await t.test(
+    'awaitInitialReplication resolves on success alone: a first pull that fails keeps it waiting until the retry lands',
+    async (t2) => {
+      const backend = createFakeBackend();
+      backend.write('t1', { title: 'one' });
+      const a = await open(t2, 'A');
+      backend.fail('pull', 1);
+      const replication = connect(t2, a, backend, { live: false, retryTime: 30 });
+      const errors = [];
+      replication.on('error', (error) => errors.push(error));
+      let done = false;
+      replication.awaitInitialReplication().then(() => {
+        done = true;
+      });
+      await waitUntil(() => errors.length === 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.strictEqual(done, false, 'the first pull failed: not initial yet');
+      await waitUntil(() => done, { timeout: 5000 });
+      assert.deepStrictEqual((await a.get('t1')).title, 'one');
+      await replication.cancel();
+      // The push half the same: an offline record whose first push fails keeps the initial replication waiting.
+      await a.insert({ $type: 'Task', title: 'offline' });
+      backend.fail('push', 1);
+      const second = connect(t2, a, backend, { live: false, retryTime: 30 });
+      const failures = [];
+      second.on('error', (error) => failures.push(error));
+      let settled = false;
+      second.awaitInitialReplication().then(() => {
+        settled = true;
+      });
+      await waitUntil(() => failures.length === 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.strictEqual(settled, false);
+      await waitUntil(() => settled, { timeout: 5000 });
+      assert.strictEqual(backend.docs.size, 2);
+    },
+  );
+
+  await t.test(
+    'a stream that ends (END) is followed again after a backoff, from the checkpoint; a safety pull runs every safetyTime meanwhile',
+    async (t2) => {
+      const backend = createFakeBackend();
+      backend.write('t1', { title: 'one' });
+      const a = await open(t2, 'A');
+      const { pull, push } = backend.handlers();
+      const subscriptions = [];
+      const emitters = [];
+      let stops = 0;
+      const quiet = {
+        pull: {
+          handler: pull.handler,
+          stream: (emit, { checkpoint }) => {
+            subscriptions.push(checkpoint);
+            emitters.push(emit);
+            return () => {
+              stops++;
+            };
+          },
+        },
+        push,
+      };
+      assert.throws(() => replicate(a, { name: 'x', collection: 'Task', ...quiet, safetyTime: -1 }), {
+        name: 'TypeError',
+        message: /safetyTime/,
+      });
+      const replication = connect(t2, a, backend, { ...quiet, retryTime: 30, safetyTime: 40 });
+      await replication.awaitInitialReplication();
+      await waitUntil(() => subscriptions.length === 1);
+      assert.strictEqual(subscriptions[0], 1, 'followed from the checkpoint');
+      // The stream ends: stopped, followed again after the backoff from the checkpoint as it then stands, and pulled.
+      backend.write('t2', { title: 'two' });
+      const pulls = backend.calls.pull;
+      emitters[0]('END');
+      await waitUntil(() => subscriptions.length === 2, { timeout: 5000 });
+      assert.strictEqual(stops, 1);
+      assert.strictEqual(subscriptions[1], 1, 'followed again from the checkpoint as it stood: nothing in a gap');
+      await waitUntil(async () => (await a.get('t2')) !== null, { timeout: 5000 });
+      assert.ok(backend.calls.pull > pulls, 'pulled after the stream came back');
+      await waitUntil(() => replication.checkpoint.pull === 2);
+      // The stream is quiet; the safety pull lands what it missed.
+      backend.write('t3', { title: 'three' });
+      await waitUntil(async () => (await a.get('t3')) !== null, { timeout: 5000 });
+      await replication.cancel();
+      assert.strictEqual(stops, 2);
+      // Without a safety pull a quiet stream is trusted.
+      const trusting = connect(t2, a, backend, { ...quiet, name: 'trusting', retryTime: 30, safetyTime: 0 });
+      await trusting.awaitInitialReplication();
+      backend.write('t4', { title: 'four' });
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      assert.strictEqual(await a.get('t4'), null);
+    },
+  );
+
+  await t.test(
+    'the database’s close cancels the connector: no timer, no stream, no handler called after',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const { pull, push } = backend.handlers();
+      let stops = 0;
+      const polling = replicate(a, {
+        name: 'poll',
+        collection: 'Task',
+        pull: { handler: pull.handler },
+        push,
+        retryTime: 20,
+      });
+      const streaming = replicate(a, {
+        name: 'stream',
+        collection: 'Task',
+        pull: {
+          handler: pull.handler,
+          stream: () => () => {
+            stops++;
+          },
+        },
+        push,
+      });
+      await polling.awaitInitialReplication();
+      await streaming.awaitInitialReplication();
+      await a.close();
+      assert.strictEqual(polling.canceled, true);
+      assert.strictEqual(streaming.canceled, true);
+      assert.strictEqual(polling.active, false);
+      assert.strictEqual(stops, 1);
+      const calls = backend.calls.pull;
+      backend.write('t1', { title: 'after close' });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.strictEqual(backend.calls.pull, calls, 'no handler called after the close');
+      await assert.rejects(polling.awaitInSync(), { code: 'REPLICATION_FAILED' });
+    },
+  );
 });

@@ -760,17 +760,17 @@ A handler's write to the source is another turn, handed over again: derive into 
 ## Connector (subpath)
 
 `@alexify/syncom/connector` — `replicate(db, { name, collection, pull, push, live, retryTime, maxRetryTime,
-batchSize, modifier, resolve, autoStart })`: one collection kept in step with a backend of its own through two
-handlers — see [Connectors](../guide/connector).
+safetyTime, batchSize, modifier, resolve, autoStart })`: one collection kept in step with a backend of its own
+through two handlers — see [Connectors](../guide/connector).
 
 | Member | Notes |
 | --- | --- |
 | `pull.handler(checkpoint, batchSize)` → `{ documents, checkpoint }` | The backend's documents since the checkpoint (`[{ id, data, deleted }]`) and the position after them; landed as one transaction per page of this node's writes (`source: 'connector:<name>'`), each judged against the backend's state as known: an echo makes no op (over an unpushed edit too), another state over an unpushed edit is a conflict (`resolve`, the `conflict` event), another state otherwise lands |
-| `pull.stream(emit)` → stop | The backend's live changes: `emit({ documents, checkpoint })`, or `emit('RESYNC')`; without it a live connector pulls every `retryTime` |
+| `pull.stream(emit, { checkpoint })` → stop | The backend's live changes from the checkpoint: `emit({ documents })` (landed; the checkpoint moves with the pulls alone), `emit('RESYNC')` (pull again), `emit('END')` (followed again after the backoff, pulled); a pull from the checkpoint every `safetyTime` anyway; without a stream a live connector pulls every `retryTime` |
 | `push.handler(rows)` → conflicts | The collection's records as the turns change them, `[{ id, data, deleted, assumed }]` — `assumed` the backend's state as this node last knew it (`undefined`: a probe, "tell me what you hold" — answered among the refused as the backend holds it, nothing written); a row that reads as the backend is known to hold it is not pushed; answers the rows refused, each as the backend holds it (a conflict), or `{ id, error }` for one refused by name (parked until a turn of the record or `reSync()`) |
 | `resolve({ id, local, remote, deleted })` | What a refused row's record should be: the data to keep (pushed back, the backend's state assumed), `null` to delete; the backend's state otherwise, and when `resolve` throws |
-| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good; pulls and pushes again, the parked rows too |
-| `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push through; nothing waiting to go out and nothing in flight either way |
+| `start()`, `cancel()`, `reSync()` | Reads the checkpoint, pulls from it, pushes what the log holds since `pushed` (every record once where it cannot resume), then follows; stops for good (the database's `close` does the same); pulls and pushes again, the parked rows too |
+| `awaitInitialReplication({ signal }?)`, `awaitInSync({ signal }?)` | The first pull and push succeeded (a failure keeps it waiting for the retry); nothing waiting to go out and nothing in flight either way |
 | `checkpoint`, `active`, `canceled`, `errors`, `stats()` | `{ pull, pushed }` (the kv text `connector/<name>` holds them with `known`, the digest of the backend's state per record); whether it follows now; stopped for good; the handlers' failures, the newest twenty; the counts (`pulled`, `applied`, `pushed`, `conflicts`, `refused`, `pulls`, `pushes`, `pending`, `parked`) |
 
 Events (contained): `received` `({ documents, applied })`, `sent` `({ rows })`, `conflict` `({ id, local, remote,

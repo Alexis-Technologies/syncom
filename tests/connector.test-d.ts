@@ -25,9 +25,11 @@ const options: ReplicateOptions<Task, number> = {
       expectType<number>(batchSize);
       return { documents: [{ id: 't1', data: { title: 'a' } }], checkpoint: 1 };
     },
-    stream: (emit) => {
+    stream: (emit, { checkpoint }) => {
+      expectType<number | null>(checkpoint);
       emit({ documents: [], checkpoint: 2 });
       emit('RESYNC');
+      emit('END');
       return () => {};
     },
   },
@@ -41,6 +43,7 @@ const options: ReplicateOptions<Task, number> = {
   live: true,
   retryTime: 1000,
   maxRetryTime: 30_000,
+  safetyTime: 60_000,
   batchSize: 50,
   modifier: { pull: (data) => data, push: (data, id) => ({ ...data, id }) },
   resolve: ({ local, remote }) => remote ?? local,

@@ -18,8 +18,8 @@ const tasks = replicate(db, {
       const page = await api.changes({ since: checkpoint, limit: batchSize });
       return { documents: page.rows.map(({ id, doc, deleted }) => ({ id, data: doc, deleted })), checkpoint: page.seq };
     },
-    // Optional: the backend's live changes; without it a live connector pulls every `retryTime`.
-    stream: (emit) => api.subscribe((page) => emit({ documents: page.rows, checkpoint: page.seq })),
+    // Optional: the backend's live changes from the checkpoint; without it a live connector pulls every `retryTime`.
+    stream: (emit, { checkpoint }) => api.subscribe({ since: checkpoint }, (page) => emit({ documents: page.rows })),
   },
   push: {
     // This node's records, with what the backend was assumed to hold; answer the rows the backend refused.
@@ -128,21 +128,39 @@ the database closing — is told: the connector's `error` event carries `REPLICA
 backoff — `retryTime` doubled per failure in a row up to `maxRetryTime`, with ±25 % of jitter, reset by the next
 success of that direction; nothing is skipped, the rows stay pending and no checkpoint moves past the failure. A
 push's failure never cancels the pull's retry, nor the other way round. `awaitInitialReplication()` resolves once
-the first pull and push are through, `awaitInSync()` once
-nothing waits to go out and nothing is in flight either way (`{ signal }` cuts a wait short). `cancel()` stops for
-good; `reSync()` pulls and pushes again. `stats()` counts the documents pulled and applied, the rows pushed, the
-conflicts, the documents and rows refused, and what is pending.
+the first pull and the first push have succeeded — a first pull that fails keeps it waiting until the retry lands —
+and `awaitInSync()` once nothing waits to go out and nothing is in flight either way (`{ signal }` cuts a wait
+short). `cancel()` stops for good — the stream stopped, the timers cleared, what is in flight awaited, what is dirty
+saved; the database's `close()` cancels the connector the same way, so no handler is called after it. `reSync()`
+pulls and pushes again, the parked rows too. `stats()` counts the documents pulled and applied, the rows pushed, the
+conflicts, the documents and rows refused, what is pending and what is parked.
+
+## Live
+
+With `live` (the default) the connector follows the backend after the initial pull. Where the handlers have a
+`stream(emit, { checkpoint })`, it is subscribed from the checkpoint the last pull left and may say three things:
+`emit({ documents })` — a page, landed like a pull's page but never moving the checkpoint (only a pull does, so a page
+that fails to land is pulled again from the checkpoint, never passed over); `emit('RESYNC')` — pull again from the
+checkpoint (a `RESYNC` while a pull runs makes it run once more after its pages, so a change behind the page just
+read never waits for the next signal); `emit('END')` — the stream is over (the backend closed it): it is followed
+again after the pull's backoff, from the checkpoint as it stands, and a pull catches up what it missed. Every
+`safetyTime` ms (60 000; `0` for none) a pull from the checkpoint runs anyway, for a stream gone quiet without a
+word. Without a stream a live connector pulls every `retryTime`. Everything the pull side lands — the pages of a run,
+the pages of the stream — goes through one queue in order, and a landing and a push take turns, so neither judges a
+record against a state the other is changing. A page of the stream delivered out of order (an older state after a
+newer push) is judged again by the next pull run.
 
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `name` | — | The checkpoint's name in the `connector` kv namespace |
 | `collection` | — | The collection replicated |
 | `pull.handler(checkpoint, batchSize)` | — | `{ documents: [{ id, data, deleted }], checkpoint }` |
-| `pull.stream(emit)` | — | `emit({ documents, checkpoint })` or `emit('RESYNC')`; returns what stops it |
-| `push.handler(rows)` | — | `rows: [{ id, data, deleted, assumed }]`; answers the conflicts `[{ id, data, deleted }]` and the rows refused by name `[{ id, error }]` |
+| `pull.stream(emit, { checkpoint })` | — | `emit({ documents })`, `emit('RESYNC')` or `emit('END')`; returns what stops it |
+| `push.handler(rows)` | — | `rows: [{ id, data, deleted, assumed }]` (`assumed` `undefined`: a probe); answers the conflicts `[{ id, data, deleted }]` and the rows refused by name `[{ id, error }]` |
 | `live` | `true` | Follow the backend after the initial pull: its stream, or a pull every `retryTime` |
 | `retryTime` | `5000` | After a failure (doubled per failure in a row), and between pulls without a stream, in ms |
 | `maxRetryTime` | `60000` | The most a retry waits, in ms |
+| `safetyTime` | `60000` | With a stream, a pull from the checkpoint this often anyway, in ms; `0` for none |
 | `batchSize` | `100` | Documents per pull, rows per push |
 | `modifier` | — | `{ pull(data, id), push(data, id) }` |
 | `resolve` | — | What a refused row's record should be; the backend's state without it |

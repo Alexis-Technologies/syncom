@@ -50,6 +50,8 @@ const DEFAULT_BATCH = 100;
 const DEFAULT_RETRY = 5000;
 // The most a retry waits: the backoff doubles from `retryTime` up to it, with jitter (±25 %).
 const DEFAULT_MAX_RETRY = 60_000;
+// With a stream, a pull from the checkpoint this often anyway — a stream that went quiet without saying END (0: none).
+const DEFAULT_SAFETY = 60_000;
 // How many of the handlers' errors are kept (the newest).
 const MAX_ERRORS = 20;
 // The checkpoint text is written at most this often while pages keep landing (one write in flight, the next after
@@ -130,6 +132,7 @@ class Replication extends Emitter {
   #live;
   #retryTime;
   #maxRetryTime;
+  #safetyTime;
   #batchSize;
   #modifier;
   #resolve;
@@ -143,10 +146,17 @@ class Replication extends Emitter {
   #active = false;
   #canceled = false;
   #initial = null;
-  #initialDone = false;
+  // The initial replication: the first pull run through and the first push drained — each on success alone.
+  #initialPull = false;
+  #initialPush = false;
   #listener = null;
+  #closing = null;
+  // The live half: the stream's stop, whether it is followed now, the pull timer without a stream, the safety pull
+  // timer with one.
   #stream = null;
+  #following = false;
   #timer = null;
+  #safety = null;
   // A retry timer per direction: a push that fails must not cancel the pull's try, nor the other way round; the
   // failures in a row per direction, what the backoff doubles by, reset by a success.
   #retry = { pull: null, push: null };
@@ -166,9 +176,14 @@ class Replication extends Emitter {
   #contradicted = new Map();
   // The newest turn heard: the position the next pending id is pending since.
   #last = null;
-  // The push in flight; the pull in flight.
+  // The push in flight; the pull run in flight, and whether a RESYNC came while it ran (it runs once more).
   #pushing = null;
   #pulling = null;
+  #stale = false;
+  // One queue for everything the pull side lands — the pages of a run, the pages of the stream — in order; how many
+  // wait or run on it.
+  #queue = Promise.resolve();
+  #queued = 0;
   // One judgement at a time: a page landing and a push (the rows read, the answer judged, the conflicts landed) take
   // turns, so neither judges a record against a state the other is changing under it.
   #turn = Promise.resolve();
@@ -200,6 +215,7 @@ class Replication extends Emitter {
       live = true,
       retryTime = DEFAULT_RETRY,
       maxRetryTime = DEFAULT_MAX_RETRY,
+      safetyTime = DEFAULT_SAFETY,
       batchSize = DEFAULT_BATCH,
       modifier,
       resolve = null,
@@ -223,6 +239,9 @@ class Replication extends Emitter {
     if (!Number.isFinite(maxRetryTime) || maxRetryTime < retryTime) {
       throw new TypeError('replicate(): maxRetryTime must be a number of at least retryTime');
     }
+    if (!Number.isFinite(safetyTime) || safetyTime < 0) {
+      throw new TypeError('replicate(): safetyTime must be a non-negative number');
+    }
     if (!Number.isInteger(batchSize) || batchSize <= 0) {
       throw new TypeError('replicate(): batchSize must be a positive integer');
     }
@@ -243,6 +262,7 @@ class Replication extends Emitter {
     this.#live = live;
     this.#retryTime = retryTime;
     this.#maxRetryTime = maxRetryTime;
+    this.#safetyTime = safetyTime;
     this.#batchSize = batchSize;
     this.#modifier = { pull: modifier?.pull ?? null, push: modifier?.push ?? null };
     this.#resolve = resolve;
@@ -316,23 +336,22 @@ class Replication extends Emitter {
   async #begin() {
     if (!this.#loaded) await this.#load();
     if (this.#canceled) return;
-    // Listened to before the log is read: a turn landing between the two is in `log.since` or is heard.
+    // Listened to before the log is read: a turn landing between the two is in `log.since` or is heard. The
+    // database's close cancels the connector: no timer, no stream, no handler called after it.
     this.#listener = (event) => this.#heard(event);
     this.#db.on('transaction', this.#listener);
+    this.#closing = () => this.cancel().catch(NOOP);
+    this.#db.on('close', this.#closing);
     this.#last = this.#db.log.lastEventId;
-    try {
-      // What waits to go is known BEFORE the backend is pulled: a backend that moved under an offline edit is then a
-      // conflict of the pull, not a silent landing over the edit. The backend first: what it holds is what a push
-      // then assumes, and what the pull landed is the backend's already.
-      if (this.#push !== null) this.#collectPending();
-      if (this.#pull !== null) await this.#pullAll();
-      if (this.#push !== null) await this.#flush();
-    } finally {
-      this.#initialDone = true;
-      this.#settle();
-    }
-    if (this.#canceled) return;
-    if (this.#live && this.#pull !== null) this.#follow();
+    if (this.#pull === null) this.#initialPull = true;
+    if (this.#push === null) this.#initialPush = true;
+    // What waits to go is known BEFORE the backend is pulled: a backend that moved under an offline edit is then a
+    // conflict of the pull, not a silent landing over the edit. The backend first: what it holds is what a push
+    // then assumes, and what the pull landed is the backend's already. The initial replication is done when both
+    // have succeeded once — a first pull or push that fails is tried again, and `awaitInitialReplication()` waits.
+    if (this.#push !== null) this.#collectPending();
+    if (this.#pull !== null) await this.#pullAll();
+    if (this.#push !== null) await this.#flush();
   }
 
   /** Stops for good: the collection no longer followed, the backend's stream closed, what is in flight finished. */
@@ -342,12 +361,14 @@ class Replication extends Emitter {
     this.#active = false;
     if (this.#listener !== null) this.#db.off('transaction', this.#listener);
     this.#listener = null;
+    if (this.#closing !== null) this.#db.off('close', this.#closing);
+    this.#closing = null;
     this.#stopFollowing();
     for (const direction of ['pull', 'push']) {
       if (this.#retry[direction] !== null) clearTimeout(this.#retry[direction]);
       this.#retry[direction] = null;
     }
-    await Promise.allSettled([this.#pushing, this.#pulling]);
+    await Promise.allSettled([this.#pushing, this.#queue]);
     await this.#flushSave();
     for (const waiter of this.#waiters) {
       waiter.reject(failed(null, `Connector ${this.#name} was canceled`, null, this.#name));
@@ -367,6 +388,7 @@ class Replication extends Emitter {
     // Behind a pull in flight: a pull again, from the checkpoint as it then stands.
     if (this.#pulling !== null) await this.#pulling.catch(NOOP);
     if (this.#pull !== null) await this.#pullAll();
+    if (this.#canceled) return;
     if (this.#push === null) return;
     // The rows the backend refused by name are tried again, with what the log holds since `pushed`.
     for (const id of this.#parked) this.#pending.set(id, this.#last);
@@ -377,13 +399,18 @@ class Replication extends Emitter {
 
   /** Resolves once the initial pull and push are done — what a reader waits for before it trusts the collection. */
   awaitInitialReplication({ signal = null } = {}) {
-    return this.#await(() => this.#initialDone, signal);
+    return this.#await(() => this.#initialPull && this.#initialPush, signal);
   }
 
   /** Resolves once nothing waits to go to the backend and nothing is in flight either way. */
   awaitInSync({ signal = null } = {}) {
     return this.#await(
-      () => this.#initialDone && this.#pending.size === 0 && this.#pushing === null && this.#pulling === null,
+      () =>
+        this.#initialPull &&
+        this.#initialPush &&
+        this.#pending.size === 0 &&
+        this.#pushing === null &&
+        this.#queued === 0,
       signal,
     );
   }
@@ -509,43 +536,78 @@ class Replication extends Emitter {
   #failed(direction, error, retry) {
     if (this.#errors.length >= MAX_ERRORS) this.#errors.shift();
     this.#errors.push(error);
-    let retryIn = null;
-    if (!this.#canceled && retry !== null && direction !== null) {
-      const doubled = this.#retryTime * 2 ** this.#attempts[direction]++;
-      retryIn = Math.round(Math.min(doubled, this.#maxRetryTime) * (0.75 + Math.random() / 2));
-    }
+    const retryIn = !this.#canceled && retry !== null && direction !== null ? this.#later(direction, retry) : null;
     this.#logger.warn({ event: 'connector.failed', name: this.#name, direction, retryIn, err: error });
     const message = `Connector ${this.#name}: the ${direction} failed (${error?.message ?? error})`;
     notify(this, this.#logger, 'error', failed(direction, message, error, this.#name, retryIn));
-    if (retryIn === null) return;
+  }
+
+  // `retry` after the direction's backoff — one timer per direction, the newer call's — answering the wait in ms.
+  #later(direction, retry) {
+    const doubled = this.#retryTime * 2 ** this.#attempts[direction]++;
+    const retryIn = Math.round(Math.min(doubled, this.#maxRetryTime) * (0.75 + Math.random() / 2));
     if (this.#retry[direction] !== null) clearTimeout(this.#retry[direction]);
     this.#retry[direction] = setTimeout(() => {
       this.#retry[direction] = null;
       if (!this.#canceled) retry();
     }, retryIn);
     this.#retry[direction].unref?.();
+    return retryIn;
   }
 
   // -------------------------------------------------------------------------
   // Pull
 
-  // Every page the backend has since the checkpoint, applied and the checkpoint moved, until a page comes short.
+  // `task` on the pull side's queue: after everything queued before it, before everything after.
+  #enqueue(task) {
+    this.#queued++;
+    const run = this.#queue.then(task).finally(() => {
+      this.#queued--;
+      if (this.#queued === 0) this.#settle();
+    });
+    this.#queue = run.catch(NOOP);
+    return run;
+  }
+
+  // A pull run: every page the backend has since the checkpoint, landed and the checkpoint moved, until a page comes
+  // short — on the queue, so the stream's pages and the runs land one after another. A RESYNC (or a timer) while a
+  // run is in flight makes it run once more after its pages: a change after the page read is never left waiting
+  // for the next signal. Resolves when the run is over, failed or not (a failure is told and tried again).
   #pullAll() {
-    if (this.#pulling !== null) return this.#pulling;
-    // The run's end writes what its pages left dirty at once.
-    this.#pulling = this.#pullPages()
-      .finally(() => this.#flushSave())
-      .finally(() => {
-        this.#pulling = null;
-        this.#settle();
-      });
+    if (this.#pulling !== null) {
+      this.#stale = true;
+      return this.#pulling;
+    }
+    this.#pulling = this.#enqueue(() => this.#pullRun()).finally(() => {
+      this.#pulling = null;
+      // A RESYNC that came as the run was ending: a run of its own.
+      if (this.#stale && !this.#canceled) this.#pullAll().catch(NOOP);
+    });
     return this.#pulling;
   }
 
+  async #pullRun() {
+    for (;;) {
+      this.#stale = false;
+      const through = await this.#pullPages();
+      // The run's end writes what its pages left dirty at once.
+      await this.#flushSave();
+      if (!through || this.#canceled) return;
+      if (!this.#initialPull) {
+        // The first run through: the initial pull is done, and the live half begins.
+        this.#initialPull = true;
+        this.#settle();
+        this.#follow();
+      }
+      if (!this.#stale) return;
+    }
+  }
+
+  // The pages of one run. Answers whether it came to the end; a failure is told, tried again from the checkpoint.
   async #pullPages() {
     let stalls = 0;
     for (;;) {
-      if (this.#canceled) return;
+      if (this.#canceled) return false;
       let page;
       try {
         page = await this.#pull.handler(this.#checkpoint.pull, this.#batchSize);
@@ -553,11 +615,13 @@ class Replication extends Emitter {
         this.#attempts.pull = 0;
       } catch (error) {
         this.#failed('pull', error, () => this.#pullAll());
-        return;
+        return false;
       }
       if (!isPlainObject(page) || !Array.isArray(page.documents)) {
-        this.#failed('pull', new TypeError('pull.handler must answer { documents, checkpoint }'), null);
-        return;
+        this.#failed('pull', new TypeError('pull.handler must answer { documents, checkpoint }'), () =>
+          this.#pullAll(),
+        );
+        return false;
       }
       // The page landed and the checkpoint moved past it, or neither: a landing that fails whole (the engine, the
       // database closing under it) is the pull's failure — told, tried again from the checkpoint as it stands.
@@ -567,13 +631,13 @@ class Replication extends Emitter {
         this.#checkpoint.pull = page.checkpoint ?? null;
         // Saved coalesced behind the pages (the run's end writes at once): a crash between lands the page again.
         this.#save().catch(NOOP);
-        if (page.documents.length < this.#batchSize) return;
+        if (page.documents.length < this.#batchSize) return true;
         // A full page at a position that does not move: asked a few times more, then left to the stream.
         if (moved) stalls = 0;
-        else if (++stalls >= MAX_STALLS) return;
+        else if (++stalls >= MAX_STALLS) return true;
       } catch (error) {
         this.#failed('pull', error, () => this.#pullAll());
-        return;
+        return false;
       }
     }
   }
@@ -741,23 +805,30 @@ class Replication extends Emitter {
 
   // The live half of the pull: the backend's stream where it has one, a pull every `retryTime` otherwise.
   #follow() {
-    if (this.#canceled || !this.#live) return;
+    if (this.#canceled || !this.#live || this.#following || this.#pull === null) return;
+    this.#following = true;
     if (typeof this.#pull.stream === 'function') {
       try {
-        const stop = this.#pull.stream((signal) => this.#streamed(signal));
+        const stop = this.#pull.stream((signal) => this.#streamed(signal), { checkpoint: this.#checkpoint.pull });
         this.#stream = typeof stop === 'function' ? stop : NOOP;
       } catch (error) {
+        this.#following = false;
         this.#failed('pull', error, () => this.#follow());
+        return;
+      }
+      // A stream may go quiet without a word: a pull from the checkpoint every `safetyTime` anyway.
+      if (this.#safetyTime > 0) {
+        this.#safety = setInterval(() => this.#pullAll().catch(NOOP), this.#safetyTime);
+        this.#safety.unref?.();
       }
       return;
     }
-    this.#timer = setInterval(() => {
-      this.#pullAll().catch(NOOP);
-    }, this.#retryTime);
+    this.#timer = setInterval(() => this.#pullAll().catch(NOOP), this.#retryTime);
     this.#timer.unref?.();
   }
 
   #stopFollowing() {
+    this.#following = false;
     if (this.#stream !== null) {
       try {
         this.#stream();
@@ -770,29 +841,42 @@ class Replication extends Emitter {
       clearInterval(this.#timer);
       this.#timer = null;
     }
+    if (this.#safety !== null) {
+      clearInterval(this.#safety);
+      this.#safety = null;
+    }
   }
 
-  // What the backend's stream tells: a page of documents with the position after them, or `RESYNC` — pull again.
+  // What the backend's stream tells: a page of documents, `RESYNC` — pull again from the checkpoint — or `END` — the
+  // stream is over (the backend closed it): followed again after the pull's backoff, from the checkpoint as it then
+  // stands, and pulled once for what it missed meanwhile.
   #streamed(signal) {
     if (this.#canceled) return;
     if (signal === 'RESYNC') return void this.#pullAll().catch(NOOP);
+    if (signal === 'END') {
+      this.#stopFollowing();
+      this.#logger.info({ event: 'connector.stream.ended', name: this.#name });
+      this.#later('pull', () => {
+        this.#follow();
+        this.#pullAll().catch(NOOP);
+      });
+      return;
+    }
     if (!isPlainObject(signal) || !Array.isArray(signal.documents)) {
       this.#logger.warn({ event: 'connector.stream.malformed', name: this.#name });
       return;
     }
-    // In order, behind a pull in flight.
-    const run = async () => {
-      await this.#land(signal.documents);
-      if (signal.checkpoint !== undefined) this.#checkpoint.pull = signal.checkpoint;
-      await this.#save(true);
-    };
-    this.#pulling = (this.#pulling ?? Promise.resolve())
-      .then(run)
-      .catch((error) => this.#failed('pull', error, null))
-      .finally(() => {
-        this.#pulling = null;
-        this.#settle();
-      });
+    // On the queue, behind the pages before it. The checkpoint stays where the last pull run left it: a page that
+    // fails to land is pulled again from there (told, a run after the backoff), never passed over.
+    this.#enqueue(async () => {
+      if (this.#canceled) return;
+      try {
+        await this.#land(signal.documents);
+        await this.#save(true);
+      } catch (error) {
+        this.#failed('pull', error, () => this.#pullAll());
+      }
+    }).catch(NOOP);
   }
 
   // -------------------------------------------------------------------------
@@ -937,8 +1021,13 @@ class Replication extends Emitter {
       this.#checkpoint.pushed = this.#frontier();
       await this.#save(true);
     }
-    // Nothing pending (or nothing was): everything heard is covered.
-    if (this.#canceled || this.#checkpoint.pushed === this.#frontier()) return;
+    if (this.#canceled) return;
+    // Drained: the initial push is done; nothing pending (or nothing was), everything heard is covered.
+    if (!this.#initialPush) {
+      this.#initialPush = true;
+      this.#settle();
+    }
+    if (this.#checkpoint.pushed === this.#frontier()) return;
     this.#checkpoint.pushed = this.#frontier();
     await this.#save(true);
   }

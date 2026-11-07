@@ -658,13 +658,13 @@ const ENTRIES = [
   // JSON it compares a document by) and the emitter — 7.0; 7.5, raised by name.
   // 7.5 with every pulled document judged by name (another collection's, a sealed one, no JSON, the engine's refusal)
   // and the rest of the page landing; the model of review №7 E4 — the backend's state assumed and compared on pull,
-  // the digests kept with the checkpoint, the probe, the frontier, one pull queue — is ~1.5 KB more (2026-11-07). 9,
-  // raised by name.
+  // the digests kept with the checkpoint, the probe, the frontier, one pull queue with END and the safety pull, the
+  // database's close cancelling — measured 9.2 (2026-11-07). 9.5, raised by name (the plan's 9, or 9.5 if over).
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 9,
+    budget: 9.5,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
