@@ -183,6 +183,28 @@ test('every runtime export is declared in the types', () => {
   check('src/dump/dump.js', 'src/dump/dump.d.ts');
   check('src/pipeline/pipeline.js', 'src/pipeline/pipeline.d.ts');
   check('src/cleanup/cleanup.js', 'src/cleanup/cleanup.d.ts');
+  check('src/shared/shared.js', 'src/shared/shared.d.ts');
+  check('src/attachments/attachments.js', 'src/attachments/attachments.d.ts');
+  check('src/testing/testing.js', 'src/testing/testing.d.ts');
+  check('src/mcp/mcp.js', 'src/mcp/mcp.d.ts');
+  check('src/query/query.js', 'src/query/query.d.ts');
+  check('src/versions/versions.js', 'src/versions/versions.d.ts');
+  check('src/local/local.js', 'src/local/local.d.ts');
+  check('src/state/state.js', 'src/state/state.d.ts');
+  check('src/dump/dump.js', 'src/dump/dump.d.ts');
+  check('src/pipeline/pipeline.js', 'src/pipeline/pipeline.d.ts');
+  check('src/cleanup/cleanup.js', 'src/cleanup/cleanup.d.ts');
+  check('src/connector/connector.js', 'src/connector/connector.d.ts');
+  check('src/connector/couchdb.js', 'src/connector/couchdb.d.ts');
+  check('src/connector/graphql.js', 'src/connector/graphql.d.ts');
+  check('src/connector/mongodb.js', 'src/connector/mongodb.d.ts');
+  check('src/connector/supabase.js', 'src/connector/supabase.d.ts');
+  check('src/connector/firestore.js', 'src/connector/firestore.d.ts');
+  check('src/connector/appwrite.js', 'src/connector/appwrite.d.ts');
+  check('src/connector/gdrive.js', 'src/connector/gdrive.d.ts');
+  check('src/connector/onedrive.js', 'src/connector/onedrive.d.ts');
+  check('src/shared/shared.js', 'src/shared/shared.d.ts');
+  check('src/attachments/attachments.js', 'src/attachments/attachments.d.ts');
   // browser.js is only loadable under OPFS/WebCrypto globals, so compare its
   // barrel's names against the node one instead of requiring it here.
   check('index.js', 'browser.d.ts');

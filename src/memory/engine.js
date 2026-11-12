@@ -10,9 +10,17 @@
 // Requires engine.js and errors.js only.
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 
-const CAPABILITIES = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true, shared: true });
+const CAPABILITIES = capabilitiesOf({
+  atomicBatch: true,
+  exclusiveCreate: true,
+  indexes: true,
+  shared: true,
+  changeStream: true,
+  blobs: true,
+});
 
 // A record handed in as text that is no record: kept as the text, read as
 // INTEGRITY — what a torn file reads as under the files engine.
@@ -145,6 +153,26 @@ const openDb = (path) => {
     if (keys === undefined) spaces.set(ns, (keys = new Map()));
     return keys;
   };
+  // Attachments' bytes by digest, copied in and out.
+  const blobs = new Map();
+  const blobStore = {
+    async get(digest) {
+      const bytes = blobs.get(checkDigest(digest, 'blobs.get'));
+      return bytes === undefined ? null : bytes.slice();
+    },
+    async has(digest) {
+      return blobs.has(checkDigest(digest, 'blobs.has'));
+    },
+    async list() {
+      return sorted(blobs.keys());
+    },
+    async put(digest, bytes) {
+      blobs.set(checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES).slice());
+    },
+    async remove(digest) {
+      blobs.delete(checkDigest(digest, 'blobs.remove'));
+    },
+  };
   const kv = {
     async get(ns, key) {
       return spaces.get(ns)?.get(key) ?? null;
@@ -264,8 +292,31 @@ const openDb = (path) => {
   };
   // One write set, applied with nothing awaited in between: whole, or — a
   // write set that throws before it is applied — nothing.
+  // What a write set changed, told to the instances listening (`db.changes`: a follower over the same engine) on a
+  // microtask — the writer's landing never runs a listener. Every instance hears every write: the writer never
+  // listens (a follower alone subscribes), so there is nothing of its own to leave out.
+  const listeners = new Set();
+  const announce = (ids) => {
+    if (ids.length === 0 || listeners.size === 0) return;
+    queueMicrotask(() => {
+      for (const listener of listeners) {
+        try {
+          listener({ records: ids });
+        } catch {
+          // A listener's failure is its own.
+        }
+      }
+    });
+  };
+  const changes = {
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
   const write = async (batch) => {
     if (batch.records !== undefined || batch.remove !== undefined) sortedIds = null;
+    const ids = [];
     const puts = batch.kv?.put;
     if (puts !== undefined) for (let i = 0; i < puts.length; i++) space(puts[i][0]).set(puts[i][1], String(puts[i][2]));
     const rows = batch.records;
@@ -279,18 +330,35 @@ const openDb = (path) => {
           for (let k = 0; k < made.length; k++) held.set(made[k][0], made[k][1]);
         }
         records.set(row.id, row.stored !== undefined ? row.stored : parsed(row.text));
+        ids.push(row.id);
         const dropped = row.pieces?.remove;
         if (dropped !== undefined) for (let k = 0; k < dropped.length; k++) pieces.get(row.id)?.delete(dropped[k]);
       }
     }
     const removed = batch.remove;
-    if (removed !== undefined) for (let i = 0; i < removed.length; i++) records.delete(removed[i]);
+    if (removed !== undefined) {
+      for (let i = 0; i < removed.length; i++) {
+        records.delete(removed[i]);
+        ids.push(removed[i]);
+      }
+    }
     const copied = batch.copies?.put;
     if (copied !== undefined) for (let i = 0; i < copied.length; i++) tag(copied[i][0]).set(copied[i][1], copied[i][2]);
     const removals = batch.kv?.remove;
     if (removals !== undefined) {
       for (let i = 0; i < removals.length; i++) spaces.get(removals[i][0])?.delete(removals[i][1]);
     }
+    announce(ids);
+  };
+  // What the database holds, as JSON would (the records are objects): an estimate, with nothing to say of a quota.
+  const estimate = async () => {
+    let usage = 0;
+    for (const keys of spaces.values()) for (const text of keys.values()) usage += text.length;
+    for (const stored of records.values()) usage += JSON.stringify(stored).length;
+    for (const named of pieces.values()) for (const text of named.values()) usage += text.length;
+    for (const tagged of copies.values()) for (const text of tagged.values()) usage += text.length;
+    for (const bytes of blobs.values()) usage += bytes.length;
+    return { usage, quota: null };
   };
   return Object.freeze({
     path,
@@ -301,7 +369,10 @@ const openDb = (path) => {
     copies: copyStore,
     catalog: catalogStore,
     log: logStore(),
+    blobs: blobStore,
+    changes,
     write,
+    estimate,
     close: async () => {},
     /** How many records the database holds, tombstones included. */
     get size() {

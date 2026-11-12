@@ -12,7 +12,7 @@ src/idb/engine.js         idbEngine({ name, indexedDB, IDBKeyRange, durability, 
                           records [p, id] (the object as handed), pieces [p, id, name], copies [p, tag, id], log [p, seq] with the group's
                           first seq, meta [p, key] (the log's index and segments, the catalog's rows); one readwrite transaction per write
                           set and per log group, key ranges for listings, a BroadcastChannel for another tab — requires engine.js,
-                          errors.js only
+                          blobs.js, errors.js only
 ```
 
 ## Rules
@@ -29,3 +29,8 @@ src/idb/engine.js         idbEngine({ name, indexedDB, IDBKeyRange, durability, 
   object; `raw(id)` stringifies on demand; a text that is no record is kept as `{ text }` and reads as `INTEGRITY`.
   The log's entries are clones too (a scrub puts the stripped entries again — `scrub`), and the catalog's rows are one
   meta value. `fake-indexeddb` runs it all under Node (`tests/engine.idb.test.js`, `tests/sync.engine.idb-engine.test.js`).
+- **Seven stores, made at once, at version 1.** `kv`, `records`, `pieces`, `copies`, `log`, `meta` and `blobs`
+  (`[p, digest]` → a Uint8Array) are made in the one `onupgradeneeded` a new database gets. Nothing is published, so
+  there is no older database to upgrade: a store added before the first release joins `STORES` at version 1 and a
+  development database is deleted, not upgraded (IndexedDB refuses a database of a higher version). After the first
+  release a new store is a new version, never a store made outside the upgrade.

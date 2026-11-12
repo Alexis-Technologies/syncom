@@ -18,8 +18,9 @@
 // instance holds a database by a lease on the server's clock, and every
 // document a handle writes carries the lease's generation (`gen`): a put or
 // a removal never reaches a document of a newer lease (the fence). Nothing
-// here opens or closes a connection: the client is the caller's. Requires
-// engine.js and errors.js only.
+// here opens or closes a connection: the client is the caller's. The subpath
+// also exports `mongoSharedLog` (./shared-log.js). Requires engine.js,
+// errors.js and shared-log.js only.
 //
 //   collection  _id (the key as JSON)   fields beside it
 //   kv          [p, ns, key]            p, ns, key, v, gen — the small named texts (node.json, schema.json, the keys, the lock…)
@@ -34,9 +35,11 @@
 // index (`{ p, id: { $gt } }` sorted by `id` over `{ p: 1, id: 1 }`).
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
+const { mongoSharedLog } = require('./shared-log.js');
 
-const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
+const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
 // A lease per database path: `{ _id: path, owner, gen, expires }`, renewed by its holder, taken once it lapsed.
 const LOCKS = 'locks';
 const DEFAULT_LEASE = 30_000;
@@ -48,6 +51,7 @@ const INDEXES = {
   log: { p: 1, seq: 1 },
   meta: { p: 1, key: 1 },
   catalog: { p: 1, id: 1 },
+  blobs: { p: 1, digest: 1, n: 1 },
 };
 const DUPLICATE = 11000;
 // A duplicate key as the driver reports it: the code on the error, or on the first write error of a bulk.
@@ -73,6 +77,9 @@ const parsed = (id, text) => {
 
 // The `_id` of a document: its key as JSON, the path first.
 const keyOf = (parts) => JSON.stringify(parts);
+// A blob's part: a document holds 16 MiB at most, so a blob goes in parts of BLOB_CHUNK bytes — `[p, digest, n]`,
+// n ≥ 1 the parts, n = 0 the head `{ parts, length }` written last, so a put cut short leaves no blob.
+const BLOB_CHUNK = 15 * 1024 * 1024;
 // The key back from an `_id`, or null for one that is no key of ours.
 const partsOf = (_id) => {
   if (typeof _id !== 'string' || _id[0] !== '[') return null;
@@ -117,6 +124,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     changeStream: changes,
     lock: 'native',
     shared: true,
+    blobs: true,
   });
   const c = {};
   for (let i = 0; i < COLLECTIONS.length; i++) c[COLLECTIONS[i]] = database.collection(COLLECTIONS[i]);
@@ -322,6 +330,55 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         fenced((session) => bulk(c.copies, [put(keyOf([p, tag, id]), { p, tag, id, t: text })], session)),
       remove: (tag, id) => fenced((session) => bulk(c.copies, [del(keyOf([p, tag, id]))], session)),
       drop: (tag) => fenced((session) => bulk(c.copies, [{ deleteMany: { filter: { p, tag, ...fence() } } }], session)),
+    };
+
+    // Attachments' bytes by digest: a Binary (the driver's) or the bytes themselves (a fake's), answered as a Uint8Array.
+    const bytesOf = (value) => {
+      if (value === null || value === undefined) return null;
+      if (value instanceof Uint8Array) return new Uint8Array(value);
+      if (ArrayBuffer.isView(value?.buffer)) return new Uint8Array(value.buffer);
+      if (typeof value?.value === 'function') return new Uint8Array(value.value(true));
+      return null;
+    };
+    const blobs = {
+      get: async (digest) => {
+        checkDigest(digest, 'blobs.get');
+        const head = await one(c.blobs, keyOf([p, digest, 0]), { _id: 0, parts: 1, length: 1 });
+        if (head === null) return null;
+        const docs = await many(
+          c.blobs,
+          { p, digest, n: { $gte: 1 } },
+          { sort: { n: 1 }, projection: { _id: 0, n: 1, b: 1 } },
+        );
+        const out = new Uint8Array(head.length);
+        let at = 0;
+        for (let i = 0; i < docs.length; i++) {
+          const part = bytesOf(docs[i].b);
+          if (part === null || at + part.length > out.length) return null;
+          out.set(part, at);
+          at += part.length;
+        }
+        // Fewer parts than the head names: a blob removed under the read — none.
+        return docs.length === head.parts && at === head.length ? out : null;
+      },
+      has: async (digest) => (await one(c.blobs, keyOf([p, checkDigest(digest, 'blobs.has'), 0]), { _id: 1 })) !== null,
+      list: async () => sorted(await many(c.blobs, { p, n: 0 }, { projection: { _id: 0, digest: 1 } }), 'digest'),
+      put: async (digest, bytes) => {
+        checkDigest(digest, 'blobs.put');
+        const whole = checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES);
+        const ops = [];
+        let n = 0;
+        for (let from = 0; from < whole.length; from += BLOB_CHUNK) {
+          n++;
+          ops.push(put(keyOf([p, digest, n]), { p, digest, n, b: whole.slice(from, from + BLOB_CHUNK) }));
+        }
+        ops.push(put(keyOf([p, digest, 0]), { p, digest, n: 0, parts: n, length: whole.length }));
+        return fenced((session) => bulk(c.blobs, ops, session));
+      },
+      remove: async (digest) => {
+        checkDigest(digest, 'blobs.remove');
+        return fenced((session) => bulk(c.blobs, [{ deleteMany: { filter: { p, digest, ...fence() } } }], session));
+      },
     };
 
     const meta = async (key) => {
@@ -823,6 +880,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       copies,
       log,
       catalog,
+      blobs,
       write,
       lock,
       close: async () => {},
@@ -858,4 +916,4 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   });
 };
 
-module.exports = { mongoEngine };
+module.exports = { mongoEngine, mongoSharedLog };

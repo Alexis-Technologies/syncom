@@ -1,5 +1,7 @@
 'use strict';
 
+const { SyncomError, isQuotaError } = require('./errors.js');
+
 // The persisted operation log: every op this node applied — its own and the
 // ones it accepted from peers — in the order they landed here. Two things read
 // it: a subscriber resuming from an event id (`since`), and the node itself on
@@ -713,15 +715,19 @@ class OpLog {
         else this.#heads.set(key, head);
       }
     }
+    // A medium that is full is said as such: the writer hears QUOTA, with the platform's error as the cause.
+    const reported = isQuotaError(error)
+      ? new SyncomError('QUOTA', 'The medium is full: nothing more can be appended', { cause: error })
+      : error;
     if (this.#onFail !== null) {
       try {
-        this.#onFail(error, group.from);
+        this.#onFail(reported, group.from);
       } catch (thrown) {
         this.#log?.warn?.({ event: 'listener.error', name: 'log', err: thrown });
       }
     }
-    group.reject(error);
-    if (later !== null) later.reject(error);
+    group.reject(reported);
+    if (later !== null) later.reject(reported);
   }
 
   // Sealing: write the segment, then the index, then remove the open files.
@@ -968,22 +974,24 @@ class OpLog {
    * a backend with no rename. Takes one id or an array of them: a file
    * holding entries of several is rewritten once.
    */
-  scrub(ids) {
+  scrub(ids, { skip = false } = {}) {
     const list = typeof ids === 'string' ? [ids] : ids;
     return this.#serialize(() => {
       const otel = this.#otel;
-      if (!otel.enabled) return this.#scrub(list);
+      if (!otel.enabled) return this.#scrub(list, skip);
       return traced(
         otel,
         'syncom.log.scrub',
         {},
-        () => this.#scrub(list),
+        () => this.#scrub(list, skip),
         (fresh) => ({ 'syncom.log.scrubbed': fresh }),
       );
     });
   }
 
-  async #scrub(ids) {
+  // `skip`: the entries are flagged `skipped` too — never applied here again, by a replay or a fold
+  // (`forget(id)`: the record is gone from this node, its ops stay in the stream as headers).
+  async #scrub(ids, skip = false) {
     // Every entry of each id (from the index, not a walk), for the files to
     // rewrite; the ones still holding a payload, for the count. A rewrite
     // that failed last time left the files behind memory: the id stays
@@ -1004,12 +1012,14 @@ class OpLog {
       for (const seq of seqs) {
         const entry = this.#entryAt(seq);
         if (!entry) continue;
+        const skipping = skip && entry.skipped !== true;
+        if (skipping) entry.skipped = true;
         if (!entry.scrubbed) {
           scrubOp(entry.op);
           entry.scrubbed = true;
           fresh++;
           taken.push(seq);
-        } else if (torn) taken.push(seq);
+        } else if (torn || skipping) taken.push(seq);
       }
     }
     if (taken.length === 0) return 0;

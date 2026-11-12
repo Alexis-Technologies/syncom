@@ -10,7 +10,8 @@ const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefin
 // slot may be appended (the writer's schema version was the 13th, the actor
 // the 14th, the signature, its payload digest and the digest's nonce the
 // 15th to 17th, a transaction's message the 18th, the fingerprint of the op
-// before it in its stream the 19th): a reader of an older shape ignores slots
+// before it in its stream the 19th, whether the op was scrubbed — its payload
+// taken, a no-op wherever it lands — the 20th): a reader of an older shape ignores slots
 // it does not know,
 // a reader of a newer one takes an absent slot as null. The codes are the
 // protocol's, not a plugin's: a node without the plugin for a type still
@@ -74,6 +75,7 @@ const packOps = (ops) => {
       op.nonce === undefined ? null : op.nonce,
       op.msg === undefined ? null : op.msg,
       op.prev === undefined ? null : op.prev,
+      op.scrubbed === true ? 1 : null,
     ]);
   }
   return packed;
@@ -104,8 +106,10 @@ const unpackOps = (packed) => {
       nonce,
       msg,
       prev,
+      scrubbed,
     ] = row;
     const op = { origin, seq, ts, type: own(CODE_TYPES, code) ?? code };
+    if (scrubbed === 1) op.scrubbed = true;
     if (id !== null && id !== undefined) op.id = id;
     if (v !== null && v !== undefined) op.v = v;
     if (actor !== null && actor !== undefined) op.actor = actor;

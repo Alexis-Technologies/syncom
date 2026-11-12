@@ -210,7 +210,8 @@ const mergeBatch = async (core, records, via, from) => {
   // Every merge is announced whatever an afterWrite hook did to one of them —
   // all are durable — and the turn after them; the first failure is thrown once.
   let failed = null;
-  for (const { ctx, op, started, changes: own } of batch.pending) {
+  for (let i = 0; i < batch.pending.length; i++) {
+    const { ctx, op, started, changes: own } = batch.pending[i];
     try {
       await core.hook('afterWrite', ctx, op);
     } catch (error) {
@@ -218,7 +219,8 @@ const mergeBatch = async (core, records, via, from) => {
     } finally {
       const entry = batch.touched.get(op.id);
       core.refresh(op.id, isAlive(entry) ? entry.data : null, batch.deltas.get(op.id), null, entry);
-      core.emit('change', op, via, { changes: own });
+      // One entry per op, in order (`mergeOne` pushes both): the position the announce names.
+      core.emit('change', op, via, { changes: own, seq: entries[i].seq });
       for (const change of own) changes.push({ id: op.id, ...change });
       if (core.otel.enabled) core.otel.recordCommit('merge', 'applied', now() - started, 'queue');
     }
@@ -290,7 +292,7 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   const [{ seq }] = ticket.entries;
   await core.log.advance(news);
   core.log.applied(seq);
-  core.emit('change', op, via);
+  core.emit('change', op, via, { changes: [], seq });
   return op;
 };
 

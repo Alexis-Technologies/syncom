@@ -2,7 +2,7 @@
 // writes, fed by the storage's `commit` events, applied as new ops through
 // `applyPatches()` so an undo merges like any write. Platform-neutral.
 
-import type { Storage, SyncOp } from '../../index.js';
+import type { Database, SyncOp } from '../../index.js';
 
 export interface UndoOptions {
   /** Commits within this many ms of a step's first merge into it; 500 by default. A transaction's commits are one step whatever the interval. */
@@ -100,4 +100,4 @@ export declare class UndoManager {
 }
 
 /** An undo manager over `storage`'s own writes; stops itself when the storage closes. */
-export function createUndo(storage: Storage, options?: UndoOptions): UndoManager;
+export function createUndo(storage: Database, options?: UndoOptions): UndoManager;

@@ -1,7 +1,7 @@
 // The `@alexify/syncom/inspect` subpath: devtools — what a record is made
 // of, raw, and a copy of anything with every string hashed out.
 
-import type { Storage, SyncOpType } from '../../index.js';
+import type { Database, SyncOpType } from '../../index.js';
 
 /** An index a query asked for and no index served: the entity, the key (the equalities, a range field, the sort), how many queries. */
 export interface IndexSuggestion {
@@ -17,7 +17,7 @@ export interface IndexAdvisor {
 }
 
 /** Watches every plan the database's cursors make from here on and suggests the indexes that would serve the queries no index served, or sorted. */
-export function indexAdvisor(storage: Storage): IndexAdvisor;
+export function indexAdvisor(storage: Database): IndexAdvisor;
 
 /** One field of a record as the metadata holds it: its kind, whether the composed reading shows it, and the kind's own counts and stamps. */
 export interface FieldInspection {
@@ -81,7 +81,7 @@ export interface Inspection {
 }
 
 /** What record `id` is made of, raw: nothing read through the lens or the hooks, nothing written. */
-export function inspect(storage: Storage, id: string): Promise<Inspection>;
+export function inspect(storage: Database, id: string): Promise<Inspection>;
 /**
  * A copy of `value` with every string replaced by a stable hash of it under `salt` — the keys too when `keys` is true —
  * and numbers, booleans and nulls as they are: the shape for a bug report, none of the words.

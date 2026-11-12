@@ -9,7 +9,7 @@
 // transaction over the `log` store, and a listing or a range is one
 // `getAll`/`getAllKeys` over a key range — where the file store
 // (`createIdbFsi`) spent a transaction per file and the catalog a rewrite
-// of one whole file. No requires beyond engine.js and errors.js: it ships
+// of one whole file. No requires beyond engine.js, blobs.js and errors.js: it ships
 // to the browser on its own.
 //
 //   store     keyPath            holds
@@ -25,9 +25,10 @@
 // has one. The lock stays the database's (Web Locks in a browser).
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 
-const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta'];
+const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'blobs'];
 const KEYS = {
   kv: ['p', 'ns', 'key'],
   records: ['p', 'id'],
@@ -35,7 +36,10 @@ const KEYS = {
   copies: ['p', 'tag', 'id'],
   log: ['p', 'seq'],
   meta: ['p', 'key'],
+  blobs: ['p', 'digest'],
 };
+// The database's version: every store is made in the one upgrade a new database gets. Nothing is published, so no
+// older database is upgraded — a store added before the first release joins STORES at this version.
 const VERSION = 1;
 
 const request = (req) =>
@@ -67,7 +71,7 @@ const parsed = (text) => {
 /**
  * `idbEngine({ name, indexedDB, IDBKeyRange, durability, channel })` — the engine over
  * IndexedDB: the database `name` is opened lazily and reopened after another
- * tab upgrades or deletes it; `durability` is the transactions' (`'default'`,
+ * tab deletes it; `durability` is the transactions' (`'default'`,
  * `'relaxed'`, `'strict'`); `close()` closes the connection.
  */
 const idbEngine = ({
@@ -88,6 +92,7 @@ const idbEngine = ({
     indexes: true,
     changeStream: broadcasts,
     shared: true,
+    blobs: true,
   });
   const token = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
   let opening = null;
@@ -98,13 +103,11 @@ const idbEngine = ({
       const req = indexedDB.open(name, VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
-        for (let i = 0; i < STORES.length; i++) {
-          if (!db.objectStoreNames.contains(STORES[i])) db.createObjectStore(STORES[i], { keyPath: KEYS[STORES[i]] });
-        }
+        for (let i = 0; i < STORES.length; i++) db.createObjectStore(STORES[i], { keyPath: KEYS[STORES[i]] });
       };
       req.onsuccess = () => {
         const db = req.result;
-        // Another tab upgrades or deletes the database: let go, and the next call opens it again.
+        // Another tab deletes the database: let go, and the next call opens it again.
         db.onversionchange = () => {
           db.close();
           opening = null;
@@ -271,6 +274,41 @@ const idbEngine = ({
       put: (tag, id, text) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.put({ p, tag, id, text })),
       remove: (tag, id) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.delete([p, tag, id])),
       drop: (tag) => transaction(['copies'], 'readwrite', ({ copies: s }) => void s.delete(under([p, tag]))),
+    };
+
+    // Attachments' bytes by digest, a Uint8Array a row; the digest checked before the transaction.
+    const blobs = {
+      get: async (digest) => {
+        checkDigest(digest, 'blobs.get');
+        return transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
+          const row = await request(s.get([p, digest]));
+          return row === undefined ? null : new Uint8Array(row.bytes);
+        });
+      },
+      has: async (digest) => {
+        checkDigest(digest, 'blobs.has');
+        return transaction(
+          ['blobs'],
+          'readonly',
+          async ({ blobs: s }) => (await request(s.getKey([p, digest]))) !== undefined,
+        );
+      },
+      list: () =>
+        transaction(['blobs'], 'readonly', async ({ blobs: s }) => {
+          const keys = await request(s.getAllKeys(under([p])));
+          const digests = [];
+          for (let i = 0; i < keys.length; i++) digests.push(keys[i][1]);
+          return digests;
+        }),
+      put: async (digest, bytes) => {
+        checkDigest(digest, 'blobs.put');
+        const copy = checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES).slice();
+        return transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.put({ p, digest, bytes: copy }));
+      },
+      remove: async (digest) => {
+        checkDigest(digest, 'blobs.remove');
+        return transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.delete([p, digest]));
+      },
     };
 
     // The catalog's rows, as one value of the meta store: a structured clone, no text.
@@ -464,7 +502,27 @@ const idbEngine = ({
         }
       : undefined;
 
-    const db = { path: p, capabilities, kv, records, pieces, copies, catalog, log, write, close: async () => {} };
+    // The room: the browser's Storage API estimate for the origin (every database of it), where there is one.
+    const estimate = async () => {
+      const storage = globalThis.navigator?.storage;
+      if (storage === undefined || typeof storage.estimate !== 'function') return { usage: null, quota: null };
+      const { usage = null, quota = null } = await storage.estimate();
+      return { usage, quota };
+    };
+    const db = {
+      path: p,
+      capabilities,
+      kv,
+      records,
+      pieces,
+      copies,
+      catalog,
+      log,
+      blobs,
+      write,
+      estimate,
+      close: async () => {},
+    };
     if (changes !== undefined) db.changes = changes;
     return Object.freeze(db);
   };

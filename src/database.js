@@ -9,8 +9,8 @@
 // beyond registers is src/fields.js and the versions API src/versions/api.js,
 // both over the same lent core: this file keeps a delegate per method.
 
-const { Emitter, generateUUID, createLogger, taskScope } = require('./utils.js');
-const { sha256 } = require('./crypto/digest.js');
+const { Emitter, generateUUID, createLogger, taskScope, estimateStorage, persistStorage } = require('./utils.js');
+const { sha256, hashText } = require('./crypto/digest.js');
 const { OpLog, appliedHere } = require('./log.js');
 const { EntryStore } = require('./entries.js');
 const { Document } = require('./document.js');
@@ -19,9 +19,9 @@ const { commit, commitAtOnce, transact, prepareOp, applyLocal, MISMATCH, ABSENT 
 const F = require('./fields.js');
 const P = require('./patches.js');
 const B = require('./blame.js');
-const { applyBatch } = require('./apply.js');
+const { applyBatch, checkPage } = require('./apply.js');
 const { snapshotPage, mergeBatch, adopt } = require('./bootstrap.js');
-const { applyOp, isAlive, kindOf } = require('./ops.js');
+const { applyOp, isAlive, kindOf, kindsOf } = require('./ops.js');
 const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { project, namedId, idReason } = require('./schema/entity.js');
@@ -35,20 +35,21 @@ const { Catalog, isTextIndex } = require('./catalog.js');
 const { DISABLED, isWriter, writerOf, traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE } = require('./scope.js');
 const { normalizeStorageOptions } = require('./options.js');
-const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR } = require('./shape.js');
+const { isPlainObject, isRecordId, invalidId, isStreamName, VALIDATED, MAX_ACTOR, asJson } = require('./shape.js');
 const { isOperators } = require('./operators.js');
 const { checkOrm, tombstone, operate, modifyIn } = require('./writes.js');
 const { dropDatabase } = require('./drop.js');
 const { Observers } = require('./observe.js');
 const { DeferredWindow } = require('./defer.js');
 const { fieldName } = require('./args.js');
-const { compose, composeData } = require('./compose.js');
+const { compose, composeData, decompose } = require('./compose.js');
+const { diffViews } = require('./patch.js');
 
 // The ids a `storage.unpersisted` line names; past them it says how many.
 const UNPERSISTED_NAMED = 32;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
-const { SyncomError, typed } = require('./errors.js');
+const { SyncomError, typed, isQuotaError } = require('./errors.js');
 const { loadIdentity } = require('./identity.js');
 
 // What a storage without the schema plugin runs with: no entities, version 1.
@@ -103,6 +104,8 @@ class Database extends Emitter {
   #queryStats = null;
   // The local documents (`db.local`) — the local plugin's.
   #local = null;
+  // The attachments (`db.attachments`) — the attachments plugin's.
+  #attachments = null;
   #settings;
   #log = null;
   #entries = null;
@@ -471,6 +474,7 @@ class Database extends Emitter {
       }
       if (hooks.versions) this.#tags = hooks.versions.tags;
       if (hooks.local) this.#local = hooks.local;
+      if (hooks.attachments) this.#attachments = hooks.attachments;
       if (Object.hasOwn(hooks, 'telemetry')) {
         this.#otel = writerOf(hooks.telemetry);
         adapted = true;
@@ -695,7 +699,7 @@ class Database extends Emitter {
       // The same write from INSIDE a task of the queue (`core.run`), where
       // `commit` would wait for itself; and whether an entry is live.
       commitNow: (type, id, payload, options) => commit(this.#core, type, id, payload, options),
-      cursor: (source, entity, query) => this[CURSOR](entity, query, source),
+      cursor: (source, entity, query) => this[CURSOR](entity, query, { source }),
       alive: isAlive,
       // A field's kind in an entry, under this storage's registry (src/ops.js kindOf).
       kindOf: (entry, field) => kindOf(entry, field, this.#plugins),
@@ -1096,6 +1100,12 @@ class Database extends Emitter {
     return this.#local;
   }
 
+  /** The attachments of this database (`put`, `get`, `has`, `list`, `remove`) — the `attachments` plugin's. */
+  get attachments() {
+    if (this.#attachments === null) throw missing('db.attachments', 'attachments');
+    return this.#attachments;
+  }
+
   /**
    * Defines collections after the open: `{ [name]: definition }` (or a Map),
    * each as an entity of `createDatabase({ schema })` would be — its validator,
@@ -1181,11 +1191,13 @@ class Database extends Emitter {
   }
 
   // The cursor over a source seam (this storage's by default; a tag's for a
-  // view at a tag): the query plugin's, PLUGIN_MISSING without it.
+  // view at a tag): the query plugin's, PLUGIN_MISSING without it. Sealed records are left out unless asked
+  // (`sealed: true`): the facade's collections ask — the key holder reads its own — while a host's query, an
+  // agent's tool and a connector read through the seam as it is, and no sealed record leaves the key holder by them.
   get [CURSOR]() {
-    return (entity, query, source = this[SOURCE]) => {
+    return (entity, query, { source = this[SOURCE], sealed = false } = {}) => {
       if (this.#cursor === null) throw missing('select()');
-      return this.#cursor(source, entity, query);
+      return this.#cursor(source, entity, query, { sealed: sealed === true });
     };
   }
 
@@ -1259,22 +1271,41 @@ class Database extends Emitter {
       // Folded tombstones taken away with their rows (`cleanup({ drop: true })`): the catalog forgets the ids.
       forgetMany: (ids) => this.#run(() => this.#landing(() => this.#entries.dropMany(ids))),
       nodes: () => (this.#sync === null ? [] : this.#sync.listNodes()),
+      // A record as a reader of data sees it: the lensed view, or a sealed record's data as the key here opens
+      // it (a copy: registers alone, no meta to compose) — a query over sealed records is answered from the
+      // record at the key holder, never from the catalog.
       load: async (id) => {
         const entry = await this.#entries.load(id);
-        if (entry === null || entry.encrypted || !isAlive(entry)) return null;
-        return this.#view(id, entry);
+        if (entry === null) return null;
+        if (entry.encrypted) return entry.data === null ? null : asJson(entry.data);
+        return isAlive(entry) ? this.#view(id, entry) : null;
       },
       // Several records as `load` reads them, in ONE read of the engine for the ones not cached: a
-      // Map by id, null for one absent, encrypted or gone (a cursor's `populate`, `findByIds`).
+      // Map by id, null for one absent or gone (a cursor's `populate`, `findByIds`).
       loadMany: async (ids) => {
         const entries = await this.#entries.loadMany(ids);
         const out = new Map();
         for (const [id, entry] of entries) {
-          if (entry === null || entry.encrypted || !isAlive(entry)) out.set(id, null);
-          else out.set(id, await this.#view(id, entry));
+          if (entry === null) out.set(id, null);
+          else if (entry.encrypted) out.set(id, entry.data === null ? null : asJson(entry.data));
+          else out.set(id, isAlive(entry) ? await this.#view(id, entry) : null);
         }
         return out;
       },
+      // The sealed records of a collection, by id: what a query reads whole at the key holder.
+      sealed: (entity) => catalog.sealed(entity),
+      // A page of a peer's ops checked as a push checks them — well-formed, signed as `sync.signatures` asks, under the
+      // key that is the origin — without applying one: `{ verdicts }` by position (VERDICT.OK, UNSIGNED, FORGED). What
+      // a hub that cannot write asks before it forwards a page to the inbox.
+      checkOps: (ops) => checkPage({ core: this.#core, signatures: this.#signatures }, ops),
+      // The record brought to what a host holds of it (the dialer's revert of a refused op): the fields named —
+      // every one for null — made to read as `target` (the host's data, flat) reads, through the kinds' patches, so
+      // a counter moves by an inc, a set by adds and removes, a text by its diff — never a register written over
+      // another kind, and nothing the host accepted since is touched; `target` null forgets the record.
+      revert: (id, target, fields, options) => this.#revert(id, target, fields, options),
+      // SHA-256 of a text as base64url (src/crypto/digest.js hashText): what a connector names the backend's state
+      // by in its checkpoint, so that it bundles no hasher of its own.
+      digest: (text) => hashText(text),
       // The entry as it is — data and meta, a tombstone too — for the
       // inspector (@alexify/syncom/inspect); never for a reader of data.
       entry: (id) => this.#entries.load(id),
@@ -1471,6 +1502,24 @@ class Database extends Emitter {
   /** Whether every write is refused: opened with `readOnly: true` (a follower), or a writer whose lease was lost. */
   get readOnly() {
     return this.#readOnly;
+  }
+
+  /**
+   * The room the medium has: `{ usage, quota }` in bytes — the engine's own estimate where it has one (memory: what
+   * it holds; SQLite: the file and its volume; IndexedDB: the browser's Storage API), the files engine's volume
+   * under the path (`usage` null; the browser's Storage API over OPFS); null where the medium says nothing (MongoDB,
+   * an engine over a port).
+   */
+  quota() {
+    const db = this.#db;
+    if (db !== null && typeof db.estimate === 'function') return db.estimate();
+    if (this.#engine.name === 'files') return estimateStorage(this.#path);
+    return Promise.resolve({ usage: null, quota: null });
+  }
+
+  /** Asks the browser to keep this origin's storage out of eviction (`navigator.storage.persist()`); true where nothing need be asked. */
+  persist() {
+    return persistStorage();
   }
 
   /**
@@ -1835,7 +1884,10 @@ class Database extends Emitter {
     const named = ids.length > UNPERSISTED_NAMED ? ids.slice(0, UNPERSISTED_NAMED) : ids;
     this.#logger.error({ event: 'storage.unpersisted', ids: named, count: ids.length, err: error });
     const message = `${ids.join(', ')}: logged, but not written; held until the next open`;
-    notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, { ids, cause: error }));
+    const fields = { ids, cause: error };
+    // A medium that is full: said on the error, so the application can ask for room (`quota()`, `persist()`).
+    if (isQuotaError(error)) fields.quota = true;
+    notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, fields));
   }
 
   async #persistBatch(touched, fromSeq, toSeq) {
@@ -2265,6 +2317,30 @@ class Database extends Emitter {
     }
     this.#closing = this.#close(true);
     return this.#closing;
+  }
+
+  /**
+   * Forgets a record HERE, with no op: its file and pieces removed, its
+   * catalog row with them, every entry of it in this node's log scrubbed and
+   * flagged skipped (a replay applies none of them again; the stream keeps
+   * its headers, so no peer sees a gap). Nothing reaches a peer: what a node
+   * does with the records of a scope a host took back (`REVOKED`), where a
+   * `delete` would be an op the host refuses. A later op of the record from
+   * a peer makes it again. Idempotent.
+   */
+  async forget(id) {
+    if (!isRecordId(id)) throw typed('INVALID_ID', `forget(): ${String(id)} is not a record id`);
+    // One turn of the queue: the deferred slot goes with the record (a flush after would lay it back as a file),
+    // then the log's entries are scrubbed and flagged skipped — before the next turn can write the id again.
+    await this.#run(async () => {
+      await this.#landing(() => {
+        this.#window.settle(id, Infinity);
+        return this.#entries.remove(id);
+      });
+      await this.#log.scrub([id], { skip: true });
+    });
+    this.#records.delete(id);
+    this.#emitUpdate(id, null, {}, null, null);
   }
 
   /**
@@ -2700,11 +2776,6 @@ class Database extends Emitter {
     return document;
   }
 
-  /** @deprecated `document()` — the name before the rename. */
-  record(id) {
-    return this.document(id);
-  }
-
   getCachedData(id) {
     const entry = this.#entries.cached(id);
     if (!entry) return null;
@@ -2733,6 +2804,49 @@ class Database extends Emitter {
    * the log: live records AND tombstones, with their metadata, in id order.
    * `cursor` is the last id of the previous page; `null` back means done.
    */
+  // The seam's `revert` (src/sync/manager.js): the patches from the record as it reads here — flat, every path a
+  // field, as `compact` reads it — to the same with the fields named read as `target` has them (gone where it
+  // lacks them), realized as ops of this node's own under `actor`.
+  async #revert(id, target, fields, { actor = 'revert' } = {}) {
+    if (target === null || target === undefined) return this.forget(id);
+    const entry = await this.#entries.load(id);
+    const plugins = this.#plugins;
+    const alive = entry !== null && !entry.encrypted && isAlive(entry);
+    const fromKinds = alive ? kindsOf(entry, plugins) : {};
+    const from = alive ? decompose(await this.#view(id, entry), entry, plugins) : null;
+    // A field under a member that is not shown is unreachable (as `compact` reads it): not this revert's.
+    if (from !== null) {
+      for (const field of Object.keys(fromKinds)) if (!Object.hasOwn(from, field)) delete fromKinds[field];
+    }
+    const to = {};
+    const toKinds = {};
+    if (fields === null || from === null) {
+      for (const field of Object.keys(target)) {
+        to[field] = target[field];
+        toKinds[field] = fromKinds[field] ?? 'register';
+      }
+    } else {
+      for (const field of Object.keys(from)) {
+        to[field] = from[field];
+        toKinds[field] = fromKinds[field];
+      }
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        if (Object.hasOwn(target, field)) {
+          to[field] = target[field];
+          toKinds[field] ??= 'register';
+        } else {
+          delete to[field];
+          delete toKinds[field];
+        }
+      }
+    }
+    const context = { from: { entry }, to: { entry } };
+    const patches = diffViews(from, fromKinds, to, toKinds, { plugins, context });
+    if (patches.length === 0) return 0;
+    return P.applyPatches(this.#core, id, patches, { actor });
+  }
+
   snapshot(options = {}) {
     return snapshotPage(this.#core, options);
   }
@@ -2833,11 +2947,7 @@ class Database extends Emitter {
 
 Database.Collection = Collection;
 Database.Document = Document;
-// The names before the rename (2026-11): `Storage`, `Record`, `open()` stay
-// as aliases until 1.0; the docs say `Database`, `Document`, `createDatabase()`.
-Database.Record = Document;
 
 const createDatabase = (options) => new Database(options);
-const open = createDatabase;
 
-module.exports = { Database, createDatabase, dropDatabase, Storage: Database, open };
+module.exports = { Database, createDatabase, dropDatabase };

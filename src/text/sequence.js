@@ -9,8 +9,8 @@
 // name in an id index (./ids.js), the registers, the marks and what waits in
 // hash tries (./cow.js), so a keystroke, a cut, an assign, a move, a mark, a
 // cursor and a reading are O(log n) and never walk the field or copy a map
-// again. No requires beyond ../vector.js, ../plugin.js, ./rle.js, ./keys.js
-// and those.
+// again. No requires beyond ../plugin.js, ./rle.js, ./keys.js, ./state.js, ./splice.js,
+// ./marks.js and ./join.js.
 //
 // The ordering rule is Fugue (Weidner & Kleppmann, "The Art of the Fugue",
 // 2023; reference: fugue-simple, MIT): every element has one place in a

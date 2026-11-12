@@ -60,6 +60,8 @@ export interface CopyEngineOptions {
   path: string;
   /** Records, or log entries, per write set; 500 by default. */
   batch?: number;
+  /** Where the copy lands on the target engine; `path` by default. */
+  targetPath?: string;
 }
 
 /** What `copyEngine` copied. */
@@ -69,6 +71,7 @@ export interface CopyEngineResult {
   copies: number;
   kv: number;
   entries: number;
+  blobs: number;
 }
 
 /**

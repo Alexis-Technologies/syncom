@@ -222,7 +222,7 @@ const runCatalogTests = async (t, assert, createStorage) => {
     assert.strictEqual(storage.getCachedData(target), null, 'evicted');
     const referrer = await storage.insert({ $type: 'Link', to: target });
     const record = await storage.document(referrer);
-    assert.strictEqual(typeof record.to.record, 'function');
+    assert.strictEqual(typeof record.to.document, 'function');
     assert.strictEqual((await record.to.document()).i, 2);
     const loose = await storage.document(await storage.insert({ $type: 'Link', to: ids[2] }));
     assert.strictEqual(await loose.to.document(), null, 'not a Link');

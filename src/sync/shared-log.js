@@ -1,12 +1,15 @@
 'use strict';
 
-// Reserved: the contract of a log shared by several hub processes — what a
-// broker-backed hub mode takes after v1, where every hub appends the ops it
-// accepts to one stream and serves `changes` from it, so a peer can resume
-// on any hub. It is structurally wrpc's `BrokerLog` (`append`, `read`,
-// `parseId`), so a broker's `.log` — memory, Redis, NATS, Kafka — fits with
-// no adapter. Nothing consumes it yet: `createDatabase({ sync: { sharedLog } })` is
-// refused, and this check is what the option will run. No requires.
+// The contract of a log shared by several hub processes (`createDatabase({
+// sync: { sharedLog } })`, src/sync/shared.js): every hub appends the ops it
+// accepts to one stream and serves `changes` from it, so a peer can resume on
+// any hub. It is structurally wrpc's `BrokerLog` (`append`, `read`, `parseId`),
+// so a broker's `.log` — memory, Redis, NATS, Kafka — fits with no adapter. A
+// read yields `{ id, value, headers }` in order; a log may yield a HOLE — an id
+// whose entry never came, `value: null` with `headers.hole` — which a consumer
+// tells and passes, never a gap it skips in silence (`mongoSharedLog` does). A
+// log may have `trimBefore(topic, id)`: a writer trims the inbox past what it
+// landed. No requires.
 
 const METHODS = ['append', 'read', 'parseId'];
 

@@ -284,7 +284,8 @@ test('an engine over a message port', async (t) => {
         refused = error;
       }
     }
-    assert.strictEqual(refused?.code, 'ENOSPC', 'the fourth insert failed with its append');
+    assert.strictEqual(refused?.code, 'QUOTA', 'the fourth insert failed with its append: a full medium is QUOTA');
+    assert.strictEqual(refused.cause?.code, 'ENOSPC', 'the platform’s error crosses the port as the cause');
     assert.strictEqual(ids.length, 5);
     const { next, length } = db.stats().log;
     await db.close();

@@ -488,8 +488,10 @@ which one a node plays on a given link is just who opened the connection.
 | --- | --- | --- |
 | `hello` | dialer → host | Exchange node ids, vectors, log epochs, schemas, the kinds each side runs with (`kinds`) and the protocol version; the host may `authorize` (and, requiring signatures, refuses a node id that is no key). A host that holds more of the dialer's own streams than the dialer's vector says adds `proof`: the newest op of each it holds, packed like a page — see [The log](#the-log) |
 | `push` | dialer → host | Ops the host lacks, by its vector |
-| `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live |
+| `changes` (subscription) | host → dialer | Everything that lands in the host's log from the cursor on, live; an empty page marked `idle` once the feed is read to its end — the dialer's `caughtUp`, what `awaitInSync()` waits for |
 | `snapshot` | dialer → host | One page of the host's state, for bootstrap |
+| `prove` | dialer → host | The challenge hello handed the dialer, signed under its key — before anything else, where the host asks (`unit({ prove })`) |
+| `query`, `count` | dialer → host | A thin client's read of the host's records in its scopes (`unit({ query: true })`) |
 
 ```mermaid
 sequenceDiagram
@@ -516,7 +518,12 @@ requiring signatures, for a node id that is no key (`UNSIGNED`). `push`,
 subscription reaches a new server-side client: the dialer greets again. A
 refused hello is reported through the dialer's `error` event and kept as
 `peers()[i].lastError`; the host is greeted again when the link reconnects,
-or after `enableNode(url, false)` and `true`.
+or after `enableNode(url, false)` and `true`. A host that asks for a proof of
+the key answers hello with a `challenge` and refuses every other call with 403
+(`UNPROVEN`) until `prove` carries its signature (`BAD_PROOF` for one that
+does not check); a unit that does not serve a procedure refuses it with 403
+(`READ_ONLY` for a push, `NOT_SERVED` for a snapshot or a feed,
+`QUERY_DISABLED` for a query).
 
 A push carries the dialer's own writes **and** what it received from its other
 peers, so ops travel across the mesh hop by hop. The version vector stops them
@@ -528,6 +535,10 @@ backing off and re-opening the subscription from the last event id are the
 **link's** job — a wrpc client already does all three. After a reconnect the
 manager only repeats `hello` + `push`, the outbound half a transport cannot know
 about.
+
+The cursor is one hub's log position — `<epoch>.<seq>` — unless the hub
+serves `changes` from a [shared log](./scaling#hubs), where it is a position
+in that log and the same on every hub.
 
 A page that cannot be applied — a `beforeApply` that throws, a log append
 that fails — is a **break in the stream**, not a page to step over (an op on
@@ -641,11 +652,19 @@ has to reach a fuller node.
 
 ```js
 await storage.sync.addNode({ url: 'wss://peer/api', token: 'secret', scopes: ['*'] });
+await storage.sync.addNode({ url: 'wss://feed/api', direction: 'pull' }); // take its ops, push none
 await storage.sync.enableNode('wss://peer/api', false); // keep, but do not dial
 await storage.sync.removeNode('wss://peer/api');
 storage.sync.listNodes();
-// [{ url, token, scopes, enabled, lastSync, cursor, remote: { id, epoch, schema }, acked }]
+// [{ url, token, scopes, direction, enabled, lastSync, cursor, remote: { id, epoch, schema }, acked }]
 ```
+
+`direction` is what the link carries: `'both'` (the default) pushes and
+subscribes; `'pull'` only subscribes — nothing of this node goes to the
+peer, `sync()` pushes nothing to it, and retention does not wait for its
+acknowledgement; `'push'` only pushes — no feed, no bootstrap, so what the
+peer holds never comes back. The host's own rules are its unit's `allow`
+([Hosting](#hosting)).
 
 Each node is a file under `<path>/remote/`, named by its percent-encoded url,
 on Node.js and in the browser alike. The `cursor` and the remote node's identity
@@ -661,13 +680,18 @@ and why a node is registered once: `addNode()` of a url already there is
 await storage.sync.start(); // dial every enabled node; automatic when `connect` is given
 await storage.sync.stop();  // close every link
 await storage.sync.sync();  // push what the peers lack right now
-storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, lastError }]
+storage.sync.peers();       // [{ url, node, connected, subscribed, cursor, lastSync, pending, behind, stuck, terminal, lastError, direction, caughtUp }]
 storage.sync.hosted();      // hosting side: [{ node, scopes, since, cursor }] — every live `changes` feed
+await storage.sync.awaitInitialReplication(); // every enabled node greeted and its feed read to its end once
+await storage.sync.awaitInSync();             // …and nothing left to push to any of them, right now (a node whose dial failed, or whose host refused its feed for good — `terminal` — is not waited for)
+await storage.sync.awaitDocumentPushed(id);   // this node's newest op for the record acknowledged by every node it goes to
 
 storage.sync.on('peer', ({ url, connected, node, reconnected, schema }) => {});
 storage.sync.on('sync', ({ url, pushed, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged }) => {});
 storage.sync.on('bootstrap', ({ url, records }) => {});
 storage.sync.on('error', (error) => {}); // error.url names the peer; error.code: a string below, or a host's numeric refusal
+storage.sync.revoke(node, ['B']);  // hosting side: take scopes back from a peer — its feeds end, it is told, its next hello grants less; kept across a restart, every hub's over a shared log
+storage.sync.on('revoke', ({ node, scopes }) => {});
 storage.sync.on('refused', ({ node, reason, count }) => {}); // hosting side: a peer's ops refused — 'scope' | 'forged' | 'unsigned' | 'equivocation'
 storage.sync.on('start', () => {});
 storage.sync.on('stop', () => {});
@@ -724,7 +748,7 @@ once `close()` was called is refused at once.
 | `log.rollAfter` | `64` | Groups of appends per sealed segment |
 | `pageSize` | `500` | Ops per push. What a host serves per page — snapshot records, `changes` ops — is its own `unit({ pageSize })` |
 | `hooks` | — | `beforeConnect`, `beforeBootstrap` — see [Hooks and events](./hooks#sync-hooks) |
-| `sharedLog` | — | Reserved for a hub mode on a broker's log; refused in this version — see [Scaling](./scaling#hubs) |
+| `sharedLog` | — | A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`) or `mongoSharedLog()` — alone or as `{ log, topic, inbox, stopWait }`: every op this node accepts goes to the topic, the other hubs' are applied from it, `changes` is served from it, a read-only hub hosts over it — see [Scaling](./scaling#hubs) |
 
 The `telemetry` option sits beside `sync` on `createDatabase()`, not inside it — see
 [OpenTelemetry](./telemetry) for the spans and metrics replication emits.
@@ -757,6 +781,10 @@ const unit = storage.sync.unit({
 | `pageBytes` | `4 MiB` | Above this a page is sent inline rather than streamed |
 | `limits` | `{ opsPerPush: 10000 }` | Per-peer push limits: `opsPerPush` (10 000 unless given; `Infinity` for none), `bytesPerPush` (the JSON length of a page) and `opsPerSecond` — see below |
 | `meta` | — | Copied onto all four procedures, for a wrpc `onRequest` hook to read as `context.procedure.meta` |
+| `authorizeWrite({ op, peer, current, after })` | `sync.authorizeWrite` | The host's rule on what a peer may write — the manager's (`createDatabase({ sync: { authorizeWrite } })`) unless the unit names its own, and the writer's over what a follower forwarded to the shared log's inbox — asked of every pushed op before it is applied, with the record as it is here and as the op would leave it: `false` refuses the op — logged as a scrub leaves it, relayed as a no-op, no gap — and the push's answer names it (`refused`, with the record as the host holds it and the op's `actor`), so the pusher sets itself straight (`WRITE_REFUSED`, `touched` naming the fields: its own op's fields brought back to what the host holds through the kinds' own ops — a counter by an inc, a set by a remove, a text by a splice — leaving what the host accepted since as it is; or the record forgotten where the host holds nothing; a revert refused again is reported alone). A sealed record at the host is skipped before the rule is asked. A throw fails the page |
+| `prove` | `true` under `signatures: 'require'` | Ask every peer to prove it holds the key that is its node id: hello answers a `challenge`, the peer signs it (`syncom/prove`, the dialer does so by itself), and until then push, snapshot and changes are 403 `UNPROVEN` (a bad signature 403 `BAD_PROOF`). Needs the signing plugin |
+| `query` | `false` | Serve `query` and `count`: a thin client's read of this host's records through the query plugin — a Mango query, sort keys, a window — in its scopes, within `limits.rowsPerQuery` (500: the rows answered to a peer granted everything, the rows READ for a scoped one, whose walk goes on until its window is full and whose answer says `capped` where the budget ended it; `Infinity` for none); never a [sealed record](./query#sealed-records), which is the key holder's. `true` is `{ regex: false }`: a `$regex` from the wire is refused (400 `REGEX`); `{ regex: 'safe' }` takes a pattern with no nested quantifier, backreference or lookaround; `{ regex: true }` any — a trusted peer's, since a pattern runs on this host's event loop. A client over a stateless transport (plain HTTP: one request, one client) carries its hello in the call (`hello: { node, token, scopes }`), greeted as a hello is and kept nowhere. See [Wire format](../reference/wire#query-and-count) and [Thin clients over HTTP](./wrpc#thin-clients-over-http) |
+| `allow` | `{ push: true, changes: true, snapshot: true, blob: 'named' }` | Which procedures this unit serves: a peer asking for `push` where it is off is refused with 403 (`reason` `'READ_ONLY'`), for `blob` ([attachments](./attachments)) or `snapshot` or `changes` with 403 (`'NOT_SERVED'`) — a read-only mirror, a write-only sink, each a unit of its own. `blob` is `'named'` (`true`): a digest served only to a peer that names a live record in its scopes holding it, so a revoke, a purge or a forget follow the record; `'any'`: by digest alone, a trusted mesh's |
 | `presence` | `{ timeout: 30000, rate: 20, max: 1024 }` | The unit's inbound event `on.presence` — a peer's [presence](./presence) update, its own node's and of a scope it asked for, at most `rate` a second, signed under `'require'` — relayed to the scope's room; the host keeps the newest state per node (`max` per scope, for `timeout` ms) and hands them to a newcomer at hello |
 
 `limits` are the host's own, checked in `push` — the one place that knows the
@@ -793,6 +821,27 @@ const unit = storage.sync.unit({
 ```
 
 See [wrpc transport](./wrpc) for mounting it.
+
+**Over a shared log** (`sync.sharedLog`, [Scaling](./scaling#hubs)) the
+unit hosts from the log rather than from this node's own: `changes` reads the
+topic from the client's cursor — a position in the log, the same on every
+hub, and `hello` answers the log's epoch (`shared:<topic>`) so a client moved
+between hubs keeps it — a client with no cursor is told to bootstrap, and a
+snapshot's first page is positioned at a marker the hub appended and its
+consumer passed (`eventId`). A hub that cannot write — a follower
+(`readOnly: true`) over MongoDB, a writer whose lease was lost — hosts there
+too, and nowhere else (`sync.unit()` is `READ_ONLY` without a shared log):
+its hello answers the vector as the log moved it, and a push — verified as a
+writer verifies one, a forged or an unsigned op stopping there — is held to
+that vector and to what it forwarded before, and forwarded to the inbox for a
+hub that writes to land under its `authorizeWrite` (the answer says
+`forwarded: true`; the shadow moves once the topic shows the op, and what the
+writer did not take it tells in the topic, `dropped`, so the hold is let go);
+it serves no snapshot (403 `READ_ONLY`: a fresh
+client bootstraps from a hub that writes); without an inbox (`inbox: false`)
+a push is 503 (`READ_ONLY`), and a snapshot the shared log did not answer
+for — the relay behind, the marker not reached in time — is 503
+(`SHARED_LOG`, `detail` says which).
 
 ## The link contract
 

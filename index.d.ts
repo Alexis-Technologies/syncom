@@ -188,9 +188,19 @@ export interface EngineDb {
     remove(tag: string, id: string): Promise<void>;
     drop(tag: string): Promise<void>;
   };
+  /** Attachments' bytes by their SHA-256 (hex), where `capabilities.blobs`: a copy in, a copy out. */
+  readonly blobs?: {
+    get(digest: string): Promise<Uint8Array | null>;
+    has(digest: string): Promise<boolean>;
+    list(): Promise<string[]>;
+    put(digest: string, bytes: Uint8Array): Promise<void>;
+    remove(digest: string): Promise<void>;
+  };
   /** The op log's medium — what `OpLog` writes its groups, segments and index through; its shape is the store's (src/files/journal.js). */
   readonly log: object;
   write(batch: EngineWriteSet): Promise<void>;
+  /** Optional: the room, in bytes — what the medium can say (`db.quota()` asks it). */
+  estimate?(): Promise<{ usage: number | null; quota: number | null }>;
   close(): Promise<void>;
 }
 
@@ -453,6 +463,8 @@ export interface SyncOp {
   nonce?: string;
   /** The message of the transaction (or patch batch) the op was made in, at most 1 024 characters; in the signed header. */
   msg?: string;
+  /** The payload was scrubbed — by a purge, a `beforeSend` that said no, an `authorizeWrite` that refused: the op is a no-op wherever it lands. */
+  scrubbed?: true;
   /**
    * The fingerprint (SHA-256 of the header, hex) of the op before it in its
    * stream — `origin@scope`, or the `@~` stream of `merge`/`advance`; absent
@@ -593,6 +605,7 @@ export type SyncomErrorCode =
   | 'IN_HOOK'
   | 'IN_TRANSACTION'
   | 'PIPELINE_FAILED'
+  | 'REPLICATION_FAILED'
   | 'NOT_FOUND'
   | 'EXISTS'
   | 'FIELD_KIND'
@@ -611,8 +624,21 @@ export type SyncomErrorCode =
   | 'LOCKED'
   | 'READ_ONLY'
   | 'LEASE_LOST'
+  | 'NOT_LEADER'
+  | 'LEADER_LOST'
+  | 'CALL_UNKNOWN'
+  | 'PROMOTE_FAILED'
+  | 'BLOB_NOT_FOUND'
+  | 'BLOB_MISMATCH'
+  | 'ATTACHMENT_INVALID'
   | 'FOLLOW_LOST'
+  | 'SHARED_LOG_FAILED'
+  | 'REVOKED'
+  | 'UNPROVEN'
+  | 'WRITE_REFUSED'
   | 'TARGET_NOT_EMPTY'
+  | 'BLOBS_UNSUPPORTED'
+  | 'MOVED'
   | 'SCHEMA_MISMATCH'
   | 'ENGINE_UNREACHABLE'
   | 'KEYS_INCOMPLETE'
@@ -635,6 +661,7 @@ export type SyncomErrorCode =
   | 'STREAMS_UNSUPPORTED'
   | 'UNRECOVERABLE'
   | 'UNPERSISTED'
+  | 'QUOTA'
   | 'REWOUND'
   | 'UNDELIVERABLE'
   | 'UNLOGGED'
@@ -658,13 +685,14 @@ export type TypedErrorCode =
   | 'INVALID_VERSION'
   | 'NO_CHAIN'
   | 'PLUGIN_MISSING'
+  | 'BLOB_TOO_LARGE'
   | 'PRESENCE_SIZE';
 
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
  * a `TypeError`, which is a wrong argument, option or hook result and carries
  * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`,
- * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `PRESENCE_SIZE`, whose
+ * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `BLOB_TOO_LARGE`, `PRESENCE_SIZE`, whose
  * value is data or configuration). `code` is one constant; the fields the code
  * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
  * underlying one. A host's wire refusal is not one of these: it is a plain
@@ -720,7 +748,7 @@ export interface OpLogOptions {
   telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   fsi?: Fsi;
   /**
-   * Seal only the batches the owner has marked `applied`: what Storage asks
+   * Seal only the batches the owner has marked `applied`: what the Database asks
    * for, so a reopen's replay always covers a batch whose records may not
    * have been written. A log on its own seals everything.
    */
@@ -770,7 +798,7 @@ export interface OpLog {
     eventId: string | null | undefined,
     options?: { scopes?: readonly string[] | null; limit?: number },
   ): LogEntry[] | null;
-  /** Every retained entry of the record `id`, oldest first — what `Storage.repair()` rebuilds from. */
+  /** Every retained entry of the record `id`, oldest first — what `Database.repair()` rebuilds from. */
   entriesOf(id: string): LogEntry[];
   advance(vector: VersionVector): Promise<void>;
   tail(): LogEntry[];
@@ -1214,6 +1242,18 @@ export interface SyncHooks {
    * every later op of that stream; per-peer visibility is what scopes do.
    */
   beforeBootstrap?: (peer: BootstrapContext) => void | boolean | Promise<void | boolean>;
+  /**
+   * Before an op goes to a peer (a push, a relay). Return `false` to send it scrubbed — the header alone, a no-op
+   * where it lands, no gap in its stream (an op withheld would stop every later op of the stream at the peer).
+   * The log's op is untouched: the scrub is the copy that leaves.
+   */
+  beforeSend?: (context: { op: SyncOp; peer: PeerRef }) => void | boolean | Promise<void | boolean>;
+  /**
+   * A host took scopes back from this node (`REVOKED`): the registry entry is narrower already, the feed is opened
+   * again under the new grant after this. Without the hook every record of those scopes is forgotten here
+   * (`forget(id)`: no op — the host would refuse one).
+   */
+  onRevoke?: (context: { url: string; node: string | null; scopes: string[] }) => void | Promise<void>;
 }
 
 export interface SyncOptions {
@@ -1278,8 +1318,37 @@ export interface SyncOptions {
   maxPageBytes?: number;
   /** Lifecycle hooks — see SyncHooks. */
   hooks?: SyncHooks;
-  /** Reserved for the broker-backed hub mode; refused in this version. See SharedLog. */
-  sharedLog?: never;
+  /**
+   * The host's rule on what a peer may write — every unit's unless the unit names its own (`unit({ authorizeWrite })`),
+   * and the writer's over what a follower forwarded to the shared log's inbox: asked of every pushed op before it is
+   * applied, with the record as it is here (`current`, null for none) and as the op would leave it (`after`); `false`
+   * refuses the op — logged as a scrub leaves it, relayed as a no-op, named in the push's answer. A throw fails the page.
+   */
+  authorizeWrite?: (context: {
+    op: SyncOp;
+    peer: PeerRef | null;
+    current: RecordData | null;
+    after: RecordData | null;
+  }) => boolean | Promise<boolean>;
+  /**
+   * A log shared by the hubs of a mesh — a broker's log (wrpc's `BrokerLog`: Redis Streams, NATS, Kafka, AMQP, the
+   * memory broker) or `mongoSharedLog()` — so a client resumes on any hub: every op this node accepts is appended to
+   * the topic, what the other hubs appended is applied from it, and `changes` is served from it (a client's cursor is a
+   * position in the log). A read-only node (a follower over MongoDB, a writer whose lease was lost) hosts over it too:
+   * its hello answers the vector as the log moved it, and a push is forwarded to the inbox for a writer to land. The
+   * log alone, or `{ log, topic, inbox }`. See SharedLog.
+   */
+  sharedLog?: SharedLog | SharedLogOptions;
+}
+
+export interface SharedLogOptions {
+  log: SharedLog;
+  /** The topic every hub appends to and serves `changes` from; `'syncom'` by default. */
+  topic?: string;
+  /** The topic a read-only hub forwards its clients' pushes to, consumed by a hub that writes; `<topic>.inbox` by default, `false` for none (a read-only hub then refuses a push with 503). */
+  inbox?: string | false;
+  /** How long `stop()` (and `close()`) waits for an append in flight before letting go of it, in ms (5000 by default): what it carried is above the watermark and the next start appends it again. */
+  stopWait?: number;
 }
 
 /** What a write hook sees: the op being made, and the record it lands on. */
@@ -1525,6 +1594,10 @@ export interface ApplyContext {
 export interface PeerRef {
   url: string | null;
   node: string | null;
+  /** The op came from the shared log: `node` is the hub that appended it. */
+  shared?: true;
+  /** The op came from the shared log's inbox — a read-only hub forwarded a client's push: `node` is that client. */
+  inbox?: true;
 }
 
 /** The lockfile's knobs: `open({ lock: { mode, staleAfter, poll, timeout } })`. */
@@ -1826,7 +1899,11 @@ export interface Transaction extends TextMethods, TreeMethods {
   insert(data: object, options?: WriteOptions): Promise<string>;
   set(id: string, data: object, options?: WriteOptions): Promise<void>;
   /** The fields set, or the operators run — over what the transaction left; with `ifMatch`, whether it wrote. */
-  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(
+    id: string,
+    delta: object | UpdateOperators,
+    options: UpdateOptions & { ifMatch: MangoQuery },
+  ): Promise<boolean>;
   update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   swap(id: string, changes: object, prev: object, options?: WriteOptions): Promise<boolean>;
   delete(id: string, options?: DeleteOptions): Promise<void>;
@@ -1853,6 +1930,8 @@ export interface Node {
   url: string;
   token?: string;
   scopes: string[];
+  /** What the link carries: pushes and subscribes (`'both'`), subscribes alone (`'pull'`), pushes alone (`'push'`). */
+  direction?: 'both' | 'pull' | 'push';
   enabled: boolean;
   lastSync: number | null;
   /** Where the subscription resumes from; `null` until the first page. */
@@ -1867,9 +1946,11 @@ export interface Node {
 }
 
 /**
- * @experimental Reserved: the contract of a log shared by several hub
- * processes, for a hub mode after this version — structurally wrpc's
- * `BrokerLog`, so a broker's `.log` fits with no adapter.
+ * The contract of a log shared by several hubs (`createDatabase({ sync: { sharedLog } })`): structurally wrpc's
+ * `BrokerLog`, so a broker's `.log` — the memory broker's, Redis Streams', NATS', Kafka's, AMQP's — fits with no
+ * adapter, and so does `mongoSharedLog()` of `@alexify/syncom/mongodb`. `read` tails the topic live from `after` on
+ * (or from the oldest entry, `from: 'earliest'`); an id of another log or one trimmed past fails with `code` 410, a
+ * malformed one or one past the tip with 400.
  */
 export interface SharedLogEntry {
   id: string;
@@ -1996,12 +2077,14 @@ export interface ApplyRemoteResult {
    * logged nor relayed.
    */
   equivocations: number;
+  /** Ops a host's `authorizeWrite` refused — scrubbed and skipped here, named for the pusher with the record as it is; there only when something was. */
+  refused?: Array<{ origin: string; seq: number; scope: string | null; id: string; current: RecordData | null }>;
 }
 
-/** The events a Storage emits; listeners are contained. */
+/** The events a Database emits; listeners are contained. */
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
-  change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[] }) => void;
+  change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[]; seq: number | null }) => void;
   /** A local document written or removed (`db.local`, a collection's): its full key and the value (null once deleted). */
   local: (event: { key: string; value: unknown }) => void;
   /** A local op is durable: what it changed, as copies — built only when someone listens. */
@@ -2048,7 +2131,7 @@ export interface StorageEvents {
           count: number;
         })
       /** Records logged but not written — held in memory until they land (see Health). */
-      | (SyncomError & { code: 'UNPERSISTED'; ids: string[] })
+      | (SyncomError & { code: 'UNPERSISTED'; ids: string[]; quota?: true })
       /** The engine's lease went to another instance: read-only from here on. */
       | (SyncomError & { code: 'LEASE_LOST'; path: string; cause?: unknown })
       /** A follower's change stream ended: subscribed again, every record read again. */
@@ -2060,14 +2143,30 @@ export interface StorageEvents {
    * A peer's op left a unique key shared by two records: `id` (the op's)
    * and `other`. Both are kept — the application decides which yields.
    */
-  conflict: (event: {
-    kind: 'unique';
-    entity: string;
-    fields: string[];
-    id: string;
-    other: string;
-    op: SyncOp;
-  }) => void;
+  conflict: (
+    event:
+      | {
+          kind: 'unique';
+          entity: string;
+          fields: string[];
+          id: string;
+          other: string;
+          op: SyncOp;
+        }
+      | {
+          /**
+           * A peer's register write (a `set`'s or `write`'s field) stamped below the one this node holds: both
+           * were made without seeing the other, and the newer stamp won. The op is applied for its other fields
+           * and logged all the same; `winner` is what the field reads as here, `loser` what the op carried.
+           */
+          kind: 'register';
+          id: string;
+          field: string;
+          op: SyncOp;
+          winner: { ts: number; origin: string; value: unknown };
+          loser: { ts: number; origin: string; value: unknown };
+        },
+  ) => void;
   /**
    * `drift`: a peer runs this node's schema version with another snapshot
    * hash — two builds of "the same" schema that disagree. Reported after
@@ -2486,13 +2585,24 @@ export interface Database {
   set(id: string, data: object, options?: StorageDataOptions): Promise<void>;
   delete(id: string, options?: DeleteOptions): Promise<void>;
   /** Forgets the record for good: a `purge` op no later write revives, and a scrub of its entries from the log — here and on every peer it reaches. */
+  /**
+   * Forgets a record HERE, with no op: its file, pieces and catalog row removed, every entry of it in this node's
+   * log scrubbed and flagged skipped (a replay applies none again; the stream keeps its headers, so no peer sees a
+   * gap). Nothing reaches a peer — what a node does with the records of a scope a host took back. A later op of the
+   * record from a peer makes it again.
+   */
+  forget(id: string): Promise<void>;
   purge(id: string, options?: WriteOptions): Promise<void>;
   /**
    * Sets the listed fields (a `set` op) — or runs the operators (`UpdateOperators`), each by the kind of
    * its field, as one transaction; with `ifMatch` (the `query` plugin's) only where the record matches,
    * decided inside the queue, resolving to whether it wrote.
    */
-  update(id: string, delta: object | UpdateOperators, options: UpdateOptions & { ifMatch: MangoQuery }): Promise<boolean>;
+  update(
+    id: string,
+    delta: object | UpdateOperators,
+    options: UpdateOptions & { ifMatch: MangoQuery },
+  ): Promise<boolean>;
   update(id: string, delta: object | UpdateOperators, options?: WriteOptions): Promise<void>;
   /** Removes fields of any kind — one name or an array; a field the record does not hold is no op. An `unset` op: a register's tombstone an older concurrent `set` loses to. */
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
@@ -2536,6 +2646,8 @@ export interface Database {
   readonly collections: { readonly [name: string]: SyncomCollection };
   /** The local documents of this database — the `local` plugin's (`PLUGIN_MISSING` without it). */
   readonly local: LocalStore;
+  /** The attachments of this database — the `attachments` plugin's (`PLUGIN_MISSING` without it). */
+  readonly attachments: AttachmentStore;
   /**
    * Defines collections after the open — each as an entity of `createDatabase({ schema })`
    * would be, in force from here over the records of its type; nothing is persisted
@@ -2543,7 +2655,9 @@ export interface Database {
    * defined already or taken by the database, or a malformed definition, is a
    * TypeError and nothing is taken. The `schema` plugin's (`PLUGIN_MISSING` without it).
    */
-  addCollections(definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>): Promise<void>;
+  addCollections(
+    definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>,
+  ): Promise<void>;
   /** Forgets a collection's definition; the records stay. An unknown name is a TypeError. */
   removeCollection(name: string): void;
   /**
@@ -2570,14 +2684,16 @@ export interface Database {
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
   /** A live `Document` of `id` — `R` types its fields (`document<Post>(id)`). */
   document<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData<R = RecordData>(id: string): R | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
   hasRecord(id: string): boolean;
   /** The node's health as an operator reads it — queue, cache, catalog, log, chain, lock. No I/O. */
   stats(): StorageStats;
+  /** The room the medium has, in bytes: the engine's own estimate (memory, SQLite, IndexedDB), the files engine's volume (`usage` null); null where the medium says nothing. */
+  quota(): Promise<{ usage: number | null; quota: number | null }>;
+  /** Asks the browser to keep this origin's storage out of eviction; true where nothing need be asked. */
+  persist(): Promise<boolean>;
   /** Lands what waits — the writes in flight, then the deferred record files — so what was written is on disk. */
   flush(): Promise<void>;
   /**
@@ -2595,6 +2711,13 @@ export interface Database {
       peer?: PeerRef | null;
       adoptFrom?: string | null;
       bound?: readonly string[] | null;
+      /** A host's rule on what the peer may write (see `SyncUnitOptions.authorizeWrite`). */
+      authorize?: (context: {
+        op: SyncOp;
+        peer: PeerRef | null;
+        current: RecordData | null;
+        after: RecordData | null;
+      }) => boolean | Promise<boolean>;
     },
   ): Promise<ApplyRemoteResult>;
   adoptVector(vector: VersionVector, options?: { via?: PeerRef | null; from?: string }): Promise<SyncOp | null>;
@@ -2714,7 +2837,14 @@ export interface Cursor<T = QueryRow> {
     field: string,
     vector: readonly number[],
     k: number,
-    options?: { distance?: 'cosine' | 'euclidean' | 'manhattan' | 'dot' | ((a: readonly number[], b: readonly number[]) => number) },
+    options?: {
+      distance?:
+        | 'cosine'
+        | 'euclidean'
+        | 'manhattan'
+        | 'dot'
+        | ((a: readonly number[], b: readonly number[]) => number);
+    },
   ): Promise<{ distance: number; row: T }[]>;
   /** Every match updated — fields or operators — as ONE transaction over the matches when it starts (10 000 at most, else a TypeError): `{ matched, written }`. */
   update(delta: object | UpdateOperators, options?: TransactOptions): Promise<WriteByQuery>;
@@ -2753,8 +2883,15 @@ export interface QueryPlan {
   narrow: { field: string; values: unknown[] }[];
   /** How many records the plan expects to read before the predicate: the scan's entries, the narrowest posting list, the window where sorted; null where nothing says. */
   estimate: number | null;
+  /** How many sealed records of the collection a run reads whole beside the plan (see Sealed records). */
+  sealed: number;
   /** What the query asks of its fields: an equality, a range, a sort — what an index advisor reads. */
   uses: { equalities: string[]; ranges: string[]; order: string[] };
+}
+
+/** What `collection.select()` takes beside the query: whether the collection's sealed records are read (true by default at the facade). */
+export interface SelectOptions {
+  sealed?: boolean;
 }
 
 /** Where a page ends: the last row's order keys and its id — what `after()` takes. Opaque; JSON. */
@@ -2785,8 +2922,6 @@ export interface Reference {
   readonly id: string;
   /** The live Document the reference names, or `null` when the record is not there. */
   document<R = RecordData>(): Promise<SyncomDocument<R> | null>;
-  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record<R = RecordData>(): Promise<SyncomDocument<R> | null>;
   toJSON(): string;
 }
 
@@ -2911,7 +3046,7 @@ export interface SyncomDocumentApi<R = RecordData> {
 
 /**
  * A live record: the methods, plus one getter/setter per field of the loaded
- * object — typed by `R` (`record<Post>(id)`, a typed collection's
+ * object — typed by `R` (`document<Post>(id)`, a typed collection's
  * `record()`), any name and `unknown` under `RecordData`. A field named
  * like a method never shadows it; `data()` has it.
  */
@@ -2922,10 +3057,6 @@ export type SyncomDocument<R = RecordData> = SyncomDocumentApi<R> & { -readonly 
  * under a name that does not.
  */
 export type Document<R = RecordData> = SyncomDocument<R>;
-/** @deprecated `SyncomDocumentApi` — the name before the rename; removed in 1.0. */
-export type SyncomRecordApi<R = RecordData> = SyncomDocumentApi<R>;
-/** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
-export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
 
 /**
  * A collection, `storage.<Entity>`. `R` is the record as it reads, `I` what
@@ -2951,6 +3082,71 @@ export interface BulkResult<I = RecordData> {
  * values kept beside the records that never become an op — not logged, not in the catalog or a
  * snapshot, never at a peer. A key is a kv key (no `/`); a collection's store prefixes `<name>.`.
  */
+/** What a record says of one attachment: the register `_attachments/<name>`. */
+export interface AttachmentEntry {
+  /** SHA-256 of the stored bytes, hex. */
+  digest: string;
+  type: string;
+  /** The bytes' length before compression. */
+  length: number;
+  encoding?: 'gzip' | 'deflate';
+}
+
+export interface Attachment extends AttachmentEntry {
+  bytes: Uint8Array;
+}
+
+/** `db.attachments` — the `attachments` plugin's. */
+export interface AttachmentStore {
+  /** The bytes kept under the record as `name` (the engine's blobs store, by digest) and named on it. Rejects `NOT_FOUND` for a record that is not there. */
+  put(
+    id: string,
+    name: string,
+    bytes: Uint8Array | ArrayBuffer | string,
+    options?: { type?: string },
+  ): Promise<AttachmentEntry>;
+  /** The attachment named, or null; bytes this node lacks are asked of the peers it dials unless `fetch: false` — none has them, `BLOB_NOT_FOUND`. */
+  get(id: string, name: string, options?: { fetch?: boolean }): Promise<Attachment | null>;
+  /** Whether this node holds the bytes of the attachment named. */
+  has(id: string, name: string): Promise<boolean>;
+  list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
+  /** Takes the name off the record (replicated); the bytes stay in the store until a `sweep()`. */
+  remove(id: string, name: string): Promise<void>;
+  /** What a `put` would store and write, without storing or writing; the register's field name. */
+  prepare(
+    name: string,
+    bytes: Uint8Array | ArrayBuffer | string,
+    options?: { type?: string },
+  ): Promise<{ stored: Uint8Array; entry: AttachmentEntry; field: string }>;
+  field(name: string): string;
+  /**
+   * Mark-and-sweep over the blobs store: every digest a live record, a tag's copy (`tags`, on by default) or a put in
+   * flight names is kept, every other blob removed (`dryRun` counts alone). `READ_ONLY` on a follower.
+   */
+  sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
+  /** The counts: puts, gets (the bytes read whole), the gets that fetched from a peer, the mismatches, the misses, the sweeps, the puts in flight. */
+  stats(): AttachmentStats;
+}
+
+/** What `db.attachments.stats()` answers. */
+export interface AttachmentStats {
+  puts: number;
+  gets: number;
+  fetched: number;
+  mismatches: number;
+  missing: number;
+  sweeps: number;
+  pending: number;
+}
+
+/** What `db.attachments.sweep()` answers: the blobs the store held, the digests marked, the blobs removed, the puts in flight. */
+export interface AttachmentSweep {
+  blobs: number;
+  marked: number;
+  removed: number;
+  pending: number;
+}
+
 export interface LocalStore {
   readonly local: true;
   /** The value under `key`, or null. */
@@ -2992,7 +3188,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
    * Writes a new record: under the id its data names (the entity's composite id, or its id
    * field — a live record there is `EXISTS`, decided inside the queue), else under a minted one.
    */
-  insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
+  insert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
   /** Writes the record its data names whole, new or not (`set()` by the named id; a TypeError without one). */
   upsert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
   /** Writes the record its data names unless a live one is there, inside the queue; the Document either way. */
@@ -3011,9 +3207,12 @@ export interface SyncomCollection<R = RecordData, I = R> {
    */
   remove(options?: WriteOptions & { purge?: boolean }): Promise<{ removed: number }>;
   get(id: string, options?: { at?: Version }): Promise<R | null>;
-  /** A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. */
-  select(query?: MangoQuery<R>): Cursor<QueryRow<R>>;
-  count(query?: MangoQuery<R>): Promise<number>;
+  /**
+   * A cursor over this collection — see Cursor; the query names the record's fields, or any by a dotted path. The
+   * collection's sealed (`encrypted: true`) records are read at the key holder unless `{ sealed: false }`.
+   */
+  select(query?: MangoQuery<R>, options?: SelectOptions): Cursor<QueryRow<R>>;
+  count(query?: MangoQuery<R>, options?: SelectOptions): Promise<number>;
   /** The live records of `ids` that are this collection's, as a Map by id — one read of the engine for the ones not cached; an id absent, gone or foreign is left out. */
   findByIds(ids: readonly string[]): Promise<Map<string, R>>;
   /** The distinct values of `field` among the records matching `query`, in the sort order. */
@@ -3037,8 +3236,6 @@ export interface SyncomCollection<R = RecordData, I = R> {
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
   document(id: string): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record(id: string): Promise<SyncomDocument<R>>;
 }
 /** `Collection<R, I>`: a collection, by its RxDB-style name. */
 export type Collection<R = RecordData, I = R> = SyncomCollection<R, I>;
@@ -3054,8 +3251,6 @@ export interface SyncomDocumentConstructor {
   readonly prototype: SyncomDocument;
   new <R = RecordData>(id: string, database: Database): Promise<SyncomDocument<R>>;
 }
-/** @deprecated `SyncomDocumentConstructor` — the name before the rename; removed in 1.0. */
-export type SyncomRecordConstructor = SyncomDocumentConstructor;
 
 export interface DatabaseConstructor {
   readonly prototype: Database;
@@ -3064,30 +3259,15 @@ export interface DatabaseConstructor {
   ): Promise<Database & Collections<S> & PluginMethods<P>>;
   Collection: SyncomCollectionConstructor;
   Document: SyncomDocumentConstructor;
-  /** @deprecated `Document` — the name before the rename; removed in 1.0. */
-  Record: SyncomDocumentConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }
-/** @deprecated `DatabaseConstructor` — the name before the rename; removed in 1.0. */
-export type StorageConstructor = DatabaseConstructor;
 
 export const Database: DatabaseConstructor;
 
 export namespace Database {
   export type DatabaseDocument<R = RecordData> = SyncomDocument<R>;
   export type DatabaseCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
-}
-
-/** @deprecated `Database` — the name before the rename (the class and the type); removed in 1.0. */
-export const Storage: DatabaseConstructor;
-/** @deprecated `Database` — the name before the rename; removed in 1.0. */
-export type Storage = Database;
-export namespace Storage {
-  /** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
-  export type StorageRecord<R = RecordData> = SyncomDocument<R>;
-  /** @deprecated `SyncomCollection` — the name before the rename; removed in 1.0. */
-  export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
 /** The options of `createDatabase()` under the new name (`StorageOptions` keeps its name). */
@@ -3108,7 +3288,3 @@ export function createDatabase<S extends Schema = Schema, const P extends readon
  * database is `LOCKED`, never emptied under it; a path that holds nothing is nothing to do.
  */
 export function dropDatabase(path: string, options?: { engine?: Engine; fsi?: Fsi }): Promise<void>;
-/** @deprecated `createDatabase()` — the name before the rename; removed in 1.0. */
-export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
-  options?: StorageOptions<S> & { plugins?: P },
-): Promise<Database & Collections<S> & PluginMethods<P>>;

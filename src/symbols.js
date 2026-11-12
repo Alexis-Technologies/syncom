@@ -16,7 +16,8 @@
 const COMMIT = Symbol('syncom.commit');
 const REFRESH = Symbol('syncom.refresh');
 const SOURCE = Symbol('syncom.source');
-// The cursor factory of the query plugin: `storage[CURSOR](entity, query, source?)`.
+// The cursor factory of the query plugin: `storage[CURSOR](entity, query, { source?, sealed? })` — the collection's
+// sealed records left out unless `sealed` (the facade's collections ask; a host, an agent, a connector do not).
 const CURSOR = Symbol('syncom.cursor');
 const PLUGINS = Symbol('syncom.plugins');
 const SIGNER = Symbol('syncom.signer');

@@ -12,10 +12,10 @@ import type {
   TextHandle,
   TextHandleMethods,
 } from '../src/text/text.js';
-import { open } from '../index.js';
+import { createDatabase } from '../index.js';
 
 expectType<Plugin<TextMethods & TextHandleMethods>>(text);
-const storage = await open({ plugins: [text] });
+const storage = await createDatabase({ plugins: [text] });
 expectType<Promise<void>>(storage.splice('id', 'body', 0, 0, 'hi'));
 expectType<Promise<TextSpan[] | null>>(storage.spans('id', 'body'));
 expectType<Promise<string | null>>(storage.elementAt('id', 'items', 0));

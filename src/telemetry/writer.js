@@ -73,6 +73,16 @@ const DISABLED = Object.freeze({
   recordCleanup: noop,
   recordDump: noop,
   recordInsertNamed: noop,
+  recordShared: noop,
+  recordSharedEntry: noop,
+  recordSharedLag: noop,
+  recordRevoke: noop,
+  recordRead: noop,
+  recordBlob: noop,
+  recordForward: noop,
+  recordFailover: noop,
+  recordConnector: noop,
+  recordTool: noop,
   gauges: noop,
 });
 
@@ -110,6 +120,16 @@ const METHODS = Object.freeze([
   'recordCleanup',
   'recordDump',
   'recordInsertNamed',
+  'recordShared',
+  'recordSharedEntry',
+  'recordSharedLag',
+  'recordRevoke',
+  'recordRead',
+  'recordBlob',
+  'recordForward',
+  'recordFailover',
+  'recordConnector',
+  'recordTool',
   'gauges',
 ]);
 

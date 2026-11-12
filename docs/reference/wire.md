@@ -1,9 +1,9 @@
 # Wire format
 
 What travels between two nodes and what lies on disk, byte by byte: the op
-and its nineteen slots, the payload of every type, what a signature covers,
-the per-stream chain, the log and record files, the four procedures and the
-presence event, the bounds a node holds a peer to, and what may change
+and its twenty slots, the payload of every type, what a signature covers,
+the per-stream chain, the log and record files, the procedures and the
+events, the bounds a node holds a peer to, and what may change
 without breaking a peer.
 Every example on this page was run against the package as it is
 (`@alexify/syncom/all` over `memory()`); node ids, signatures and digests
@@ -112,7 +112,7 @@ engine reads it, so a short name never names another origin's run; a full
 name of the op's own is read alike. A `remove`'s add stamp is the `ts`
 of the `add` this node had seen, per origin.
 
-### Packed: the nineteen slots
+### Packed: the twenty slots
 
 A push and a `changes` page carry ops packed — one positional array per
 op, the type as its code, `null` for an absent field, no key names
@@ -127,6 +127,7 @@ repeated per op:
 | 5 | `id` | 11 | `vector` | 17 | `nonce` |
 | 6 | `scope` | 12 | `from` | 18 | `msg` |
 | | | | | 19 | `prev` |
+| | | | | 20 | `scrubbed` (`1`) |
 
 The ops above, packed (`packOps` in `src/sync/wire.js`; `unpackOps` is the way
 back, and takes a row of fewer than five slots as nothing):
@@ -142,9 +143,13 @@ back, and takes a row of fewer than five slots as nothing):
 
 Slots were appended in this order — `v` was the thirteenth, `actor` the
 fourteenth, the signature's three the fifteenth to seventeenth, `msg` the
-eighteenth, `prev` the nineteenth — and are never reordered: a reader of
-fewer slots ignores the rest, a reader of more takes an absent slot as
-`null`. The log itself keeps the keyed form; packing is for the wire.
+eighteenth, `prev` the nineteenth, `scrubbed` the twentieth — and are never
+reordered: a reader of fewer slots ignores the rest, a reader of more takes
+an absent slot as `null`. `scrubbed` is `1` on an op whose payload was taken
+— by a purge, by its sender's `beforeSend`, by a host's `authorizeWrite` —
+and `null` otherwise: a scrubbed op is a header alone, applied nowhere,
+logged and relayed as one (a `purge` carries nothing a scrub could take and
+applies as it is). The log itself keeps the keyed form; packing is for the wire.
 
 ## What a signature covers
 
@@ -412,10 +417,19 @@ The rest of a directory: `node.json` `{ id, plugins }` (the node's id and
 the kind plugins it was opened with), `keys/sign-public.pem` and
 `keys/sign-private.pem` (the Ed25519 pair the id is), `keys/public.pem` and
 `keys/private.pem` (the RSA pair that seals an encrypted record),
-`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 4, indexes,
-stamp, rows }` — derived, rebuilt when stale; a row is `[id, type, v, encrypted, fields, gone, text,
-folded]`, the eighth cell a folded tombstone's stamps, see [cleanup](../guide/cleanup)), `local/` (the
-local documents), `pipeline/` (the pipelines' checkpoints), `tags/`.
+`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 1, indexes,
+stamp, rows }` — derived, rebuilt when stale; a row is `[id, type, v, encrypted, fields, gone, seventh]`, cut after
+its last cell that says something: the seventh a live record's search text, or the stamp of a tombstone's delete —
+a folded tombstone lives whole in the `tombstones` kv namespace, see [cleanup](../guide/cleanup)), `local/` (the
+local documents), `pipeline/` (the pipelines' checkpoints), `tags/`, `blobs/<digest>` (an attachment's bytes under
+their SHA-256, base64 text in the files engine), and the texts a block keeps in the root namespace or one of its own:
+`revoked.json` `{ v: 1, nodes: { "<node>": ["<scope>", …] } }` (the scopes a host took back from each node,
+[revoke](#the-revoke-event)), `shared/cursor.json` (a hub's cursors over the [shared log](#the-shared-log)),
+`connector/<name>` `{ pull, pushed, known: { "<id>": "<22 base64url characters of the SHA-256>" | null } }` (a
+connector's checkpoint: the backend's position, this node's log position pushed through, the backend's state per
+record as a digest — [connectors](../guide/connector#the-checkpoint)), `moved.json` `{ to: { path, engine }, at }` (a
+source `rotateAtRest` copied away, fenced: `createDatabase` refuses it as `MOVED`) and `copy.json` `{ from, started }`
+(a copy in flight into this directory, removed last; one left behind by a crash is taken away by the next copy).
 
 ## The procedures
 
@@ -429,19 +443,31 @@ naming the check.
 
 ```
 → { node, version: 1, vector, scopes, token?, schema, kinds }
-← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof? }
+← { node, vector, epoch, version: 1, schema, kinds, duplicate?, proof?, challenge?, revoked? }
 ```
+
+`challenge` is there when the host asks for a proof of the key (`unit({ prove })`,
+on by default under `signatures: 'require'`): 32 random bytes as base64url,
+to be signed under the caller's key and answered with `prove` before
+anything else is taken or handed. `revoked` names the scopes the host took
+back from this node (`sync.revoke`): asked for again, they are not granted.
 
 `vector` is the caller's whole version vector; `scopes` the scopes it
 asks to be held to (`['*']` for all); `token` its registered credential,
 for the host's `authorize`; `schema` `{ version, hash }` or `null`; `kinds`
 the names of the kind plugins it runs.
 
+Over a [shared log](../guide/scaling#a-shared-log) `epoch` is the log's
+(`shared:<topic>`), the same on every hub, so a client moved between hubs
+keeps its cursor; and a hub that cannot write — a follower, a writer whose
+lease was lost — answers the `vector` as the log moved it, not its own as of
+its open.
+
 `proof` is there only when the caller's node id is a signing key and the
 host's `vector` holds more of one of the caller's own streams (`node`,
 `node@scope`, `node@~`) than the caller's `vector` says — a directory
 restored from an older copy. It is the newest op of each such stream the
-host's log still retains, packed in the [nineteen slots](#packed-the-nineteen-slots):
+host's log still retains, packed in the [twenty slots](#packed-the-twenty-slots):
 the caller's own op at the seq the host claims, signed by the caller's key.
 The caller moves a stream past the host's (`REWOUND`) only when that op is
 well formed, its origin, stream and seq are the claim's and its signature
@@ -466,20 +492,106 @@ op of it names as `prev`. The answer, from the run above:
 
 ```
 → { ops: [packed…] }
-← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations }
+← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations, refused }
 ```
+
+`refused` names the ops the host's `authorizeWrite` said no to — `{ origin,
+seq, scope, id, current, actor }`, `current` the record as the host holds it
+(null for none), `actor` the op's own (null for none): each is logged there
+as a scrub leaves it (skipped, scrubbed) and relayed as a no-op, so the
+stream has no gap, and the pusher sets itself straight (`WRITE_REFUSED`: the
+fields its own op touched brought back to `current` through the kinds' own
+ops, or the record forgotten where the host holds nothing; an op whose
+`actor` is `revert` is reported and reverted no further).
 
 `vector` carries the keys the page touched, not the host's whole vector.
 An op outside the scopes hello granted is refused before anything reads it
 (`outOfScope`), and so is one whose record the host reads as outside them;
 one that [equivocates](#the-per-stream-chain) is refused too
 (`equivocations`, the host's `refused` event with `reason: 'equivocation'`).
+A hub that cannot write and has a [shared log](#the-shared-log) with an
+inbox verifies the page as a writer would (`forged`, `unsigned` counted and
+announced, never forwarded) and answers `forwarded: true` beside the counts:
+the ops in order of their streams went to the inbox for a hub that writes to
+land under its `authorizeWrite`, `vector` moved past them, a duplicate or a
+gap by the vector the log keeps current — and by what was forwarded before
+and the topic has not shown yet — counted and not forwarded. The hub's own
+vector moves once the topic shows an op; what the writer did not take of an
+inbox entry it names in the topic (`dropped`), and the hold is let go.
 
 | Code | `reason` | When |
 | --- | --- | --- |
 | 428 | `HELLO_FIRST` | No hello on this connection — the ordinary course of a reconnect |
 | 413 | `OPS_PER_PUSH` / `BYTES_PER_PUSH` | Over `unit({ limits })` |
 | 429 | `OPS_PER_SECOND` | The peer's token bucket is empty |
+| 403 | `READ_ONLY` | The unit takes no pushes (`allow.push` false) |
+| 403 | `UNPROVEN` | The host asked for a proof of the key and has none yet |
+| 503 | `READ_ONLY` | A hub that cannot write and forwards nothing — push to another |
+
+### `prove`
+
+```
+→ { sig }
+← { proven: true }
+```
+
+The `challenge` hello answered, signed under the caller's key as
+`Ed25519( JSON([1, "prove", challenge, hostNodeId, callerNodeId]) )`, base64url.
+Until it is answered `push`, `snapshot`, `changes`, `query`, `count` and `blob` are 403 `UNPROVEN`, a presence
+update is refused (`PRESENCE_UNPROVEN`), and the caller joins no room and is handed no presence; a
+signature over another message or under another key is 403 `BAD_PROOF`, a call
+without one (or without a challenge pending) 400 `BAD_PROOF`. Every hello is a
+new challenge.
+
+### `blob`
+
+```
+→ { digest, id, name }
+← { id, size, digest }                 (a wrpc stream of the bytes, where the transport carries one)
+← { digest, size, base64 }             (the bytes themselves otherwise)
+```
+
+An attachment's bytes by their SHA-256 (hex, 64 characters), named by the record `id` and the attachment `name`
+that hold them: what a node that holds a record naming bytes it lacks asks of the peers it dials
+([Attachments](../guide/attachments)). Under `allow.blob` `'named'` (the default) the host serves the digest only
+where a live record in the caller's scopes names it under that name — a record forgotten, purged, sealed, out of
+scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing of what the host holds is told, and
+a revoke, a purge, a forget follow the record; under `'any'` the digest alone serves (a capability: a trusted
+mesh's). The host answers a stream on a binary-capable transport and base64 on a text one (SSE); the dialer checks
+the bytes against the digest before it keeps them. 404 `BLOB_NOT_FOUND` where the host holds none (or has no blobs
+store), 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for what is no digest, 428 `HELLO_FIRST` before
+a hello, 403 `UNPROVEN` under `prove`.
+
+### `query` and `count`
+
+```
+→ { entity, query?, order?: [field | { field, desc }], limit?, offset?, scopes?, hello? }   (query)
+← { rows: [{ id, …fields }], capped }
+→ { entity, query?, scopes?, hello? }                                                        (count)
+← { count, capped }
+```
+
+A thin client's read of the host's records through the query plugin
+(`unit({ query: true })`; a host without it mounts no such procedure): the
+rows are the cursor's — a Mango `query`, the sort keys in order, the window —
+narrowed to the caller's scopes (as the host scopes a record). A caller
+granted everything is answered at most `limits.rowsPerQuery` (500) rows; a
+scoped caller's walk reads at most that many rows, in the cursor's order,
+until its window is full, and `capped` is true where the budget ended the
+walk before it was (a scoped `count` the same: `capped` says it counted what
+the budget allowed) — never a silent zero for a tenant whose rows lie past
+the first ones. `rowsPerQuery: Infinity` is no cap. A sealed (`encrypted:
+true`) record is never among the rows nor in a count: it is the key holder's
+alone. A `$regex` anywhere in the query is 400 `REGEX` unless the unit takes
+them (`unit({ query: { regex: 'safe' } })`: a pattern with no nested
+quantifier, backreference or lookaround; `regex: true`: any — a trusted
+peer's, since a pattern runs on the host's event loop). An entity or a query
+the cursor refuses is 400 `BAD_QUERY`. A caller that said no hello is 428
+`HELLO_FIRST` — unless the call carries one: `hello` is the [hello](#hello)'s
+own arguments, taken as a hello is (`authorize`, the scopes, the revocations;
+`UNPROVEN` under `prove`) and kept nowhere — no room, no session, no presence
+— for a client over a stateless transport (plain HTTP, where one request is
+one client and nothing can come first).
 
 ### `snapshot`
 
@@ -490,7 +602,15 @@ one that [equivocates](#the-per-stream-chain) is refused too
 
 Records in id order, tombstones included, each with its `meta`; `cursor`
 is the last id of the page and `null` when the page is the last; `vector`
-rides on the first page only. On a binary-capable transport a page under
+rides on the first page only. Over a [shared log](#the-shared-log) the
+first page's `eventId` is the id of a marker the host appended — behind
+every op it offered to the topic — and its consumer passed before the page
+was taken, and its `vector` is what the host's reads reflect (every op
+announced, none merely reserved in its log). A hub that cannot write serves
+no snapshot: 403 `READ_ONLY` (bootstrap from a hub that writes); a log that
+did not answer is 503 `SHARED_LOG` with `detail` `behind` (the relay has an
+append to recover first), `marker` (the consumer did not reach it in time)
+or `stopped`. On a binary-capable transport a page under
 `pageBytes` (4 MiB) goes as a wrpc stream of NDJSON — one record per line
 — and the answer is `{ id, size, cursor, eventId, vector? }`, `id` the
 stream to read. `scopes` narrows what hello granted (403 `SCOPES` when
@@ -507,9 +627,35 @@ A subscription. Each page is labelled with the host's log position through
 wrpc's `tracked` shape (`Symbol.for('wrpc.tracked')`, `{ id, data }`), so a
 resume from the last id replays exactly what was missed; the ops are the
 host's log from the cursor on, in the scopes asked for, less the
-subscriber's own and what came from it. `{ bootstrap: true }` ends the
+subscriber's own and what came from it. Once the feed is read to its end
+the host sends one empty page marked `{ ops: [], eventId, idle: true }`,
+labelled with the position (the log's first, `<epoch>.0`, when nothing was
+read yet), and again after every page with ops: the dialer's `caughtUp`.
+`{ bootstrap: true }` ends the
 feed when the cursor cannot be resumed — another epoch, or compacted past
-it — and the dialer pages `snapshot` instead.
+it — and the dialer pages `snapshot` instead. Over a [shared log](#the-shared-log)
+the position is the log's entry id, one page per entry (its ops narrowed to
+the scopes, less the subscriber's own; an empty page at least every 64
+entries passed), a subscription with no cursor is told to bootstrap, and a
+position the log no longer has — another log's, trimmed past — ends the
+feed with `bootstrap` too.
+
+### The revoke event
+
+```
+host → dialer   syncom/revoke { scopes: ['…'] }
+```
+
+`sync.revoke(node, scopes)` on the host: the peer's live feeds end, this
+event reaches it at once — every connection of the node's live session, a
+session going with its socket — its grant is narrower from here on, and its
+next hello says `revoked`. The host keeps what it took back in `revoked.json`
+of its root kv namespace (`{"v":1,"nodes":{"<node>":["B"]}}`), so a restart
+grants it no more, and over a [shared log](#the-shared-log) appends it to the
+topic (`{ v: 1, node, revoke: { node, scopes } }`), so every hub takes it
+back. The dialer narrows its registry entry, reports `REVOKED`, runs
+`onRevoke` — without the hook it forgets every record of those scopes
+(`forget(id)`: no op) — and opens its feed again.
 
 ### The presence event
 
@@ -529,10 +675,52 @@ At most 1 024 entries. A host takes an update that is the peer's own
 (every entry its node), of a scope it asked for, within `rate` a second
 (20), signed under `'require'`; else refuses it — 428 `HELLO`, 429
 `PRESENCE_RATE`, 400 `PRESENCE_MALFORMED`, 403 `PRESENCE_SCOPE`,
-`PRESENCE_FORGED`, `PRESENCE_UNSIGNED` — counted, announced, never
-relayed. What passes goes to the room `syncom:<scope>` but the sender, and
+`PRESENCE_FORGED`, `PRESENCE_UNSIGNED`, `PRESENCE_UNPROVEN` (under `prove`, before the
+key is shown) — counted, announced, never relayed. What passes goes to the room `syncom:<scope>` but the sender, and
 into the host's memory of the room (`max` 1 024 states per scope, for
 `timeout` ms, 30 000), which a newcomer is sent at hello.
+
+## The shared log
+
+What the hubs of a mesh append to one log (`sync.sharedLog`,
+[Scaling](../guide/scaling#a-shared-log)) and read back. An entry's value is
+one JSON text, its headers one string:
+
+```
+value    { "v": 1, "node": "<the appender's node id>", "ops": [packed…], "scopes"?: ["…"] }
+         { "v": 1, "node": "<the appender's node id>", "mark": true }
+headers  { "by": "<the appender's token, one per process>" }
+```
+
+`ops` are the [twenty slots](#packed-the-twenty-slots), at most the
+appender's `pageSize` (500) an entry, in the order the appender accepted
+them; `scopes` rides on an inbox entry alone — the scopes the forwarding
+hub granted the client, what the landing hub bounds the ops to. A `mark`
+positions a snapshot: the id its append answered is the first page's
+`eventId`. `{ v: 1, node, revoke: { node, scopes } }` is a revocation for
+every hub to fold (`sync.revoke`). `{ v: 1, node, dropped: [[key, seq]…], inbox }` names what a
+writer did not take of the inbox entry `inbox` — a record out of scope, a
+gap — by stream key and seq: a follower lets go of the hold it kept on the
+client's stream for it (a refused op is logged as a scrub and travels as an
+op). `by` lets a hub pass its own entries without parsing them. A log
+may yield a **hole** — `{ id, value: null, headers: { hole: '1' } }`, an id
+whose entry never came (`mongoSharedLog`: a crashed appender's number) —
+which a hub tells (`SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The
+ids are the log's (`<epoch>.<n>` on wrpc's brokers and `mongoSharedLog`);
+a hub keeps its consumer's cursors and the relay's watermark — the last
+position of its own log every op at or below which is in the topic — in
+`shared/cursor.json`:
+
+```json
+{"topic":"k1x9ab.42","inbox":null,"appended":"mvqe40dinmi2cx.17"}
+```
+
+A hub that cannot write forwards a client's push to the inbox topic
+(`<topic>.inbox`) as an entry of the same shape; the hub that writes lands
+it through `applyRemote` with `via` `{ url: null, node: <the client>, inbox:
+true }` and relays it to the topic, where every hub applies it with `via`
+`{ url: null, node: <the appending hub>, shared: true }` and appends it no
+further.
 
 ## Bounds
 
@@ -568,12 +756,15 @@ a snapshot buys nothing an op could not:
 
 `hello` carries `version: 1` both ways, and a host answers another version
 with 400 `PROTOCOL`. Version 1 is the wire as the first publication will
-have it: the fifteen types and the nineteen slots above, the header under
+have it: the fifteen types and the twenty slots above, the header under
 its version number `1` with `prev` in it, the log file with its hash, the
 index with every field it is written with, the `enc1:` ciphertext bound to
-its file name, the presence format `p: 1`. Nothing reads a shape from
+its file name, the presence format `p: 1`, the catalog file's `format: 1`,
+the IndexedDB database's version 1. Nothing reads a shape from
 before that publication: a log file without a hash is unreadable, an index
-with a field missing is no index (a new epoch). Before the publication the
+with a field missing is no index (a new epoch), a catalog of another format
+is rebuilt, and no stored format carries a number above 1 — a database made
+by an earlier build is deleted, not upgraded. Before the publication the
 shapes on this page may change without a bump; after it:
 
 - **A slot is appended, never reordered or removed.** A reader of fewer

@@ -218,7 +218,7 @@ test('Catalog', async (t) => {
       catalog.put('p5', { v: 1, gone: true, deleted: [1_700_000_000_000, 'A'] });
       await catalog.save('e.9');
       const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-      assert.strictEqual(file.format, 5);
+      assert.strictEqual(file.format, 1);
       const rowsById = Object.fromEntries(file.rows.map((row) => [row[0], row]));
       assert.deepStrictEqual(rowsById.p1, ['p1', 'Post', 2, false, { orgId: 'o1' }, false, 'Again']);
       assert.deepStrictEqual(rowsById.p2, ['p2', 'Post', 1, false, {}, true]);
@@ -311,7 +311,7 @@ test('Catalog', async (t) => {
     await catalog.save('epoch.7');
     assert.strictEqual(catalog.dirty, 0);
     const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-    assert.strictEqual(file.format, 5);
+    assert.strictEqual(file.format, 1);
     assert.strictEqual(file.stamp, 'epoch.7');
     assert.deepStrictEqual(file.rows, [
       ['a', 'Post', 1, false, { orgId: 'o1', slug: 'a' }],
@@ -328,9 +328,12 @@ test('Catalog', async (t) => {
     const other = catalogOf({ entities: { Post: { index: ['title'] } } }, fsi);
     assert.strictEqual(await other.load(), null);
     assert.strictEqual(other.size, 0);
-    // Format 4 — before a tombstone's row kept its stamp — reads only where the indexes are not asked for (a tag's).
-    await fsi.write('store/index', 'catalog.json', JSON.stringify({ ...file, format: 4 }));
-    assert.strictEqual(await catalogOf(schema, fsi).load(), null, 'format 4 under strict');
+    // A file of another format is not read — a tag's catalog (`strict: false`) no more than the live one: nothing
+    // is published, so there is no older format to read.
+    await fsi.write('store/index', 'catalog.json', JSON.stringify({ ...file, format: 2 }));
+    assert.strictEqual(await catalogOf(schema, fsi).load(), null, 'another format under strict');
+    assert.strictEqual(await catalogOf(schema, fsi).load({ strict: false }), null, 'another format for a tag');
+    await fsi.write('store/index', 'catalog.json', JSON.stringify(file));
     assert.deepStrictEqual(await catalogOf(schema, fsi).load({ strict: false }), { stamp: 'epoch.7' });
     // Absent, unreadable, or of another shape.
     assert.strictEqual(await catalogOf(schema, memory()).load(), null);
@@ -529,4 +532,36 @@ test('load, define and adopt build the sorted indexes once and read the same', a
     loaded.put(id, { type: 'Post', v: 1, data: { n: catalog.row(id).fields.n, m: 1 } });
   }
   assert.deepStrictEqual(scanIds(loaded, 'Post', { index: ['n', 'm'], prefix: [], range, desc: false }), expected);
+});
+
+test('the sealed listing is the catalog’s set: a plain write leaves it the same array, a sealed write rebuilds it once, and a collection without sealed records answers the shared empty one', () => {
+  const catalog = catalogOf({ entities: { Post: { index: ['orgId'] }, Tag: {} } });
+  const none = catalog.sealed('Post');
+  assert.deepStrictEqual(none, []);
+  assert.ok(Object.isFrozen(none), 'the empty listing is shared, so frozen');
+  assert.strictEqual(catalog.sealed('Tag'), none, 'one empty listing for every collection without sealed records');
+  catalog.put('p1', { type: 'Post', v: 1, data: { orgId: 'o1' } });
+  assert.strictEqual(catalog.sealed('Post'), none, 'a plain write makes no sealed record');
+  catalog.put('e2', { type: 'Post', encrypted: true });
+  catalog.put('e1', { type: 'Post', encrypted: true });
+  const sealed = catalog.sealed('Post');
+  assert.deepStrictEqual(sealed, ['e1', 'e2']);
+  assert.strictEqual(catalog.sealed('Post'), sealed, 'read again: the same array');
+  // Plain writes of the collection — an insert, an update, a delete — leave the sealed listing as it was.
+  catalog.put('p2', { type: 'Post', v: 1, data: { orgId: 'o1' } });
+  catalog.put('p1', { type: 'Post', v: 2, data: { orgId: 'o2' } });
+  catalog.put('p2', null);
+  assert.strictEqual(catalog.sealed('Post'), sealed, 'plain writes leave the listing the same array');
+  // A sealed record gone: the listing is built again, once, from the set.
+  catalog.put('e1', null);
+  const rest = catalog.sealed('Post');
+  assert.deepStrictEqual(rest, ['e2']);
+  assert.strictEqual(catalog.sealed('Post'), rest);
+  // A sealed record of another collection now: it leaves one listing and joins the other.
+  catalog.put('e2', { type: 'Tag', encrypted: true });
+  assert.strictEqual(catalog.sealed('Post'), none, 'the last sealed record gone: the shared empty one');
+  assert.deepStrictEqual(catalog.sealed('Tag'), ['e2']);
+  // A load rebuilds the set with the rows.
+  catalog.put('e3', { type: 'Post', encrypted: true });
+  assert.deepStrictEqual(catalog.sealed('Post'), ['e3']);
 });

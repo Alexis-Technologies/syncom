@@ -18,11 +18,18 @@ src/state/state.js        @alexify/syncom/state — createState(db, name): app s
 src/dump/dump.js          @alexify/syncom/dump — exportJSON/exportPages/importJSON/migrateStorage: a database as JSON and back (its own CLAUDE.md)
 src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): a collection's turns handled once, checkpointed (its own CLAUDE.md)
 src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, options): old, acknowledged tombstones folded whole into the tombstones kv namespace (its own CLAUDE.md)
-src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents: one store object for Svelte's contract and
+src/attachments/attachments.js @alexify/syncom/attachments — attachments({ compression }): db.attachments over the engine's blobs store, the record's `_attachments/<name>` register, the bytes fetched from a peer on demand (its own CLAUDE.md)
+src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase, path, engine, channel, election }): several instances over one database, one leading, the others following and writing through it (its own CLAUDE.md)
+src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, collection, pull, push }): a collection kept in step with a backend through two handlers, checkpointed (its own CLAUDE.md)
+src/testing/testing.js    @alexify/syncom/testing — MemoryLink, createMesh, settle, waitUntil, withDatabase, memoryEngine: what a test over syncom stands on; the repository's tests run on it through tests/utils (its own CLAUDE.md)
+src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit, sealed }): the tools an agent calls over a database in the Model Context Protocol's shape, every argument checked against the tool's inputSchema (its own CLAUDE.md)
+src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents/toObservable: one store object for Svelte's contract and
                           React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
 src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
 src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
 src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
+src/blobs.js              the door of every blobs store: MAX_BLOB_BYTES (64 MiB, the one cap on plain bytes; a store takes MAX_STORED_BYTES, the seal's 28 more), isDigest/checkDigest (SHA-256 as 64 lowercase hex),
+                          checkBlobBytes (a Uint8Array within the cap, BLOB_TOO_LARGE past it) — the engines', attachments' and fetchBlob's; apart from engine.js, which every block bundles — no requires
 src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
 src/layout.js             DIRS, tagDirs — every directory a database keeps under its path (the kv namespaces, the files engine's, a tag's two): what engine.remove sweeps, tests/package/layout.test.js holds every module to — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
@@ -35,7 +42,8 @@ src/crypto/digest.js      sha256, hashOf — SHA-256 of a value's JSON as hex: t
                           path names every op by) at once on both, `hashOf` at once but a promise in the browser past 64 KiB
 src/crypto/sha256.js      sha256Now — SHA-256 in JavaScript, at once: the browser half's `hashText` (Web Crypto answers with a promise only) — no requires
 src/crypto/keys.js        loadKeyPair — the on-disk key pairs (RSA for sealing, Ed25519 for signing), generator injected by each crypto half; the signing and encryption subpaths share it; KEY_FILE_MODE — requires errors.js only
-src/crypto/pem.js         base64/PEM helpers over btoa/atob for the browser crypto halves of signing and encryption — no requires
+src/crypto/pem.js         base64/PEM helpers over btoa/atob (Buffer where there is one) for the browser crypto halves of signing and encryption, and
+                          the one base64 of a blob's bytes (the files engine, the at-rest wrapper, the host's `blob` answer) — no requires
 src/scope.js              GLOBAL_SCOPE, inScope, opInScope — the one definition of "in scope" — no requires
 src/blame.js              lastEditorOf, editorsOf — who wrote what, from a record's meta (registers' clocks, counters' sums, sets' slots, the plugins' `editors` hook); never the log
 src/hash.js               xxHash32 in pure JS — what `anonymize` hashes a string by (src/inspect/inspect.js); a checksum, never a signature — no requires
@@ -46,8 +54,7 @@ src/header.js             what names an op, the core's: the header (v1, `prev` l
 src/shape.js              isPlainObject, own, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
 src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
-src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument
-                          checks, shared by Database and realize() in patch.js — requires paths.js only
+src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument checks, shared by Database and realize() in patch.js — requires paths.js only
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes over a 62-letter alphabet (Loro's rule, MIT), as
                           strings, for ordering records — no requires; the tree plugin uses it for a node's place
 src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
@@ -57,12 +64,11 @@ src/options.js            normalizeStorageOptions — createDatabase()'s plain o
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values, the sorted indexes; catalog.json through a kv store — requires engine.js, sorted.js only
 src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — no requires
-src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
-                          `createDatabase()` (and the pre-rename aliases `Database`, `open`)
+src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends; `createDatabase()`
 src/writes.js             the facade's write helpers: checkOrm (an entity's methods/statics against what a Document and a Collection answer to), tombstone (a delete's payload), operate (an operator delta as the calls over a transaction's api), modifyIn (`modify(id, fn)` as the difference) — requires document.js, collection.js, operators.js, plugin.js, shape.js, errors.js only
 src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js only
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
-src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId) — requires errors.js, shape.js only
+src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId); a rotated source's moved.json refused (MOVED) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
 src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
@@ -73,7 +79,8 @@ src/collection.js         Collection — an entity's records, `db.<Entity>`; pub
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`); `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
-src/errors.js             SyncomError, ValidationError, typed() — no requires
+src/errors.js             SyncomError (a field never its own name, code or stack, never `__proto__`), ValidationError, typed() — no requires
+src/wire-error.js         packError/unpackError — an error as JSON between two sides of this package (the tabs' channel, the remote engine) — requires errors.js only
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over the store an engine hands it (a journal, rows; it builds none): seqs reserved at append
@@ -106,7 +113,7 @@ src/                      ships as-is — no build step, CommonJS, 'use strict'
   `setup(ctx)` — `{ fsi, db, path, logger, options, settings, storage, hash, catalogOf }`, run in `#open` before the
   log opens, in registration order — and hands back hooks the core takes: `identity` (`{ id,
 sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
-  encryption plugin), `chain` (a Blockchain, the chain plugin) — and `open(ctx)` — `{ storage,
+  encryption plugin), `chain` (a Blockchain, the chain plugin), `local` and `attachments` (the stores the facade hands out as `db.local` and `db.attachments`) — and `open(ctx)` — `{ storage,
 options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
   sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
   `core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
@@ -179,11 +186,13 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   and an op that lands on a record purged BEFORE it is stripped (`scrubOp`, src/header.js) and
   appended `scrubbed` — never logged or relayed with its payload. Never log a payload for a
   purged id through another path.
-- **`packOps` is 19 positional slots, both halves together.** `v` (13),
+- **`packOps` is 20 positional slots, both halves together.** `v` (13),
   `actor` (14), `sig`, `digest` and `nonce` (15–17), `msg` (18, a
   transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed
   header), `prev` (19, the fingerprint of the op before it in its stream, in
-  the signed header) were appended; a reader
+  the signed header), `scrubbed` (20: `1` on an op whose payload was taken — `scrubOp` in src/header.js sets it;
+  `applyOne` logs and relays such an op skipped and scrubbed, applies nothing, a `purge` excepted — never
+  malformed, so a withheld or refused op travels as a header and leaves no gap) were appended; a reader
   of fewer slots ignores the rest, a reader of more takes an absent slot as
   null. Append, never reorder — the
   shape is on the wire between every pair of peers (the log itself stores
@@ -296,7 +305,8 @@ fi }` — what is the op's own origin's named short (a run by its stamp, an elem
   `changesOf` completes the rest from
   `delta` as a `reset` with a copy of the value, or an `unset`; `delete` and
   `purge` are one change each. Never diff two readings on the op path. Every
-  announce hands them on: `change(op, via, { changes })`, `commit.changes`
+  announce hands them on: `change(op, via, { changes, seq })` (`seq` the op's log position — a
+  relay's watermark is kept by it, src/sync/shared.js), `commit.changes`
   and `commit.txn`, and ONE `transaction` event per turn (a commit, a
   transaction, a peer's page, a joined snapshot) with the changes tagged by
   id — built only while something listens.
@@ -546,8 +556,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   landings) — nothing persisted, a reopen rebuilds. A write from inside a hook or a transaction's `fn` through the
   database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
   write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
-  (a cursor's writes), `guard` (a local write) — every member a `#run` of the queue or a refusal of it; a new member
-  goes through the queue the same way.
+  (a cursor's writes), `guard` (a local write), `revert` (the sync manager's: a host's reading laid back through the
+  kinds' patches) — every member a `#run` of the queue or a refusal of it; a new member goes through the queue the
+  same way. `[CURSOR](entity, query, { source, sealed })` leaves sealed records out unless `sealed`: the facade's
+  collections ask, a host's query, an agent's tools and a connector read the seam as it is (SEC-7).
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
   `lock: false`; `bench/storage.js` does the latter. Never weaken the
@@ -563,15 +575,16 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A batch of records is
   ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions — the chain's block and tail ride in
   it as kv puts, the pieces a record drops with its row, the tags' copies ahead of the records; a lost lease swaps the stores and the log's medium for the read-only ones
-  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine and neither dials nor hosts (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
+  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine, never dials and hosts over a shared log alone (`sync.sharedLog`, src/sync/shared.js: its feed from the log, its pushes forwarded to the inbox) (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write
   while one is running — a write from a hook would wait for the hook that
   waits for it. Hook calls live in `src/commit.js`, `src/bootstrap.js`
-  (`core.hook`), `get`, `src/apply.js`, `#connect` and `#bootstrap` only; there is deliberately no hook on the ops
-  that leave for a peer (a withheld op is a gap that stops that stream —
-  scopes are the per-peer filter). Only the hooks that run inside the
+  (`core.hook`), `get`, `src/apply.js`, `#connect`, `#bootstrap` and `#outgoing` only; the hook on the ops that
+  leave for a peer (`beforeSend`, src/sync/manager.js) never withholds one — a missing op is a gap that stops that
+  stream — it sends a scrubbed copy (slot 20), and the host's `authorizeWrite` refuses the same way; scopes are
+  the per-peer filter. Only the hooks that run inside the
   mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
   queues. A collection's events (`Collection#hear`, fed by `Catalog.subscribe` inside the landing) are queued

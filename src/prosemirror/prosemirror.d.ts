@@ -7,7 +7,7 @@ import type * as PMModel from 'prosemirror-model';
 import type * as PMState from 'prosemirror-state';
 import type * as PMTransform from 'prosemirror-transform';
 import type * as PMView from 'prosemirror-view';
-import type { Storage, TextMethods, TextSpan } from '../../index.js';
+import type { Database, TextMethods, TextSpan } from '../../index.js';
 import type { DeltaOp, TextBinding, TextBindingOptions, PresenceCursor } from '../editor/editor.js';
 import type { Presence } from '../presence/presence.js';
 import type { UndoManager } from '../undo/undo.js';
@@ -78,7 +78,7 @@ export interface ProseMirrorBinding {
 
 /** Binds a ProseMirror editor to text field `path` of record `id`. */
 export declare function createProseMirror(
-  storage: Storage & TextMethods,
+  storage: Database & TextMethods,
   id: string,
   path: string,
   pm: ProseMirrorModules,

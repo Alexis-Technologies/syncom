@@ -10,7 +10,7 @@ import {
   isVector,
 } from '../src/search/search.js';
 import type { TextIndex, Distance } from '../src/search/search.js';
-import { open } from '../index.js';
+import { createDatabase } from '../index.js';
 import type { StorageOptions } from '../index.js';
 
 const factory = createSearch();
@@ -30,4 +30,4 @@ expectAssignable<Distance>(euclidean);
 expectAssignable<Distance>(manhattan);
 expectAssignable<Distance>(dot);
 expectType<boolean>(isVector([1]));
-void open({ search: createSearch(), schema: { entities: { Post: { search: ['title'] } } } });
+void createDatabase({ search: createSearch(), schema: { entities: { Post: { search: ['title'] } } } });

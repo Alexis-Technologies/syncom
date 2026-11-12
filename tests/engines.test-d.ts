@@ -15,6 +15,8 @@ await createDatabase({ engine });
 const connected = await connectEngine(port);
 expectAssignable<Engine>(connected);
 const copied = await copyEngine(memoryEngine(), memoryEngine(), { path: 'app', batch: 100 });
+await copyEngine(memoryEngine(), memoryEngine(), { path: 'app', targetPath: 'app-copy' });
+expectType<number>(copied.blobs);
 expectType<CopyEngineResult>(copied);
 expectType<number>(copied.records);
 const guarded = serveEngine(memoryEngine(), port, { allow: ['app'] });

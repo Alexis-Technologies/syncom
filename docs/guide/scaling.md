@@ -19,23 +19,128 @@ await hub.sync.addNode({ url: 'wss://hub-2.internal/api', scopes: ['*'] });
 defineRouter({ syncom: hub.sync.unit({ access: 'session', authorize, limits, meta }) });
 ```
 
-Two rules keep it simple. **Sticky sessions**: a client's `changes`
-subscription names a position in *one* hub's log (`<epoch>.<seq>`), so a
-load balancer must keep a client on the hub it greeted; a client moved to
-another hub finds another epoch at hello, drops its cursor and starts over
-there — that hub's whole retained log, or a bootstrap once it has compacted
-— correct, just more expensive. **A hub restart resumes**: the log's
-epoch is minted once, so clients of a restarted hub pick up from their
-cursors without a snapshot, as long as retention still covers them.
+Two rules keep a hub mesh without a shared log simple. **Sticky sessions**:
+a client's `changes` subscription names a position in *one* hub's log
+(`<epoch>.<seq>`), so a load balancer must keep a client on the hub it
+greeted; a client moved to another hub finds another epoch at hello, drops
+its cursor and starts over there — that hub's whole retained log, or a
+bootstrap once it has compacted — correct, just more expensive. **A hub
+restart resumes**: the log's epoch is minted once, so clients of a restarted
+hub pick up from their cursors without a snapshot, as long as retention still
+covers them.
 
-What a hub mesh does not give is one log shared by every hub process. That
-is the next step — a **shared log** on a broker (Redis Streams, NATS,
-Kafka), every hub appending what it accepts and serving `changes` from the
-stream, so a client resumes on any hub. The contract is reserved as
-`SharedLog` (`append`, `read`, `parseId` — the shape of wrpc's
-`BrokerLog`, so a broker's `.log` fits with no adapter; `isSharedLog()`
-checks it) and `createDatabase({ sync: { sharedLog } })` is refused until that mode
-exists.
+### A shared log
+
+What a hub mesh alone does not give is one log every hub process serves
+from. `sync.sharedLog` is that log: every op a hub accepts — its own writes,
+a client's push, a joined snapshot — is appended to one topic (a batch an
+entry, `pageSize` ops at most), every other hub applies from the topic what
+it lacks, and `changes` is served from the topic, so a client's cursor is a
+position in the shared log — the same on every hub, whose hello answers the
+log's epoch (`shared:<topic>`) — and a client moved by the load balancer
+resumes on the new hub without a bootstrap. The hubs need no edge between
+them. The log is anything with wrpc's `BrokerLog` shape — `append`, `read`,
+`parseId`; `isSharedLog()` checks it — so a wrpc broker's `.log` fits with
+no adapter:
+
+```js
+// Hubs over one broker: Redis Streams here; @alexify/wrpc/broker/nats, /kafka, /amqp the same way.
+const { createRedisBroker } = require('@alexify/wrpc/broker/redis');
+const broker = createRedisBroker({ client: redis });
+const hub = await createDatabase({ path: '/var/lib/syncom', schema, sync: { sharedLog: broker.log } });
+defineRouter({ syncom: hub.sync.unit({ access: 'session', authorize, limits, meta }) });
+```
+
+`{ log, topic, inbox }` names the topic (`'syncom'`) and the inbox
+(`<topic>.inbox`; `false` for none). wrpc's in-process `MemoryBroker` is the
+same log in one process — `tests/wrpc.integration.test.js` runs two hubs over
+its `log` behind real servers and moves a client between them, which resumes
+from its cursor without a bootstrap. Without a broker, a MongoDB the hubs
+already share carries the log: `mongoSharedLog()` of `@alexify/syncom/mongodb`
+keeps a topic's entries in two collections, numbered by the topic's head
+document, with a change stream (or a poll) as the tail — the writer hub and
+its followers over one `mongoEngine()` database serve `changes` from it:
+
+```js
+const { mongoEngine, mongoSharedLog } = require('@alexify/syncom/mongodb');
+const engine = mongoEngine({ client });
+const sharedLog = mongoSharedLog({ client });
+// The one writer: holds the database's lease, lands every op, appends what it lands.
+const writer = await createDatabase({ path: 'hub', engine, schema, sync: { sharedLog } });
+// A follower in another process: reads the records as the writer lands them, hosts from the log.
+const follower = await createDatabase({ path: 'hub', engine, schema, readOnly: true, sync: { sharedLog } });
+defineRouter({ syncom: follower.sync.unit({ access: 'session', authorize }) });
+```
+
+A **read-only hub** — a follower, or a writer whose lease was lost — hosts
+over the shared log and nowhere else: its hello answers the vector as the log
+moved it (a shadow the topic keeps current), its feed comes from the log, and
+a client's push — verified first, as a writer verifies one: a forged or an
+unsigned op stops at the follower, counted and told — is held to that vector
+and to what the follower forwarded before, and forwarded to the **inbox**,
+which a hub that writes consumes under its `authorizeWrite`, lands and relays
+to the topic (the push answers `forwarded: true` with the vector moved past
+what went in; the shadow itself moves once the topic shows the op). What the
+writer refuses by rule is logged as a scrub and reaches the topic like any
+op; what it does not take at all — a record out of scope, a gap — it tells
+the followers in the topic (`dropped`) and the `refused` event (`via:
+'inbox'`), so the hold is let go, the next hello sets the client straight,
+and a genuine op at that position is forwarded then. It serves no **snapshot** (403
+`READ_ONLY`): its shadow runs ahead of its engine, and a page of it could lack
+what the vector claims — so the load balancer's rule is that a client with no
+cursor lands on a hub that writes, and follows on any hub from then on (the
+epoch is the log's). Without an inbox a read-only hub refuses a push with 503
+(`READ_ONLY`). Several writers over one inbox each land every entry of
+it — correct, wasteful: a mesh of writers needs no inbox (`inbox: false`),
+one writer and its followers need one.
+
+A **revocation** (`sync.revoke`) made on one hub reaches every hub of the
+log — appended to the topic, folded by each, kept by each in its
+`revoked.json` — so a client the hub took scopes back from is granted them
+on no hub, after no restart.
+
+A hub reads the log **once**, however many clients follow it: its consumer's
+read serves every `changes` feed from the entries it passed last (a ring of
+1 024), and only a feed whose cursor fell behind the ring reads the log its
+own way until it catches up — a thousand idle followers cost the log one tail.
+
+A hub **joins** the log with its state: everything its log retains goes to
+the topic first (what it compacted reaches the others through a snapshot of
+it — dial it once; a log compacted past the watermark is told once, `lost`,
+and what it retains still goes). A **fresh client** of a shared-log hub bootstraps: a
+`changes` subscription with no cursor is told so, and the snapshot's first
+page is positioned at a marker the hub appends — behind every op it offered
+to the topic so far — and its consumer passes, so nothing lands between the
+pages and the cursor; the page's `vector` is what the hub's reads reflect
+(every op announced, none merely reserved in its log), so the client takes
+as seen nothing a page could lack. While the relay is behind the snapshot is
+refused (503 `SHARED_LOG`, `detail: 'behind'`) until it recovers. **Failures** are
+`SHARED_LOG_FAILED` on the manager's `error` event, with a `reason`: an
+append that failed (`append`, once per run) is appended again — everything
+the log holds above the **watermark**, the last position of this hub's log
+every op at or below which is in the topic (moved only by a whole run of
+appended positions, never by a position still landing) — once the broker
+answers, and every start does the same, so a hub stopped or closed with ops
+waiting appends them at its next start (`stop()` waits `stopWait`, 5 s, for
+an append in flight, then lets go of it); a
+cursor the log trimmed past, or another log's (`gone`), is read from the
+oldest entry, and what fell between is a gap of its streams until a bootstrap
+from another hub fills it (`addNode` a hub, once); an entry the engine
+refuses — the medium down, a lease late, a group the log would not take — is
+tried again, backed off (`apply`, told once per run; `sync.shared().retrying`),
+until it lands, while one a rule refuses three times — a hook that throws, a
+bug — leaves its topic `stuck` (`sync.shared().stuck`) and nothing past it is
+taken until `sync.stop()` and `start()`. `sync.shared()`
+is the cursors, the watermark (`appended`, and `covered`: the positions
+above it known to be in the topic) and the counts. A **hole** — a position
+the log handed out whose entry never came (`mongoSharedLog`: a crashed
+appender's number) — is told (`hole`, with the id) and passed; the appender's
+own recovery appends what it carried once it is back. Retention is the log's —
+a broker's `maxEntries`, `mongoSharedLog({ retention: { maxEntries, topics } })`
+or `trim()` — and a client whose cursor was trimmed bootstraps; name the
+topics retention trims where an inbox is in play: the writer trims the inbox
+past its cursor itself (`trimBefore`), so what a follower forwarded is never
+dropped before it landed.
 
 ## Scopes as buckets
 
@@ -121,16 +226,13 @@ same updates travel over the mesh.
 
 Two tabs are two instances, and `createDatabase()` is exclusive per directory
 ([why](./database#one-instance-per-directory)): the second tab sees
-`code: 'LOCKED'`. The connection is easy to share — a SharedWorker running
-wrpc's `WrpcClientProxy` holds one WebSocket, and every tab's
-`connect(url, { worker })` goes through it — but the storage is not: a
-proxied connection does not stop two storages from minting the same
-sequence number. For v1, one tab owns the storage and syncs: the others
-wait for the lock (`lock: 'wait'`), route reads and writes to it through a
-`BroadcastChannel`, or read beside it as a follower (`readOnly: true` over
-the IndexedDB engine, which hears the owner's writes) — a follower's log
-and vector are as of its open, and it neither dials nor hosts until the
-shared log lands. A storage served from a worker to its tabs is the
+`code: 'LOCKED'`. [`@alexify/syncom/shared`](./shared) is the arrangement:
+one tab leads — a full database that writes, dials and hosts — and the others
+follow as read-only databases over the same engine, hearing the leader's
+writes through the engine's change stream and writing through the leader over
+a channel (wrpc on a SharedWorker's port); the leader gone, the next tab is
+granted the lock and leads with the same node id and log. Replication is the
+leader's alone. A storage served from a worker to its tabs is the
 follow-up.
 
 ## End-to-end encryption

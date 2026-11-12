@@ -33,6 +33,10 @@ const SYNC_INTROSPECTION = Object.freeze({
     push: Object.freeze({}),
     snapshot: Object.freeze({}),
     changes: Object.freeze({ kind: 'subscription' }),
+    prove: Object.freeze({}),
+    query: Object.freeze({}),
+    count: Object.freeze({}),
+    blob: Object.freeze({}),
   }),
 });
 
@@ -102,4 +106,22 @@ const createWrpcLink = (client, { unit = UNIT } = {}) => {
   return link;
 };
 
-module.exports = { createWrpcLink, isSyncLink, SYNC_INTROSPECTION };
+/**
+ * The channel a follower of `@alexify/syncom/shared` carries its writes over: a WrpcClient (or anything with its
+ * `call` and `close`) to the leader's server, where `defineRouter({ [unit]: shared.serve() })` mounts the writers —
+ * over a worker port (`WrpcClient.connect(url, { worker: port })`, the leader's `rpc.attachPort(port)`), a
+ * WebSocket, anything wrpc dials. `unit` is the router unit's name (`syncom-db`).
+ */
+const createSharedChannel = (client, { unit = 'syncom-db' } = {}) => {
+  if (!client || typeof client.call !== 'function' || typeof client.close !== 'function') {
+    throw new TypeError('createSharedChannel: expected a WrpcClient (call/close)');
+  }
+  if (typeof unit !== 'string' || unit.length === 0) throw new TypeError('createSharedChannel: unit must be a name');
+  return {
+    call: (method, args) => client.call(`${unit}/${method}`, args),
+    close: () => client.close(),
+    client,
+  };
+};
+
+module.exports = { createWrpcLink, createSharedChannel, isSyncLink, SYNC_INTROSPECTION };

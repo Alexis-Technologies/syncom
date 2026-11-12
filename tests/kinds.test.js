@@ -93,7 +93,7 @@ test('a method of a plugin the storage was not opened with rejects with PLUGIN_M
   assert.deepStrictEqual(await storage.get(id), { title: 'x', hits: 2, tags: ['a'] });
 });
 
-test('open({ plugins }) picks the kinds; the /all entry has every shipped one', async (t) => {
+test('createDatabase({ plugins }) picks the kinds; the /all entry has every shipped one', async (t) => {
   const withText = await openLean({ plugins: [text] });
   t.after(() => withText.close());
   assert.deepStrictEqual([withText.plugins, withText.kinds], [['text'], ['text']]);

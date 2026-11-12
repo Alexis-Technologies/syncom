@@ -80,7 +80,7 @@ const ENTRIES = [
   // signed at its three sites, the verify pre-pass over a peer's page with
   // its two refusals and the `sync.signatures` option — the raise to 40 KB
   // (39.8 measured). The search seam — an entity's `search` fields joined
-  // into its catalog row (format 3), the injected TextIndex contract, `$text`
+  // into its catalog row, the injected TextIndex contract, `$text`
   // seeding the candidates in the index's order — the raise to 41 KB (40.7
   // measured); the index itself is the @alexify/syncom/search subpath. The
   // fixes the RxDB comparison found — scope bounds on a push, a dialer that
@@ -179,7 +179,7 @@ const ENTRIES = [
   // 68.8 with the catalog's sorted indexes (compound keys, `scan`) and `compare` shared, an array keyed per element (collections plan, C3.1). 69.5, raised by name.
   // 69.8 with folded tombstones (Catalog.fold, EntryStore.fold, the row rebuilt on a read; collections plan,
   // C4.5) and the transaction event's eventId. 70, raised by name.
-  // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (catalog FORMAT 5; review №6, E1.1;
+  // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (review №6, E1.1;
   // 2026-11-02). 70.5, raised by name. 70.5 with the folded tombstones in the `tombstones` kv namespace (EntryStore.foldMany,
   // the fallback read, the rebuild over both stores; review №6, E1.2–E1.3). 71, raised by name.
   // 71.0 with a row's id laid last, writes by query matched again inside the queue, drop() under the lock, dropDatabase()
@@ -197,7 +197,17 @@ const ENTRIES = [
   // 74.7 with the collection's events on a microtask, the unique keys in maps, one operator per field, a query's depth
   // bound (review №6, E6; 2026-11-02). 75, raised by name.
   // 75.1 with the writer's record methods, the stats fields, the error fields and the log lines of E7 (review №6, E7; 2026-11-02). 75.5, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 75.5 },
+  // 75.5 (over by bytes) with a peer's register write that lost told as a conflict (applyFields' `lost`, apply.js
+  // reportLost; sync-parity plan, S1; 2026-11-06). 76, raised by name.
+  // 76.4 with the attachments getter, the files engine's blobs store and the one base64 of crypto/pem.js (sync-parity
+  // plan, S4). 77, raised by name.
+  // 77.2 with the sealed seam's flag and the merged sealed page, the seam's `revert` by the kinds' patches (review №7,
+  // E1, E3.1; 2026-11-07). 77.5, raised by name.
+  // 77.2 with the digest and the blob cap at the contract (engine.js isDigest/checkDigest/checkBlobBytes, every store's
+  // door; review №7, E7.1; 2026-11-07). 77.5, raised by name.
+  // 77.8 with both tracks of review №7 merged — the sealed seam, the revert by patches, the blobs' door and the moved
+  // source's fence (2026-11-07). 78, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -210,7 +220,10 @@ const ENTRIES = [
     label: 'contracts — browser (@alexify/syncom/contracts)',
     entry: 'src/contracts/contracts.js',
     platform: 'browser',
-    budget: 1,
+    // 1.1 with isQuotaError beside the errors it shares with the core (sync-parity plan, S5). 1.2, raised by name.
+    // 1.2 (at the line) with a SyncomError's fields guarded against its own name, code and `__proto__` (review №7, E11.3;
+    // 2026-11-07). 1.25, raised by name.
+    budget: 1.25,
   },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
@@ -231,7 +244,12 @@ const ENTRIES = [
     label: 'engines — browser (@alexify/syncom/engines)',
     entry: 'src/engines/engines.js',
     platform: 'browser',
-    budget: 10,
+    // 10.1 with the blobs store proxied and copied (sync-parity plan, S4). 10.5, raised by name.
+    // 10.6 with the blobs' door (src/blobs.js) at the served store and a copy refused into a target without blobs
+    // (BLOBS_UNSUPPORTED; review №7, E7.1/E7.3; 2026-11-07). 11, raised by name.
+    // 11.0 (at the line) with the served store taking the seal's bytes past the cap (MAX_STORED_BYTES; review №7, E12;
+    // 2026-11-07). 11.25, raised by name.
+    budget: 11.25,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
@@ -313,7 +331,9 @@ const ENTRIES = [
     entry: 'src/inspect/inspect.js',
     platform: 'browser',
     // 5.0 with own() from shape.js and the checksum's reused buffer (2026-10-27). 5.5, raised by name.
-    budget: 5.5,
+    // 5.6 (over by bytes) with isQuotaError's walk of the cause and SQLITE_FULL in errors.js, which it bundles (review №7,
+    // E7.3; 2026-11-07). 5.75, raised by name.
+    budget: 5.75,
   },
   // Everything in one import: the core with the text and tree plugins
   // registered — what the main entry was before the kinds became plugins.
@@ -427,7 +447,39 @@ const ENTRIES = [
   // 160.5 with a purge's ids scrubbed together through the log and the tags (review №6, E5.5). 161, raised by name.
   // 161.3 with the events, the guards and the bounds of E6 (review №6, E6). 161.5, raised by name.
   // 162.3 with the blocks recording their work (review №6, E7). 162.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 162.5 },
+  // 165.9 with the shared log (src/sync/shared.js: the relay, the consumer, a read-only hub's shadow vector and its
+  // forwarded pushes; the feed and the positioned snapshot in hosting.js; sync-parity plan, S0; 2026-11-04). 166.5,
+  // raised by name.
+  // 167.1 with one-way links, a host's `allow`, the idle page and the awaits, register conflicts (sync-parity plan,
+  // S1; 2026-11-06). 167.5, raised by name.
+  // 169.6 with the host's rules and the dialer's (authorizeWrite, beforeSend, prove, revoke, query/count, forget;
+  // sync-parity plan, S1; 2026-11-06). 170, raised by name.
+  // 170.9 with the blobs stores, fetchBlob and the host's blob procedure (sync-parity plan, S4). 172, raised by name.
+  // 173.2 with the sealed records in queries, QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
+  // 173.9 with the sealed seam and the merged sealed page, the relay's watermark by log position (review №7, E1–E2.1;
+  // 2026-11-07). 174.5, raised by name.
+  // 174.5 with the snapshot's relayed vector, the holes, the ring the feeds read from (review №7, E2.2–E2.4;
+  // 2026-11-07). 175, raised by name.
+  // 175.1 with the revert by what the op touched, through the kinds' patches (review №7, E3.1; 2026-11-07). 175.5,
+  // raised by name.
+  // 175.8 with the inbox under the rule, the verified forward, the dropped entries (review №7, E3.2; 2026-11-07). 176,
+  // raised by name.
+  // 176.5 with the $regex gate and the scoped walk (review №7, E3.3; 2026-11-07). 177, raised by name.
+  // 177.1 with the durable, shared revocations and the sessions let go of (review №7, E3.4; 2026-11-07). 177.5, raised by
+  // name.
+  // 177.6 with the blob served by record and beforeSend on hosted pages (review №7, E3.5; 2026-11-07). 178, raised by
+  // name.
+  // 178.0 with the hosting side split into hosting.js, rules.js and reads.js (review №7, E11.1; 2026-11-07). 178.5, raised
+  // by name.
+  // 174.2 with the blobs' door (src/blobs.js) at every store, the engines' estimate(), isQuotaError's walk of the cause
+  // (review №7, E7.1–E7.3; 2026-11-07). 174.5, raised by name.
+  // 174.8 with the at-rest blobs as bytes, the copy's mark and the moved source's fence (review №7, E7.4; 2026-11-07).
+  // 175, raised by name.
+  // 179.3 with both tracks of review №7 merged (the sync track and the blobs/at-rest track; 2026-11-07). 179.5, raised by
+  // name.
+  // 180.4 with the sync blocks, the tabs and the blobs observed — the writer's methods and the shared log's, the host's
+  // and the manager's call sites (review №7, E9; 2026-11-07). 181, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 181 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -465,7 +517,8 @@ const ENTRIES = [
   // once per base, MAX_MARKS) beside the handle's fixes (E2) in one bundle. 43.5, raised by name.
   // 43.5 (over by bytes) with a join that is the same on every node whatever a forged picture differs in under one
   // key (the lesser text wins; SEQ-13). 44, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44 },
+  // 44.1 with isQuotaError in the errors it shares with the core (sync-parity plan, S5). 44.5, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44.5 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
@@ -490,7 +543,8 @@ const ENTRIES = [
     platform: 'browser',
     // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
     // 6.6 with the engines' shared errors beside the contract (src/engine.js unreadableRecord, eexist; review №5 M-4). 6.75, raised by name.
-    budget: 6.75,
+    // 6.8 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 6.75. 7, raised by name.
+    budget: 7,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
@@ -509,7 +563,11 @@ const ENTRIES = [
     label: 'encryption — browser (@alexify/syncom/encryption)',
     entry: 'src/encryption/encryption.js',
     platform: 'browser',
-    budget: 6.5,
+    // 6.6 with the blobs sealed at rest (sync-parity plan, S4). 7, raised by name.
+    // 9.2 with rotateAtRest: the copy (engines/copy.js, the lock, the keys) rides along for the rotation by copy (sync-parity plan, S5). 9.5, raised by name.
+    // 9.6 with the blobs' door at the at-rest store, estimate() passed through and the copy's BLOBS_UNSUPPORTED it
+    // bundles (review №7, E7.1/E7.3; 2026-11-07). 10.5, raised by name — E7.4's at-rest blobs as bytes land under it.
+    budget: 10.5,
   },
   // The backends as blocks: the Map in memory; the multi-level cache over
   // several (with the contract check it shares with the core).
@@ -522,7 +580,9 @@ const ENTRIES = [
     // 3.2 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES) and a scrub that swaps a wrapper's copies
     // (review №5 E1). 3.25, raised by name.
     // 3.3 with the engines' shared errors beside the contract (review №5 M-4). 3.5, raised by name.
-    budget: 3.5,
+    // 3.5 with the blobs store and the change stream (sync-parity plan, S3/S4). 4, raised by name.
+    // 4.0 (at the line) with a SyncomError's fields guarded (review №7, E11.3; 2026-11-07). 4.25, raised by name.
+    budget: 4.25,
   },
   {
     label: 'layered — browser (@alexify/syncom/layered)',
@@ -539,7 +599,27 @@ const ENTRIES = [
   // 22.5 with the review's sync fixes: proof for own streams, the hash chain's heads, presence refusals reported,
   // a bootstrap's pages checked (BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
   // 23.0 with sets shared between versions (the core's ops.js it bundles). 23.5, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 23.5 },
+  // 25.4 with the shared log (src/sync/shared.js), one-way links, the awaits, a host's rules — authorizeWrite,
+  // prove, revoke, query/count — and the dialer's beforeSend and revert (sync-parity plan, S0–S1; 2026-11-06).
+  // 25.5, raised by name.
+  // 26.4 with the host's `blob` procedure and the dialer's `fetchBlob` (sync-parity plan, S4). 27, raised by name.
+  // 27.0 with the relay's watermark kept by log position, the recovery at every start and a bounded stop (review №7,
+  // E2.1; 2026-11-07). 27.5, raised by name.
+  // 27.6 with the relayed vector and the ordered marker, a hole told, the inbox trimmed, the feeds served from the
+  // consumer's ring (review №7, E2.2–E2.4; 2026-11-07). 28, raised by name.
+  // 28.5 with the inbox under the writer's rule, the follower's verified forward and held shadow, the dropped entries
+  // (review №7, E3.2; 2026-11-07). 29, raised by name.
+  // 29.2 with the $regex gate (safeRegex), the scoped walk with its budget and `capped`, Infinity kept (review №7,
+  // E3.3; 2026-11-07). 29.5, raised by name.
+  // 29.8 with the sessions let go of with their sockets, the thin state taken off, the revocations durable and shared
+  // (review №7, E3.4; 2026-11-07). 30, raised by name.
+  // 30.3 with prove gating the presence, the blob served by record, beforeSend on hosted pages (review №7, E3.5;
+  // 2026-11-07). 31, raised by name.
+  // 31.1 with the blobs' door (src/blobs.js) the dialer's fetchBlob checks a digest by (review №7, E7.1 merged;
+  // 2026-11-07). 31.5, raised by name.
+  // 31.5 (at the line) with proveMessage the protocol's and the blobs' MAX_STORED_BYTES (review №7, E11–E12; 2026-11-07).
+  // 31.75, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 31.75 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {
@@ -553,15 +633,18 @@ const ENTRIES = [
     // raised by name.
     // 6.6 with the id named by the data, a composite id and the declared references read off a schema's relations
     // (collections plan, C1.2–C1.8). 7, raised by name.
-    budget: 7,
+    // 7.0 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 7. 7.25, raised by name.
+    budget: 7.25,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
+  // 4.8 with ten instruments more — the shared log's ops, entries and lag, the revokes, the reads and their rows, the blobs
+  // and their bytes, the tabs' calls and failovers — and a refusal's reason (review №7, E9; 2026-11-07). 5, raised by name.
   {
     label: 'telemetry — browser (@alexify/syncom/telemetry)',
     entry: 'src/telemetry/telemetry.js',
     platform: 'browser',
-    budget: 4.5,
+    budget: 5,
   },
   // Queries: the predicate, the planner and the cursor, measured ALONE with
   // the catalog's value keys it shares with the core.
@@ -585,7 +668,8 @@ const ENTRIES = [
   // the design estimated 14.5 for all of E4). 17, raised by name.
   // 17.0 with a live run delivering a row that stayed as the copy it was, nearest() streamed into its sink, the
   // cache bounded by rows and the key built once (review №6, E5.2–E5.3; 2026-11-02). 17.5, raised by name.
-  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 17.5 },
+  // 17.5 with the sealed records joining a cursor's candidates (sync-parity plan, S5); was 17.5. 18, raised by name.
+  { label: 'query — browser (@alexify/syncom/query)', entry: 'src/query/query.js', platform: 'browser', budget: 18 },
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.
@@ -611,7 +695,9 @@ const ENTRIES = [
     // 40.1 with the write path's `expect: ABSENT` and the immutables it bundles (review №6, E2). 40.5, raised by name.
     // 40.5 (over by bytes) with the cursor and the catalog it bundles grown through E5 (review №6, E5.6; 2026-11-02). 41,
     // raised by name.
-    budget: 41,
+    // 41.1 with the writer's methods for the sync blocks, the tabs and the blobs it bundles with the core's write path
+    // (review №7, E9; 2026-11-07). 41.5, raised by name.
+    budget: 41.5,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
@@ -622,11 +708,76 @@ const ENTRIES = [
   { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 3 },
   // Persistent app state by name and path, over a record or a local document — measured with the paths and the
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
-  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3 },
+  // 3.1 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
+  // 3.25, raised by name.
+  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3.25 },
   // Dumps: export/import over snapshot pages, a move between engines — measured with the engines' copy it ships
   // (collections plan, C4.3).
   // 6.5 measured; 7.
-  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7 },
+  // 7.0 (over by bytes) with the copy's mark and the moved source's fence in engines/copy.js, which it bundles (review №7,
+  // E7.4; 2026-11-07). 7.25, raised by name.
+  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7.25 },
+  // Connectors: a collection kept in step with a backend through pull/push handlers, the checkpoint in the `connector`
+  // kv namespace (sync-parity plan, S2). The plan said 5; measured alone it brings shape.js (the id check, the canonical
+  // JSON it compares a document by) and the emitter — 7.0; 7.5, raised by name.
+  // 7.5 with every pulled document judged by name (another collection's, a sealed one, no JSON, the engine's refusal)
+  // and the rest of the page landing; the model of review №7 E4 — the backend's state assumed and compared on pull,
+  // the digests kept with the checkpoint, the probe, the frontier, one pull queue with END and the safety pull, the
+  // database's close cancelling — measured 9.2 (2026-11-07). 9.5, raised by name (the plan's 9, or 9.5 if over).
+  {
+    label: 'connector — browser (@alexify/syncom/connector)',
+    entry: 'src/connector/connector.js',
+    platform: 'browser',
+    budget: 9.5,
+  },
+  // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
+  { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
+  { label: 'connector/graphql — browser', entry: 'src/connector/graphql.js', platform: 'browser', budget: 2 },
+  { label: 'connector/mongodb — browser', entry: 'src/connector/mongodb.js', platform: 'browser', budget: 2 },
+  { label: 'connector/supabase — browser', entry: 'src/connector/supabase.js', platform: 'browser', budget: 2 },
+  { label: 'connector/firestore — browser', entry: 'src/connector/firestore.js', platform: 'browser', budget: 2 },
+  { label: 'connector/appwrite — browser', entry: 'src/connector/appwrite.js', platform: 'browser', budget: 2 },
+  // Google Drive speaks four routes (the search by name, the v2 metadata for the ETag, the create, the media upload)
+  // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).
+  { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.5 },
+  // OneDrive's first upload asks Graph to fail where the file is there (conflictBehavior=fail), and a 409 is tried
+  // like a 412: 2.0 measured, at the line (review №7, E5.3; 2026-11-07). 2.25, raised by name.
+  { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2.25 },
+  // Attachments: the plugin over the engine's blobs store — the plan said 2.5 KB; the browser digest half brings its
+  // JavaScript SHA-256 along (hashText), 4.1 measured (sync-parity plan, S4). 4.5, raised by name.
+  // 4.5 (at the limit) with the register validated, the bytes checked against it, sweep() and prepare() (review №7,
+  // E7.1–E7.6; 2026-11-07). 5, raised by name.
+  // 5.6 with stats(), every blob counted with its bytes and the sweep as a span — the writer contract (telemetry/writer.js)
+  // bundled for `traced` (review №7, E9; 2026-11-07). 5.75, raised by name.
+  {
+    label: 'attachments — browser (@alexify/syncom/attachments)',
+    entry: 'src/attachments/attachments.js',
+    platform: 'browser',
+    budget: 5.75,
+  },
+  // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
+  // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
+  // 6.2 with the re-armable election (onLead/yield/request), a promotion that yields and asks again (PROMOTE_FAILED),
+  // an honest START and close, one dial shared by the writes waiting on it (review №7, E6.1; 2026-11-07). 6.5, raised by name.
+  // 6.6 with the forwarded call's id and `retry`, the leader's answers kept per follower and CALL_UNKNOWN (review №7,
+  // E6.2; 2026-11-07). 7, raised by name.
+  // 8.0 with the follower's surface — a collection's writers, the attachments and the local documents forwarded
+  // (SharedCollection, SharedAttachments, SharedLocal; the collection/local/fetchBlob procedures; review №7, E6.3;
+  // 2026-11-07). 8.5, raised by name.
+  {
+    label: 'shared — browser (@alexify/syncom/shared)',
+    entry: 'src/shared/shared.js',
+    platform: 'browser',
+    budget: 8.5,
+  },
+  // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
+  // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
+  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7 },
+  // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
+  // 2.7 with `$regex` refused at the door, the `tools` allowlist, `annotations` on every tool and `changes` paged by
+  // `limit` through `log.read` (review №7, E5.4; 2026-11-07). 2.75, raised by name — the plan's cap.
+  // 2.8 with every call counted through the seam's writer (review №7, E9.2; 2026-11-07). 3, raised by name.
+  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 3 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.
@@ -635,7 +786,9 @@ const ENTRIES = [
     entry: 'src/pipeline/pipeline.js',
     platform: 'browser',
     // 2.8 measured; 3.
-    budget: 3.25,
+    // 3.3 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
+    // 3.5, raised by name.
+    budget: 3.5,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
   // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.

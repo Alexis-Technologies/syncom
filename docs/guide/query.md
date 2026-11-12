@@ -55,7 +55,10 @@ A malformed query — an unknown operator, `$in` without an array, an invalid
 regex, a `$text` that is not a string, is over 1000 characters or sits inside
 `$and`/`$or`/`$not`, a `$text` on a collection with no search fields — is a
 `TypeError` at `select()`, not at `fetch()`. A query nests 32 levels at most (`$and`, `$or`, `$nor`, `$not`, `$elemMatch` within one
-another): deeper is a `TypeError`.
+another): deeper is a `TypeError`. A `$regex` is the application's: a pattern runs on this node's event loop, and a
+pathological one (`^(a+)+$` over a long string) runs for minutes — so a host serving queries to peers
+([`unit({ query })`](./sync#hosting)) refuses a `$regex` from the wire unless told to take them, `'safe'` letting
+through what `safeRegex` passes (no nested quantifier, no backreference, no lookaround — the shape, not a proof).
 
 ## The cursor
 
@@ -97,6 +100,27 @@ A cursor at a [tag](./versions#tags) — `storage.at(name).collection(entity).se
 change, so `watch()` on it throws, and it carries no text index, so a `$text`
 query there is a `TypeError`.
 
+## Sealed records
+
+A record written `encrypted: true` ([Encryption at rest](./database#encryption-at-rest)) is stored as one
+ciphertext: the catalog holds a row for it with no fields, and no index knows it. A query still finds it — at the
+key holder. The sealed records of a collection are read and opened through the plugin's key and matched, ordered and
+windowed like the rest, while the plain rows are answered as before — narrowed by the index, counted from its
+entries, covered by the catalog where the query asks for indexed fields alone, and an ordered page is still taken
+from the index in its order: the sealed records are read once and laid where they sort as the rows come, so a
+`limit(10)` reads ten plain records and the sealed ones, never the collection. `explain().sealed` says how many ride
+beside the plan. `$text` queries leave sealed records out: the text index never saw them. A node without the key
+does not hold sealed records (they are not replicated), so a query there sees none of them.
+
+A sealed record is the key holder's: `collection.select(query)` and `count(query)` read them, and
+`select(query, { sealed: false })` asks for the plain rows alone; a read that leaves the node — a host's
+[`query`/`count`](./sync#the-host) for a thin client, an agent's [tools](./mcp) (unless
+`createTools(db, { sealed: true })`), a [connector](./connector) — never carries one.
+
+The cost is the sealed records: `n` of them are `n` reads and `n` decryptions per query over the collection,
+whatever the query asks; the collection's own listing of them is kept per write, never rebuilt by a plain one. A
+blind index — an equality on a sealed field narrowed by a keyed hash — is not here yet.
+
 ## The plan
 
 The entity's `index` — fields, and compound keys of fields: `index: ['boardId', ['boardId', 'rank']]`,
@@ -111,7 +135,7 @@ db.Task.select({ boardId: 'b1', rank: { $gte: 10 } }).order('rank').limit(4).exp
 // { scan: 'index', index: ['boardId', 'rank'], prefix: ['b1'], in: null,
 //   range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
 //   desc: false, sortedByIndex: true, covered: false, residual: false,
-//   narrow: [], estimate: 4,
+//   narrow: [], estimate: 4, sealed: 0,
 //   uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] } }
 ```
 

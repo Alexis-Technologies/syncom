@@ -24,10 +24,11 @@
 //   catalog  (p, id)            row — the catalog's row of a record (JSON), a row at a time
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
+const { SyncomError, typed } = require('../errors.js');
 
 const MEMORY = ':memory:';
-const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog'];
+const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
 const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS kv (p TEXT NOT NULL, ns TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (p, ns, key)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS records (p TEXT NOT NULL, id TEXT NOT NULL, text TEXT NOT NULL, PRIMARY KEY (p, id)) WITHOUT ROWID',
@@ -36,6 +37,7 @@ const SCHEMA = [
   'CREATE TABLE IF NOT EXISTS log (p TEXT NOT NULL, seq INTEGER NOT NULL, first INTEGER NOT NULL, entry TEXT NOT NULL, PRIMARY KEY (p, seq)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS meta (p TEXT NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, PRIMARY KEY (p, key)) WITHOUT ROWID',
   'CREATE TABLE IF NOT EXISTS catalog (p TEXT NOT NULL, id TEXT NOT NULL, row TEXT NOT NULL, PRIMARY KEY (p, id)) WITHOUT ROWID',
+  'CREATE TABLE IF NOT EXISTS blobs (p TEXT NOT NULL, digest TEXT NOT NULL, bytes BLOB NOT NULL, PRIMARY KEY (p, digest)) WITHOUT ROWID',
 ];
 const SQL = {
   kvGet: 'SELECT value FROM kv WHERE p = ? AND ns = ? AND key = ?',
@@ -57,6 +59,13 @@ const SQL = {
   copyPut: 'INSERT OR REPLACE INTO copies (p, tag, id, text) VALUES (?, ?, ?, ?)',
   copyRemove: 'DELETE FROM copies WHERE p = ? AND tag = ? AND id = ?',
   copyDrop: 'DELETE FROM copies WHERE p = ? AND tag = ?',
+  blobGet: 'SELECT bytes FROM blobs WHERE p = ? AND digest = ?',
+  blobHas: 'SELECT 1 AS held FROM blobs WHERE p = ? AND digest = ? LIMIT 1',
+  pageCount: 'PRAGMA page_count',
+  pageSize: 'PRAGMA page_size',
+  blobList: 'SELECT digest FROM blobs WHERE p = ? ORDER BY digest',
+  blobPut: 'INSERT OR REPLACE INTO blobs (p, digest, bytes) VALUES (?, ?, ?)',
+  blobRemove: 'DELETE FROM blobs WHERE p = ? AND digest = ?',
   logAll: 'SELECT seq, first, entry FROM log WHERE p = ? ORDER BY seq',
   logPut: 'INSERT OR REPLACE INTO log (p, seq, first, entry) VALUES (?, ?, ?, ?)',
   logDrop: 'DELETE FROM log WHERE p = ? AND seq >= ? AND seq <= ?',
@@ -106,7 +115,7 @@ const pragmas = (file, full) => {
 const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable = false } = {}) => {
   if (typeof file !== 'string' || file.length === 0) throw new TypeError('sqliteEngine: file is a path or ":memory:"');
   if (driver !== null && typeof driver?.open !== 'function') throw new TypeError('sqliteEngine: driver has no open()');
-  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true });
+  const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true, blobs: true });
   let connection = null;
   let opening = null;
   let statements = new Map();
@@ -278,6 +287,23 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       put: (tag, id, text) => run(SQL.copyPut, [p, tag, id, text]),
       remove: (tag, id) => run(SQL.copyRemove, [p, tag, id]),
       drop: (tag) => run(SQL.copyDrop, [p, tag]),
+    };
+
+    // Attachments' bytes by digest, a BLOB a row; the digest checked before the statement.
+    const blobs = {
+      get: async (digest) => {
+        const row = await get(SQL.blobGet, [p, checkDigest(digest, 'blobs.get')]);
+        return none(row) ? null : new Uint8Array(row.bytes);
+      },
+      has: async (digest) => !none(await get(SQL.blobHas, [p, checkDigest(digest, 'blobs.has')])),
+      list: async () => names(await all(SQL.blobList, [p]), 'digest'),
+      put: async (digest, bytes) =>
+        run(SQL.blobPut, [
+          p,
+          checkDigest(digest, 'blobs.put'),
+          checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES),
+        ]),
+      remove: async (digest) => run(SQL.blobRemove, [p, checkDigest(digest, 'blobs.remove')]),
     };
 
     const meta = async (tx, key) => {
@@ -502,6 +528,26 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         }),
     };
 
+    // The room: what the file holds (`page_count × page_size` — the whole file, every database in it) and the free
+    // space of the file's volume; a `:memory:` database, or a connection given, says nothing of the volume.
+    const estimate = async () => {
+      const pages = await get(SQL.pageCount, []);
+      const size = await get(SQL.pageSize, []);
+      const usage = none(pages) || none(size) ? null : Number(pages.page_count) * Number(size.page_size);
+      let quota = null;
+      if (file !== MEMORY && database === null) {
+        try {
+          const { statfs } = require('node:fs/promises');
+          const { dirname } = require('node:path');
+          const stats = await statfs(dirname(file));
+          quota = Number(stats.bavail) * Number(stats.bsize);
+        } catch {
+          // No volume to ask (a driver over another platform): the usage alone.
+        }
+      }
+      return { usage, quota };
+    };
+
     return Object.freeze({
       path: p,
       capabilities,
@@ -511,7 +557,9 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       copies,
       log,
       catalog,
+      blobs,
       write,
+      estimate,
       close: async () => {},
     });
   };

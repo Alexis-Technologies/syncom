@@ -1,10 +1,10 @@
 import { expectType } from 'tsd';
 import { local } from '../src/local/local.js';
 import type { Plugin, LocalStore } from '../src/local/local.js';
-import { open } from '../index.js';
+import { createDatabase } from '../index.js';
 
 expectType<Plugin>(local);
-const db = await open({ plugins: [local] });
+const db = await createDatabase({ plugins: [local] });
 expectType<LocalStore>(db.local);
 expectType<Promise<{ panel: number } | null>>(db.local.get<{ panel: number }>('layout'));
 expectType<Promise<number>>(db.local.set('n', 1));

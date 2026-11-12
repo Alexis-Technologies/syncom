@@ -9,7 +9,13 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
                           MongoDB database — kv, records (JSON text), pieces, copies, catalog (a document per record's row), log (a document per entry with its group's
                           first seq), meta; `_id` the key as JSON, the key's fields flat beside it over an index per collection;
                           a bulk write per collection per write set, in a session transaction under `transactions: true`; change
-                          streams as `db.changes` — requires engine.js, errors.js only
+                          streams as `db.changes`; the subpath also exports mongoSharedLog — requires engine.js, blobs.js,
+                          errors.js, shared-log.js only
+src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes, poll, gapTimeout, retention: { maxEntries, topics }, logger }):
+                          a shared log (wrpc's BrokerLog shape) over two collections — a topic's entries `[topic, n]` numbered by its head
+                          document (`<collection>_heads`: epoch, next, first) in one findOneAndUpdate; a read a range by `n` (the head once a
+                          page) then a tail woken by a change stream or a poll; a hole told, a tombstone passed; 410/400 as wrpc's feeds
+                          speak them; trim, trimBefore, retention — no requires
 ```
 
 ## Rules
@@ -54,9 +60,26 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   ONE timer, in one bulk write a tick at the shortest margin among them (keyed by the holder's token: a lease lost and
   not yet noticed and the next on the same path are two); a tick that lands short or fails hands each lease its own
   renewal, which tells the lost one from the rest and keeps its retry (`late`, then lost) as it is.
+- **The shared log numbers in the head, tells a hole, and is not the engine's log.** `mongoSharedLog` keeps a
+  topic's entries apart from the engine's `log` collection (a follower never reads the writer's op log — it hosts
+  from the shared log, src/sync/shared.js): `append` takes a number from the topic's head document
+  (`findOneAndUpdate` with a pipeline, upsert — the one round trip two appenders agree through, so two never share
+  a number) and inserts the entry after it, so a reader that finds `n + 1` before `n` waits `gapTimeout` for `n`
+  (an insert is one round trip behind its number), reads it once more, and then yields it as a HOLE — `{ id,
+value: null, headers: { hole: '1' } }`, `shared.hole` warned — which the hub tells (`SHARED_LOG_FAILED` `hole`)
+  and passes; never skipped in silence. An insert that failed marks its number a tombstone (`hole: true`, best
+  effort) and one slower than `gapTimeout` — a live reader may have passed it — marks its number and takes a fresh
+  one (`MAX_RENUMBER` times, then 503): a tombstone is passed without a word, nothing was lost. The epoch is
+  minted once per topic (`$ifNull` keeps the first) and a topic never appended to adopts the first head it sees.
+  A tail is one per topic per instance, shared by its readers: a change stream matched to the topic on the server
+  wakes them (the timer a watchdog then, `poll × WATCHDOG`), a poll every `poll` ms where there is none or it failed
+  (`shared.stream.failed`); a read checks the head once per page (another epoch, or a trim past the reader, is 410).
+  `trim`, `trimBefore(topic, id)` (what a writer landed of its inbox — the hub calls it every `INBOX_TRIM_EVERY`
+  inbox entries) and `retention.maxEntries` (the topics `retention.topics` names; every one without the list) move
+  `first` with `$max` — the fake supports `$max` for it — and delete below it.
 - **A change stream is one path's records, matched on the server, and its end is heard.** `db.changes`
-  watches `records` alone (the `log` collection is not watched: a follower's log is as of its open until the
-  shared log) with a pipeline — `$match` on `fullDocument.p`, or for a deletion (no document) on the key's
+  watches `records` alone (the `log` collection is not watched: a follower hosts from the shared log, never
+  from the writer's op log) with a pipeline — `$match` on `fullDocument.p`, or for a deletion (no document) on the key's
   JSON prefix `["<p>",` by `$regex`, then `$project` without `fullDocument.t` — under `fullDocument:
 'updateLookup'`, because every put is an upsert and an update event carries no document otherwise. Every
   record and log document carries `w`, the writer's token — one per `open(path)`, so two handles of one engine
@@ -66,3 +89,10 @@ src/mongodb/mongodb.js    @alexify/syncom/mongodb — mongoEngine({ client, db, 
   `error`, `close` and `end` are listened to (an unheard `error` would crash the process): the listener hears
   `{ error }` once and the subscription is over — the follower subscribes again and reads every record again
   (`FOLLOW_LOST`). `changes: false` for a standalone server, where `watch` would fail.
+- **A blob is parts of bytes under a head.** A document holds 16 MiB and a blob may hold 64 (MAX_BLOB_BYTES), so `blobs`
+  keeps a blob as parts of `BLOB_CHUNK` (15 MiB) — `_id` `[p, digest, n]`, `{ p, digest, n, b }` for n ≥ 1 (`b` the
+  driver's Binary, answered as a Uint8Array through `bytesOf`; a fake's own Uint8Array as it is) — and a head `n: 0`
+  `{ parts, length }`, written LAST in the one ordered bulk, so a put cut short leaves no blob; `get` reads the head, then
+  the parts by `n`, and answers null where they do not add up to the head (a removal under the read); `has` and `list`
+  read heads alone; `remove` is one `deleteMany` of the digest, fenced like every statement. The engine says nothing of
+  the room (no `estimate`): the server's disk is the server's.

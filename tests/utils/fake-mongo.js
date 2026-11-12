@@ -205,7 +205,11 @@ const applyUpdate = (doc, update, inserting, clock) => {
     else if (op === '$setOnInsert') continue;
     else if (op === '$unset') for (const key of Object.keys(fields)) delete next[key];
     else if (op === '$inc') for (const [key, by] of Object.entries(fields)) next[key] = (next[key] ?? 0) + by;
-    else throw new Error(`fake-mongo: update ${op} is not supported`);
+    else if (op === '$max') {
+      for (const [key, value] of Object.entries(fields)) {
+        next[key] = next[key] === undefined ? value : Math.max(next[key], value);
+      }
+    } else throw new Error(`fake-mongo: update ${op} is not supported`);
   }
   return next;
 };

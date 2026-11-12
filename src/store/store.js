@@ -180,4 +180,45 @@ const fromEvents = (emitter, events, read, options) => {
   }, options);
 };
 
-module.exports = { toStore, fromEvents };
+// RxJS's interop key: `Symbol.observable` where a library defined it, '@@observable' otherwise — `from()` reads either.
+const OBSERVABLE = typeof Symbol.observable === 'symbol' ? Symbol.observable : '@@observable';
+
+/**
+ * An interop Observable over a store — what Angular's `async` pipe and `toSignal()`, RxJS's `from()` and anything
+ * else that reads `subscribe({ next })` take: `next` per value the store gives (the first at once), never `error`
+ * or `complete` (a live source; a failure stays on `store.error`), `unsubscribe()` leaving the store (its source
+ * let go with the last subscriber), the observable itself at `Symbol.observable`.
+ */
+const toObservable = (store) => {
+  if (store === null || typeof store !== 'object' || typeof store.subscribe !== 'function') {
+    throw new TypeError('toObservable() takes a store');
+  }
+  const observable = {
+    subscribe(observer) {
+      const next =
+        typeof observer === 'function'
+          ? observer
+          : typeof observer?.next === 'function'
+            ? (value) => observer.next(value)
+            : null;
+      let closed = false;
+      const stop = store.subscribe((value) => {
+        if (!closed && next !== null) next(value);
+      });
+      return {
+        get closed() {
+          return closed;
+        },
+        unsubscribe() {
+          if (closed) return;
+          closed = true;
+          stop();
+        },
+      };
+    },
+  };
+  observable[OBSERVABLE] = () => observable;
+  return Object.freeze(observable);
+};
+
+module.exports = { toStore, fromEvents, toObservable };

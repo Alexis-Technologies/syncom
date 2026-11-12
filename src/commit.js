@@ -501,7 +501,8 @@ const announced = (core, op, entry, delta, source, via, committed, changes, refr
     const event = commitEvent(core, op, entry, isAlive(entry), committed, source, changes);
     core.emit('commit', event);
   }
-  core.emit('change', op, via, { changes });
+  // The log position rides on the event: what a relay covers the op by (src/sync/shared.js).
+  core.emit('change', op, via, { changes, seq: committed === null ? null : committed.seq });
 };
 
 // The `commit` event: `before` and `after` are copies of the record and

@@ -10,81 +10,77 @@
 //
 // The dialing side is src/sync/manager.js; `SyncManager.unit()` builds the unit here
 // with what the two halves share: the storage, the telemetry writer, the
-// wakers every live feed waits on and the set `hosted()` lists.
+// wakers every live feed waits on and the set `hosted()` lists. The rules the
+// procedures stand on — refusals, the peer of a call, the options, the limits,
+// the grant, the proof, the sessions — are src/sync/rules.js; the reads a thin
+// client makes (`query`, `count`, `blob`) are src/sync/reads.js; here are the
+// hello, the push, the snapshot, the two feeds, the presence and the unit.
 
 const { packOps, unpackOps } = require('./wire.js');
 const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
-const { isKeyId, isPlainObject, isStreamName } = require('../shape.js');
+const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js');
+const { SIGNER, SOURCE } = require('../symbols.js');
+const {
+  refuse,
+  refuseCall,
+  peerOf,
+  announceRefused,
+  refuseOps,
+  normalizeAllow,
+  normalizeLimits,
+  limit,
+  grant,
+  challengeOf,
+  prove,
+  joinRooms,
+  remember,
+  handPresence,
+} = require('./rules.js');
+const { normalizeQuery, query, count, blob } = require('./reads.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
 const MAX_SCOPES = 256;
 const { isUpdate: isPresenceUpdate, isEntry: isPresenceEntry, sized } = require('../presence/presence.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf } = require('./protocol.js');
+const { parseEntry, sleep } = require('./shared.js');
 
 const DEFAULT_PAGE_BYTES = 4 << 20;
+
 const TRACKED = Symbol.for('wrpc.tracked');
+
+// A feed over a shared log labels a page at least every so many entries it passed without one for its peer.
+const PASS_EVERY = 64;
+
+// A feed whose read of the shared log failed waits this long before it reads again, doubling.
+const FEED_BACKOFF = 1000;
+
+const MAX_FEED_BACKOFF = 60_000;
+
+// A feed over a shared log that read nothing for this long tells its peer it is caught up (an idle page).
+const IDLE_AFTER = 50;
+
+const IDLE = Symbol('syncom.idle');
+
+// The next entry of a shared read, or IDLE after `ms` with none.
+const nextOrIdle = (pending, ms) =>
+  new Promise((resolve, reject) => {
+    const timer = setTimeout(() => resolve(IDLE), ms);
+    timer.unref?.();
+    pending.then(
+      (result) => {
+        clearTimeout(timer);
+        resolve(result);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+
 const encoder = new TextEncoder();
-
-// A refusal as it goes on the wire: the numeric `code` a transport carries
-// (wrpc sends code and message), and `reason` — a constant naming which
-// check refused — for the host's own logs and listeners.
-const coded = (message, code, reason) => {
-  const error = new Error(message);
-  error.code = code;
-  error.reason = reason;
-  error.expose = true;
-  return error;
-};
-
-const LIMIT_KEYS = new Set(['opsPerPush', 'bytesPerPush', 'opsPerSecond']);
-
-// The ops one push may carry when the host says nothing: twenty pages of a
-// dialer's default size. A page that size is a peer gone wrong — or one
-// that wants this node's memory — and is refused at a length check, before
-// a byte of it is read. `limits: { opsPerPush: Infinity }` lifts it; the
-// bytes and the rate have no default (the byte count serializes every page).
-const DEFAULT_OPS_PER_PUSH = 10_000;
-
-// `unit({ limits })`: each a positive number (Infinity for none), unknown keys refused.
-const normalizeLimits = (limits) => {
-  const normalized = { opsPerPush: DEFAULT_OPS_PER_PUSH };
-  if (limits === undefined || limits === null) return normalized;
-  if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
-  for (const key of Object.keys(limits)) {
-    if (!LIMIT_KEYS.has(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
-    const value = limits[key];
-    if (value === undefined) continue;
-    if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
-      throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
-    }
-    if (value === Infinity) delete normalized[key];
-    else normalized[key] = value;
-  }
-  return normalized;
-};
-
-// The scopes a read may cover: what hello granted, narrowed to what the
-// call asks for. A peer granted `'*'` reads what it asks (nothing asked:
-// everything); one granted a list reads the intersection — asking for `'*'`
-// or for nothing is asking for its list, asking only for others is 403.
-const grant = (asked, granted) => {
-  const everything = granted.includes(GLOBAL_SCOPE);
-  if (!Array.isArray(asked)) return everything ? null : granted;
-  const held = everything ? null : new Set(granted);
-  const scopes = [];
-  for (let i = 0; i < asked.length; i++) {
-    const scope = asked[i];
-    if (typeof scope !== 'string') continue;
-    if (held === null) scopes.push(scope);
-    else if (scope === GLOBAL_SCOPE) return granted;
-    else if (held.has(scope)) scopes.push(scope);
-  }
-  if (held === null) return scopes;
-  if (scopes.length === 0) throw coded('Scopes not granted', 403, 'SCOPES');
-  return scopes;
-};
 
 // Resolves on the next change (or abort). The manager keeps ONE listener on
 // the storage and wakes every waiting subscription from it, because a host
@@ -100,38 +96,6 @@ const waitFor = (wakers, signal) =>
     wakers.add(done);
     signal?.addEventListener?.('abort', done, { once: true });
   });
-
-// Per-peer push limits, the one place that knows the ops and the bytes:
-// a page over `opsPerPush` or `bytesPerPush` is 413, a peer over
-// `opsPerSecond` is 429 — a token bucket in its state, refilled at that
-// rate, holding one second's worth. Codes, not a hang-up: the dialer
-// reports them, marks the host behind and pushes again from the vector at
-// the next sign of life on the link (`#recover` in src/sync/manager.js).
-const limit = (otel, state, args, ops, limits) => {
-  const { opsPerPush, bytesPerPush, opsPerSecond } = limits;
-  if (opsPerPush !== undefined && ops.length > opsPerPush) {
-    otel.recordLimited('ops');
-    throw coded(`Push of ${ops.length} ops exceeds opsPerPush ${opsPerPush}`, 413, 'OPS_PER_PUSH');
-  }
-  if (bytesPerPush !== undefined) {
-    const bytes = encoder.encode(JSON.stringify(args?.ops ?? null)).length;
-    if (bytes > bytesPerPush) {
-      otel.recordLimited('bytes');
-      throw coded(`Push of ${bytes} bytes exceeds bytesPerPush ${bytesPerPush}`, 413, 'BYTES_PER_PUSH');
-    }
-  }
-  if (opsPerSecond !== undefined) {
-    const at = Date.now();
-    const bucket = (state.bucket ??= { tokens: opsPerSecond, at });
-    bucket.tokens = Math.min(opsPerSecond, bucket.tokens + ((at - bucket.at) / 1000) * opsPerSecond);
-    bucket.at = at;
-    if (ops.length > bucket.tokens) {
-      otel.recordLimited('rate');
-      throw coded(`Rate limited: ${ops.length} ops over opsPerSecond ${opsPerSecond}`, 429, 'OPS_PER_SECOND');
-    }
-    bucket.tokens -= ops.length;
-  }
-};
 
 // A snapshot page as a wrpc stream — NDJSON, serialized first because a
 // stream declares its size up front; a page is bounded, so that buffer is
@@ -152,35 +116,6 @@ const streamed = (client, page, pageBytes) => {
     stream.end();
   });
   return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
-};
-
-// A refusal before the handler: counted by code; 428 is the normal course
-// of a wrpc reconnect (a new server-side client) and only counted.
-const refuse = (host, message, code, reason, node = null) => {
-  host.otel.recordRefusal(code);
-  if (code !== 428) host.logger.warn({ event: 'sync.hello.refused', code, reason, node });
-  return coded(message, code, reason);
-};
-
-const peerOf = (host, context) => {
-  const state = context?.client?.data?.syncom;
-  if (!state) throw refuse(host, 'Say hello first', 428, 'HELLO_FIRST');
-  return state;
-};
-
-// Ops of a peer this host would not take, logged and announced through the
-// `refused` event — where the host ties a refusal to the client that pushed.
-const announceRefused = (host, node, reason, count) => {
-  host.logger.warn({ event: 'sync.op.refused', node, reason, count });
-  notify(host.manager, host.logger, 'refused', { node, reason, count });
-};
-
-// Refused HERE, before anything sees them: counted too — `reason` is what
-// the `syncom.ops.rejected` metric carries. (A signature refusal is counted
-// per op in applyRemote already, and only announced here.)
-const refuseOps = (host, node, reason, count) => {
-  for (let i = 0; i < count; i++) host.otel.recordRejected(reason);
-  announceRefused(host, node, reason, count);
 };
 
 // What a dialer that lost part of its log needs to move its streams past
@@ -207,7 +142,12 @@ const proofOf = (storage, node, claimed, held) => {
   return ops.length === 0 ? null : packOps(ops);
 };
 
-const hello = (host) => async (context, args) => {
+// A hello: the peer named, checked and granted its scopes, its state on the client; `keep` false for a hello
+// carried by a thin client's call over a stateless transport (one request, one client — `greeted`): the state is
+// set for the call and nothing of the client is kept — no room, no session, no presence.
+const hello = (host) => (context, args) => greet(host, context, args, true);
+
+const greet = async (host, context, args, keep) => {
   const { storage } = host;
   if (!args || typeof args.node !== 'string') throw refuse(host, 'hello needs a node id', 400, 'BAD_HELLO');
   if (args.version !== undefined && args.version !== PROTOCOL) {
@@ -243,24 +183,54 @@ const hello = (host) => async (context, args) => {
   }
   const schema = schemaOf(args.schema);
   const kinds = kindsOf(args.kinds);
+  // Scopes taken back from this node (`sync.revoke`): never granted again, and named in the answer.
+  const taken = host.revoked.get(args.node);
+  let revoked = null;
+  if (taken !== undefined) {
+    const kept = [];
+    revoked = [];
+    for (let i = 0; i < scopes.length; i++) (taken.has(scopes[i]) ? revoked : kept).push(scopes[i]);
+    scopes = kept;
+  }
+  const challenge = host.prove ? challengeOf() : null;
   if (context?.client) {
     context.client.data ??= {};
     // A repeated hello keeps the rate buckets: greeting again is not a refill.
     const bucket = context.client.data.syncom?.bucket;
     const presenceBucket = context.client.data.syncom?.presenceBucket;
     const ref = { url: null, node: args.node };
-    context.client.data.syncom = { node: args.node, scopes, schema, kinds, bucket, presenceBucket, ref };
-    if (typeof context.client.join === 'function') {
-      for (const scope of scopes) context.client.join(`syncom:${scope}`);
+    const state = {
+      node: args.node,
+      scopes,
+      schema,
+      kinds,
+      bucket,
+      presenceBucket,
+      ref,
+      challenge,
+      proven: false,
+      // Counted up by a revoke: a feed opened under an older grant ends, one opened after serves the new one.
+      generation: 0,
+    };
+    state.keep = keep;
+    context.client.data.syncom = state;
+    if (keep) {
+      // Under `prove` the rooms and the presence wait for the proof: nothing is handed before the key is shown.
+      if (!host.prove) joinRooms(context, scopes);
+      remember(host, context, state);
     }
   }
   notify(host.manager, host.logger, 'hello', { node: args.node, scopes, schema, kinds });
   host.drift(schema, { url: null, node: args.node });
-  handPresence(host, context, scopes);
+  if (keep && !host.prove) handPresence(host, context, scopes);
+  // Over a shared log the epoch is the log's, the same on every hub, so a
+  // client moved between hubs keeps its cursor; a hub that cannot write
+  // answers the vector as the log moved it, not its own as of its open.
+  const { shared } = host;
   const answer = {
     node: storage.nodeId,
-    vector: storage.vector,
-    epoch: storage.log.epoch,
+    vector: (shared === null ? null : shared.vector()) ?? storage.vector,
+    epoch: shared === null ? storage.log.epoch : shared.epoch,
     version: PROTOCOL,
     schema: schemaOf(storage.schemaInfo),
     // The kinds this host can hold: a dialer that holds more does not
@@ -270,13 +240,16 @@ const hello = (host) => async (context, args) => {
   };
   const proof = proofOf(storage, args.node, args.vector, answer.vector);
   if (proof !== null) answer.proof = proof;
+  if (challenge !== null) answer.challenge = challenge;
+  if (revoked !== null && revoked.length > 0) answer.revoked = revoked;
   return answer;
 };
 
 const push = (host) => async (context, args) => {
   const { storage, limits } = host;
-  const state = peerOf(host, context);
+  const state = peerOf(host, context, 'push');
   const { node, scopes } = state;
+  if (!host.allow.push) throw refuseCall(host, 'push', 'This host takes no pushes', 403, 'READ_ONLY', node);
   const ops = unpackOps(args?.ops);
   limit(host.otel, state, args, ops, limits);
   // The scopes hello granted bound what a peer writes here, not only what
@@ -292,11 +265,44 @@ const push = (host) => async (context, args) => {
     else outOfScope++;
   }
   if (outOfScope > 0) refuseOps(host, node, 'scope', outOfScope);
+  // A hub that cannot write — a follower, a writer whose lease was lost —
+  // lands nothing: over a shared log with an inbox it forwards the page for a
+  // writer to land (held to the vector as the log moved it), else the client
+  // is told to push elsewhere.
+  if (storage.readOnly) {
+    if (host.shared === null || host.shared.inbox === false) {
+      const message = 'This hub is read-only and forwards nothing: push to another';
+      throw refuseCall(host, 'push', message, 503, 'READ_ONLY', node);
+    }
+    // Verified before it is forwarded, as a writer verifies a push: a forged or an unsigned op stops here, counted
+    // and announced — never a writer's to find in its inbox.
+    const { verdicts } = await storage[SOURCE].checkOps(granted);
+    const taking = [];
+    let forged = 0;
+    let unsigned = 0;
+    for (let i = 0; i < granted.length; i++) {
+      if (verdicts[i] === VERDICT.OK) taking.push(granted[i]);
+      else if (verdicts[i] === VERDICT.FORGED) forged++;
+      else unsigned++;
+    }
+    if (forged > 0) refuseOps(host, node, 'forged', forged);
+    if (unsigned > 0) refuseOps(host, node, 'unsigned', unsigned);
+    const result = await host.shared.forward(taking, node, scopes);
+    return {
+      ...result,
+      forged: result.forged + forged,
+      unsigned: result.unsigned + unsigned,
+      outOfScope: outOfScope + result.outOfScope,
+    };
+  }
   // `url` is null: a host does not dial, so it has no url for the peer.
   const via = state.ref ?? { url: null, node };
   // `bound`: the records the peer writes must be in its scopes too, as this
   // node scopes them — the scope an op declares is only the peer's word.
-  const result = await storage.applyRemote(granted, { via, scopes, peer: via, bound: scopes });
+  const options = { via, scopes, peer: via, bound: scopes };
+  if (host.authorizeWrite !== null) options.authorize = host.authorizeWrite;
+  const result = await storage.applyRemote(granted, options);
+  if (result.refused !== undefined) refuseOps(host, node, 'rule', result.refused.length);
   if (result.outOfScope > 0) refuseOps(host, node, 'scope', result.outOfScope);
   if (result.forged > 0) announceRefused(host, node, 'forged', result.forged);
   if (result.unsigned > 0) announceRefused(host, node, 'unsigned', result.unsigned);
@@ -312,23 +318,150 @@ const push = (host) => async (context, args) => {
   return { vector, ...result, outOfScope: outOfScope + result.outOfScope };
 };
 
+// Over a shared log a snapshot is positioned in the log, not in this hub's
+// own: a marker appended first (behind every op the hub offered, refused
+// while its relay is behind), the first page taken once the consumer passed
+// it — so everything the log held before the marker is in the pages, and the
+// client resumes after it — and the vector the page carries is what the hub's
+// reads reflect (`shared.vector()`), never a position reserved but not landed.
+// A hub that cannot write serves none: its shadow runs ahead of its engine,
+// and a page of it could lack what the vector claims — a fresh client
+// bootstraps from a hub that writes (the load balancer's rule).
+const positioned = async (host, node) => {
+  const { shared, storage } = host;
+  if (storage.readOnly) {
+    const message = 'A hub that cannot write serves no snapshot: bootstrap from a hub that writes';
+    throw refuseCall(host, 'snapshot', message, 403, 'READ_ONLY', node);
+  }
+  try {
+    const id = await shared.mark();
+    await shared.reached(id);
+    return id;
+  } catch (error) {
+    host.logger.warn({ event: 'sync.snapshot.failed', err: error });
+    const refused = refuseCall(
+      host,
+      'snapshot',
+      `The shared log did not answer: ${error.message}`,
+      503,
+      'SHARED_LOG',
+      node,
+    );
+    // What of the log: the relay `behind`, the `marker` not reached in time, a `stopped` consumer.
+    refused.detail = error.reason ?? null;
+    throw refused;
+  }
+};
+
 const snapshot = (host) => async (context, args) => {
-  const state = peerOf(host, context);
+  const state = peerOf(host, context, 'snapshot');
+  if (!host.allow.snapshot) {
+    throw refuseCall(host, 'snapshot', 'This host serves no snapshots', 403, 'NOT_SERVED', state.node);
+  }
+  const cursor = args?.cursor ?? null;
+  const position = host.shared !== null && cursor === null ? await positioned(host, state.node) : null;
   const page = await host.storage.snapshot({
-    cursor: args?.cursor ?? null,
+    cursor,
     limit: host.pageSize,
     scopes: grant(args?.scopes, state.scopes),
   });
+  if (position !== null) {
+    page.eventId = position;
+    page.vector = host.shared.vector();
+  }
   // The vector rides on the first page only: the dialer adopts it as of
   // the start, and a hub's is too large to repeat.
-  if (args?.cursor) page.vector = undefined;
+  if (cursor !== null) page.vector = undefined;
   return streamed(context?.client, page, host.pageBytes);
+};
+
+// The feed over a shared log: the topic from the client's cursor on, every
+// entry's ops narrowed to its scopes and less its own echoes, one page per
+// entry, labelled with the entry's id — the same position on every hub. A
+// position the log no longer has (another log's, trimmed past) ends the feed
+// with `bootstrap`; a fresh subscription (no cursor) too: the snapshot's first
+// page is what positions a client in the log. A read that fails is read again
+// from the cursor, backed off.
+const sharedChanges = async function* (host, context, args, subscription) {
+  const { shared, feeds } = host;
+  const state = peerOf(host, context);
+  const { node, scopes: granted, generation } = state;
+  const { lastEventId, signal } = subscription;
+  const scopes = grant(args?.scopes, granted);
+  if (lastEventId === undefined || lastEventId === null) {
+    yield { bootstrap: true };
+    return;
+  }
+  let cursor = lastEventId;
+  const feed = { node, scopes, since: Date.now(), cursor };
+  feeds.add(feed);
+  try {
+    let passed = 0;
+    let backoff = 0;
+    // Whether the last page told the peer it was caught up: told once per lull.
+    let idle = false;
+    for (;;) {
+      if (signal?.aborted) return;
+      try {
+        const iterator = shared.read(cursor, signal)[Symbol.asyncIterator]();
+        let pending = iterator.next();
+        for (;;) {
+          // A lull in the log — nothing for IDLE_AFTER — is the peer's `caughtUp`: an empty page, labelled
+          // with the cursor, says so once; the read goes on.
+          const result = idle ? await pending : await nextOrIdle(pending, IDLE_AFTER);
+          if (signal?.aborted || state.generation !== generation) return;
+          if (result === IDLE) {
+            idle = true;
+            yield host.track(cursor, { ops: [], eventId: cursor, idle: true });
+            continue;
+          }
+          if (result.done) break;
+          const entry = result.value;
+          pending = iterator.next();
+          backoff = 0;
+          const parsed = parseEntry(entry.value);
+          const ops = [];
+          if (parsed !== null && parsed !== undefined) {
+            for (let i = 0; i < parsed.ops.length; i++) {
+              const op = parsed.ops[i];
+              if (opInScope(op, scopes) && op.origin !== node && op.from !== node) ops.push(op);
+            }
+          }
+          cursor = entry.id;
+          // Nothing for this peer: the position moves without a page, labelled
+          // every PASS_EVERY entries so a resume looks at few of these again.
+          if (ops.length === 0 && ++passed < PASS_EVERY) continue;
+          passed = 0;
+          idle = false;
+          feed.cursor = cursor;
+          // `beforeSend` rules a hosted page as it rules a push: an op it says no to goes as its header.
+          const sent = ops.length === 0 ? ops : await host.manager.sendable(ops, state.ref);
+          yield host.track(cursor, { ops: packOps(sent), eventId: cursor });
+        }
+        // The read ended without an abort — the log closed, a tail that ends: read again from the cursor.
+      } catch (error) {
+        if (signal?.aborted) return;
+        if (error?.code === 410 || error?.code === 400) {
+          yield { bootstrap: true };
+          return;
+        }
+        host.logger.warn({ event: 'shared.feed.failed', topic: shared.topic, node, err: error });
+      }
+      backoff = backoff === 0 ? FEED_BACKOFF : Math.min(backoff * 2, MAX_FEED_BACKOFF);
+      await sleep(backoff, signal);
+    }
+  } finally {
+    feeds.delete(feed);
+  }
 };
 
 const changes = (host) =>
   async function* (context, args, subscription = {}) {
     const { storage, feeds, wakers, pageSize } = host;
-    const { node, scopes: granted } = peerOf(host, context);
+    const state = peerOf(host, context, 'changes');
+    const { node, scopes: granted, generation } = state;
+    if (!host.allow.changes) throw refuseCall(host, 'changes', 'This host serves no feed', 403, 'NOT_SERVED', node);
+    if (host.shared !== null) return yield* sharedChanges(host, context, args, subscription);
     const { lastEventId, signal } = subscription;
     const scopes = grant(args?.scopes, granted);
     let cursor = lastEventId ?? undefined;
@@ -336,8 +469,12 @@ const changes = (host) =>
     const feed = { node, scopes, since: Date.now(), cursor: cursor ?? null };
     feeds.add(feed);
     try {
+      // Whether the last page told the peer it was caught up: told once per lull.
+      let idle = false;
       for (;;) {
-        if (signal?.aborted) return;
+        // The feed ends when the socket does, or when scopes were taken back (`sync.revoke`): the peer opens a
+        // feed again under the narrower grant, which is another generation of its session.
+        if (signal?.aborted || state.generation !== generation) return;
         const page = storage.log.read(cursor, { scopes, limit: pageSize });
         if (page === null) {
           // Cannot resume: another epoch, or compacted past the cursor.
@@ -356,6 +493,14 @@ const changes = (host) =>
             cursor = storage.log.formatId(last);
             feed.cursor = cursor;
           }
+          // Caught up: an empty page labelled with the cursor says so once
+          // before the wait (the log's first position when nothing was read
+          // yet — never `lastEventId`), so the peer knows it holds everything.
+          if (!idle) {
+            idle = true;
+            const at = cursor ?? storage.log.formatId(0);
+            yield host.track(at, { ops: [], eventId: at, idle: true });
+          }
           await waitFor(wakers, signal);
           continue;
         }
@@ -363,21 +508,18 @@ const changes = (host) =>
         for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
         cursor = storage.log.formatId(entries[entries.length - 1].seq);
         feed.cursor = cursor;
+        idle = false;
+        // `beforeSend` rules a hosted page as it rules a push: an op it says no to goes as its header.
+        const sent = ops.length === 0 ? ops : await host.manager.sendable(ops, state.ref);
         // Labelled even when every op was the peer's own echo: the position
         // still moves, and a resume must not replay it.
-        yield host.track(cursor, { ops: packOps(ops), eventId: cursor });
+        yield host.track(cursor, { ops: packOps(sent), eventId: cursor });
       }
     } finally {
       feeds.delete(feed);
     }
   };
 
-/**
- * The unit `manager.unit(options)` returns. `access` defaults to wrpc's own
- * default, 'session'; `authorize(context, hello)` gates a peer by whatever
- * the transport presented. `drift(schema, peer)` is the manager's report of
- * a schema that disagrees with this node's.
- */
 // A peer's presence, the inbound event `syncom/presence`: the update must be
 // the peer's own (every entry the node that said hello), of a scope it
 // asked for, within the rate, signed when this host requires signatures —
@@ -393,6 +535,7 @@ const PRESENCE_REASONS = Object.freeze({
   PRESENCE_SCOPE: 'scope',
   PRESENCE_FORGED: 'forged',
   PRESENCE_UNSIGNED: 'unsigned',
+  PRESENCE_UNPROVEN: 'unproven',
 });
 
 const presence = (host) => async (context, update) => {
@@ -405,6 +548,8 @@ const presence = (host) => async (context, update) => {
     notify(host.manager, host.logger, 'refused', { node, reason, count: 1 });
   };
   if (!session) return void no('HELLO');
+  // Under `prove` nothing is taken before the key is shown — a presence update neither.
+  if (host.prove && session.proven !== true) return void no('PRESENCE_UNPROVEN');
   const { node, scopes } = session;
   const { rate, timeout } = host.presence;
   const now = Date.now();
@@ -450,36 +595,30 @@ const presence = (host) => async (context, update) => {
   await host.manager.receivePresence(update, { node, url: null });
 };
 
-// What a newcomer is handed at hello: the room's states of every scope it asked for.
-const handPresence = (host, context, scopes) => {
-  const server = context?.server;
-  const client = context?.client;
-  if (!server || typeof server.sendTo !== 'function' || !client || client.id === undefined) return;
-  const floor = Date.now() - host.presence.timeout;
-  const self = client.data?.syncom?.node;
-  const { rooms } = host.presence;
-  const seen = new Set();
-  for (let i = 0; i < scopes.length; i++) {
-    const scope = scopes[i];
-    if (seen.has(scope)) continue;
-    seen.add(scope);
-    const room = rooms.get(scope);
-    if (room === undefined) continue;
-    const s = [];
-    for (const entry of room.values()) if (entry[2] >= floor && entry[0] !== self) s.push(entry);
-    if (s.length > 0) server.sendTo(client.id, 'syncom/presence', { p: 1, scope, s });
-  }
-};
-
-const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) => {
+const createUnit = (
+  manager,
+  options,
+  { storage, otel, wakers, feeds, drift, shared = null, sessions = new Map(), revoked = new Map(), scopeOf = null },
+) => {
   const {
     access = 'session',
     authorize = null,
+    // The manager's rule (`sync.authorizeWrite`) unless the unit names its own.
+    authorizeWrite = manager.authorizeWrite ?? null,
     tracked = null,
     pageSize = DEFAULT_PAGE_SIZE,
     pageBytes = DEFAULT_PAGE_BYTES,
     meta,
+    prove: proving = storage.signatures === 'require',
   } = options;
+  const serveQuery = normalizeQuery(options.query);
+  if (authorizeWrite !== null && typeof authorizeWrite !== 'function') {
+    throw new TypeError('unit({ authorizeWrite }): authorizeWrite must be a function');
+  }
+  if (typeof proving !== 'boolean') throw new TypeError('unit({ prove }): prove must be a boolean');
+  if (proving && storage[SIGNER] === null) {
+    throw new TypeError('unit({ prove }): a proof of key needs the signing plugin (@alexify/syncom/signing)');
+  }
   const presenceOptions = options.presence ?? {};
   if (typeof presenceOptions !== 'object' || presenceOptions === null) {
     throw new TypeError('unit({ presence }): presence must be an object');
@@ -495,6 +634,7 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) =
     }
   }
   const limits = normalizeLimits(options.limits);
+  const allow = normalizeAllow(options.allow);
   if (meta !== undefined && (typeof meta !== 'object' || meta === null || Array.isArray(meta))) {
     throw new TypeError('unit({ meta }): meta must be an object');
   }
@@ -506,26 +646,43 @@ const createUnit = (manager, options, { storage, otel, wakers, feeds, drift }) =
     wakers,
     feeds,
     drift,
+    shared,
+    sessions,
+    revoked,
+    scopeOf: scopeOf ?? (() => GLOBAL_SCOPE),
     authorize,
+    authorizeWrite,
+    prove: proving,
+    query: serveQuery,
     limits,
+    allow,
     pageSize,
     pageBytes,
     logger: storage.logger,
     track: tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data })),
+    // What a read that carries its hello greets through (src/sync/reads.js `greeted`).
+    greet: (context, args, keep) => greet(host, context, args, keep),
     presence: { timeout: presenceTimeout, rate: presenceRate, max: presenceMax, rooms: new Map() },
   };
   // `meta` rides on every procedure: what a wrpc `onRequest` hook reads as
   // `context.procedure.meta` — a hub-wide policy (rate limits, audit) stays
   // the host's, and the unit stays a plain object.
   const procedure = (handler) => (meta === undefined ? { access, handler } : { access, handler, meta });
-  return {
+  const unit = {
     hello: procedure(hello(host)),
     push: procedure(push(host)),
     snapshot: procedure(snapshot(host)),
     changes: procedure(changes(host)),
+    prove: procedure(prove(host)),
+    blob: procedure(blob(host)),
     // An inbound event (wrpc's `on` block): fire-and-forget, never answered.
     on: { presence: procedure(presence(host)) },
   };
+  if (serveQuery) {
+    unit.query = procedure(query(host));
+    unit.count = procedure(count(host));
+  }
+  return unit;
 };
 
 module.exports = { createUnit };

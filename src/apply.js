@@ -46,7 +46,13 @@ const VERIFY_CHUNK = 64;
 // fingerprints of the ops admitted, `prints` of the ones accepted, by stream
 // and seq, what this log holds once they are appended. `bound` is the scopes
 // of the peer that pushed the page, on a host: the records it may write.
-const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = null, bound = null } = {}) => {
+// `authorize`, on a host: `({ op, peer, current, after }) => boolean`, asked
+// of every op before it is applied — false refuses it (logged skipped and
+// scrubbed, relayed as a no-op, named in `refused` for the pusher).
+const openBatch = (
+  core,
+  { via = null, scopes = null, peer = null, adoptFrom = null, bound = null, authorize = null } = {},
+) => {
   const at = Date.now();
   return {
     core,
@@ -55,6 +61,8 @@ const openBatch = (core, { via = null, scopes = null, peer = null, adoptFrom = n
     scopes,
     adoptFrom,
     bound,
+    authorize,
+    refused: null,
     // The seqs this batch moved, by stream; every other is the log's, read
     // one key at a time (`seqIn`) — a hub's vector, thousands of streams,
     // was copied whole for every page.
@@ -432,6 +440,47 @@ const reportConflicts = async (batch, op, entry) => {
   }
 };
 
+// A peer's register write stamped below the one this node holds for the
+// field: both writes were made without seeing the other (`prepareOp` stamps
+// above everything a node holds, so a lower stamp proves concurrency), and
+// last writer wins — the loser is told, with both sides, to whoever listens.
+const reportLost = (batch, op, entry, lost) => {
+  const { core } = batch;
+  for (let i = 0; i < lost.length; i++) {
+    const { field, held, value } = lost[i];
+    core.otel.recordConflict('register');
+    core.emit('conflict', {
+      kind: 'register',
+      id: op.id,
+      field,
+      op,
+      winner: { ts: held[0], origin: held[1], value: entry.data[field] },
+      loser: { ts: op.ts, origin: op.origin, value },
+    });
+  }
+};
+
+// What a record reads as for a hook: its data while alive, else null.
+const visibleOf = (entry) => (entry && isAlive(entry) ? entry.data : null);
+
+// `authorizeWrite` said no: the op scrubbed, skipped, and reported with the record as it is here.
+const refused = async (batch, op, current) => {
+  const { core } = batch;
+  const after = applyOp(current, op, core.limits).entry;
+  const verdict = await batch.authorize({ op, peer: batch.peer, current: visibleOf(current), after: visibleOf(after) });
+  if (verdict !== false) return false;
+  core.otel.recordRejected('rule');
+  scrubOp(op);
+  (batch.stripped ??= new Set()).add(op);
+  skip(batch, op);
+  const scope = op.scope ?? null;
+  // The actor rides along: a revert the rule refuses too is told by it, never reverted again (the pusher's log may
+  // have compacted the op by then).
+  const actor = typeof op.actor === 'string' ? op.actor : null;
+  (batch.refused ??= []).push({ origin: op.origin, seq: op.seq, scope, id: op.id, current: visibleOf(current), actor });
+  return true;
+};
+
 // One admitted op, applied to the record it names.
 const applyOne = async (batch, op) => {
   const { core } = batch;
@@ -454,6 +503,15 @@ const applyOne = async (batch, op) => {
     core.emit('schema', { kind: 'ahead', op, held: true });
     return;
   }
+  // An op scrubbed before it came — withheld by its sender's `beforeSend`, refused by a host's `authorizeWrite`,
+  // landed on a purged record — is a header alone: logged and relayed as one (skipped, scrubbed), applied
+  // nowhere, a gap for no one. A purge carries nothing a scrub could take: it applies as it is.
+  if (op.scrubbed === true && op.type !== 'purge') {
+    // The flag is the peer's word; the payload goes all the same — never logged or relayed with one.
+    scrubOp(op);
+    (batch.stripped ??= new Set()).add(op);
+    return void skip(batch, op);
+  }
   const current = await currentOf(batch, op);
   if (current === undefined) return;
   // What lands on a record purged before it is logged and relayed as a scrub
@@ -464,15 +522,21 @@ const applyOne = async (batch, op) => {
   if (current?.meta?.purged != null && op.type !== 'purge' && op.type !== 'merge') {
     scrubOp(op);
     (batch.stripped ??= new Set()).add(op);
+    return void skip(batch, op);
   }
   if (current?.encrypted) {
     // Sealed here for this node alone: the op is logged and relayed, never
     // applied — flagged skipped, so neither a replay nor a fold of the log
-    // applies what this node did not.
+    // applies what this node did not — and no rule is asked of it (a sealed
+    // entry has no meta an op could be tried over).
     core.logger.warn({ event: 'sync.op.encrypted', id: op.id });
     skip(batch, op);
     return;
   }
+  // The host's rule on what a peer may write, asked before anything else may apply the op: refused, the op is
+  // logged as a scrub leaves it — skipped and scrubbed, a no-op for every node behind this one, no gap in its
+  // stream — and named in the answer, with the record as it stands here, for the pusher to set itself straight.
+  if (batch.authorize !== null && (await refused(batch, op, current))) return;
   // A `false` from beforeApply skips the op HERE only. A throw aborts the
   // batch — nothing is durable yet, so the peer sees a failed push and
   // offers the page again.
@@ -480,7 +544,11 @@ const applyOne = async (batch, op) => {
   const verdict = await core.hook('beforeApply', { op, via: batch.via, peer: batch.peer, current: visible });
   if (verdict === false) return void skip(batch, op);
   core.clock.observe(op.ts);
-  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits);
+  // The register writes of the op that lost to a newer stamp held here: reported as conflicts while
+  // something listens (the local path never loses — a write is stamped above what the node holds).
+  const lost = core.listening('conflict') ? [] : null;
+  const { entry, changed, delta, rejected, changes } = applyOp(current, op, core.limits, lost);
+  if (lost !== null && lost.length > 0) reportLost(batch, op, entry, lost);
   if (rejected.length > 0) {
     if (onlyKinds(rejected)) refuseKind(batch, op, rejected);
     else {
@@ -529,6 +597,8 @@ const persist = async (batch) => {
   });
   await ticket.done;
   const { entries } = ticket;
+  // One entry per accepted op, in order: the positions the announce names.
+  batch.entries = entries;
   const first = entries[0].seq;
   const last = entries[entries.length - 1].seq;
   if (batch.adopted) await core.log.advance(batch.adopted);
@@ -559,9 +629,11 @@ const announce = async (batch, result) => {
     }
     core.emit('apply', { via, peer, ops: accepted, ...result });
     const changes = [];
-    for (const op of accepted) {
+    const { entries } = batch;
+    for (let i = 0; i < accepted.length; i++) {
+      const op = accepted[i];
       const own = batch.changes.get(op) ?? [];
-      core.emit('change', op, via, { changes: own });
+      core.emit('change', op, via, { changes: own, seq: entries === undefined ? null : entries[i].seq });
       for (const change of own) changes.push({ id: op.id, ...change });
     }
     if (accepted.length > 0 && core.listening('transaction')) {
@@ -610,6 +682,8 @@ const applyRemote = async (core, ops, options) => {
     outOfScope: batch.outOfScope,
     equivocations: batch.equivocations,
   };
+  // What a host's rule refused, for the pusher: there only when something was.
+  if (batch.refused !== null) result.refused = batch.refused;
   await persist(batch);
   await announce(batch, result);
   return result;
@@ -650,4 +724,4 @@ const applyBatch = (core, ops, options = {}) => {
   return tracedApply(core, ops, options);
 };
 
-module.exports = { applyBatch };
+module.exports = { applyBatch, checkPage };

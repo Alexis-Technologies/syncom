@@ -17,12 +17,35 @@
 //   - a wire refusal (src/sync/hosting.js) is a plain Error with the numeric
 //     `code` wrpc transports (400–429) and a `reason` constant beside it.
 
+// A medium that is full, as the platforms say it: node:fs's ENOSPC, the browser's QuotaExceededError (a DOMException,
+// code 22), SQLite's SQLITE_FULL (better-sqlite3's code; node:sqlite's ERR_SQLITE_ERROR with errcode 13) — on the error
+// or on a `cause` under it, CAUSE_DEPTH deep. What the log turns into `QUOTA` and a landing into `UNPERSISTED { quota: true }`.
+const CAUSE_DEPTH = 8;
+const isFull = (e) =>
+  e.code === 'ENOSPC' ||
+  e.code === 'SQLITE_FULL' ||
+  e.name === 'QuotaExceededError' ||
+  (e.name === 'DOMException' && e.code === 22) ||
+  (e.code === 'ERR_SQLITE_ERROR' && e.errcode === 13);
+const isQuotaError = (error) => {
+  for (let depth = 0; depth <= CAUSE_DEPTH; depth++) {
+    if (error === null || typeof error !== 'object') return false;
+    if (isFull(error)) return true;
+    error = error.cause;
+  }
+  return false;
+};
+
+// What a field riding on an error may never be: the error's own (`name`, `message`, `code`, `stack`) or `__proto__`,
+// which would swap its prototype — a field named `name` once renamed a SyncomError to its data.
+const RESERVED = new Set(['name', 'message', 'stack', 'cause', 'code', '__proto__']);
+
 class SyncomError extends Error {
   constructor(code, message, { cause, ...fields } = {}) {
     super(message, cause === undefined ? undefined : { cause });
     this.name = 'SyncomError';
     this.code = code;
-    Object.assign(this, fields);
+    for (const key of Object.keys(fields)) if (!RESERVED.has(key)) this[key] = fields[key];
     Error.captureStackTrace?.(this, this.constructor);
   }
 }
@@ -51,4 +74,4 @@ class ValidationError extends SyncomError {
   }
 }
 
-module.exports = { SyncomError, ValidationError, typed };
+module.exports = { SyncomError, ValidationError, typed, isQuotaError };

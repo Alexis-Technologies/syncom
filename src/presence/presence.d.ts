@@ -4,7 +4,7 @@
 // sync plugin carries its updates (`storage.sync.presence(instance)`), or
 // any transport of the application's own (`encode()` / `apply()`).
 
-import type { Storage } from '../../index.js';
+import type { Database } from '../../index.js';
 
 /** A node's state as it travels: the node, its clock, its stamp, the state (null leaves) and a signature when the node signs. */
 export type PresenceEntry =
@@ -90,7 +90,7 @@ export declare class Presence {
 }
 
 /** Presence over `storage`'s identity: signed when the signing plugin is registered. */
-export function createPresence(storage: Storage, options?: PresenceOptions): Presence;
+export function createPresence(storage: Database, options?: PresenceOptions): Presence;
 /** Whether a value is a presence update of the wire format. */
 export function isUpdate(value: unknown): value is PresenceUpdate;
 /** Whether a value is one entry of an update: the shape, a stamp no more than `MAX_AHEAD` ahead. */

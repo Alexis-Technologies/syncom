@@ -46,6 +46,22 @@ const directoryExists = async (path) => {
   return stats.isDirectory();
 };
 
+// How much room the medium under `path` has: Node asks the file system (`statfs`; the directory, else the
+// working directory, else nothing); what this database itself holds the file system does not say (`usage` null).
+const estimateStorage = async (path) => {
+  for (const at of [path, process.cwd()]) {
+    try {
+      const stats = await fsp.statfs(at);
+      return { usage: null, quota: Number(stats.bavail) * Number(stats.bsize) };
+    } catch {
+      // Not a directory here: the next.
+    }
+  }
+  return { usage: null, quota: null };
+};
+// Nothing to ask of a file system: what is written stays.
+const persistStorage = async () => true;
+
 module.exports = {
   Emitter,
   createLogger,
@@ -53,4 +69,6 @@ module.exports = {
   taskScope,
   fileExists,
   directoryExists,
+  estimateStorage,
+  persistStorage,
 };

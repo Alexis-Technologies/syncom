@@ -9,7 +9,7 @@
 // `EngineDb`, `engine.remove(path)` takes every store of that database away.
 // A database is a set of stores over one `path`:
 //
-//   kv       small named texts beside the records — node.json, schema.json,
+//   kv       small named texts beside the records — node.json, schema.json, revoked.json,
 //            tags.json, the keys, the lock, the registry, the chain's blocks —
 //            `get/has/list/put/remove` by namespace and key; `create` where the
 //            medium can make a key exclusively (the lock prefers it)
@@ -24,6 +24,8 @@
 //   write    one write set — records (each with the pieces it makes and drops),
 //            kv puts and removals, copies — landed whole where the medium has
 //            transactions (`capabilities.atomicBatch`), in order otherwise
+//   estimate optional: `{ usage, quota }` in bytes, what the medium can say of
+//            the room (`db.quota()` asks it; the files engine asks its volume)
 //
 // The files engine (src/files/files.js) is the one every fsi becomes; a
 // native engine (memory, IndexedDB, SQLite, MongoDB) keeps rows, indexes and
@@ -47,7 +49,9 @@ const CAPABILITIES = Object.freeze({
   lock: 'kv',
   // Several instances may open one database at once (read-only followers).
   shared: false,
-  // A `blobs` store for attachments.
+  // A `blobs` store for attachments: `get(digest)`, `has`, `list()`, `put(digest, bytes)`, `remove` — bytes by their
+  // SHA-256; every store checks the digest and the bytes at its door (src/blobs.js: checkDigest, checkBlobBytes
+  // within MAX_BLOB_BYTES) before the medium sees them.
   blobs: false,
   // The log's medium appends a line to a journal (a file per group otherwise).
   append: false,
@@ -132,7 +136,18 @@ const fsiNamespace = (fsi, dir) => {
 // The kv namespaces a database writes besides a tag's (`tags/<tag>/index`):
 // the one list `copyEngine` copies and the files engine sweeps — a plugin
 // that writes a namespace of its own adds it here.
-const KV_NAMESPACES = Object.freeze(['', 'keys', 'blockchain', 'index', 'remote', 'local', 'pipeline', 'tombstones']);
+const KV_NAMESPACES = Object.freeze([
+  '',
+  'keys',
+  'blockchain',
+  'index',
+  'remote',
+  'local',
+  'pipeline',
+  'tombstones',
+  'shared',
+  'connector',
+]);
 
 // A kv key, a tag's name, a piece's name: a text that names one thing and
 // nothing else — no separator, no `.`/`..`, no control character, 255 at

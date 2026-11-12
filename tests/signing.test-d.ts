@@ -1,11 +1,11 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
 import { signing, calculateHash, generateSigningKeys, loadSigningKeys, sign, verify } from '../src/signing/signing.js';
 import type { Plugin, KeyPair, SigningKeyPair } from '../src/signing/signing.js';
-import { open } from '../index.js';
+import { createDatabase } from '../index.js';
 import { memory } from '../src/memory/memory.js';
 
 expectType<Plugin>(signing);
-const storage = await open({ plugins: [signing], sync: { signatures: 'require' } });
+const storage = await createDatabase({ plugins: [signing], sync: { signatures: 'require' } });
 expectType<string>(storage.nodeId);
 // node:crypto is synchronous, unlike the browser half.
 expectType<string>(calculateHash({ a: 1 }));

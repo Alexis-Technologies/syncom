@@ -5,12 +5,12 @@ import * as transform from 'prosemirror-transform';
 import * as view from 'prosemirror-view';
 import { createProseMirror, docToSpans, spansToDoc, indexOfPos, posOfIndex } from '../src/prosemirror/prosemirror.js';
 import type { ProseMirrorBinding } from '../src/prosemirror/prosemirror.js';
-import type { Storage, TextSpan } from '../src/all/all.js';
+import type { Database, TextSpan } from '../src/all/all.js';
 import type { TextBinding } from '../src/editor/editor.js';
 import { createUndo } from '../src/undo/undo.js';
 import { createPresence } from '../src/presence/presence.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 declare const schema: model.Schema;
 declare const doc: model.Node;
 

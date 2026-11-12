@@ -128,3 +128,6 @@ docs/.vitepress/cache
 
 # The automerge-perf editing trace, downloaded at bench time (bench/compare/trace.js)
 bench/compare/.cache
+
+# The database `createDatabase()` makes at its default path — what examples/main.js opens when run from the root
+/syncom/

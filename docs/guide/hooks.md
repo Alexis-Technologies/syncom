@@ -180,12 +180,17 @@ a slow read hook holds no write.
 | --- | --- | --- | --- |
 | `beforeConnect(node)` | Before a registered node is dialled — at `start()`, `addNode()` while started, or `enableNode()`. `node` is a copy of the registry entry | `false` leaves it registered but not dialled | Reported through the manager's `error` event, with `error.url` |
 | `beforeBootstrap({ url, node })` | When a host's log cannot resume this node and its whole state is about to be joined | `false` refuses: the peer stays connected for pushes but nothing is received from it until the next handshake asks again | Reported through `error` |
+| `beforeSend({ op, peer })` | Before an op goes to a peer — a push, a relay, a hosted `changes` page (over a shared log too) | `false` sends it **scrubbed**: the header alone, a no-op where it lands, no gap in its stream (the log's op is untouched). A snapshot page and a query answer are records, not ops: the scopes rule them | Reported through `error`; the push fails and is tried again |
+| `onRevoke({ url, node, scopes })` | A host took scopes back from this node (`REVOKED`); the registry entry is narrower already, the feed is opened again under the new grant after the hook | — | Reported through `error` |
 
-There is deliberately no hook on the ops that leave for a peer. Seqs run
-contiguously per origin and scope, so an op withheld from one peer is a gap
-that stops every later op of that stream at it. Per-peer visibility is what
-[scopes](./sync#scopes) are for: a scope is its own stream, and a node only
-receives the scopes it asked for.
+No hook ever withholds an op: seqs run contiguously per origin and scope, so
+an op missing at one peer is a gap that stops every later op of that stream
+at it. `beforeSend` sends the header instead — the op is logged and relayed
+everywhere as a no-op (`scrubbed`) — and a host's
+[`authorizeWrite`](./sync#hosting) refuses the same way. Per-peer visibility
+is what [scopes](./sync#scopes) are for: a scope is its own stream, and a
+node only receives the scopes it asked for. Without `onRevoke`, the records
+of a revoked scope are forgotten (`forget(id)`: gone here, no op).
 
 ```js
 const storage = await createDatabase({
@@ -218,11 +223,11 @@ default) on the storage and on its sync manager; one more throws.
 
 | Event | Payload | When |
 | --- | --- | --- |
-| `change` | `(op, via, { changes })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; keystrokes sent without waiting, or typed through a transaction, that continue each other are one op (typed on at the end of their run, or a chain of cuts), announced once with the changes of each in order; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op) |
+| `change` | `(op, via, { changes, seq })` | Every op this node logs — a local write, a peer's accepted op (a skipped one included), a bootstrap's `merge` and `advance`; keystrokes sent without waiting, or typed through a transaction, that continue each other are one op (typed on at the end of their run, or a chain of cuts), announced once with the changes of each in order; `via` is `null` for a local write, otherwise `{ url, node }` of the peer it came from (`url` null on the hosting side); `changes` what the reading shows of the op, in the write API's terms and the reading's indices (see [Changes](./versions#changes); `[]` for an `advance`, a skipped op); `seq` the op's position in this node's log (what a hub's relay to a [shared log](./scaling#hubs) covers it by) |
 | `commit` | `({ op, seq, source, before, after, kinds, embeds? })` | A local write is durable — any kind of op made through the write API, `transact()`, `applyPatches()` and `migrate()` included; never a peer's op, a bootstrap's `merge`, an encrypted write (it makes no op) or a write that changed nothing. `seq` is its log position, `source` the `Document` whose `save()` it was or the `source` given to `transact()`/`applyPatches()` (`null` otherwise), `before`/`after` the record as copies in the op model's terms — every [path](./database#paths) a field of its own, not composed (`null` when absent or deleted), `kinds` every field's kind before and after (`register`, `counter`, `set`, `list`, `text`, `tree`), `embeds` the markers of a text's [embed slots](./lists#embeds-and-blocks) by index on each side, when a side holds any; `op.msg` the transaction's message — see [The commit event](./versions#the-commit-event); built only while something listens. It fires after `afterWrite` and the `Document`'s `update`, before `change`; a transaction's fire once it has landed whole, in op order |
 | `transaction` | `({ local, via, source, message, ops, changes, ts })` | One turn's ops durable and announced, after their `change` events: a local write (`ops` one), a `transact()` (its ops, `source` and `message`), a peer's page (`local` false, `via` the peer), a joined snapshot (`local` true, `via` the host) — `changes` every op's, tagged with its record `id`, `ts` the last op's stamp; built only while something listens; `eventId` the log position of the turn's last op, where a reader of the turns resumes from (`log.since`) |
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A peer's batch is durable — `ops` are the accepted ones, skipped included |
-| `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` | A peer's op left a unique key shared by two records — see [Queries](./database#queries) |
+| `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` or `({ kind: 'register', id, field, op, winner: { ts, origin, value }, loser: { ts, origin, value } })` | A peer's op left a unique key shared by two records — see [Queries](./database#queries); or a peer's register write (a `set`'s or `write`'s field) was stamped below the one this node holds — both made without seeing the other, the newer stamp won on every node, and the op is applied for its other fields all the same; `winner` is what the field reads as here, `loser` what the op carried. Only the apply path loses: a local write is stamped above everything the node holds |
 | `schema` | `({ kind: 'drift', … })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash — see [Schemas](./sync#schemas); a peer's op is from a newer version — see [Reading across versions](./database#reading-across-versions) |
 | `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op the engine refused (`OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a [limit](./lists#costs-and-limits) (`detail`: `pending`, `run` or `field`), `malformed` for a payload it does not admit; skipped as invalid under this node's [schema](./schema#how-a-write-is-validated) (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`); logged ops whose record files could not be written (`UNPERSISTED`); the engine's lease gone to another instance (`LEASE_LOST`, `path`) or a follower's change stream ended (`FOLLOW_LOST`, `path`: subscribed again, every record read again) |
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them — see [The log](./sync#the-log) |
@@ -260,7 +265,7 @@ the intended scale.
 | `bootstrap` | `({ url, records })` | A host's whole state was joined |
 | `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw, a page that failed (`PAGE_FAILED`, `STUCK`), a host that holds more of this node's ops than its log (`REWOUND`) or lacks ones its log no longer holds (`UNDELIVERABLE`) |
 | `hello` | `({ node, scopes, schema })` | Hosting side: a peer greeted this node and was authorized |
-| `refused` | `({ node, reason, count })` | Hosting side: a push carried ops this node would not take — `'scope'` (outside the peer's scopes), `'forged'`, `'unsigned'` |
+| `refused` | `({ node, reason, count, via? })` | Hosting side: a push carried ops this node would not take — `'scope'` (outside the peer's scopes), `'forged'`, `'unsigned'`, `'equivocation'`, `'rule'` (`authorizeWrite` said no); `via: 'inbox'` where the ops came through a follower's forward over the shared log, judged by the writer |
 
 ## `HookError`
 

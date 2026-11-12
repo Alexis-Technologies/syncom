@@ -27,10 +27,14 @@ const { SortedIndex, rankOf, compare, beforePosition } = require('./sorted.js');
 const FILE = 'catalog.json';
 // The key `ids()` caches the whole live list under.
 const ALL = Symbol('syncom.catalog.all');
-// 4: a folded tombstone's stamps ride on its row (`folded`, the eighth cell; @alexify/syncom/cleanup).
-// 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell); a
-//    folded tombstone lives in the `tombstones` kv namespace, whole, and its row is any tombstone's.
-const FORMAT = 5;
+// The sealed listing of a collection without sealed records: one frozen array, read by every cursor over it.
+const EMPTY = Object.freeze([]);
+// The file's format. A row is `[id, type, v, encrypted, fields, gone, seventh]`, cut after its last cell that says
+// something: the seventh a live record's search text, or the stamp of a tombstone's delete (`deleted`) — a
+// tombstone's row keeps its collection (`type`) too; a folded tombstone lives in the `tombstones` kv namespace,
+// whole, and its row is any tombstone's. Nothing is published: the format is 1 whatever changed before the first
+// release, and a file of any other is not read.
+const FORMAT = 1;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
@@ -268,6 +272,11 @@ class Catalog {
   #loaded = false;
   #sorted = null;
   #sortedIds = new Map();
+  // A collection's sealed records by type — a Set, kept by every insert and remove of a sealed row — and the sorted
+  // listing a query reads: built from the set once, kept until a sealed record of the collection comes or goes (a
+  // plain write never touches it; a collection without sealed records answers the one frozen EMPTY).
+  #sealed = new Map();
+  #sealedSorted = new Map();
   #text;
   #textPending = new Map();
   #logger;
@@ -604,6 +613,10 @@ class Catalog {
     if (row.gone) return;
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
+    if (row.encrypted) {
+      drop(this.#sealed, row.type, id);
+      this.#sealedSorted.delete(row.type);
+    }
     drop(this.#byType, row.type, id);
     this.#index(id, row, false);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
@@ -646,6 +659,10 @@ class Catalog {
     if (row.gone) return;
     this.#sortedIds.delete(row.type);
     this.#sortedIds.delete(ALL);
+    if (row.encrypted) {
+      add(this.#sealed, row.type, id);
+      this.#sealedSorted.delete(row.type);
+    }
     add(this.#byType, row.type, id);
     this.#index(id, row, true);
     const def = row.type === null ? undefined : this.#defs.get(row.type);
@@ -843,6 +860,20 @@ class Catalog {
   }
 
   /**
+   * The sealed (encrypted) records of a collection, sorted by id — rows with no fields, which no index knows: a
+   * query reads them whole at the key holder. The set is kept per put; the sorted listing is built from it once and
+   * stays until a sealed record of the collection comes or goes — a plain write costs it nothing. Shared: read it.
+   */
+  sealed(type) {
+    const set = this.#sealed.get(type);
+    if (set === undefined) return EMPTY;
+    let sorted = this.#sealedSorted.get(type);
+    if (sorted !== undefined) return sorted;
+    sorted = [...set].sort();
+    this.#sealedSorted.set(type, sorted);
+    return sorted;
+  }
+  /**
    * The ids a query over `entity` can only match, from the indexed fields
    * it names by equality (`field: value`, `{ $eq }`, `{ $in }`) — at the top
    * level and down every `$and` branch; an `$or` narrows when each of its
@@ -973,8 +1004,7 @@ class Catalog {
     }
     const usable =
       isObject(parsed) &&
-      // A tag's catalog (`strict: false`) saved as format 4 still reads; the live one asks for today's format.
-      (parsed.format === FORMAT || (!strict && parsed.format === 4)) &&
+      parsed.format === FORMAT &&
       (!strict || parsed.indexes === this.#indexKey) &&
       typeof parsed.stamp === 'string' &&
       Array.isArray(parsed.rows);

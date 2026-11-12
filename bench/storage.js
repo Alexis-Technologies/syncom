@@ -98,7 +98,7 @@ const main = async () => {
     await bench('swap — mismatch (reads only)', () => storage.swap(id, { name: 'x' }, { name: 'nope' }));
 
     await bench('has — existing id', () => storage.has(id));
-    await bench('record — cached Record instance', () => storage.record(id));
+    await bench('document — cached Document instance', () => storage.document(id));
 
     // The catalog: list() and hasRecord() answer from memory however many
     // records there are; a rebuild is the one scan, and only on an open

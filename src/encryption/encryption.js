@@ -22,13 +22,21 @@
 //   (DECRYPT_FAILED, reason 'plain' the other way round). Given an engine
 //   (memory, IndexedDB, SQLite, MongoDB), the same over its stores — every
 //   record, piece, copy, kv text and log entry a ciphertext bound to its
-//   place (./at-rest-engine.js); the files engine is wrapped at its backend.
+//   place, a blob's bytes as bytes (iv ‖ ciphertext, no base64:
+//   `sealBytes`/`openBytes`) (./at-rest-engine.js); the files engine is
+//   wrapped at its backend.
+// - `rotateAtRest(engine | { fsi, filesEngine }, { path, from, to, into })` —
+//   the key rotated by a copy (engines/copy.js) into another path, engine or
+//   backend; the source is then fenced with `moved.json` (createDatabase
+//   refuses it as MOVED, naming where it went) until it is dropped.
 
 const { generateKeys, encrypt, decrypt, loadKeys } = require('./rsa.js');
 const { checkFsi } = require('../backend.js');
 const { isEngine } = require('../engine.js');
 const { SyncomError } = require('../errors.js');
 const { atRestEngine } = require('./at-rest-engine.js');
+const { copyEngine } = require('../engines/copy.js');
+const { toBase64, fromBase64 } = require('../crypto/pem.js');
 
 const encryption = Object.freeze({
   name: 'encryption',
@@ -49,40 +57,14 @@ const encryption = Object.freeze({
 // `enc1:` binds each ciphertext to its file name (the additional data of
 // AES-GCM): a file copied over another one of the store does not decrypt.
 const PREFIX = 'enc1:';
+// What follows the prefix: standard base64 (crypto/pem.js's decoder is lenient under Node, so the shape is checked here).
+const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const IV_BYTES = 12;
+const TAG_BYTES = 16;
+// The fence a rotated source carries in its root namespace (src/identity.js reads it: MOVED).
+const MOVED_FILE = 'moved.json';
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
-
-// Base64 of bytes, three at a time into four letters, a chunk of text per
-// 3 KB joined at the end: a string per byte was a heap of them for a record.
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-const B64_CHUNK = 3072;
-const toBase64 = (bytes) => {
-  const out = [];
-  let chunk = '';
-  let i = 0;
-  for (; i + 2 < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    chunk += B64[n >> 18] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63];
-    if (chunk.length === (B64_CHUNK / 3) * 4) {
-      out.push(chunk);
-      chunk = '';
-    }
-  }
-  if (i < bytes.length) {
-    const second = i + 1 < bytes.length;
-    const n = (bytes[i] << 16) | ((second ? bytes[i + 1] : 0) << 8);
-    chunk += B64[n >> 18] + B64[(n >> 12) & 63] + (second ? B64[(n >> 6) & 63] : '=') + '=';
-  }
-  out.push(chunk);
-  return out.join('');
-};
-const fromBase64 = (text) => {
-  const binary = atob(text);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes;
-};
 
 const failed = (where, reason, cause) =>
   new SyncomError(
@@ -126,45 +108,50 @@ const keyOf = async ({ key, password, salt, iterations }) => {
   return subtle().deriveKey(params, base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
 };
 
-// The cipher of one key: `seal(name, text)` → `enc1:…` bound to `name` (the
-// additional data of AES-GCM), `open(where, name, text)` the text back, or
-// DECRYPT_FAILED naming `where`. The key is imported or derived once, at the
-// first call (a failed import surfaces there, not as an unhandled rejection).
+// The cipher of one key: `sealBytes(name, bytes)` → iv ‖ ciphertext (the tag
+// inside) bound to `name` (the additional data of AES-GCM), `openBytes(where,
+// name, bytes)` the bytes back or DECRYPT_FAILED `key` naming `where` — what a
+// blob is sealed as, its size its own; `seal(name, text)` → `enc1:` and the
+// base64 of the same, `open(where, name, text)` the text back ('plain' for a
+// text without the prefix, 'torn' for one that is no base64). The key is
+// imported or derived once, at the first call (a failed import surfaces
+// there, not as an unhandled rejection).
 const createCipher = (options) => {
   const ready = keyOf(checkOptions(options));
   ready.catch(() => {});
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const bound = (name) => ({ additionalData: encoder.encode(name) });
-  const seal = async (name, text) => {
+  const sealBytes = async (name, bytes) => {
     const key = await ready;
     const iv = globalThis.crypto.getRandomValues(new Uint8Array(IV_BYTES));
     const params = { name: 'AES-GCM', iv, ...bound(name) };
-    const body = new Uint8Array(await subtle().encrypt(params, key, encoder.encode(text)));
+    const body = new Uint8Array(await subtle().encrypt(params, key, bytes));
     const out = new Uint8Array(iv.length + body.length);
     out.set(iv, 0);
     out.set(body, iv.length);
-    return PREFIX + toBase64(out);
+    return out;
   };
-  const open = async (where, name, text) => {
-    if (typeof text !== 'string' || !text.startsWith(PREFIX)) throw failed(where, 'plain');
+  const openBytes = async (where, name, bytes) => {
+    // Too short for an iv and a tag: never sealed here (a plain blob under the wrapper), or torn.
+    if (!(bytes instanceof Uint8Array) || bytes.length < IV_BYTES + TAG_BYTES) throw failed(where, 'key');
     const key = await ready;
-    let bytes;
-    try {
-      bytes = fromBase64(text.slice(PREFIX.length));
-    } catch (error) {
-      throw failed(where, 'torn', error);
-    }
     try {
       const iv = bytes.subarray(0, IV_BYTES);
       const params = { name: 'AES-GCM', iv, ...bound(name) };
-      const plain = await subtle().decrypt(params, key, bytes.subarray(IV_BYTES));
-      return decoder.decode(plain);
+      return new Uint8Array(await subtle().decrypt(params, key, bytes.subarray(IV_BYTES)));
     } catch (error) {
       throw failed(where, 'key', error);
     }
   };
-  return { seal, open };
+  const seal = async (name, text) => PREFIX + toBase64(await sealBytes(name, encoder.encode(text)));
+  const open = async (where, name, text) => {
+    if (typeof text !== 'string' || !text.startsWith(PREFIX)) throw failed(where, 'plain');
+    const body = text.slice(PREFIX.length);
+    if (!BASE64.test(body)) throw failed(where, 'torn');
+    return decoder.decode(await openBytes(where, name, fromBase64(body)));
+  };
+  return { seal, open, sealBytes, openBytes };
 };
 
 // A backend whose every file is encrypted: the name, not the directory,
@@ -196,10 +183,85 @@ const atRestFsi = (fsi, options) => {
  */
 const atRest = (target, options = {}) => {
   if (isEngine(target)) {
-    const { seal, open } = createCipher(options);
-    return atRestEngine(target, { seal, open: (name, text) => open(name, name, text) });
+    const { seal, open, sealBytes, openBytes } = createCipher(options);
+    return atRestEngine(target, {
+      seal,
+      open: (name, text) => open(name, name, text),
+      sealBytes,
+      openBytes: (name, bytes) => openBytes(name, name, bytes),
+    });
   }
   return atRestFsi(target, options);
 };
 
-module.exports = { encryption, atRest, generateKeys, encrypt, decrypt, loadKeys };
+/**
+ * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole — every record,
+ * piece, copy, kv text, log entry and blob — into `into` (`{ path }` on the same engine or backend, `{ engine }`,
+ * `{ fsi }`, or a path with either) sealed under `to`; the same node (its identity, epoch, vector and heads go with
+ * it), so a peer resumes where it was. Over an engine (memory, IndexedDB, SQLite, MongoDB) `rotateAtRest(engine, …)`;
+ * over a backend — the files engine, wrapped at its backend — `rotateAtRest({ fsi, filesEngine }, …)` with the files
+ * engine's factory (`filesEngine` of the main entry: nothing of it is bundled here). Never in place: a copy cut short
+ * leaves the source as it was and the target marked (`copy.json`), which the next copy takes away first
+ * (`TARGET_NOT_EMPTY` for a target that holds a database). Once copied, the source is FENCED: `moved.json` in its root
+ * namespace names where it went, and `createDatabase` there refuses `MOVED` until `dropDatabase` takes it — the same
+ * node id never writes in two places. Open the database at its new place with `atRest(…, to)`.
+ */
+const rotateAtRest = async (target, { path, from, to, into, batch } = {}) => {
+  const overBackend = target !== null && typeof target === 'object' && !isEngine(target) && 'fsi' in target;
+  if (!overBackend && !isEngine(target)) {
+    throw new TypeError('rotateAtRest(): an engine, or { fsi, filesEngine } for a backend');
+  }
+  if (typeof path !== 'string' || path.length === 0) throw new TypeError('rotateAtRest(): path');
+  const named = into !== null && typeof into === 'object';
+  if (!named || (into.engine === undefined && into.path === undefined && into.fsi === undefined)) {
+    throw new TypeError(
+      'rotateAtRest(): into names where the rotated database lands — { path }, { engine } or { fsi }',
+    );
+  }
+  const targetPath = into.path ?? path;
+  let source;
+  let destination;
+  let engineName;
+  if (overBackend) {
+    const { fsi, filesEngine } = target;
+    checkFsi(fsi, 'rotateAtRest({ fsi })');
+    if (typeof filesEngine !== 'function') {
+      throw new TypeError(
+        "rotateAtRest({ fsi, filesEngine }): the files engine's factory — filesEngine of '@alexify/syncom'",
+      );
+    }
+    if (into.engine !== undefined) {
+      throw new TypeError('rotateAtRest({ fsi }): into names a path or a backend (fsi), not an engine');
+    }
+    const other = into.fsi === undefined ? fsi : checkFsi(into.fsi, 'rotateAtRest(into.fsi)');
+    if (other === fsi && targetPath === path) {
+      throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or backend');
+    }
+    source = filesEngine(atRestFsi(fsi, from));
+    destination = filesEngine(atRestFsi(other, to));
+    engineName = 'files';
+  } else {
+    if (into.fsi !== undefined) {
+      throw new TypeError('rotateAtRest(engine): into names a path or an engine, not a backend');
+    }
+    const engine = into.engine ?? target;
+    if (engine === target && targetPath === path) {
+      throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or engine');
+    }
+    source = atRest(target, from);
+    destination = atRest(engine, to);
+    engineName = engine.name;
+  }
+  const counts = await copyEngine(source, destination, { path, targetPath, batch });
+  // The fence: the source says where it went (sealed under its own key), and opens nowhere until dropped.
+  const moved = JSON.stringify({ to: { path: targetPath, engine: engineName }, at: Date.now() });
+  const db = await source.open(path, {});
+  try {
+    await db.kv.put('', MOVED_FILE, moved, { atomic: true });
+  } finally {
+    await db.close();
+  }
+  return counts;
+};
+
+module.exports = { encryption, atRest, rotateAtRest, generateKeys, encrypt, decrypt, loadKeys };

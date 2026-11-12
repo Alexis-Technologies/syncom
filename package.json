@@ -2,6 +2,7 @@
   "name": "@alexify/syncom",
   "version": "0.0.1",
   "description": "Fast, zero-dependency distributed data sync engine",
+  "type": "commonjs",
   "main": "index.js",
   "browser": {
     "./index.js": "./browser.js",
@@ -167,15 +168,68 @@
       "types": "./src/cleanup/cleanup.d.ts",
       "default": "./src/cleanup/cleanup.js"
     },
+    "./connector": {
+      "types": "./src/connector/connector.d.ts",
+      "default": "./src/connector/connector.js"
+    },
+    "./connector/couchdb": {
+      "types": "./src/connector/couchdb.d.ts",
+      "default": "./src/connector/couchdb.js"
+    },
+    "./connector/graphql": {
+      "types": "./src/connector/graphql.d.ts",
+      "default": "./src/connector/graphql.js"
+    },
+    "./connector/mongodb": {
+      "types": "./src/connector/mongodb.d.ts",
+      "default": "./src/connector/mongodb.js"
+    },
+    "./connector/supabase": {
+      "types": "./src/connector/supabase.d.ts",
+      "default": "./src/connector/supabase.js"
+    },
+    "./connector/firestore": {
+      "types": "./src/connector/firestore.d.ts",
+      "default": "./src/connector/firestore.js"
+    },
+    "./connector/appwrite": {
+      "types": "./src/connector/appwrite.d.ts",
+      "default": "./src/connector/appwrite.js"
+    },
+    "./connector/gdrive": {
+      "types": "./src/connector/gdrive.d.ts",
+      "default": "./src/connector/gdrive.js"
+    },
+    "./connector/onedrive": {
+      "types": "./src/connector/onedrive.d.ts",
+      "default": "./src/connector/onedrive.js"
+    },
+    "./shared": {
+      "types": "./src/shared/shared.d.ts",
+      "default": "./src/shared/shared.js"
+    },
+    "./attachments": {
+      "types": "./src/attachments/attachments.d.ts",
+      "default": "./src/attachments/attachments.js"
+    },
+    "./testing": {
+      "types": "./src/testing/testing.d.ts",
+      "default": "./src/testing/testing.js"
+    },
+    "./mcp": {
+      "types": "./src/mcp/mcp.d.ts",
+      "default": "./src/mcp/mcp.js"
+    },
     "./package.json": "./package.json"
   },
   "directories": {
     "test": "tests"
   },
   "scripts": {
-    "test": "node --test --test-timeout=120000",
-    "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test --test-timeout=120000",
+    "test": "node --test --test-timeout=120000 --test-force-exit",
+    "test:coverage": "c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 --reporter text --reporter lcov node --test --test-timeout=120000 --test-force-exit",
     "test:types": "tsd",
+    "test:smoke": "node tests/smoke/smoke.js",
     "bench": "node bench/run-all.js",
     "bench:compare:install": "pnpm --dir bench/compare install --ignore-workspace",
     "bench:compare": "node bench/compare.js",
@@ -238,7 +292,9 @@
     "sqlite",
     "mongodb",
     "opentelemetry",
-    "observability"
+    "observability",
+    "connector",
+    "mcp"
   ],
   "author": "Alex Dolid <dolid.sasha@gmail.com>",
   "license": "MIT",

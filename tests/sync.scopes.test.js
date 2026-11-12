@@ -100,25 +100,34 @@ test('Hosting scopes', async (t) => {
     const link = new MemoryLink(unit);
     await link.call('syncom/hello', { node: 'tenant-a', version: 1, scopes: ['A'] });
     const pages = [];
+    // The idle pages apart: one per lull, never one per op of another scope.
+    const idles = [];
     link.subscribe(
       'syncom/changes',
       { scopes: ['A'] },
       {
-        onData: (value, eventId) => pages.push({ ids: (value.ops ?? []).map((row) => row[4]), eventId }),
+        onData: (value, eventId) => {
+          if (value.idle === true) idles.push(eventId);
+          else pages.push({ ids: (value.ops ?? []).map((row) => row[4]), eventId });
+        },
         onError: (error) => {
           throw error;
         },
       },
     );
+    await waitUntil(() => idles.length === 1);
+    assert.match(idles[0], /\.0$/, 'caught up on an empty log: the position before its first op');
     for (let i = 0; i < 20; i++) await host.insert({ $type: 'B', i });
     // Every B op woke the feed; its cursor followed them to the last real
-    // entry, and nothing went out.
+    // entry, and nothing went out — not a page, not another idle one.
     await waitUntil(() => host.sync.hosted()[0]?.cursor === host.log.lastEventId);
     assert.deepStrictEqual(pages, [], 'no empty pages');
+    assert.strictEqual(idles.length, 1, 'idle once per lull');
     const a = await host.insert({ $type: 'A', n: 1 });
-    await waitUntil(() => pages.length === 1);
+    await waitUntil(() => pages.length === 1 && idles.length === 2);
     assert.deepStrictEqual(pages[0].ids, [a], 'the A op alone, labelled with its own position');
     assert.strictEqual(pages[0].eventId, host.log.lastEventId);
+    assert.strictEqual(idles[1], pages[0].eventId, 'idle again, at the page’s position');
     assert.strictEqual(host.sync.hosted()[0].cursor, host.log.lastEventId);
     // A resume from the last page delivered is exact: the B ops before it are
     // behind the cursor the page carried. (The socket dies first, as it does

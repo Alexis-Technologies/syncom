@@ -70,6 +70,51 @@ const asyncDriver = {
 test('SQLite engine', async (t) => {
   await runEngineTests(t, { create: () => sqliteEngine(), root: vroot });
 
+  await t.test('remove(path) takes the blobs with the rest; has() reads no bytes', async () => {
+    // A driver that records every statement prepared: what `has` asks the file for.
+    const prepared = [];
+    const driver = {
+      open(file) {
+        const conn = new DatabaseSync(file);
+        return {
+          exec: (sql) => conn.exec(sql),
+          prepare(sql) {
+            prepared.push(sql);
+            return conn.prepare(sql);
+          },
+          close: () => conn.close(),
+        };
+      },
+    };
+    const engine = sqliteEngine({ driver });
+    const db = await engine.open('/blobs', { logger: null });
+    const digest = 'e'.repeat(64);
+    await db.blobs.put(digest, new Uint8Array(100_000).fill(5));
+    await db.blobs.put('f'.repeat(64), new Uint8Array([1]));
+    const other = await engine.open('/other', { logger: null });
+    await other.blobs.put(digest, new Uint8Array([9]));
+    prepared.length = 0;
+    assert.strictEqual(await db.blobs.has(digest), true);
+    assert.strictEqual(await db.blobs.has('a'.repeat(64)), false);
+    const asked = prepared.filter((sql) => /blobs/.test(sql));
+    assert.ok(asked.length >= 1);
+    assert.ok(
+      asked.every((sql) => !/\bbytes\b/.test(sql)),
+      `has() selects no bytes: ${asked.join(' | ')}`,
+    );
+    // The room: the file's pages, nothing of a volume for :memory:.
+    const room = await db.estimate();
+    assert.ok(room.usage > 100_000, `${room.usage} bytes of pages hold the blob`);
+    assert.strictEqual(room.quota, null);
+    // remove(path) takes every row of the path, the blobs among them — and no other path's.
+    await engine.remove('/blobs');
+    const again = await engine.open('/blobs', { logger: null });
+    assert.deepStrictEqual(await again.blobs.list(), []);
+    assert.strictEqual(await again.blobs.has(digest), false);
+    assert.deepStrictEqual([...(await other.blobs.get(digest))], [9], 'the other path keeps its blob');
+    await engine.close();
+  });
+
   await t.test('capabilities and names: atomic write sets, exclusive create, no change stream; the file', async () => {
     const engine = sqliteEngine();
     assert.strictEqual(engine.name, 'sqlite');

@@ -32,15 +32,21 @@
 // port is the platform's (worker_threads, a browser's MessageChannel).
 
 const { checkEngine, checkEngineDb, capabilitiesOf, isKvKey, isKvNamespace } = require('../engine.js');
+const { isDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, typed } = require('../errors.js');
+const { packError, unpackError } = require('../wire-error.js');
 
 const LOG_GETTERS = ['journaled', 'sealedTo', 'open', 'segments', 'corrupt', 'health'];
 // A call's arguments are its own, a short fixed list: more is no call of the contract's.
 const ARGS_MAX = 4;
 
 const refused = (what) => new TypeError(`serveEngine(): ${what}`);
+// A blob's digest: hex, 64 characters (SHA-256) — the contract's `isDigest`.
+const digest = (value) => {
+  if (!isDigest(value)) throw refused(`${JSON.stringify(value)} is not a digest`);
+};
 const text = (value, what) => {
   if (typeof value !== 'string') throw refused(`${what} is a text`);
   return value;
@@ -143,6 +149,17 @@ const CHECKS = Object.freeze({
     },
     remove: pieceName,
   }),
+  blobs: Object.freeze({
+    get: digest,
+    has: digest,
+    list: () => {},
+    put: (name, bytes) => {
+      digest(name);
+      if (!(bytes instanceof Uint8Array)) throw refused('a blob is a Uint8Array');
+      checkBlobBytes(typed, bytes, 'serveEngine() blobs.put', MAX_STORED_BYTES);
+    },
+    remove: digest,
+  }),
   copies: Object.freeze({
     get: copyKey,
     has: copyKey,
@@ -224,30 +241,6 @@ const portOf = (port) => {
     return () => port.removeEventListener?.('close', once);
   };
   return { send, listen, onClose };
-};
-
-// An error as a message, and back: a SyncomError with its code and fields,
-// a TypeError, any other with its code (EEXIST) — and nothing else of it: a
-// file system's `path`, `syscall` or `errno` stays on the served side.
-const packError = (error) => {
-  if (error === null || typeof error !== 'object') return { message: String(error) };
-  const out = { name: error.name, message: error.message };
-  if (error.code !== undefined) out.code = error.code;
-  if (error instanceof SyncomError) {
-    for (const field of Object.keys(error)) {
-      if (field !== 'cause' && field !== 'stack' && field !== 'code') out[field] = error[field];
-    }
-  }
-  return out;
-};
-const unpackError = (packed) => {
-  const { name, message, code, ...fields } = packed;
-  if (name === 'SyncomError' && typeof code === 'string') {
-    return new SyncomError(code, message, { ...fields, cause: null });
-  }
-  const error = name === 'TypeError' ? new TypeError(message) : new Error(message);
-  if (code !== undefined) error.code = code;
-  return Object.assign(error, fields);
 };
 
 const logState = (log) => {
@@ -581,6 +574,15 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       remove: method('copies', 'remove'),
       drop: method('copies', 'drop'),
     };
+    const blobs = capabilities.blobs
+      ? {
+          get: method('blobs', 'get'),
+          has: method('blobs', 'has'),
+          list: method('blobs', 'list'),
+          put: method('blobs', 'put'),
+          remove: method('blobs', 'remove'),
+        }
+      : undefined;
     // The log store's getters are read at once by the OpLog: the last state the served side answered with.
     let state = { journaled: false, sealedTo: null, open: 0, segments: [], corrupt: 0, health: null };
     const logCall = async (name, args) => {
@@ -646,6 +648,7 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       write: (batch) => value({ h, store: 'write', args: [batch] }),
       close: () => value({ h, close: true }),
     };
+    if (blobs !== undefined) db.blobs = blobs;
     if (capabilities.changeStream) {
       db.changes = {
         subscribe(listener) {

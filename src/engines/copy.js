@@ -8,9 +8,14 @@
 // take; a lease lost on the way fails it), and a target that holds anything
 // is refused (TARGET_NOT_EMPTY). The identity — node.json, the keys — lands
 // LAST, so a copy cut short is no node of that name, and a copy that fails
-// takes what it wrote away again. The log's sealed entries go as one
-// segment, `batch` entries a group; the open groups as they were. Requires
-// engine.js, errors.js, lock.js and crypto/keys.js (the keys' file mode) only.
+// takes what it wrote away again — and marks its target first (`copy.json`,
+// removed last), so one cut short by a crash is taken away by the next copy;
+// a source moved elsewhere by rotateAtRest (`moved.json`) is refused (MOVED).
+// The log's sealed entries go as one segment, `batch` entries a group; the
+// open groups as they were. Requires
+// engine.js, errors.js, lock.js and crypto/keys.js (the keys' file mode) only. A
+// target without a blobs store while the source holds blobs is refused
+// (BLOBS_UNSUPPORTED) before anything is written.
 
 const { checkEngine, checkEngineDb, kvNamespace, KV_NAMESPACES } = require('../engine.js');
 const { KEY_FILE_MODE } = require('../crypto/keys.js');
@@ -18,12 +23,39 @@ const { SyncomError } = require('../errors.js');
 const { acquireLock, LOCK_FILE } = require('./../lock.js');
 
 const NODE_FILE = 'node.json';
+// The mark of a copy in flight on its target (written first, taken away last): a target that carries one and no
+// identity is a copy cut short, taken away before the next. The fence of a moved source (src/identity.js): never copied.
+const COPY_FILE = 'copy.json';
+const MOVED_FILE = 'moved.json';
 const KEYS = 'keys';
 const TAGS_FILE = 'tags.json';
 const PENDING = '.pending';
 
 const empty = (path) =>
   new SyncomError('TARGET_NOT_EMPTY', `copyEngine(): the target holds a database at ${path}`, { path });
+// A source that rotateAtRest moved elsewhere: copied again it would be the node in two places.
+const movedAway = (path, text) => {
+  let to = null;
+  try {
+    to = JSON.parse(text)?.to ?? null;
+  } catch {
+    // A fence that does not read is a fence still.
+  }
+  return new SyncomError(
+    'MOVED',
+    `copyEngine(): the database at ${path} was moved (rotateAtRest): copy it from where it went`,
+    {
+      path,
+      to,
+    },
+  );
+};
+const noBlobs = (engine, blobs) =>
+  new SyncomError(
+    'BLOBS_UNSUPPORTED',
+    `copyEngine(): the ${engine} engine has no blobs store, and the source holds ${blobs} blob(s)`,
+    { engine, blobs },
+  );
 const lost = (path, cause) =>
   new SyncomError('LEASE_LOST', `copyEngine(): the lease on ${path} was lost during the copy`, { path, cause });
 
@@ -68,7 +100,8 @@ const kvPuts = async (source, ns, { identity }) => {
   const keys = await source.kv.list(ns);
   for (let k = 0; k < keys.length; k++) {
     const key = keys[k];
-    if (ns === '' && (key === LOCK_FILE || (key === NODE_FILE) !== identity)) continue;
+    if (ns === '' && (key === LOCK_FILE || key === COPY_FILE || key === MOVED_FILE)) continue;
+    if (ns === '' && (key === NODE_FILE) !== identity) continue;
     const value = await source.kv.get(ns, key);
     if (value === null) continue;
     puts.push([ns, key, value, ns === KEYS ? { mode: KEY_FILE_MODE } : undefined]);
@@ -77,19 +110,23 @@ const kvPuts = async (source, ns, { identity }) => {
 };
 
 /**
- * `copyEngine(from, to, { path, batch })` — the database at `path` copied
- * from one engine to another, `batch` records (or log entries) per write set
- * (500). Answers what was copied: `{ records, pieces, copies, kv, entries }`.
+ * `copyEngine(from, to, { path, targetPath, batch })` — the database at `path` copied
+ * from one engine to another (at `targetPath` there, `path` by default), `batch` records (or log entries) per write set
+ * (500). Answers what was copied: `{ records, pieces, copies, kv, entries, blobs }`.
  */
-const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
+const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {}) => {
   checkEngine(from, 'copyEngine(from)');
   checkEngine(to, 'copyEngine(to)');
   if (typeof path !== 'string' || path.length === 0) throw new TypeError('copyEngine(): path');
+  if (typeof targetPath !== 'string' || targetPath.length === 0) throw new TypeError('copyEngine(): targetPath');
+  if (from === to && targetPath === path) {
+    throw new TypeError('copyEngine(): the target is the source — another engine, or targetPath');
+  }
   if (!Number.isInteger(batch) || batch < 1) throw new TypeError('copyEngine(): batch must be a positive integer');
   const source = checkEngineDb(await from.open(path, {}), 'copyEngine(from)');
-  const target = checkEngineDb(await to.open(path, {}), 'copyEngine(to)');
+  let target = checkEngineDb(await to.open(targetPath, {}), 'copyEngine(to)');
   const held = [];
-  const counts = { records: 0, pieces: 0, copies: 0, kv: 0, entries: 0 };
+  const counts = { records: 0, pieces: 0, copies: 0, kv: 0, entries: 0, blobs: 0 };
   // A lease that goes while the copy runs: the next write set fails, nothing lands over another holder's.
   let gone = null;
   const onLost = (cause) => {
@@ -105,11 +142,30 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
   let written = false;
   try {
     held.push(await hold(source, path, onLost));
-    held.push(await hold(target, path, onLost));
+    const fence = await source.kv.get('', MOVED_FILE);
+    if (fence !== null) throw movedAway(path, fence);
+    let lock = await hold(target, targetPath, onLost);
+    // A copy cut short before this one — the mark without an identity: taken away, the target opened anew.
+    if ((await target.kv.has('', COPY_FILE)) && !(await target.kv.has('', NODE_FILE))) {
+      await lock.release();
+      await target.close();
+      await to.remove(targetPath);
+      target = checkEngineDb(await to.open(targetPath, {}), 'copyEngine(to)');
+      lock = await hold(target, targetPath, onLost);
+    }
+    held.push(lock);
     if ((await target.kv.has('', NODE_FILE)) || (await target.records.ids({ limit: 1 })).length > 0) {
-      throw empty(path);
+      throw empty(targetPath);
+    }
+    // A target that cannot keep the attachments' bytes the source holds: refused before anything is written —
+    // a copy that silently lost every blob would leave the registers naming bytes nowhere.
+    if (source.blobs !== undefined && target.blobs === undefined) {
+      const held = (await source.blobs.list()).length;
+      if (held > 0) throw noBlobs(to.name, held);
     }
     written = true;
+    // The mark of a copy in flight, first of all.
+    await target.kv.put('', COPY_FILE, JSON.stringify({ from: path, started: Date.now() }), { atomic: true });
     // The kv texts, namespace by namespace — the identity (node.json, the keys) last of all.
     const tags = await tagNames(source);
     const namespaces = [];
@@ -119,6 +175,17 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
       const puts = await kvPuts(source, namespaces[i], { identity: false });
       if (puts.length > 0) await write({ kv: { put: puts } });
       counts.kv += puts.length;
+    }
+    // The attachments' blobs, where both engines keep them: one by one, by digest.
+    if (source.blobs !== undefined && target.blobs !== undefined) {
+      const digests = await source.blobs.list();
+      for (let i = 0; i < digests.length; i++) {
+        check();
+        const bytes = await source.blobs.get(digests[i]);
+        if (bytes === null) continue;
+        await target.blobs.put(digests[i], bytes);
+        counts.blobs++;
+      }
     }
     // The records with their pieces, `batch` per write set, in id order.
     let after = null;
@@ -231,6 +298,8 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
     const identity = await kvPuts(source, '', { identity: true });
     if (identity.length > 0) await write({ kv: { put: identity } });
     counts.kv += keys.length + identity.length;
+    // Whole: the mark goes.
+    await target.kv.remove('', COPY_FILE);
     written = false;
     return counts;
   } finally {
@@ -238,7 +307,7 @@ const copyEngine = async (from, to, { path, batch = 500 } = {}) => {
     await source.close();
     await target.close();
     // A copy that failed takes what it wrote away: the target was empty, and a retry finds it so.
-    if (written) await to.remove(path);
+    if (written) await to.remove(targetPath);
   }
 };
 

@@ -367,14 +367,18 @@ class Collection extends Emitter {
     return this.#storage.get(id, options);
   }
 
-  /** A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. */
-  select(query) {
-    return this.#storage[CURSOR](this.#name, query);
+  /**
+   * A cursor over this collection: `select(query).order(f).limit(n).fetch()` — the query plugin's. The collection's
+   * sealed records are read, at the key holder, unless `{ sealed: false }` asks for the plain rows alone.
+   */
+  select(query, options = {}) {
+    if (!isPlainObject(options)) throw new TypeError('select() takes a query and { sealed }');
+    return this.#storage[CURSOR](this.#name, query, { sealed: options.sealed !== false });
   }
 
   /** How many records of this collection match `query`. */
-  count(query) {
-    return this.select(query).count();
+  count(query, options) {
+    return this.select(query, options).count();
   }
 
   /**
@@ -438,11 +442,22 @@ class Collection extends Emitter {
     this.#mine(id);
     return this.#storage.document(id);
   }
-
-  /** @deprecated `document()` — the name before the rename. */
-  record(id) {
-    return this.document(id);
-  }
 }
 
-module.exports = { Collection };
+// The collection's writers that take data and answer a value — what a follower of `@alexify/syncom/shared` forwards
+// to the leader (its SharedCollection keeps the same list; tests/shared.test.js holds the two equal). `modify()` and
+// `remove()` are not among them: a function does not cross a wire, and a write by query is the leader's.
+const COLLECTION_WRITERS = Object.freeze([
+  'insert',
+  'upsert',
+  'insertIfAbsent',
+  'set',
+  'update',
+  'unset',
+  'delete',
+  'bulkInsert',
+  'bulkUpsert',
+  'bulkRemove',
+]);
+
+module.exports = { Collection, COLLECTION_WRITERS };

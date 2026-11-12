@@ -13,7 +13,7 @@ src/search/distance.js   isVector, cosine, euclidean, manhattan, dot, DISTANCES 
 ## Rules
 
 - **`$text` is the catalog's.** An entity's `search` fields are joined into
-  its catalog row as `row.text` (format 3, a seventh cell) and handed to the
+  its catalog row as `row.text` (the seventh cell) and handed to the
   injected `TextIndex` (`createDatabase({ search })`, built per entity in
   `#defineSchema`) LAZILY: `#insert`/`#remove` leave the last word per id in
   `#textPending`, and `candidates` flushes it before a `$text` query reads the

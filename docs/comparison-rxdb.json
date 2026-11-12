@@ -1556,17 +1556,17 @@
         },
         "size": {
           "mark": "",
-          "text": "75.4 KB min+gzip the core (browser); 162.4 KB `@alexify/syncom/all`, everything",
+          "text": "76.8 KB min+gzip the core (browser); 173.2 KB `@alexify/syncom/all`, everything",
           "source": "scripts/size.js; pnpm size"
         },
         "sizeSync": {
           "mark": "",
-          "text": "89.3 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
+          "text": "96.1 KB min+gzip: the core, the sync plugin and the wrpc link adapter",
           "source": "bench/compare/size.js; bench/results/size.json"
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when any entry passes its budget (the core 75.5 KB, `/all` 162.5 KB, each subpath its own)",
+          "text": "`pnpm size` fails CI when any entry passes its budget (the core 77 KB, `/all` 174 KB, each subpath its own)",
           "source": "scripts/size.js"
         },
         "node": {
@@ -1575,14 +1575,14 @@
           "source": "package.json:134-136; src/fsi.js; .github/workflows/ci.yml:33-34"
         },
         "deno": {
-          "mark": "❌",
-          "text": "not tested; `engines` names Node.js only",
-          "source": "package.json:134-136; .github/workflows/ci.yml"
+          "mark": "⚠️",
+          "text": "a smoke runs in CI (`tests/smoke/smoke.js`: a database in memory, two nodes over the in-process link); the suite is node:test's and runs under Node alone",
+          "source": ".github/workflows/ci.yml (smoke-deno); tests/smoke/smoke.js"
         },
         "bun": {
-          "mark": "❌",
-          "text": "not tested",
-          "source": ".github/workflows/ci.yml"
+          "mark": "⚠️",
+          "text": "a smoke runs in CI (`tests/smoke/smoke.js`); the suite is node:test's and runs under Node alone",
+          "source": ".github/workflows/ci.yml (smoke-bun); tests/smoke/smoke.js"
         },
         "browser": {
           "mark": "✅",
@@ -1596,9 +1596,10 @@
           "detail": "docs/guide/browser.md names OPFS and Web Crypto but not Ed25519 specifically; which browser versions expose Ed25519 in Web Crypto was not checked here. OPFS writes use `createWritable()`."
         },
         "worker": {
-          "mark": "⚠️",
-          "text": "the engine runs in a worker (`serveEngine` there, `connectEngine(worker)` in the main thread: the I/O off the main thread, tested under worker_threads); a database shared by several tabs through a SharedWorker leader is the planned `/shared`",
-          "source": "src/engines/remote.js; tests/engines.remote.test.js; docs/guide/backends.md#an-engine-in-a-worker"
+          "mark": "✅",
+          "text": "the leader in a SharedWorker: `openShared({ election: { locks } })` there, its `serve()` on wrpc's router; every tab `openShared({ election: { follower: true } })` (never a leader) over `createSharedChannel(connect(url, { worker }))` — nothing crosses a realm but the wrpc calls; run over a MessageChannel in the integration test",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js",
+          "detail": "Free; the SharedWorker's server is wrpc's."
         },
         "reactNative": {
           "mark": "❌",
@@ -1616,10 +1617,9 @@
           "source": "docs/guide/backends.md#your-own"
         },
         "electron": {
-          "mark": "❌",
-          "text": "not documented or tested; no IPC bridge",
-          "source": "docs/guide/ (no Electron page)",
-          "detail": "The main process is Node.js and a renderer is a browser, so either half may run there; nothing checks it."
+          "mark": "⚠️",
+          "text": "the same leader/follower shape with the main process leading and the renderers following over Electron's `MessageChannelMain` — the handshake is wrpc's worker transport's; no Electron example is run in this repository yet",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js"
         },
         "tauri": {
           "mark": "❌",
@@ -1632,15 +1632,15 @@
           "source": "docs/guide/"
         },
         "multiTab": {
-          "mark": "⚠️",
-          "text": "one tab writes: `createDatabase()` holds a Web Lock (a lease on MongoDB); another tab opens the same database `readOnly: true` and reads what the writer lands, hearing it through the engine's change stream (IndexedDB, MongoDB); a leader that takes the others' writes is the planned `/shared`",
-          "source": "src/lock.js; src/database.js (readOnly, #hearChange); src/idb/engine.js (changes)",
-          "note": "There are no cross-tab change events and no read-only open: the other tabs wait for the lock (`lock: 'wait'`) or route reads and writes to the owner through a `BroadcastChannel`."
+          "mark": "✅",
+          "text": "`@alexify/syncom/shared`: `openShared()` in every tab over one engine — one leads (a full database), the others follow (read-only over the same engine, the leader's writes heard through the engine's change stream) and write through it over a channel; the leader gone, a follower takes its place with the same node id and log",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js",
+          "detail": "A follower reads records whole: no `transaction` event, no `observe()` there; a recorded transaction cannot `insert`."
         },
         "leader": {
-          "mark": "⚠️",
-          "text": "no election API; `lock: 'wait'` hands the storage to the next tab",
-          "source": "src/lock.js:58-70; docs/guide/database.md#one-instance-per-directory"
+          "mark": "✅",
+          "text": "the election of `/shared`: Web Locks (`navigator.locks`) where they are, a heartbeat over a BroadcastChannel else; `waitForLeadership()`, `isLeader()`, the `leader` event; the database's own lock the last word",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js"
         },
         "storageContract": {
           "mark": "✅",
@@ -1720,8 +1720,8 @@
         },
         "remoteStorage": {
           "mark": "✅",
-          "text": "`serveEngine(engine, port)` / `connectEngine(port)` (`@alexify/syncom/engines`): the engine answered over a `MessagePort` — a worker thread, a SharedWorker, Electron's main process — every call a message; the database stays where it is opened",
-          "source": "src/engines/remote.js; tests/engines.remote.test.js"
+          "text": "`remoteEngine()`/`serveEngine()` over a MessagePort or worker (the I/O out of the main thread, one database), and `/shared` for several instances: the followers' writes over the leader's served writers (wrpc on a worker port)",
+          "source": "src/engines/remote.js; src/shared/shared.js; docs/guide/backends.md#an-engine-in-a-worker; docs/guide/shared.md; tests/engines.remote.test.js; tests/wrpc.integration.test.js"
         },
         "sharding": {
           "mark": "❌",
@@ -1767,10 +1767,9 @@
           "detail": "`integrity: 'lazy'` or `chain: false` turn the per-read check off. `repair` needs a whole-record op still in the log, otherwise `UNRECOVERABLE`."
         },
         "quotas": {
-          "mark": "❌",
-          "text": "none; past the log append a failed record file is held in memory and reported (`UNPERSISTED`)",
-          "source": "src/database.js (#land, #unpersisted); src/commit.js (persistLocal); tests/storage.fsi.test.js",
-          "detail": "No `navigator.storage.persist()` request; the docs note the browser may evict OPFS."
+          "mark": "✅",
+          "text": "`db.quota()` (`{ usage, quota }`: the engine's own `estimate()` — the Storage API's for IndexedDB, a file system's free space for the files engine, the texts and blobs held for memory, the pages and the file's disk for SQLite; `null` where the medium says nothing, MongoDB) and `db.persist()`; a log append the medium refuses for want of room is `QUOTA` (the platform's error as `cause`, SQLite's `SQLITE_FULL` and a cause's quota seen too), a record file it refuses `UNPERSISTED { quota: true }`",
+          "source": "src/database.js (quota, persist, #unpersisted); src/engine.js (estimate); src/log.js (#fail); src/errors.js (isQuotaError); tests/storage.quota.test.js; tests/attachments.test.js; docs/guide/database.md#encryption-at-rest"
         },
         "onDiskFormat": {
           "mark": "✅",
@@ -1783,9 +1782,9 @@
           "source": "src/files/files.js; src/entries.js (writeMany); tests/engine.idb.test.js; tests/engine.sqlite.test.js"
         },
         "compression": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "✅",
+          "text": "attachments: `attachments({ compression: 'gzip' | 'deflate' })` through CompressionStream, the encoding on the register; records themselves are not compressed (the engines' own)",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js"
         },
         "docCache": {
           "mark": "✅",
@@ -1793,9 +1792,9 @@
           "source": "src/entries.js:62-73; src/options.js:9,53-58; docs/guide/database.md#the-catalog-and-the-cache"
         },
         "attachments": {
-          "mark": "❌",
-          "text": "none: JSON records only, no binary type",
-          "source": "src/shape.js; docs/guide/database.md"
+          "mark": "✅",
+          "text": "`@alexify/syncom/attachments`: `db.attachments.put/get/has/list/remove` — the bytes in the engine's `blobs` store under their SHA-256 (every engine; sealed at rest), the name a register on the record that replicates like any field",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js"
         },
         "localDocs": {
           "mark": "✅",
@@ -2271,9 +2270,10 @@
           "source": "src/query/cursor.js (#populated); docs/guide/query.md#the-cursor"
         },
         "encryptedFields": {
-          "mark": "❌",
-          "text": "an `{ encrypted: true }` record is listed, never a query row",
-          "source": "src/catalog.js:10-13; src/query/cursor.js; docs/guide/query.md#the-cursor"
+          "mark": "✅",
+          "text": "a query over a collection with `encrypted: true` records reads them whole at the key holder and matches, orders, windows and counts them with the rest; no index knows them (a full read of the sealed records per query), `$text` leaves them out",
+          "source": "src/query/cursor.js (#sealed, withSealed); src/catalog.js (sealed); src/database.js ([SOURCE].load); tests/query.sealed.test.js; docs/guide/query.md#sealed-records",
+          "detail": "A blind index for an equality on a sealed field is not here yet: the sealed records are a scan."
         },
         "secondaryIndexes": {
           "mark": "✅",
@@ -2438,9 +2438,9 @@
           "detail": "A different version is not refused: every op carries `v`, older records are lensed, newer ops applied or held (`ahead`)."
         },
         "foreignBackend": {
-          "mark": "❌",
-          "text": "none: the far end must be a syncom node hosting `unit()`",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`replicate(db, { collection, pull, push })` (`@alexify/syncom/connector`): a collection kept in step with any backend through two handlers — pulled documents land as this node's writes and reach its peers, the collection's turns go out with what the backend was assumed to hold, conflicts the backend wins unless `resolve` decides",
+          "source": "src/connector/connector.js; tests/connector.test.js; docs/guide/connector.md"
         },
         "customTransport": {
           "mark": "✅",
@@ -2518,56 +2518,56 @@
           "source": "src/wrpc/wrpc.js; tests/wrpc.integration.test.js:59-160"
         },
         "http": {
-          "mark": "⚠️",
-          "text": "no request–response sync; wrpc's SSE transport untested in the repo",
-          "source": "src/wrpc/wrpc.js; scratchpad/replication/verify/syncom-over-sse.js",
-          "note": "In a one-off check over wrpc 2.0.1, `transport: 'sse'` synced both ways with a live update; plain `http` cannot (the subscription is refused, then every call answers 428)."
+          "mark": "✅",
+          "text": "the protocol over wrpc's Server-Sent Events transport (`transport: 'sse'`: `GET …/events` down, `POST` up) — a bootstrap from the page itself, pushes, live updates; a thin client over plain HTTP reads `syncom/query`/`syncom/count` with its hello in the call",
+          "source": "docs/guide/wrpc.md#over-http-and-server-sent-events; src/sync/hosting.js (streamed, greeted); tests/wrpc.integration.test.js",
+          "detail": "Plain `transport: 'http'` cannot subscribe, so it is a thin client's transport, not a replica's; a replica over HTTP is SSE."
         },
         "graphql": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/graphql`: the application's pull and push queries posted over `fetch` or its own client, their answers read by its functions, its subscription client the stream — one adapter for every schema",
+          "source": "src/connector/graphql.js; docs/guide/connector.md#graphql; tests/connector.adapters.test.js"
         },
         "couchdb": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/couchdb`: `_changes` with the documents as the pull, a long poll from the checkpoint as the stream, `_bulk_docs` with the revisions last seen as the push, a conflict read back as the database holds it, a probe read back and written nothing, an id CouchDB refuses that row's `{ id, error }`",
+          "source": "src/connector/couchdb.js; docs/guide/connector.md#couchdb; tests/connector.adapters.test.js"
         },
         "firestore": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/firestore`: the injected modular SDK — the server stamp and a tombstone the adapter's fields, one cursor `{ seconds, nanoseconds, id }` after the checkpoint (the stamp whole: milliseconds skipped a commit's documents), a transaction per 500 rows whose own reads decide a conflict, `onSnapshot` the signal and its error `END`",
+          "source": "src/connector/firestore.js; docs/guide/connector.md#firestore; tests/connector.adapters.test.js"
         },
         "supabase": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/supabase`: one table through the injected client — PostgREST with the modified column as the compare-and-set (the value the database stored kept for the next match, a trigger's included), a `(stamp, key)` cursor so a transaction's rows are never skipped at a page's edge, Realtime's `postgres_changes` the signal and the channel's error `END`",
+          "source": "src/connector/supabase.js; docs/guide/connector.md#supabase; tests/connector.adapters.test.js"
         },
         "appwrite": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/appwrite`: the injected `Databases`, `Query` and client — `$updatedAt` the position, a boolean attribute the tombstone, a read then a write the push (Appwrite has no compare-and-set: said), a 400 (an id past 36 letters) that row's `{ id, error }`, Realtime the signal; Node and the browser alike",
+          "source": "src/connector/appwrite.js; docs/guide/connector.md#appwrite; tests/connector.adapters.test.js"
         },
         "mongodb": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/mongodb`: one collection of the injected driver — `_rev`, `_deleted`, `_updated` the adapter's fields, a `(stamp, id)` cursor, a change stream the signal and its error or close `END` — beside the engine and the hubs' shared log over the same driver",
+          "source": "src/connector/mongodb.js; docs/guide/connector.md#mongodb; tests/connector.adapters.test.js"
         },
         "nats": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js",
-          "detail": "wrpc has a NATS broker transport; syncom does not use it (the shared-log hub mode is reserved)."
+          "mark": "✅",
+          "text": "a wrpc broker's log — NATS JetStream, Redis Streams, Kafka, AMQP — as the hubs' shared log (`sync.sharedLog: broker.log`): every hub appends what it accepts, serves `changes` from it, a client resumes on any hub",
+          "source": "src/sync/shared.js; src/sync/hosting.js; docs/guide/scaling.md#a-shared-log; tests/hub.shared.test.js",
+          "detail": "The log is the hubs' bus and the clients' cursor space; a subject per document (RxDB's replication-nats) is a different shape — a client that speaks NATS itself is the `/connector` recipe (S2)."
         },
         "gdrive": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/gdrive`: one JSON file of the collection in the application data folder through an injected `fetch` — the oldest by `createdTime`, the ETag the compare-and-set (a 412 read again; no ETag a refusal, never an unconditional write), a create listed again so two devices' first pushes end in one file, a probe of the ETag the stream; no lock file",
+          "source": "src/connector/gdrive.js; src/connector/jsonfile.js; docs/guide/connector.md#google-drive; tests/connector.adapters.test.js"
         },
         "onedrive": {
-          "mark": "❌",
-          "text": "none",
-          "source": "docs/guide/sync.md#protocol; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`@alexify/syncom/connector/onedrive`: the same file over Microsoft Graph — `root:/<path>` for the eTag, `PUT …:/content` under `If-Match`, or under `conflictBehavior=fail` where no file is known (a 409 another device's, read and judged)",
+          "source": "src/connector/onedrive.js; src/connector/jsonfile.js; docs/guide/connector.md#onedrive; tests/connector.adapters.test.js"
         },
         "conflictDetect": {
           "mark": "—",
@@ -2581,7 +2581,7 @@
         },
         "customMerge": {
           "mark": "❌",
-          "text": "none: the rules are fixed; `beforeApply` can only skip an op",
+          "text": "none: the rules are fixed — a merge rule is a kind plugin on every node; `beforeApply` skips an op, a host's `authorizeWrite` refuses one",
           "source": "src/apply.js:253-258; docs/guide/hooks.md (Skipping a peer's op)"
         },
         "conflictWhere": {
@@ -2590,9 +2590,9 @@
           "source": "docs/guide/sync.md#clocks"
         },
         "conflictEvents": {
-          "mark": "⚠️",
-          "text": "unique-key clashes only (`conflict`); a lost concurrent write is silent",
-          "source": "src/apply.js:213-231; docs/guide/hooks.md"
+          "mark": "✅",
+          "text": "`conflict` of kind `unique` (a key shared by two records) and kind `register` (a peer's field write stamped below the one held: the op, the winner, the loser)",
+          "source": "src/apply.js; src/ops.js (applyFields); tests/sync.direction.test.js; docs/guide/hooks.md#events"
         },
         "serverCompare": {
           "mark": "—",
@@ -2685,14 +2685,15 @@
           "source": "src/sync/hosting.js; tests/sync.scopes.test.js:97"
         },
         "revoke": {
-          "mark": "❌",
-          "text": "no revocation: the peer keeps what it received",
-          "source": "docs/guide/sync.md#scopes"
+          "mark": "✅",
+          "text": "`sync.revoke(node, scopes)`: the peer's live feeds end, `syncom/revoke` reaches it, its next hello grants less; the peer forgets the records of those scopes (`forget(id)`, no op) unless `onRevoke` decides otherwise. Revocations are durable (`revoked.json`) and shared (appended to the shared log, folded by every hub); a session goes with its socket, so every live one is one a revoke reaches (`sync.sessions()`)",
+          "source": "src/sync/manager.js (revoke, adoptRevocation, #saveRevoked, sessions); src/sync/rules.js (remember); src/sync/shared.js (revoke); tests/sync.rules.test.js",
+          "detail": "A grant of everything ('*') is not narrowed by a scope: revoke what hello granted."
         },
         "oneWay": {
-          "mark": "❌",
-          "text": "every link pushes and subscribes; scopes bound both directions alike",
-          "source": "src/sync/manager.js; src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`addNode({ direction: 'pull' | 'push' | 'both' })`: a pull-only link subscribes alone (nothing of the node goes out, retention does not wait for the peer), a push-only link pushes alone; the host's `unit({ allow })` serves push, snapshot and changes each on or off",
+          "source": "src/sync/manager.js; src/sync/hosting.js; tests/sync.direction.test.js; docs/guide/sync.md#the-registry"
         },
         "deletes": {
           "mark": "✅",
@@ -2701,9 +2702,10 @@
           "detail": "Tombstones are never cleaned up, so a long-offline peer cannot resurrect a record by absence; a newer write revives it by stamp."
         },
         "replAttachments": {
-          "mark": "❌",
-          "text": "none: records are JSON, with no binary type",
-          "source": "docs/guide/database.md"
+          "mark": "⚠️",
+          "text": "the register replicates with the record; the bytes are fetched on demand from a peer that holds them (`syncom/blob`, checked by digest) when a node reads the attachment — never pushed ahead of a read",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js",
+          "detail": "A phone syncing a thousand records downloads no photo it does not open; a node offline when it first reads one has `BLOB_NOT_FOUND`."
         },
         "lifecycle": {
           "mark": "✅",
@@ -2711,10 +2713,10 @@
           "source": "src/sync/manager.js 218-235"
         },
         "awaitSync": {
-          "mark": "⚠️",
-          "text": "`sync(url?)` resolves once pushed; nothing awaits the inbound side",
-          "source": "src/sync/manager.js; index.d.ts (SyncManager.sync)",
-          "detail": "`storage.sync.toPromise('sync')` resolves on the next push or received page."
+          "mark": "✅",
+          "text": "`awaitInitialReplication()`, `awaitInSync()`, `awaitDocumentPushed(id)` — the host's feed says when it is read to its end (an idle page), `peers()[i].caughtUp`",
+          "source": "src/sync/manager.js; src/sync/hosting.js; tests/sync.direction.test.js",
+          "detail": "In sync means: every enabled node greeted, nothing left to push to it, its feed read to its end; a signal cuts a wait short."
         },
         "resync": {
           "mark": "✅",
@@ -2728,10 +2730,9 @@
           "detail": "Events `peer`, `sync`, `bootstrap`, `error`, `refused`, `hello`, `node`; storage `change` and `apply`; OpenTelemetry spans and a replication-lag metric."
         },
         "replMultiTab": {
-          "mark": "⚠️",
-          "text": "one tab owns the storage and its sync; others get `LOCKED` or wait",
-          "source": "docs/guide/scaling.md#several-tabs; src/lock.js",
-          "detail": "A SharedWorker can share wrpc's connection (`WrpcClientProxy`), not the storage; a storage served from a worker is the planned follow-up."
+          "mark": "✅",
+          "text": "replication is the leader's alone: a follower neither dials nor hosts (`shared.sync` is `NOT_LEADER`); the next leader is the same node, with the same registry, so the peers see a reconnect",
+          "source": "src/shared/shared.js; src/shared/election.js; docs/guide/shared.md; tests/shared.test.js; tests/wrpc.integration.test.js"
         },
         "serverProduct": {
           "mark": "✅",
@@ -2755,14 +2756,15 @@
           "source": "src/sync/hosting.js; docs/guide/sync.md#protocol"
         },
         "remoteQuery": {
-          "mark": "❌",
-          "text": "none: a client replicates its scopes and queries locally",
-          "source": "src/sync/hosting.js"
+          "mark": "✅",
+          "text": "`unit({ query: true | { regex } })`: `syncom/query` and `syncom/count` — a Mango query over an entity, sort keys, a window — the rows in the peer's scopes, walked until the window is full or `limits.rowsPerQuery` rows were read (`capped` says so); never a sealed record; a `$regex` from the wire refused unless the unit takes them (`'safe'` rejects nested quantifiers, backreferences and lookarounds); a thin client over plain HTTP carries its hello in the call; live results = ask again on `changes`",
+          "source": "src/sync/reads.js (query, count, walkScoped, regexRefusal); src/query/safe-regex.js; tests/sync.rules.test.js; tests/wrpc.integration.test.js; docs/guide/wrpc.md#thin-clients-over-http; docs/reference/wire.md#query-and-count",
+          "detail": "A REST face is wrpc's (its express/fastify adapters over the same procedures)."
         },
         "serverStorage": {
           "mark": "",
-          "text": "a full syncom node over any engine: node:fs, SQLite (`sqliteEngine`) or MongoDB (`mongoEngine`, one writer by lease, read-only followers over change streams)",
-          "source": "src/sqlite/sqlite.js; src/mongodb/mongodb.js; docs/guide/backends.md#engines"
+          "text": "a full syncom node over any engine: node:fs, SQLite (`sqliteEngine`) or MongoDB (`mongoEngine`, one writer by lease, read-only followers over change streams); several hub processes over one shared log (`mongoSharedLog`, or a wrpc broker's)",
+          "source": "src/sqlite/sqlite.js; src/mongodb/mongodb.js; docs/guide/backends.md#engines; src/sync/shared.js"
         },
         "atRest": {
           "mark": "✅",
@@ -2787,14 +2789,15 @@
           "source": "src/encryption/encryption.js:12-19, :76-88"
         },
         "keyRotation": {
-          "mark": "❌",
-          "text": "no rotation API; a replaced key pair cannot open sealed records",
-          "source": "src/crypto/keys.js:20-37; docs/guide/database.md#encryption-at-rest"
+          "mark": "⚠️",
+          "text": "the at-rest key: `rotateAtRest(engine, { path, from, to, into })` copies the database whole into another path or engine sealed under the new key (the same node); a sealed record's pair is the directory's and is not rotated — a new pair is a new node",
+          "source": "src/encryption/encryption.js (rotateAtRest); src/engines/copy.js (targetPath); tests/encryption.rotate.test.js; docs/guide/database.md#encryption-at-rest"
         },
         "encAttachments": {
-          "mark": "—",
-          "text": "no attachments",
-          "source": "docs/reference/api.md (no attachment API)"
+          "mark": "✅",
+          "text": "the at-rest wrapper seals a blob as bytes — iv ‖ ciphertext bound to the blob's place, the size its own — as it seals a record's text; the digest stays a name; `rotateAtRest` re-seals the blobs under the new key with the rest",
+          "source": "src/encryption/at-rest-engine.js (blobs); src/encryption/encryption.js (sealBytes, openBytes, rotateAtRest); tests/attachments.test.js",
+          "detail": "A blob of a record that is not sealed lies in the clear without the at-rest wrapper, and attachments.put on a sealed record is refused (ENCRYPTED): the register's key does not cover the bytes."
         },
         "encExport": {
           "mark": "—",
@@ -2838,10 +2841,9 @@
           "source": "src/sync/hosting.js; src/sync/manager.js; docs/guide/wrpc.md#hosting-a-node"
         },
         "peerValidation": {
-          "mark": "⚠️",
-          "text": "host `authorize`; dialer `beforeConnect`, `beforeBootstrap`; key possession not proven",
-          "source": "src/sync/hosting.js; docs/guide/hooks.md#sync-hooks; docs/guide/sync.md#signatures",
-          "detail": "Under `'require'` a host refuses a `hello` whose node id is no key (403 `UNSIGNED`); a peer greeting with someone else's key then fails every push as `forged`."
+          "mark": "✅",
+          "text": "host `authorize`, `unit({ prove })` — a challenge at hello signed under the key that is the peer's id, 403 `UNPROVEN` until then; dialer `beforeConnect`, `beforeBootstrap`",
+          "source": "src/sync/hosting.js (prove); src/sync/manager.js (#prove); tests/sync.rules.test.js"
         },
         "access": {
           "mark": "✅",
@@ -2850,10 +2852,9 @@
           "source": "src/sync/hosting.js; src/apply.js (outOfBounds); docs/guide/sync.md#scopes"
         },
         "writeRules": {
-          "mark": "⚠️",
-          "text": "ops outside granted scopes refused, by the op's scope and its record's; `beforeApply({ op, peer })` can skip one",
-          "note": "A finer rule than scopes lives in `beforeApply`: a skip is local (the op is still logged and relayed), a throw refuses the whole page.",
-          "source": "src/sync/hosting.js; src/apply.js; tests/sync.scopes.test.js"
+          "mark": "✅",
+          "text": "`unit({ authorizeWrite({ op, peer, current, after }) })` — or `createDatabase({ sync: { authorizeWrite } })`, every unit's rule and the writer's over a shared log's inbox: a refused op is scrubbed (a no-op everywhere behind the host, no gap), named in the push's answer with the fields it touched, and the pusher brings those fields back through the kinds' patches (`WRITE_REFUSED`), so what the host accepted since stands; scopes bound what a peer writes beside it",
+          "source": "src/sync/rules.js; src/sync/manager.js (authorizeWrite, #refused); src/apply.js (refused); src/sync/shared.js (#apply, #judged); tests/sync.rules.test.js; docs/guide/sync.md#hosting"
         },
         "serverValidation": {
           "mark": "✅",
@@ -2862,10 +2863,10 @@
           "detail": "A peer's op is never rewritten by the validator: the verdict alone decides, and an invalid op is skipped and reported (see the next row for where it goes)."
         },
         "serverAuth": {
-          "mark": "⚠️",
-          "text": "out-of-scope (by the op or its record), unsigned and malformed ops stop at the host; one its validator or `beforeApply` skips is relayed",
-          "note": "Checked with three nodes: an op the middle node's validator or `beforeApply` skipped still reached the node behind it, because a withheld op would leave a gap in its origin's stream; every node re-checks it. A throwing `beforeApply` refuses the whole page instead, and the sender offers it again later.",
-          "source": "src/apply.js:116-129,253-272; src/sync/hosting.js; docs/guide/hooks.md#skipping-a-peers-op"
+          "mark": "✅",
+          "text": "a refused op reaches no node behind the host as a write: it goes on as a scrubbed header (no-op), the pusher is told and reverts; out-of-scope, unsigned and malformed ops stop at the host",
+          "source": "src/apply.js (refused, scrubbed); src/sync/manager.js (#refused); tests/sync.rules.test.js",
+          "note": "A node's `beforeApply` skip is still local (the op is logged and relayed); `authorizeWrite` is the rule that binds everyone behind the host."
         },
         "limits": {
           "mark": "✅",
@@ -2927,9 +2928,10 @@
           "detail": "A peer's op is judged, never rewritten."
         },
         "outHook": {
-          "mark": "❌",
-          "text": "none, by design: a withheld op is a gap; scopes decide what leaves",
-          "source": "docs/guide/hooks.md#sync-hooks"
+          "mark": "✅",
+          "text": "`sync.hooks.beforeSend({ op, peer })`: `false` sends the op scrubbed — its header alone, a no-op where it lands, no gap in the stream",
+          "source": "src/sync/manager.js (#outgoing); src/sync/wire.js (slot 20); tests/sync.rules.test.js",
+          "detail": "An op is never dropped on its way out: seqs run contiguously per stream, so a withheld op would stop every later one at the peer."
         },
         "readHooks": {
           "mark": "⚠️",
@@ -2985,9 +2987,9 @@
           "source": "docs/guide/frameworks.md#vue"
         },
         "angular": {
-          "mark": "❌",
-          "text": "none",
-          "source": "package.json"
+          "mark": "⚠️",
+          "text": "`toObservable(store)` of `/store` fits the `async` pipe and `toSignal()` (a documented recipe over the `Subscribable` contract, not run here); no Angular package",
+          "source": "src/store/store.js (toObservable); docs/guide/frameworks.md#angular"
         },
         "svelte": {
           "mark": "✅",
@@ -2996,8 +2998,8 @@
         },
         "signals": {
           "mark": "⚠️",
-          "text": "Solid's `from(store)` over `/store`; another signal library wraps `subscribe` the same way",
-          "source": "docs/guide/frameworks.md#solid"
+          "text": "Solid's `from(store)`, Preact's `signal` fed by `subscribe`, Angular's `toSignal(toObservable(store))` — recipes over `/store`, no package per library",
+          "source": "docs/guide/frameworks.md#solid; docs/guide/frameworks.md#preact-signals; docs/guide/frameworks.md#angular"
         },
         "tanstack": {
           "mark": "❌",
@@ -3010,10 +3012,10 @@
           "source": "src/errors.js; docs/reference/api.md (error codes table)"
         },
         "testing": {
-          "mark": "⚠️",
-          "text": "`memory()` for in-memory stores; contract suites stay in the repo",
-          "source": "src/backend.js:10, 40; package.json#files (no tests/); tests/suites/fsi.js; docs/guide/backends.md#your-own",
-          "detail": "tests/utils/memory-link.js (an in-process link) and tests/utils/mesh.js (N storages, `settle()`) are repo-only."
+          "mark": "✅",
+          "text": "`@alexify/syncom/testing`: the memory engine, an in-process link with a transport's hazards (latency, a page dropped or doubled, a disconnect and reconnect), a mesh of nodes from an adjacency list, `settle()`, `withDatabase()`",
+          "source": "src/testing/testing.js; docs/guide/testing.md",
+          "detail": "The one copy: the repository's own suite runs on it through tests/utils/mesh.js and tests/utils/memory-link.js."
         },
         "ci": {
           "mark": "",
@@ -3085,9 +3087,10 @@
           "source": "docs/guide/benchmarks.md; bench/compare/; bench/results/compare.json"
         },
         "webmcp": {
-          "mark": "❌",
-          "text": "none",
-          "source": "src/"
+          "mark": "✅",
+          "text": "`@alexify/syncom/mcp`: `createTools(db, { collections, readOnly })` — query, count, get, changes, wait_changes, insert, upsert, delete per collection as tool definitions (`inputSchema` checked at `execute`); `navigator.modelContext.registerTool(tool)` or an MCP server registers them",
+          "source": "src/mcp/mcp.js; docs/guide/mcp.md",
+          "detail": "No WebMCP or MCP SDK is imported: the definitions are the protocol's shape, the registration the caller's line."
         },
         "agentDocs": {
           "mark": "✅",

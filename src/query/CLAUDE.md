@@ -14,6 +14,8 @@ src/query/plan.js         plan — how a cursor is answered over the declared in
 src/query/live.js         Live — a live query kept by event-reduce over the catalog's action stream (rows, or a count) — requires shape.js only
 src/query/cache.js        QueryCache, keyOf — a result by its key with the catalog's generation, the one live run every watch() of a
                           key shares, an LRU of unobserved results — no requires
+src/query/safe-regex.js   safeRegex — whether a pattern's source has no nested quantifier, backreference or lookaround: what a host
+                          serving queries under `regex: 'safe'` asks of a `$regex` from the wire (src/sync/hosting.js) — no requires
 ```
 
 ## Rules
@@ -48,6 +50,24 @@ plan)` reads the entries between two binary searches, forward or backward; where
   cursor reads the window and stops (`enough`), otherwise a TopK or a sort after. `compare`/`rankOf` are
   the catalog's, shared with the cursor. `explain()` is the plan as a copy. A `$text` query keeps the
   ranking and plans nothing.
+- **A sealed record is read, never indexed — and only where asked.** A collection's `encrypted: true` records are rows with no fields; the
+  seam lists them (`[SOURCE].sealed(entity)`, `Catalog.sealed`: a Set per type kept by every insert and remove of a
+  sealed row, the sorted listing built from it once and kept until a sealed record comes or goes — a plain write of
+  the collection never rebuilds it, a collection without sealed records answers one frozen `EMPTY`) and `load`
+  opens them (a copy of the data as the key here reads it, no meta to compose). `Cursor#matching` adds them to the
+  candidates of every plan over the collection (`withSealed`: every id once), lets them past `narrow`'s posting
+  lists and reads them whole — in the covered loop too, where a plain row stays the catalog's. Where the rows come
+  sorted by the index (`byIndex`) the page stays the index's (`merged`): the sealed records are read once
+  (`loadMany`), matched and sorted as the result is (`sealedRows`), laid before the first plain row each precedes
+  as `take` runs and after the last in `answer()` — the window is read and no more; a sealed row is keyed under
+  nothing in every sorted index, so `admits` drops the scan's copy of one there. Elsewhere a TopK or the sort after
+  places them. `count()` adds the sealed records that match (`#sealedMatches`) to the index's estimate; `explain()`
+  says how many ride beside the plan (`sealed`). A `$text` query never sees them (the text index did not), and a
+  tag's source lists none. The seam's `sealed` (`Cursor`'s last argument, `#withSealed`; in the cache key) says
+  whether a cursor reads them at all: the facade's collections ask, a cursor made through `[CURSOR]` for a host, an
+  agent or a connector does not — `#sealed()` is EMPTY then, `#hidden()`/`#hides()` drop a sealed candidate, a
+  live row and a populated reference. The cost is the sealed records read, not the collection's rows — a blind
+  index is not here yet.
 - **A cursor is immutable, a result has one order, a live query is kept, not run.** Every builder hands
   back a new Cursor (`#clone`). A result is ordered by its keys then the id (`compareFully`; a `$text`
   query without keys keeps the index's ranking), so a page has an edge and a live result places a row

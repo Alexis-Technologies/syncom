@@ -9,7 +9,7 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createPresence } = require('../src/presence/presence.js');
-const { toStore, fromEvents } = require('../src/store/store.js');
+const { toStore, fromEvents, toObservable } = require('../src/store/store.js');
 const { waitUntil } = require('./utils/mesh.js');
 
 const createDatabase = async (t, options = {}) => {
@@ -192,4 +192,51 @@ test('stores', async (t) => {
       assert.strictEqual(late.getSnapshot(), undefined);
     },
   );
+});
+
+test('toObservable() follows the store, as a function or an observer, and unsubscribe() stops it and lets the source go', async (t) => {
+  const storage = await createDatabase(t);
+  await storage.Task.insert({ title: 'a', done: false });
+  const store = toStore(storage.Task.select({ done: false }).order('title'));
+  const observable = toObservable(store);
+  assert.strictEqual(observable['@@observable'](), observable, 'RxJS’s interop key answers the observable itself');
+  assert.ok(Object.isFrozen(observable));
+  const seen = [];
+  const first = observable.subscribe((rows) => seen.push(rows?.map((row) => row.title)));
+  assert.deepStrictEqual(seen, [undefined], 'the first value at once');
+  await waitUntil(() => seen.length === 2);
+  assert.deepStrictEqual(seen[1], ['a']);
+  // An observer object, as Angular's async pipe, toSignal() and RxJS subscribe — `next` called as its method.
+  const calls = [];
+  const observer = {
+    count: 0,
+    next(rows) {
+      this.count++;
+      calls.push(rows?.length);
+    },
+  };
+  const second = observable.subscribe(observer);
+  assert.strictEqual(observer.count, 1);
+  const third = observable.subscribe({ error: () => {} });
+  await storage.Task.insert({ title: 'b', done: false });
+  await waitUntil(() => seen.length === 3 && calls.length === 2);
+  assert.deepStrictEqual(seen[2], ['a', 'b']);
+  assert.strictEqual(calls[1], 2);
+  assert.strictEqual(first.closed, false);
+  first.unsubscribe();
+  second.unsubscribe();
+  third.unsubscribe();
+  first.unsubscribe();
+  assert.strictEqual(first.closed, true);
+  await storage.Task.insert({ title: 'c', done: false });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.strictEqual(seen.length, 3, 'nothing after unsubscribe');
+  assert.strictEqual(calls.length, 2);
+  assert.strictEqual(
+    store.getSnapshot().length,
+    2,
+    'the source was let go with the last subscriber: the last value stays',
+  );
+  assert.throws(() => toObservable(null), { name: 'TypeError' });
+  assert.throws(() => toObservable({}), { name: 'TypeError' });
 });

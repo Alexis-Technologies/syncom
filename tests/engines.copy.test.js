@@ -115,6 +115,50 @@ test('a database copied between engines', async (t) => {
     await again.close();
   });
 
+  await t.test(
+    'copyEngine refuses a target without a blobs store while the source holds one, before it writes',
+    async () => {
+      const from = memoryEngine();
+      const a = await createDatabase({ ...base, path: 'p', engine: from });
+      await a.insert({ n: 1 });
+      await a.close();
+      const source = await from.open('p');
+      await source.blobs.put('a'.repeat(64), new Uint8Array([1, 2, 3]));
+      // An engine like the memory one without a blobs store.
+      const plain = memoryEngine();
+      const without = Object.freeze({
+        name: 'no-blobs',
+        capabilities: Object.freeze({ ...plain.capabilities, blobs: false }),
+        open: async (path, options) => {
+          const { blobs, ...rest } = await plain.open(path, options);
+          return Object.freeze(rest);
+        },
+        remove: (path) => plain.remove(path),
+      });
+      await assert.rejects(
+        () => copyEngine(from, without, { path: 'p' }),
+        (error) => {
+          assert.strictEqual(error.code, 'BLOBS_UNSUPPORTED');
+          assert.strictEqual(error.engine, 'no-blobs');
+          assert.strictEqual(error.blobs, 1);
+          return true;
+        },
+      );
+      const target = await plain.open('p');
+      assert.strictEqual(await target.kv.has('', 'node.json'), false, 'nothing written');
+      assert.deepStrictEqual(await target.kv.list(''), []);
+      assert.deepStrictEqual(await target.records.ids({ limit: 1 }), []);
+      // A source without blobs copies into such a target; one with blobs into an engine that keeps them.
+      await source.blobs.remove('a'.repeat(64));
+      const counts = await copyEngine(from, without, { path: 'p' });
+      assert.strictEqual(counts.blobs, 0);
+      assert.strictEqual(counts.records, 1);
+      await source.blobs.put('a'.repeat(64), new Uint8Array([1, 2, 3]));
+      const kept = await copyEngine(from, memoryEngine(), { path: 'p' });
+      assert.strictEqual(kept.blobs, 1);
+    },
+  );
+
   await t.test('a peer resumes from its cursor against the copy: no bootstrap, the same vector', async (t2) => {
     const engines = { A: memoryEngine(), B: memoryEngine() };
     const makeNode = async (t3, name, options = {}) => {

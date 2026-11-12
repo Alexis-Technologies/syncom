@@ -21,7 +21,7 @@ const storage = await createDatabase({ path: 'data' });
 | `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
 | `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
 | `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `createDatabase()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
-| `readOnly` | `false` | A follower: reads what another instance writes through the same engine (`engine`) and writes nothing — no lock, no replay, no catalog save; every write rejects with `code: 'READ_ONLY'`. Only an engine several instances may open at once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB); the files engine and SQLite refuse it with a `TypeError`. Its log and vector are as of its open: it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` rejects with `READ_ONLY`, `reason: 'hosting'`) until the shared log lands. Over an engine with a change stream (IndexedDB, MongoDB) a record the writer lands is read again, a live `Document` of it refreshed, its watchers woken — subscribed before the load, so nothing landed while it opens is missed; a stream that ends is `error` `FOLLOW_LOST` once, then subscribed again and every record read again |
+| `readOnly` | `false` | A follower: reads what another instance writes through the same engine (`engine`) and writes nothing — no lock, no replay, no catalog save; every write rejects with `code: 'READ_ONLY'`. Only an engine several instances may open at once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB); the files engine and SQLite refuse it with a `TypeError`. Its log and vector are as of its open: it never dials (`sync.connect` is a `TypeError`) and hosts over a [shared log](./scaling#hubs) alone — its hello answers the vector as the log moved it, its feed comes from the log, a push is forwarded to the log's inbox for the writer to land — without one `sync.unit()` rejects with `READ_ONLY`, `reason: 'hosting'`. Over an engine with a change stream (IndexedDB, MongoDB) a record the writer lands is read again, a live `Document` of it refreshed, its watchers woken — subscribed before the load, so nothing landed while it opens is missed; a stream that ends is `error` `FOLLOW_LOST` once, then subscribed again and every record read again |
 | `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Document` pins its own ([see below](#the-catalog-and-the-cache)) |
 | `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
 | `chain` | `true` | `false` keeps no [chain](./chain#through-storage) — a hub that only replicates has nothing to audit; two file writes less per record, reads lazy, `validate()` rejects with `code: 'NO_CHAIN'` |
@@ -538,6 +538,41 @@ A sealed record protects one record from the disk; the log, the catalog and
 the other records stay plain. To encrypt the directory whole, wrap the
 backend instead — `atRest()` from the same subpath, every file under one
 key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
+
+A query reads sealed records too, at the key holder — and only there: a host's `query`, an agent's tools and a connector leave them out, see [Sealed records](./query#sealed-records). A sealed
+record's pair is the directory's (`keys/`): it is not rotated — a new pair is a new node. The key of a database
+**encrypted at rest** (`atRest(engine, options)`, [Engines](./backends#encrypted-at-rest)) is rotated by a copy:
+
+```js
+const { createDatabase, dropDatabase, filesEngine } = require('@alexify/syncom');
+const { rotateAtRest, atRest } = require('@alexify/syncom/encryption');
+
+// over an engine (memory, IndexedDB, SQLite, MongoDB)
+await rotateAtRest(engine, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
+const db = await createDatabase({ engine: atRest(engine, { key: newKey }), path: 'app-2' });
+await dropDatabase('app', { engine: atRest(engine, { key: oldKey }) }); // once the new place reads
+
+// over a backend — the default medium: the files engine, wrapped at its backend under each key
+await rotateAtRest({ fsi, filesEngine }, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
+const moved = await createDatabase({ fsi: atRest(fsi, { key: newKey }), path: 'app-2' });
+```
+
+The database at `path` is copied whole — every record, piece, copy, kv text, log entry and blob — into `into`
+(another path, another engine or backend, or a path with either) sealed under the new key; it is the same node, so
+no peer bootstraps. Never in place. Once copied the source is **fenced**: `moved.json` in its root namespace names
+where it went, and `createDatabase()` there is `MOVED` (`to: { path, engine }`) until `dropDatabase()` takes it —
+the same node id never writes in two places. A copy cut short leaves the source as it was and its target marked
+(`copy.json`, written first and removed last): the next copy into that target takes the leftovers away first, while
+a target that holds a database is `TARGET_NOT_EMPTY`.
+
+The room the medium has is `db.quota()` — `{ usage, quota }` in bytes, what the engine can say: the memory engine
+counts what it holds (no quota), SQLite its file's pages (`page_count × page_size`) and the free space of the file's
+volume (none for `:memory:`), IndexedDB the browser's Storage API estimate for the origin, the files engine the free
+space of its volume (`usage` null; the Storage API over OPFS), MongoDB and an engine over a port nothing (`null`,
+`null`) — and `db.persist()` asks the browser to keep the origin out of eviction. A log append refused for want of
+room is `QUOTA` (the platform's error as `cause`: node:fs's ENOSPC, the browser's QuotaExceededError, SQLite's
+SQLITE_FULL — better-sqlite3's code, node:sqlite's errcode 13 — on the error or a `cause` under it); a record file that could not be written for it is `UNPERSISTED`
+with `quota: true` (held in memory, written at the next open).
 
 ## Documents
 

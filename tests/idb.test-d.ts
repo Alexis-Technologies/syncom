@@ -1,7 +1,7 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
 import { createIdbFsi } from '../src/idb/idb.js';
 import type { Fsi } from '../src/idb/idb.js';
-import { open } from '../index.js';
+import { createDatabase } from '../index.js';
 
 const fsi = createIdbFsi();
 expectAssignable<Fsi>(fsi);
@@ -11,7 +11,7 @@ expectAssignable<Fsi>(createIdbFsi({ name: 'app', store: 'files' }));
 declare const factory: IDBFactory;
 expectAssignable<Fsi>(createIdbFsi({ indexedDB: factory }));
 expectError(createIdbFsi({ name: 1 }));
-void open({ fsi: createIdbFsi(), durable: true });
+void createDatabase({ fsi: createIdbFsi(), durable: true });
 
 // The engine over object stores.
 import { idbEngine } from '../src/idb/idb.js';
@@ -22,4 +22,4 @@ expectType<IdbEngine>(engine);
 expectAssignable<Engine>(engine);
 expectType<Promise<void>>(engine.destroy());
 expectError(idbEngine({ durability: 'fast' }));
-void open({ engine: idbEngine() });
+void createDatabase({ engine: idbEngine() });

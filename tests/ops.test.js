@@ -714,14 +714,14 @@ test('ops module', async (t) => {
         { origin: 'A', seq: 3, ts: 3, type: 'advance', vector: { B: 4 }, from: 'B', sig },
       ];
       const packed = packOps(ops);
-      assert.strictEqual(packed[0].length, 19);
+      assert.strictEqual(packed[0].length, 20, 'prev the 19th, scrubbed the 20th');
       assert.strictEqual(packed[0][12], 2);
       assert.strictEqual(packed[0][13], 'u1');
       assert.strictEqual(packed[0][14], sig);
       assert.strictEqual(packed[0][15], digest);
       assert.strictEqual(packed[0][16], 'n'.repeat(20));
-      assert.deepStrictEqual(packed[1].slice(12), [null, null, null, null, null, null, null]);
-      assert.deepStrictEqual(packed[2].slice(14), [sig, null, null, null, null]);
+      assert.deepStrictEqual(packed[1].slice(12), [null, null, null, null, null, null, null, null]);
+      assert.deepStrictEqual(packed[2].slice(14), [sig, null, null, null, null, null]);
       // The message rides in the 18th slot, back as `msg`.
       const [withMessage] = packOps([{ ...ops[1], msg: 'why' }]);
       assert.strictEqual(withMessage[17], 'why');

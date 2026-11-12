@@ -72,6 +72,65 @@ its handshake to push what it wrote while offline.
 A node can be both. The same storage can mount its unit on a server **and**
 dial other nodes; that is what makes a [mesh](./sync#protocol).
 
+## Over HTTP and Server-Sent Events
+
+The same `Server` serves its HTTP side too: `GET <basePath>/events` opens an
+event stream, `POST <basePath>` is the way up, and a wrpc client on
+`transport: 'sse'` is a client like any other — the protocol does not change.
+Nothing to configure on the host (`sse: false` on the `Server` removes the
+endpoint); the dialer requires the subpath that registers the transport:
+
+```js
+require('@alexify/wrpc/sse');
+const storage = await createDatabase({
+  path: 'data',
+  plugins: [sync],
+  sync: { connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url, { transport: 'sse' })) },
+});
+await storage.sync.addNode({ url: 'https://hub.example.com/api' });
+```
+
+SSE carries text alone, so where the host would hand a snapshot page as a
+binary stream it hands the page itself (`client.binary` is false) — the
+bootstrap is the same pages, framed as JSON — and a reconnect re-attaches to
+the channel and replays what it missed, as a WebSocket's does. The push, the
+feed and a live update run as over a WebSocket; plain `transport: 'http'`
+cannot subscribe, so it is the thin client's below, not a replica's.
+`tests/wrpc.integration.test.js` runs a dialer over SSE against a real server:
+a bootstrap, a push both ways, a live update.
+
+## Thin clients over HTTP
+
+A client that holds no log — a script, a server-rendered page, a REST
+consumer — reads a host through `syncom/query` and `syncom/count` once the unit
+serves them (`unit({ query: true })`; a host without it mounts no such
+procedure). Over plain HTTP one request is one wrpc client, so no hello can
+come first: the call carries it, and the host greets the caller as it would
+— `authorize`, the scopes, the revocations — and keeps nothing of it:
+
+```js
+const client = await WrpcClient.connect('https://hub.example.com/api', { transport: 'http' });
+const hello = { node: 'reports-1', token: process.env.SYNC_TOKEN };
+const { rows } = await client.call('syncom/query', {
+  hello,
+  entity: 'Task',
+  query: { done: false },
+  order: ['title'],
+  limit: 50,
+});
+const { count } = await client.call('syncom/count', { hello, entity: 'Task', query: { done: true } });
+```
+
+The rows are the cursor's — a Mango query over an entity, sort keys, a window
+— narrowed to the caller's scopes within `limits.rowsPerQuery` (500: the rows
+answered, or for a scoped caller the rows read, `capped` saying when the budget
+ended the walk). A `$regex` is refused unless the unit takes them
+(`unit({ query: { regex: 'safe' } })`).
+Live results are a matter of asking again, or of dialing over SSE and asking
+on every `changes` page. wrpc's express and fastify adapters mount the same
+procedures behind an HTTP framework; the arguments are
+[`query` and `count`](../reference/wire#query-and-count) either way.
+
 ## In the browser
 
 The subpath has no Node.js code, so the same two imports work in a bundle:

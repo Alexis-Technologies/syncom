@@ -56,6 +56,13 @@ for (const entry of ENTRIES) {
   });
 }
 
+// Node reads a `.js` file as CommonJS where no package.json says otherwise; Deno reads it as an ES module unless
+// the closest package.json says "commonjs" — without the field `require` is not defined in a checkout run there
+// (the smoke-deno job of CI, tests/smoke/smoke.js).
+test('package.json says the package is CommonJS', () => {
+  assert.strictEqual(require(path.join(ROOT, 'package.json')).type, 'commonjs');
+});
+
 test('the root keeps verifyAsync to the engine', () => {
   assert.strictEqual(require(path.join(ROOT, 'index.js')).verifyAsync, undefined);
 });

@@ -1,9 +1,9 @@
 import { expectError, expectType } from 'tsd';
-import type { Storage } from '../index.js';
+import type { Database } from '../index.js';
 import { createUndo, UndoManager } from '../src/undo/undo.js';
 import type { UndoStep } from '../src/undo/undo.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 const undo = createUndo(storage, { mergeInterval: 300, limit: 50, exclude: (op) => op.id === 'x', actor: 'ada' });
 expectType<UndoManager>(undo);
 expectType<boolean>(undo.canUndo);

@@ -5,7 +5,7 @@
 
 import type * as CMState from '@codemirror/state';
 import type * as CMView from '@codemirror/view';
-import type { Storage, TextMethods, DeltaOp } from '../../index.js';
+import type { Database, TextMethods, DeltaOp } from '../../index.js';
 import type { TextBinding, TextBindingOptions, PresenceCursor } from '../editor/editor.js';
 import type { Presence } from '../presence/presence.js';
 import type { UndoManager } from '../undo/undo.js';
@@ -61,7 +61,7 @@ export interface CodeMirrorBinding {
 
 /** Binds a CodeMirror editor to text field `path` of record `id`. */
 export declare function createCodeMirror(
-  storage: Storage & TextMethods,
+  storage: Database & TextMethods,
   id: string,
   path: string,
   cm: CodeMirrorModules,

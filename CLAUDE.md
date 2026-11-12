@@ -41,6 +41,11 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/state/CLAUDE.md](./src/state/CLAUDE.md) | App state: by name and path, a path a register |
 | [src/dump/CLAUDE.md](./src/dump/CLAUDE.md) | Dumps: a merge is a bootstrap, an insert is a write |
 | [src/pipeline/CLAUDE.md](./src/pipeline/CLAUDE.md) | Pipelines: once, in order, checkpointed after the write |
+| [src/attachments/CLAUDE.md](./src/attachments/CLAUDE.md) | Attachments: bytes in the engine's blobs store by digest, a register on the record, fetched from a peer on demand |
+| [src/testing/CLAUDE.md](./src/testing/CLAUDE.md) | Testing: the in-process link with a transport's hazards, the mesh, `settle()` — the one copy the repository's suite runs on |
+| [src/mcp/CLAUDE.md](./src/mcp/CLAUDE.md) | Agent tools: the Model Context Protocol tool definitions over a database, the schema checked at the door |
+| [src/shared/CLAUDE.md](./src/shared/CLAUDE.md) | Several tabs: the leader and the followers over one engine, the election, the channel, the failover |
+| [src/connector/CLAUDE.md](./src/connector/CLAUDE.md) | Connectors: a collection and a backend kept in step — pulls land as writes, pushes follow the turns, the backend wins a conflict |
 | [src/cleanup/CLAUDE.md](./src/cleanup/CLAUDE.md) | Tombstone cleanup: a folded tombstone still wins |
 | [tests/CLAUDE.md](./tests/CLAUDE.md) | Tests: the suites run twice, the mesh, coverage, INVARIANTS.md |
 | [bench/CLAUDE.md](./bench/CLAUDE.md) | Benchmarks: the comparison's own package, the generated charts |
@@ -71,10 +76,11 @@ folder's CLAUDE.md.
 ## Gates
 
 Before every commit: `pnpm lint`, `pnpm format:check`, `pnpm test:types`,
-`node scripts/size.js`, `node --test --test-timeout=120000 tests/package/*.test.js`
-and the whole suite with `node --test --test-timeout=120000` (never a run without
-`--test-timeout`: one once hung for hours). Coverage —
-`npx c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000`
+`node scripts/size.js`, `node --test --test-timeout=120000 --test-force-exit tests/package/*.test.js`
+and the whole suite with `node --test --test-timeout=120000 --test-force-exit` (never a run without
+both: a test once hung for hours, and a file whose failed test left a message port open sat for eight
+hours after its last test). Coverage —
+`npx c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000 --test-force-exit`
 — is enforced in CI; see [tests/CLAUDE.md](./tests/CLAUDE.md).
 
 ## Rules for the whole repository
@@ -84,7 +90,8 @@ and the whole suite with `node --test --test-timeout=120000` (never a run withou
   Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0), nor from RxDB (Apache-2.0)
   and its event-reduce-js (MIT) — those are read as specifications only (the live query of `src/query/live.js` is
   the event-reduce idea written anew); the clones live in `../../open-source/local-first-alternatives/`.
-- **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build.
+- **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build. `package.json` says
+  `"type": "commonjs"` and keeps saying it: Deno reads a `.js` file as an ES module without it (the `smoke-deno` job).
 - **No runtime dependencies.** Helpers go in `src/utils.js`. `scripts/size.js`
   fails at resolve time on any bare import reaching a browser bundle, so a
   stray `require('some-pkg')` in shared code breaks `pnpm size`, not just the
@@ -119,6 +126,13 @@ and the whole suite with `node --test --test-timeout=120000` (never a run withou
 - **Constructors that return promises.** `Database`, `Blockchain` and
   `SyncManager` all `return this.#init()` from the constructor, so they are
   used as `await new Blockchain(path)`. The types model this; keep it that way.
+- **Nothing is published: every stored format is its first version, and nothing reads an older one.** A format's
+  number — `FORMAT`, `VERSION`, `PROTOCOL`, an IndexedDB database's version, a header's — stays `1` until the first
+  release, whatever changes before it: no bump, and no reader, upgrade or fallback for what an earlier build wrote
+  (a development database is deleted, not migrated). The same holds for names: an API renamed before the first
+  release keeps no alias and nothing is `@deprecated`. `tests/package/formats.test.js` holds every such constant in
+  `src/` to 1 and the sources free of `@deprecated`; the rules for after the publication are "Compatibility" in
+  `docs/reference/wire.md`.
 
 ## Skills
 

@@ -12,4 +12,17 @@ const generateUUID = () => crypto.randomUUID();
 // from one made meanwhile (it waits for the queue the function holds — the documented caveat).
 const taskScope = () => ({ run: (fn) => fn(), inside: () => false });
 
-module.exports = { Emitter, createLogger, generateUUID, taskScope };
+// The storage estimate and the persistence request of the Storage API, where the browser has them.
+const estimateStorage = async () => {
+  const storage = globalThis.navigator?.storage;
+  if (!storage || typeof storage.estimate !== 'function') return { usage: null, quota: null };
+  const estimate = await storage.estimate();
+  return { usage: estimate?.usage ?? null, quota: estimate?.quota ?? null };
+};
+const persistStorage = async () => {
+  const storage = globalThis.navigator?.storage;
+  if (!storage || typeof storage.persist !== 'function') return false;
+  return (await storage.persist()) === true;
+};
+
+module.exports = { Emitter, createLogger, generateUUID, taskScope, estimateStorage, persistStorage };

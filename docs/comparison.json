@@ -265,8 +265,8 @@
         },
         "browser": {
           "mark": "✅",
-          "text": "OPFS, IndexedDB (`/idb`), memory",
-          "source": "src/fsi.browser.js; src/idb/idb.js; src/backend.js"
+          "text": "OPFS and IndexedDB as file stores, IndexedDB as an engine (`idbEngine`: object stores, one transaction a write set), memory",
+          "source": "src/fsi.browser.js; src/idb/idb.js; src/idb/engine.js; src/memory/engine.js"
         },
         "mobile": {
           "mark": "❌",
@@ -301,8 +301,8 @@
         },
         "indexes": {
           "mark": "✅",
-          "text": "entity `index` fields, equality only, in memory",
-          "source": "src/catalog.js; docs/guide/query.md#the-plan"
+          "text": "entity `index` fields, single and compound, as sorted keys in the catalog: a prefix of equalities, then a range or the order walked in the index; `explain()` names the one used",
+          "source": "src/catalog.js (#keyed, scan); src/query/plan.js; docs/guide/query.md#the-plan"
         },
         "unique": {
           "mark": "✅",
@@ -373,10 +373,10 @@
           "note": "Ops written before any node was registered, and compacted since, cannot reach a host (`UNDELIVERABLE`)."
         },
         "serverAuth": {
-          "mark": "⚠️",
-          "text": "out-of-scope and unsigned ops stop at the host; one its validator or `beforeApply` skips is relayed",
-          "source": "src/apply.js; src/sync/hosting.js; docs/guide/hooks.md#skipping-a-peers-op",
-          "note": "A withheld op would leave a gap in its origin's stream, so a host that skips an op still relays it and every node re-checks it; a throwing `beforeApply` refuses the whole page instead."
+          "mark": "✅",
+          "text": "`unit({ authorizeWrite })`: a refused op reaches no node behind the host as a write — it goes on as a scrubbed header (a no-op, no gap), the pusher is told (`WRITE_REFUSED`) and reverts; `prove` gates a peer until it proves its key; out-of-scope, unsigned and malformed ops stop at the host",
+          "source": "src/sync/hosting.js (authorizeWrite, prove); src/apply.js (refused, scrubbed); tests/sync.rules.test.js; docs/guide/sync.md#hosting",
+          "note": "A refused op is not withheld — that would leave a gap in its origin's stream — but scrubbed: its header goes on, its payload does not, and every node behind the host applies a no-op; what a validator or `beforeApply` skips is still relayed whole."
         },
         "tamper": {
           "mark": "✅",
@@ -439,8 +439,8 @@
         },
         "ui": {
           "mark": "✅",
-          "text": "`/store` for React, Svelte, Vue and Solid; `/prosemirror`, `/codemirror` and `/editor` for editors",
-          "source": "src/store/store.js; src/prosemirror/prosemirror.js; src/codemirror/codemirror.js; docs/guide/frameworks.md; docs/guide/editors.md"
+          "text": "`/store` for React, Svelte, Vue, Solid and Angular (`toObservable`), signals by recipe; `/prosemirror`, `/codemirror` and `/editor` for editors; `/mcp` hands an agent tools",
+          "source": "src/store/store.js; src/mcp/mcp.js; src/prosemirror/prosemirror.js; src/codemirror/codemirror.js; docs/guide/frameworks.md; docs/guide/editors.md; docs/guide/mcp.md"
         },
         "richText": {
           "mark": "✅",

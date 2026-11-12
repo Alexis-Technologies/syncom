@@ -1,17 +1,19 @@
 import { expectError, expectType } from 'tsd';
 import { sync as syncPlugin, SyncManager, isSyncLink } from '../src/sync/sync.js';
-import type { Plugin, SyncApi, SyncUnit, HostedPeer, Node, SchemaInfo } from '../src/sync/sync.js';
-import { open } from '../index.js';
+import type { SyncUnitOptions } from '../src/sync/sync.js';
+import type { Plugin, SyncApi, SyncUnit, HostedPeer, Node, SchemaInfo, SharedStats } from '../src/sync/sync.js';
+import { createDatabase } from '../index.js';
 
 expectType<Plugin<SyncApi>>(syncPlugin);
 expectType<boolean>(isSyncLink({}));
-const storage = await open({ plugins: [syncPlugin] });
+const storage = await createDatabase({ plugins: [syncPlugin] });
 expectType<SyncManager>(storage.sync);
+expectType<SyncUnitOptions['authorizeWrite'] | null>(storage.sync.authorizeWrite);
 // What a REWOUND host may move of this node's own streams: on proof, or on its word.
-expectType<SyncManager>((await open({ plugins: [syncPlugin], sync: { rewind: 'adopt' } })).sync);
-expectError(open({ plugins: [syncPlugin], sync: { rewind: 'trust' } }));
+expectType<SyncManager>((await createDatabase({ plugins: [syncPlugin], sync: { rewind: 'adopt' } })).sync);
+expectError(createDatabase({ plugins: [syncPlugin], sync: { rewind: 'trust' } }));
 // The core alone has no sync property in its type.
-expectError((await open()).sync);
+expectError((await createDatabase()).sync);
 
 // sync
 const sync = storage.sync;
@@ -28,6 +30,35 @@ expectType<boolean>(sync.started);
 expectType<Promise<void>>(sync.enableNode('ws://a', false));
 expectType<Promise<Array<{ url: string; pushed: number }>>>(sync.sync());
 expectType<number>(sync.peers()[0].pending);
+expectType<boolean>(sync.peers()[0].caughtUp);
+expectType<'both' | 'pull' | 'push'>(sync.peers()[0].direction);
+expectType<Promise<void>>(sync.addNode({ url: 'ws://a', direction: 'pull' }));
+expectError(sync.addNode({ url: 'ws://a', direction: 'sideways' }));
+expectType<Promise<void>>(sync.awaitInSync());
+expectType<Promise<void>>(sync.awaitInitialReplication({ signal: new AbortController().signal }));
+expectType<Promise<void>>(sync.awaitDocumentPushed('id'));
+expectType<SyncUnit>(sync.unit({ allow: { push: false } }));
+expectType<SyncUnit>(sync.unit({ query: { regex: 'safe' }, limits: { rowsPerQuery: Infinity } }));
+expectType<SyncUnit>(sync.unit({ query: true }));
+expectType<SyncUnit>(sync.unit({ allow: { blob: 'any' } }));
+expectError(sync.unit({ allow: { blob: 'maybe' } }));
+expectType<Promise<Uint8Array>>(sync.fetchBlob('a'.repeat(64), { id: 'r1', name: 'photo.bin' }));
+expectError(sync.unit({ query: { regex: 'maybe' } }));
+expectError(sync.unit({ allow: { hello: false } }));
+// The shared log as this hub stands to it, or null without one.
+expectType<SharedStats | null>(sync.shared());
+const shared = sync.shared()!;
+expectType<string>(shared.topic);
+expectType<string | false>(shared.inbox);
+expectType<string | null>(shared.appended);
+expectType<number>(shared.covered);
+expectType<number>(shared.holes);
+expectType<{ topic: boolean; inbox: boolean }>(shared.retrying);
+expectType<string | null>(shared.cursor.topic);
+expectType<string | null>(shared.appended);
+expectType<boolean>(shared.behind);
+expectType<boolean>(shared.stuck.inbox);
+expectType<number>(shared.relayed);
 expectType<string | null>(sync.listNodes()[0].cursor);
 expectType<SchemaInfo | null>(sync.listNodes()[0].remote!.schema);
 sync.on('hello', ({ schema }) => expectType<SchemaInfo | null>(schema));
@@ -45,6 +76,7 @@ expectType<SyncUnit>(
 storage.sync.on('refused', (event) => {
   expectType<
     | 'scope'
+    | 'rule'
     | 'forged'
     | 'unsigned'
     | 'equivocation'
@@ -54,6 +86,7 @@ storage.sync.on('refused', (event) => {
     | 'PRESENCE_SCOPE'
     | 'PRESENCE_FORGED'
     | 'PRESENCE_UNSIGNED'
+    | 'PRESENCE_UNPROVEN'
   >(event.reason);
   expectType<number>(event.count);
   expectType<string | null>(event.node);

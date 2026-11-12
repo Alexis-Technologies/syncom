@@ -21,13 +21,108 @@ refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystr
 or typed through a transaction or a handle that continue each other are one op, so one `change`
 and one `commit` event, not one per call.
 
-**Upgrading a checkout from before review №6** (nothing published): the catalog is format 5 — a tombstone's row
-keeps its collection and its `deleted` stamp — so the live catalog is rebuilt once at the first open (a tag's
-format-4 catalog still reads). Tombstones folded by the format-4 build were stamps on a catalog row alone and were
-lost at any rebuild: a database that ran that build's `cleanup` is best re-synced from a peer.
+**Upgrading a checkout from before review №6** (nothing published): a tombstone's catalog row keeps its collection
+and its `deleted` stamp, and a folded tombstone lives whole in the `tombstones` kv namespace. Tombstones folded by the
+earlier build were stamps on a catalog row alone and were lost at any rebuild: a database that ran that build's
+`cleanup` is best re-synced from a peer.
+
+**Upgrading a checkout from before review №7** (nothing published): a blob sealed at rest is iv ‖ ciphertext bytes
+now and a MongoDB blob is chunked — blobs written by the older build do not read (fetch them from a peer again, or
+re-put them); the channel between the tabs of `@alexify/syncom/shared` carries `{ id, args, retry }`, so a leader and a
+follower of two builds do not speak; `syncom/blob` names the record (`{ digest, id, name }`) and a host serves a
+digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer `capped` beside the rows and refuse a
+`$regex` unless the unit takes them; the host's revocations live in `revoked.json` of the root kv.
+
+**Every stored format is its first version** (nothing published): no format was ever released, so none stands above
+1 and no reader, upgrade or fallback is kept for what an earlier build wrote. The catalog file is `format: 1` (it
+had climbed to 5, with a reader of 4 for a tag's catalog), the IndexedDB database is version 1 with its seven stores
+made at once (it was 2, upgraded at its open), and a log line's scrub is the op's own mark alone. A development
+database of an earlier build is deleted, not migrated: IndexedDB refuses to open a database of a higher version
+(`VersionError` — delete it in the browser), a live catalog of another format is rebuilt at the open, and a tag whose
+catalog is of another format is dropped (`tags.dropped`). `tests/package/formats.test.js` holds every format and
+version constant of `src/` to 1 until the first release.
 
 ### Changed
 
+- **The shared log relays by log position, and its failures are told (review №7, E2).** The relay's watermark
+  (`sync.shared().appended`) is the last position of the hub's log every op at or below which is in the topic —
+  moved by whole runs of positions appended or read from the topic, never by `lastEventId`, which ran ahead of ops
+  still landing and lost a batch that failed behind one that landed; every op is offered with its position (the
+  `change` event's third argument carries `seq`), every start recovers what the log holds above the watermark (a stop
+  with ops waiting loses none), a watermark the log compacted past is told once (`lost`) and moved to the floor, and
+  `stop()` waits `sharedLog.stopWait` (5 s) for an append in flight, then lets go. A writing hub's snapshot carries
+  the vector its reads reflect and its marker is appended behind every op offered (503 `SHARED_LOG` with
+  `detail: 'behind'` while the relay recovers); a read-only hub serves no snapshot (403 `READ_ONLY`: a fresh client
+  lands on a hub that writes). `mongoSharedLog` tells a hole (`{ id, value: null, headers: { hole: '1' } }`;
+  `SHARED_LOG_FAILED` `hole` on the hub, `sync.shared().holes`) instead of passing a late appender's number in
+  silence — a failed insert leaves a tombstone, an insert slower than `gapTimeout` takes a fresh number — reads the
+  head once per page, polls no more under a live change stream, trims the topics `retention.topics` names alone
+  (the writer trims the inbox past its cursor through `trimBefore(topic, id)`). Every `changes` feed of a hub is
+  served from its consumer's one read of the topic (a ring of the entries passed last). An entry the engine refuses
+  is tried again, backed off (`SHARED_LOG_FAILED` `apply`, `sync.shared().retrying`); only a rule's refusal — a hook
+  that throws — leaves the topic `stuck`.
+- **The host's rules close their gaps (review №7, E3).** A refused op's revert brings back the fields the op
+  touched — through the kinds' patches, a counter by an inc, a set by a remove, a text by a splice — so what the
+  host accepted since stands (`refused[]` carries the op's `actor`, `WRITE_REFUSED` says `touched`; a sealed record
+  at the host is skipped before the rule is asked). `createDatabase({ sync: { authorizeWrite } })` is every unit's
+  rule and the writer's over the shared log's inbox; a follower verifies a push before it forwards it, holds its
+  shadow to what the topic shows, and reads the writer's `dropped` entries. `unit({ query })` takes `true` or
+  `{ regex: false | 'safe' | true }` — a `$regex` from the wire is 400 `REGEX` unless the unit takes them (`'safe'`:
+  no nested quantifier, backreference or lookaround) — and a scoped `query`/`count` walks the cursor until its
+  window is full or `limits.rowsPerQuery` rows were read, the answer saying `capped` (`Infinity` is no cap). A
+  session goes with its socket (`sync.sessions()` lists them), a read's hello leaves nothing on the client, and
+  revocations are kept in `revoked.json` and appended to the shared log for every hub to fold. Under `prove` the
+  rooms and the presence wait for the proof (`PRESENCE_UNPROVEN`). `syncom/blob` names the record and the
+  attachment, served under `allow.blob: 'named'` (the default) only where a live record in the peer's scopes names
+  the digest — `'any'` keeps the digest as a capability — and `fetchBlob(digest, { id, name })` names it; an op
+  flagged `scrubbed` with a payload is scrubbed before it is logged; `beforeSend` rules a hosted `changes` page as it
+  rules a push.
+- **The awaits are told, `forget()` holds under defer (review №7, E8).** `awaitInSync`/`awaitInitialReplication`
+  resolve when a dial fails after they began or the host refuses the feed for good (`peers()[i].terminal`);
+  `forget(id)` settles the record's deferred slot and scrubs the log in the same turn of the queue, so a flush lays
+  nothing back.
+- **Several tabs: the election re-armed, a write applied once, the follower's writers (review №7, E6).** The
+  election's one-shot `lead` promise is gone: `onLead(listener)`, `yield()`, `request()` — a promotion that cannot
+  open yields the lock and asks again (`PROMOTE_FAILED`), `openShared` never resolves with `db: null`, `close()`
+  closes the database before it releases the election, a fresh path in heartbeat mode waits the election out. A
+  forwarded write is `{ id: '<token>:<n>', args, retry }`: the leader keeps its answers and answers a retry from
+  them, a retry a new leader never saw is `CALL_UNKNOWN` → `LEADER_LOST { maybeApplied: true }`. A follower's
+  collection, attachments and local writers are forwarded (`SharedCollection`, `shared.attachments`,
+  `shared.local`; `insert` answers the id on either role; `PROCEDURES`, `COLLECTION_WRITERS`); `serve()` is
+  `'session'` by default; `election: { follower: true }` never leads (the SharedWorker recipe: the worker leads);
+  followers run over `shared` engines — never SQLite; the log events are `tabs.*`.
+- **Blobs: a digest at every door, bytes as the register says, the stores' promises, `sweep()` (review №7, E7).**
+  `src/blobs.js` holds the one cap (`MAX_BLOB_BYTES`, `BLOB_TOO_LARGE`) and the one check (`isDigest`): every
+  engine's blobs store refuses a key that is no digest, a register is believed only as far as it is one
+  (`ATTACHMENT_INVALID`), the bytes read are what the register says or `BLOB_MISMATCH` (an inflating stops at the
+  register's length), a fetched blob is kept once (`sync.blob.keep.failed` where the store refuses). SQLite's
+  `remove(path)` sweeps the blobs, `copyEngine` refuses a target without blobs while the source holds some
+  (`BLOBS_UNSUPPORTED`), MongoDB blobs are chunked at 15 MiB, `quota()` asks the engine (`estimate()`),
+  `isQuotaError` sees `SQLITE_FULL` and looks through `cause`. At rest a blob is iv ‖ ciphertext bytes — the
+  cap is the plain bytes' and a store takes the seal's 28 bytes more (`MAX_STORED_BYTES`), so a blob at the cap is
+  stored sealed (the bench found a 64 MiB put refused there);
+  `rotateAtRest` takes a backend (`{ fsi, filesEngine }`), fences the source (`moved.json`, `MOVED`) and marks a
+  copy in flight (`copy.json`). `attachments.sweep({ dryRun, tags })` collects the bytes nothing names; `put` on a
+  sealed record is `ENCRYPTED`; `BLOB_NOT_FOUND`'s field is `attachment`.
+- **The sync blocks, the tabs and the blobs are observed (review №7, E9).** With the telemetry plugin the shared
+  log counts its ops (`syncom.shared.ops`: relayed, applied, forwarded, dropped), its entries (`syncom.shared.entries`:
+  passed, malformed, hole, failed, retried, stuck) and the lag of a topic entry to its apply (`syncom.shared.lag`); a
+  host's refusal says why (`syncom.hello.refused` carries `syncom.reason` beside the code), a revoke is counted by
+  where it came from (`syncom.revoke`, `syncom.via`) and is an info line (`sync.revoke`), a thin client's reads are
+  counted with their rows (`syncom.reads`, `syncom.reads.rows`), every blob put, read, served or fetched with its
+  bytes (`syncom.blobs`, `syncom.blob.bytes`), a sweep is a span (`syncom.attachments.sweep`), and the tabs count
+  their calls and their changes of role (`syncom.tabs.calls`, `syncom.tabs.failovers`; `tabs.promoted`,
+  `tabs.demoted` info lines); a connector counts its documents and rows by direction and result (`syncom.connector.rows`:
+  pulled, applied, pushed, probed, refused, parked, conflict, failed; `stats().probed`) and an agent's tools their calls
+  by verb (`syncom.mcp.calls`). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
+- **The hosting side in three files, one of every helper (review №7, E11).** `src/sync/hosting.js` keeps hello, push, snapshot, the
+  feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
+  `query`, `count` and `blob`. `proveMessage` is `src/sync/protocol.js`'s (the dialer and the host signed and verified
+  two copies of it); an error crosses a wire of this package — the tabs' channel, the remote engine — through one
+  `packError`/`unpackError` of `src/wire-error.js` (`{ name, message, code?, fields }`, a data error's own fields alone,
+  never one that would swap a prototype); a `SyncomError`'s fields never clobber its `name`, `code`, `message` or
+  `stack` — which is why `REPLICATION_FAILED` names its connector as `connector` and `PIPELINE_FAILED` its pipeline
+  as `pipeline` (both rode as `name` and renamed the error; a test had encoded it).
 - **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
   stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
   object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the
@@ -41,7 +136,7 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
 - **Tombstones are folded whole (review №6, E1).** `cleanup` moves an old, acknowledged tombstone — its data and its
   whole meta — into the `tombstones` kv namespace in ONE write set with its file's removal; the catalog is derived
   from the records and that namespace, a rebuild reads both, a fold changes no row, and a tombstone's row keeps the
-  record's collection and its `deleted` stamp (catalog format 5). A late op below the stamp stays moot on a folded
+  record's collection and its `deleted` stamp. A late op below the stamp stays moot on a folded
   node as on any other; a pipeline and a dump see a plain delete's collection.
 - **Writes made safe (review №6, E2).** A write by query and `ifMatch` go by the record's id — a data field named
   `id` names no other record; `drop()` is `READ_ONLY` on a follower or after a lost lease and sweeps under the lock;
@@ -79,13 +174,128 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   hand out a `Document` (`src/document.js`), `Collection` has a module of its own (`src/collection.js`),
   and the types follow (`Database`, `DatabaseConstructor`, `DatabaseOptions`, `Document<R>`,
   `SyncomDocument`, `Collection<R, I>`). The names before the rename — `open()`, `Storage`, `Record`,
-  `record()`, `SyncomRecord`, `StorageConstructor` — stay as aliases until 1.0 and are gone from the
-  docs; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
+  `record()`, `SyncomRecord`, `StorageConstructor` — are gone: nothing is published, so a rename keeps no
+  alias; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
   `/guide/database`. Importing the `Document` type shadows the DOM's inside that module —
   `SyncomDocument` is the same type under a name that does not.
 
 ### Added
 
+- **Connectors: `@alexify/syncom/connector`.** `replicate(db, { name, collection, pull, push })` keeps one
+  collection in step with a backend of its own through two handlers: `pull(checkpoint, batchSize)` — the
+  backend's documents since a position, landed as this node's writes (one transaction a page, a document
+  equal to the record making no op, so an echo is nothing), `pull.stream(emit)` for the backend's live
+  changes — and `push(rows)` — the collection's records as the turns change them, with what the backend was
+  assumed to hold, the rows it refuses answered as conflicts the backend wins unless `resolve` decides. The
+  checkpoint `{ pull, pushed }` lives in the `connector` kv namespace; a restart pulls from it and pushes
+  what the log holds since it. A handler that fails is `REPLICATION_FAILED` (`direction`) on the connector's
+  `error` event and tried again after `retryTime`. `awaitInitialReplication()`, `awaitInSync()`, `reSync()`,
+  `cancel()`, `stats()`.
+- **Connector adapters: `/connector/couchdb`, `/connector/graphql`, `/connector/mongodb`, `/connector/supabase`.**
+  Each answers `{ pull, push }` for `replicate()` over an injected client — a `fetch` for CouchDB (`_changes` with the
+  documents, a long poll as the stream, `_bulk_docs` with the revisions last seen) and GraphQL (the application's
+  queries posted, their answers read by its functions, its subscription the stream), the driver's collection for
+  MongoDB (`_rev`, `_deleted`, `_updated` the adapter's fields, a change stream the signal), the vendor's client for
+  Supabase (PostgREST with the modified column as the compare-and-set, Realtime the signal). A conflict is answered
+  as the backend holds the document; nothing of a backend's SDK ships, each adapter weighs under 2 KB.
+- **Connector adapters: `/connector/firestore`, `/connector/appwrite`, `/connector/gdrive`, `/connector/onedrive`.**
+  Firestore over the injected modular SDK (the server stamp and a tombstone the adapter's fields, a cursor after
+  the checkpoint, one transaction a push, `onSnapshot` the signal); Appwrite over the injected `Databases`, `Query`
+  and client (`$updatedAt` the position, a boolean attribute the tombstone, a read then a write the push — Appwrite
+  has no compare-and-set, said in the docs — Realtime the signal); Google Drive and OneDrive as one JSON file of
+  the collection in the user's drive through an injected `fetch` and token, the file's ETag the compare-and-set
+  (a 412 read again and tried once more), a probe of the ETag the stream (`poll`).
+- **The wrpc recipes, run.** The protocol over wrpc's Server-Sent Events transport (`transport: 'sse'`: a dialer
+  bootstraps from the snapshot page itself, pushes and hears live updates), a thin client over plain HTTP reading
+  `syncom/query`/`syncom/count` with its hello carried in the call (`hello: { node, token, scopes }` — taken as a
+  hello is and kept nowhere, for a transport where one request is one client), and two hubs over a wrpc
+  `MemoryBroker`'s log — each a case of `tests/wrpc.integration.test.js` and a section of the wrpc guide.
+- **Several tabs: `@alexify/syncom/shared`.** `openShared({ createDatabase, path, engine, channel, election })`
+  runs several instances over one database: one leads (a full database — it writes, dials and hosts), the others
+  follow as `readOnly` databases over the same engine, hearing the leader's writes through the engine's change
+  stream and writing through the leader over a channel (`createSharedChannel` of the wrpc subpath over a
+  SharedWorker's port; `shared.serve()` the leader's procedures). The election is Web Locks, or a heartbeat over a
+  `BroadcastChannel`; the leader gone, the next instance opens the database as the leader with the same node id
+  and log, every live thing (`live`, `document`) made again, a write in flight tried again (`LEADER_LOST` past
+  `failover` ms). A follower's `transact` is recorded and carried whole. `NOT_LEADER` for what is the leader's
+  (`sync`, `serve`). The memory engine announces every write set to the instances listening (`changes`), as the
+  IndexedDB engine does.
+- **Attachments: `@alexify/syncom/attachments`.** `createDatabase({ plugins: [attachments({ compression })] })` hands
+  the core `db.attachments`: `put(id, name, bytes, { type })` keeps the bytes in the engine's new `blobs` store under
+  their SHA-256 and names them on the record as the register `_attachments/<name>` (`{ digest, type, length,
+  encoding? }`), which replicates like any field; `get` reads them — bytes this node lacks are asked of the peers it
+  dials (`syncom/blob`: a stream, or base64 on a text transport), checked against the digest and kept; none has
+  them, `BLOB_NOT_FOUND` — `has`, `list`, `remove`. Compression through `CompressionStream`. Every engine keeps blobs
+  (IndexedDB in a seventh object store; the files engine as base64 under `blobs/`), the at-rest
+  wrapper seals them, `copyEngine()` carries them, a read-only database reads them. `unit({ allow: { blob } })`,
+  `sync.fetchBlob(digest)`.
+- **`@alexify/syncom/testing`.** What a test over syncom stands on — the memory engine, `MemoryLink` (an in-process
+  `SyncLink` with a transport's hazards: latency, a page dropped or doubled, a disconnect and wrpc's reconnect),
+  `createMesh(names, edges, { createStorage })` from an adjacency list, `settle()`, `waitUntil()`, `withDatabase()` —
+  the one copy this repository's suite runs on. A smoke of the package runs under Deno and Bun in CI
+  (`tests/smoke/smoke.js`: a database in memory, two nodes over the link); `package.json` declares
+  `"type": "commonjs"`, which is what Deno reads a checkout's `.js` files by.
+- **`@alexify/syncom/mcp`.** `createTools(db, { collections, readOnly, limit })`: the tools an agent calls over a
+  database in the Model Context Protocol's shape — `<Collection>_query`, `_count`, `_get`, `_changes`,
+  `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly` — as `{ name, description, inputSchema,
+  execute }`, every argument checked against the schema before anything runs; registering them with an MCP server
+  or WebMCP's `navigator.modelContext` is the caller's.
+- **`toObservable(store)`** of `@alexify/syncom/store`: an interop Observable over a store for Angular's `async`
+  pipe and `toSignal()`, RxJS's `from()`; Angular and Preact signals recipes in the frameworks guide.
+- **Sealed records in queries.** A collection's `encrypted: true` records are read whole at the key holder and
+  matched, ordered, windowed and counted like the rest — they join the candidates of every plan over the collection
+  (no index knows them: they alone are read, the plain rows answered from the index and the catalog as before; an
+  ordered page over an index stays the index's, the sealed records read once and laid where they sort, and
+  `explain().sealed` says how many; `$text` leaves them out). The facade's collections read them
+  (`select(query, { sealed: false })` leaves them out); a cursor made through the `[CURSOR]` seam leaves them out
+  unless asked (`{ sealed: true }`), so a host's `query`/`count`, an agent's tools (`createTools(db, { sealed })`
+  opts in) and a connector never hand a sealed record out of the key holder (review №7, E1). The catalog keeps the
+  sealed listing per put instead of rebuilding it after every write.
+- **Quota.** `db.quota()` (`{ usage, quota }`: the browser's Storage API estimate, a file system's free space) and
+  `db.persist()`; a log append refused for want of room is `QUOTA` (the platform's error as `cause`) and a record
+  file that could not be written for it `UNPERSISTED` with `quota: true`.
+- **Key rotation at rest: `rotateAtRest(engine, { path, from, to, into })`** of `@alexify/syncom/encryption` — the
+  database sealed under one key copied whole into another path or engine sealed under the next, the same node;
+  never in place. `copyEngine()` takes `targetPath` and answers `blobs`.
+- **The host's rules and the dialer's: `authorizeWrite`, `beforeSend`, `prove`, `revoke`, `query`.**
+  `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
+  would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the
+  wire says so), relayed as a no-op — no stream has a gap — and the pusher reverts its own op to what the
+  host holds (`WRITE_REFUSED`), or forgets the record where the host holds nothing. `sync.hooks.beforeSend`
+  sends an op the dialer withholds the same way: its header alone. `unit({ prove })` (on under
+  `signatures: 'require'`) asks every peer to prove it holds the key that is its id — a `challenge` at
+  hello, `syncom/prove` with its signature, 403 `UNPROVEN` until then — and the dialer proves by itself.
+  `sync.revoke(node, scopes)` takes scopes back from a peer: its feeds end, `syncom/revoke` reaches it, its
+  next hello grants less; the peer narrows its registry entry, reports `REVOKED`, runs `sync.hooks.onRevoke`
+  or forgets the records of those scopes — `db.forget(id)`: a record gone here with no op, its log entries
+  scrubbed and flagged skipped. `unit({ query: true })` serves `query` and `count` to thin clients: a Mango
+  query over an entity through the query plugin, the rows in the peer's scopes, capped by
+  `limits.rowsPerQuery`.
+- **One-way links, a host's `allow`, the idle page and the three awaits, register conflicts told.**
+  `addNode({ direction })`: `'pull'` subscribes alone (nothing of this node goes to the peer, `sync()` pushes
+  nothing to it, retention does not wait for its acknowledgement), `'push'` pushes alone (no feed, no bootstrap),
+  `'both'` as before. `unit({ allow: { push, changes, snapshot } })` serves each procedure or refuses it by code
+  (403 `READ_ONLY` for a push, 403 `NOT_SERVED` for a snapshot or a feed). A host's feed sends one empty page
+  marked `idle` once it is read to its end — `peers()[i].caughtUp` on the dialer — and `awaitInSync()`,
+  `awaitInitialReplication()` and `awaitDocumentPushed(id)` wait on it, on the pushes and on the peers'
+  acknowledgements (`{ signal }` cuts a wait short). A peer's register write stamped below the one this node
+  holds is a `conflict` of kind `register` — the op, the field, the winner and the loser — beside the `unique`
+  kind; `syncom.conflicts` counts both.
+- **A log shared by the hubs of a mesh: `createDatabase({ sync: { sharedLog } })`.** A broker's log —
+  wrpc's `BrokerLog`: Redis Streams, NATS, Kafka, AMQP, the memory broker — or `mongoSharedLog()` of
+  `@alexify/syncom/mongodb` (two collections of a MongoDB database, a topic's entries numbered by its head
+  document, a change stream or a poll as the tail). Every op a hub accepts goes to the topic once, a
+  batch an entry; every other hub applies it from there; `changes` is served from the topic, so a
+  client's cursor is a position in the log — the same on every hub, whose hello answers the log's
+  epoch — and a client moved between hubs resumes without a bootstrap; a client with no cursor
+  bootstraps from a hub's snapshot, positioned at a marker. A read-only hub — a follower over MongoDB, a
+  writer whose lease was lost — hosts over it: its hello answers the vector as the log moved it, its
+  feed comes from the log, and a push is forwarded to the inbox (`<topic>.inbox`) for a hub that writes
+  to land; `sync.unit()` without a shared log stays `READ_ONLY`. `sync.shared()` is the cursors, the
+  watermark and the counts. A failure is `SHARED_LOG_FAILED` with its `reason` (`append`, `lost`,
+  `gone`, `stuck`, `marker`, `stopped`), and recovered from: an append that fails is appended again from
+  the log once the broker answers, a trimmed cursor reads from the oldest entry, a stuck entry waits for
+  `sync.stop()` and `start()`. The option was reserved and refused before.
 - **Collections at run time: `db.collections`, `addCollections()`, `removeCollection()`.** The collections
   by name as one frozen object, and definitions added after the open — each as an entity of
   `createDatabase({ schema })` would be, its validator, indexes, unique keys and search fields in force at
@@ -120,7 +330,7 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   moot (below an unset or a set removal above the delete too), a revival above it writes a file again and
   takes the kv entry away in the same set, a snapshot still hands the deletion on whole, a rebuild of the
   catalog reads the namespace beside the records. The sweep reads no file: a tombstone's row keeps its
-  collection and its `deleted` stamp (catalog format 5). With `awaitSync` a tombstone this node made is folded
+  collection and its `deleted` stamp. With `awaitSync` a tombstone this node made is folded
   only once every enabled registered node acknowledged its delete (one the log no longer retains folds but is
   never dropped); `run({ drop: true })` takes the entry and the row too.
 - **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
@@ -914,7 +1124,7 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   length, best first unless ordered, narrowed by any equality, with `limit`,
   `one()`, `count()` and `watch()` as for any cursor; text is normalized
   (marks stripped, lower case). The catalog keeps each record's search text
-  (format 3 — an older `catalog.json` is rebuilt once) and replays it into
+  (an older `catalog.json` is rebuilt once) and replays it into
   the index at open, so no record is read; an index that throws is logged
   (`catalog.search`), never failing the write. A `TextIndex` of your own fits
   too. Browser budget 40 → 41 KB.
@@ -2053,7 +2263,7 @@ lost at any rebuild: a database that ran that build's `cleanup` is best re-synce
   and a decrypt per sealed record just to skip it. The catalog now keeps a
   row for every entry with a file, tombstones included (`gone`), and a page
   is a slice of its sorted ids; a record this node cannot read is left out
-  of the page instead of failing it. The persisted catalog is format 2 (an
+  of the page instead of failing it. The persisted catalog changed shape (an
   older file is rebuilt once).
 - **The catalog was written on the mutation queue.** Every 64th write paid
   for a full serialization of the catalog before it returned; the save now
