@@ -36,7 +36,8 @@ with `node --test --test-name-pattern 'swap'`.
 ## House rules
 
 - **CommonJS, `'use strict'`.** No build step, no transpilation. `src/` is what
-  gets published.
+  gets published. `package.json` declares `"type": "commonjs"`: Node assumes it,
+  Deno does not.
 - **Loops, not array callbacks, in `src/`.** No `map`/`filter`/`find`/`some`/
   `every`/`forEach`/`reduce`/`flatMap`/`Array.from` there — `pnpm lint` fails on
   them (`no-restricted-properties` for `src/**`). One walk does what it can, a

@@ -90,7 +90,8 @@ hours after its last test). Coverage —
   Nothing is copied from json-joy (AGPL-3.0), Collabs or `fugue/fugue` (Apache-2.0), nor from RxDB (Apache-2.0)
   and its event-reduce-js (MIT) — those are read as specifications only (the live query of `src/query/live.js` is
   the event-reduce idea written anew); the clones live in `../../open-source/local-first-alternatives/`.
-- **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build.
+- **CommonJS everywhere in `src/`.** No `import`, no `type: module`, no build. `package.json` says
+  `"type": "commonjs"` and keeps saying it: Deno reads a `.js` file as an ES module without it (the `smoke-deno` job).
 - **No runtime dependencies.** Helpers go in `src/utils.js`. `scripts/size.js`
   fails at resolve time on any bare import reaching a browser bundle, so a
   stray `require('some-pkg')` in shared code breaks `pnpm size`, not just the

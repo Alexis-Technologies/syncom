@@ -233,7 +233,8 @@ version constant of `src/` to 1 until the first release.
   `SyncLink` with a transport's hazards: latency, a page dropped or doubled, a disconnect and wrpc's reconnect),
   `createMesh(names, edges, { createStorage })` from an adjacency list, `settle()`, `waitUntil()`, `withDatabase()` —
   the one copy this repository's suite runs on. A smoke of the package runs under Deno and Bun in CI
-  (`tests/smoke/smoke.js`: a database in memory, two nodes over the link).
+  (`tests/smoke/smoke.js`: a database in memory, two nodes over the link); `package.json` declares
+  `"type": "commonjs"`, which is what Deno reads a checkout's `.js` files by.
 - **`@alexify/syncom/mcp`.** `createTools(db, { collections, readOnly, limit })`: the tools an agent calls over a
   database in the Model Context Protocol's shape — `<Collection>_query`, `_count`, `_get`, `_changes`,
   `_wait_changes`, and `_insert`, `_upsert`, `_delete` unless `readOnly` — as `{ name, description, inputSchema,

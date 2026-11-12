@@ -72,7 +72,8 @@ jobs:
 
   # The package on the other runtimes: a smoke of a database in memory and two nodes over an in-process link
   # (tests/smoke/smoke.js, plain node:assert) — what Deno's and Bun's Node compatibility has to carry for
-  # `require('@alexify/syncom')` to work there. Neither runs the suite: node:test is Node's.
+  # `require('@alexify/syncom')` to work there. Neither runs the suite: node:test is Node's. Deno reads the
+  # checkout's `.js` files as CommonJS because package.json says `"type": "commonjs"`.
   smoke-deno:
     runs-on: ubuntu-latest
     timeout-minutes: 10
