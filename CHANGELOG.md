@@ -174,8 +174,8 @@ version constant of `src/` to 1 until the first release.
   hand out a `Document` (`src/document.js`), `Collection` has a module of its own (`src/collection.js`),
   and the types follow (`Database`, `DatabaseConstructor`, `DatabaseOptions`, `Document<R>`,
   `SyncomDocument`, `Collection<R, I>`). The names before the rename — `open()`, `Storage`, `Record`,
-  `record()`, `SyncomRecord`, `StorageConstructor` — stay as aliases until 1.0 and are gone from the
-  docs; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
+  `record()`, `SyncomRecord`, `StorageConstructor` — are gone: nothing is published, so a rename keeps no
+  alias; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
   `/guide/database`. Importing the `Document` type shadows the DOM's inside that module —
   `SyncomDocument` is the same type under a name that does not.
 

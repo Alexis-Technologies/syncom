@@ -64,8 +64,7 @@ src/options.js            normalizeStorageOptions — createDatabase()'s plain o
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values, the sorted indexes; catalog.json through a kv store — requires engine.js, sorted.js only
 src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — no requires
-src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends;
-                          `createDatabase()` (and the pre-rename aliases `Database`, `open`)
+src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends; `createDatabase()`
 src/writes.js             the facade's write helpers: checkOrm (an entity's methods/statics against what a Document and a Collection answer to), tombstone (a delete's payload), operate (an operator delta as the calls over a transaction's api), modifyIn (`modify(id, fn)` as the difference) — requires document.js, collection.js, operators.js, plugin.js, shape.js, errors.js only
 src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js only
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires

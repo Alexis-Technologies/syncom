@@ -296,7 +296,7 @@ records them.
 | swap — match (writes) | 9,387 | 107 µs |
 | swap — mismatch (reads only) | 51,423 | 19.4 µs |
 | has — existing id | 52,906 | 18.9 µs |
-| record — cached Record instance | 8,302,835 | 120 ns |
+| document — cached Document instance | 8,302,835 | 120 ns |
 | list — 2000 ids (catalog) | 11,428,040 | 87.5 ns |
 | hasRecord — 2000 ids (catalog) | 6,448,813 | 155 ns |
 | select — covered eq over 2000 | 26,062 | 38.4 µs |

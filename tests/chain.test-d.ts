@@ -1,11 +1,11 @@
 import { expectType } from 'tsd';
 import { chain, Blockchain } from '../src/chain/chain.js';
 import type { Plugin, Block } from '../src/chain/chain.js';
-import { open } from '../index.js';
+import { createDatabase } from '../index.js';
 import { memory } from '../src/memory/memory.js';
 
 expectType<Plugin>(chain);
-const storage = await open({ plugins: [chain] });
+const storage = await createDatabase({ plugins: [chain] });
 expectType<Promise<boolean>>(storage.validate());
 // The constructor returns a promise: the class is async-initialised.
 expectType<Promise<Blockchain>>(new Blockchain('base'));

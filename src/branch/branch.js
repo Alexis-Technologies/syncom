@@ -117,10 +117,10 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
     throw new SyncomError('BRANCH_EXISTS', message, { path });
   }
   const sync = { ...rest.sync, retention: { ...rest.sync?.retention, ops: 0 }, autoStart: false };
-  const Storage = parent.constructor;
+  const Database = parent.constructor;
   const plugins = rest.plugins ?? parent[PLUGINS].modules;
   const where = engine === null ? { fsi } : { engine };
-  const child = await new Storage({ ...rest, ...where, path, sync, plugins });
+  const child = await new Database({ ...rest, ...where, path, sync, plugins });
   const origin = parent.nodeId;
   let forkedAt;
   try {

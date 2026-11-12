@@ -113,16 +113,7 @@ const COLLECTION_WRITERS = Object.freeze([
 const ANSWER_ID = new Set(['insert', 'upsert', 'insertIfAbsent']);
 const BULK = new Set(['bulkInsert', 'bulkUpsert', 'bulkRemove']);
 // The collection's readers a SharedCollection answers from the current instance's collection.
-const COLLECTION_READERS = Object.freeze([
-  'get',
-  'select',
-  'count',
-  'findByIds',
-  'distinct',
-  'countBy',
-  'document',
-  'record',
-]);
+const COLLECTION_READERS = Object.freeze(['get', 'select', 'count', 'findByIds', 'distinct', 'countBy', 'document']);
 const LOCAL_WRITERS = new Set(['set', 'delete']);
 // Every procedure `serve()` mounts: the writers, the recorded transaction and the three beside them.
 const PROCEDURES = Object.freeze(MUTATORS.concat(['transact', 'collection', 'local', 'fetchBlob']));

@@ -164,7 +164,6 @@ export interface SharedCollection<R = RecordData, I = R> {
   distinct: Collection<R, I>['distinct'];
   countBy: Collection<R, I>['countBy'];
   document: Collection<R, I>['document'];
-  record: Collection<R, I>['record'];
   insert(data: I, options?: Record<string, unknown>): Promise<string>;
   upsert(data: I, options?: Record<string, unknown>): Promise<string>;
   insertIfAbsent(data: I, options?: Record<string, unknown>): Promise<string>;

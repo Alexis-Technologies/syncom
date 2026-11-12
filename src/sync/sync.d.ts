@@ -8,7 +8,7 @@
 
 import type {
   Plugin,
-  Storage,
+  Database,
   SyncOptions,
   SyncLink,
   Node,
@@ -19,7 +19,7 @@ import type {
   RecordData,
 } from '../../index.js';
 
-export type { Plugin, Storage, SyncOptions, SyncLink, Node, SchemaInfo, VersionVector };
+export type { Plugin, Database, SyncOptions, SyncLink, Node, SchemaInfo, VersionVector };
 
 /** What the plugin adds to a storage: the manager at `storage.sync`. */
 export interface SyncApi {
@@ -262,7 +262,7 @@ export interface NodeData {
 }
 
 export interface SyncManager {
-  readonly storage: Storage;
+  readonly storage: Database;
   readonly started: boolean;
   /** The host's rule on what a peer may write (`createDatabase({ sync: { authorizeWrite } })`), every unit's default and the writer's over the inbox; null for none. */
   readonly authorizeWrite: SyncUnitOptions['authorizeWrite'] | null;
@@ -359,7 +359,7 @@ export interface PresenceCarried {
 
 export interface SyncManagerConstructor {
   readonly prototype: SyncManager;
-  new (storage: Storage, options?: SyncOptions): Promise<SyncManager>;
+  new (storage: Database, options?: SyncOptions): Promise<SyncManager>;
 }
 
 export declare const SyncManager: SyncManagerConstructor;

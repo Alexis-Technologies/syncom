@@ -1,9 +1,9 @@
 import { expectError, expectType } from 'tsd';
 import { DataReader, SmartContract } from '../src/contracts/contracts.js';
-import type { Storage, RecordData } from '../index.js';
+import type { Database, RecordData } from '../index.js';
 import type { Blockchain } from '../src/chain/chain.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 declare const chain: Blockchain;
 
 const reader = new DataReader(storage);

@@ -1,12 +1,12 @@
 import { expectError, expectType } from 'tsd';
 import { toStore, fromEvents } from '../src/store/store.js';
 import type { SyncomStore, StoreOptions } from '../src/store/store.js';
-import type { Storage, Cursor, QueryRow, SyncomRecord, RecordData } from '../src/all/all.js';
+import type { Database, Cursor, QueryRow, SyncomDocument, RecordData } from '../src/all/all.js';
 import { createPresence } from '../src/presence/presence.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 declare const cursor: Cursor<QueryRow<{ title: string }>>;
-declare const record: SyncomRecord<{ title: string }>;
+declare const record: SyncomDocument<{ title: string }>;
 
 const rows = toStore(cursor, { onError: (error) => error.message });
 expectType<SyncomStore<QueryRow<{ title: string }>[] | undefined>>(rows);

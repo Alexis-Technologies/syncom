@@ -1,10 +1,10 @@
 import { expectError, expectType } from 'tsd';
-import type { Storage } from '../index.js';
+import type { Database } from '../index.js';
 import type { SyncManager } from '../src/sync/sync.js';
 import { createPresence, Presence, isEntry, sized, MAX_AHEAD } from '../src/presence/presence.js';
 import type { PresenceUpdate, PresenceApplied } from '../src/presence/presence.js';
 
-declare const storage: Storage & { sync: SyncManager };
+declare const storage: Database & { sync: SyncManager };
 const presence = createPresence(storage, { scope: 'Doc', timeout: 10_000 });
 expectType<Presence>(presence);
 expectType<Promise<PresenceUpdate>>(presence.set({ name: 'ada', cursor: 3 }));

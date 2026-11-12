@@ -2,8 +2,9 @@
 
 // Nothing is published: no stored format has had a reader outside this repository, so every format and version
 // constant in src/ is its first — 1 — and a change of shape before the first release bumps none of them and keeps
-// no reader, upgrade or fallback for what an earlier build wrote (CLAUDE.md; docs/reference/wire.md,
-// "Compatibility"). When the first release is cut this test goes, and the rules of that page take over.
+// no reader, upgrade or fallback for what an earlier build wrote; and no name has had a caller, so a rename keeps
+// no alias and nothing is deprecated (CLAUDE.md; docs/reference/wire.md, "Compatibility"). When the first release
+// is cut this test goes, and the rules of that page take over.
 
 const test = require('node:test');
 const assert = require('node:assert');
@@ -56,4 +57,26 @@ test('an IndexedDB database is opened at version 1: its stores are made at once,
   assert.ok(opened.length >= 2, 'the file store and the engine both open one');
   // `VERSION` is held to 1 by the test above.
   for (const version of opened) assert.ok(version === '1' || version === 'VERSION', `opened at ${version}`);
+});
+
+test('nothing is published: nothing is deprecated — a rename before the first release keeps no alias', () => {
+  const files = sources(path.join(ROOT, 'src'));
+  const declarations = (dir, out) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) declarations(full, out);
+      else if (entry.name.endsWith('.d.ts')) out.push(full);
+    }
+    return out;
+  };
+  declarations(path.join(ROOT, 'src'), files);
+  for (const name of ['index.d.ts', 'browser.d.ts', 'index.js', 'browser.js']) files.push(path.join(ROOT, name));
+  const deprecated = [];
+  for (const file of files) {
+    const lines = readFileSync(file, 'utf8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('@deprecated')) deprecated.push(`${path.relative(ROOT, file)}:${i + 1}`);
+    }
+  }
+  assert.deepStrictEqual(deprecated, []);
 });

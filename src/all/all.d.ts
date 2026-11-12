@@ -1,7 +1,7 @@
 // Everything in one import: the core with every plugin the package ships
 // registered — the lists, the texts and the trees; signed ops under the
 // node's key, the chain, the sealing of records. The types of the core and
-// of those subpaths (`export *`) plus a Storage that has every plugin's
+// of those subpaths (`export *`) plus a Database that has every plugin's
 // methods, an `open()` that returns it, and `applyOp`/`mergeEntry` that fold
 // under the same registry.
 
@@ -45,19 +45,9 @@ export interface DatabaseConstructor extends Omit<CoreDatabaseConstructor, 'prot
   ): Promise<Database & Collections<S> & PluginMethods<P>>;
 }
 export declare const Database: DatabaseConstructor;
-/** @deprecated `Database` — the name before the rename. */
-export type Storage = Database;
-/** @deprecated `DatabaseConstructor` — the name before the rename. */
-export type StorageConstructor = DatabaseConstructor;
-/** @deprecated `Database` — the name before the rename. */
-export declare const Storage: DatabaseConstructor;
 
 /** Opens a database with every shipped plugin registered, ahead of the caller's. */
 export declare function createDatabase<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
-  options?: StorageOptions<S> & { plugins?: P },
-): Promise<Database & Collections<S> & PluginMethods<P>>;
-/** @deprecated `createDatabase()` — the name before the rename. */
-export declare function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
   options?: StorageOptions<S> & { plugins?: P },
 ): Promise<Database & Collections<S> & PluginMethods<P>>;
 

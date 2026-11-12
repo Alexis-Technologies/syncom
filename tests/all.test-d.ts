@@ -4,7 +4,7 @@ import type { StorageOptions } from '../src/all/all.js';
 import { memory } from '../src/memory/memory.js';
 
 // Everything in one import: the core's surface plus the text and tree methods.
-const storage = await syncom.open({ path: 'x' });
+const storage = await syncom.createDatabase({ path: 'x' });
 expectType<Promise<string>>(storage.insert({ a: 1 }));
 expectType<string>(storage.nodeId);
 expectType<Promise<void>>(storage.inc('id', 'hits', 1));
@@ -36,10 +36,10 @@ expectError(storage.treeMove('id', 'outline', 5));
 expectError(storage.treeMove('id', 'outline', 'n2', 'n1', { after: 3 }));
 
 // A schema's collections ride along, and so does a caller's own plugin.
-const typed = await syncom.open({ schema: { entities: { Post: {} } } });
+const typed = await syncom.createDatabase({ schema: { entities: { Post: {} } } });
 expectType<syncom.SyncomCollection>(typed.Post);
 declare const somePlugin: syncom.Plugin<{ fly(): Promise<void> }>;
-const flown = await syncom.open({ plugins: [somePlugin] });
+const flown = await syncom.createDatabase({ plugins: [somePlugin] });
 expectType<Promise<void>>(flown.fly());
 expectType<Promise<void>>(flown.splice('id', 'body', 0, 0, 'x'));
 expectType<Promise<syncom.TextHandle>>(flown.openText('id', 'body'));
@@ -89,16 +89,16 @@ expectType<syncom.ApplyResult>(
 );
 expectType<syncom.Entry | null>(syncom.mergeEntry(entry, entry));
 expectAssignable<StorageOptions>({ plugins: [syncom.text] });
-expectType<syncom.StorageConstructor>(syncom.Storage);
-// A typed collection through the bundle's `open()`.
+expectType<syncom.DatabaseConstructor>(syncom.Database);
+// A typed collection through the bundle's `createDatabase()`.
 interface Task {
   title: string;
   done: boolean;
 }
 const shaped: syncom.Schema<{ Task: Task }> = { entities: { Task: {} } };
-const tasks = await syncom.open({ schema: shaped });
+const tasks = await syncom.createDatabase({ schema: shaped });
 expectType<Promise<Task | null>>(tasks.Task.get('id'));
-expectType<Promise<syncom.SyncomRecord<Task>>>(tasks.Task.insert({ title: 'x', done: false }));
+expectType<Promise<syncom.SyncomDocument<Task>>>(tasks.Task.insert({ title: 'x', done: false }));
 expectType<Promise<void>>(tasks.splice('id', 'body', 0, 0, 'hi'));
 
 // The rename: the bundle's Database carries every plugin's methods under the new name too.

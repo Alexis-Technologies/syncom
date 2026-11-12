@@ -4,13 +4,13 @@
 // delta between two readings, selections as cursor tokens, a presence
 // room's cursors. The storage it takes runs the text plugin.
 
-import type { Storage, TextMethods, TextHandleMethods, DeltaOp, TextSpan, TextBlock } from '../../index.js';
+import type { Database, TextMethods, TextHandleMethods, DeltaOp, TextSpan, TextBlock } from '../../index.js';
 import type { Presence } from '../presence/presence.js';
 
 export type { DeltaOp, TextSpan, TextBlock };
 
 /** A storage with the text plugin's methods — what the binding and the selection helpers take. */
-export type TextStorage = Storage & TextMethods & TextHandleMethods;
+export type TextStorage = Database & TextMethods & TextHandleMethods;
 
 /** U+FFFC, the character an embed slot reads as. */
 export declare const EMBED: '￼';
@@ -201,7 +201,7 @@ export declare function undoSteps(
 
 /** How an adapter reports a failure of its own work (cursors, undo): to `onError`, or a warn `event` on the storage's logger. */
 export declare function failureReporter(
-  storage: Storage,
+  storage: Database,
   id: string,
   path: string,
 ): (event: string, onError?: (error: Error) => void) => (error: Error) => void;

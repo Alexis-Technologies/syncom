@@ -62,7 +62,6 @@ class Database extends core.Database {
 }
 
 const createDatabase = (options) => new Database(options);
-const open = createDatabase;
 const applyOp = (entry, op, limits = null) =>
   core.applyOp(entry, op, { ...limits, plugins: limits?.plugins ?? registry });
 const mergeEntry = (a, b, limits = null) => core.mergeEntry(a, b, { ...limits, plugins: limits?.plugins ?? registry });
@@ -78,8 +77,6 @@ module.exports = {
   layered,
   Database,
   createDatabase,
-  Storage: Database,
-  open,
   applyOp,
   mergeEntry,
   text,

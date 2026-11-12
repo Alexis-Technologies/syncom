@@ -2776,11 +2776,6 @@ class Database extends Emitter {
     return document;
   }
 
-  /** @deprecated `document()` — the name before the rename. */
-  record(id) {
-    return this.document(id);
-  }
-
   getCachedData(id) {
     const entry = this.#entries.cached(id);
     if (!entry) return null;
@@ -2952,11 +2947,7 @@ class Database extends Emitter {
 
 Database.Collection = Collection;
 Database.Document = Document;
-// The names before the rename (2026-11): `Storage`, `Record`, `open()` stay
-// as aliases until 1.0; the docs say `Database`, `Document`, `createDatabase()`.
-Database.Record = Document;
 
 const createDatabase = (options) => new Database(options);
-const open = createDatabase;
 
-module.exports = { Database, createDatabase, dropDatabase, Storage: Database, open };
+module.exports = { Database, createDatabase, dropDatabase };

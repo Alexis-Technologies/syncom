@@ -54,11 +54,6 @@ class Reference {
   toJSON() {
     return this.#id;
   }
-
-  /** @deprecated `document()` — the name before the rename. */
-  record() {
-    return this.document();
-  }
 }
 
 class Document extends Emitter {

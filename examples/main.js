@@ -4,7 +4,7 @@ const syncom = require('..');
 const domain = require('./domain.js');
 
 const main = async () => {
-  const storage = await syncom.open();
+  const storage = await syncom.createDatabase();
   domain.init(storage);
 
   const authorId = await storage.insert({

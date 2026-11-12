@@ -34,7 +34,7 @@ same process may run with others.
 | `@alexify/syncom/attachments` | bytes beside a record in the engine's blobs store, named on it as a register that replicates; fetched from a peer on demand, checked by digest | `createDatabase({ plugins: [attachments({ compression })] })` |
 | `@alexify/syncom/mcp` | the tools an agent calls over a database, in the Model Context Protocol's shape: query, count, get, changes, wait_changes, insert, upsert, delete per collection, every argument checked against the tool's `inputSchema`; registering them is the caller's | `createTools(db, { collections, readOnly })` |
 | `@alexify/syncom/testing` | what a test over syncom stands on: the memory engine, an in-process link with a transport's hazards (latency, a page dropped or doubled, a disconnect), a mesh of nodes from an adjacency list, `settle()`, `withDatabase()` | `createMesh(names, edges, { createStorage })` |
-| `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').open()` |
+| `@alexify/syncom/all` | the core with every shipped plugin registered — the API as one import | `require('@alexify/syncom/all').createDatabase()` |
 | `@alexify/syncom/undo`, `/branch`, `/order` | the undo stack, forks and merges, fractional indexes | functions over a storage |
 | `@alexify/syncom/presence` | who is here and what they point at: a state per node, signed, relayed by a host's rooms, never logged | `createPresence(storage)`; carried by `storage.sync.presence()` |
 | `@alexify/syncom/editor`, `/prosemirror`, `/codemirror` | an editor bound to a text field: the generic binding and its deltas, and adapters for ProseMirror and CodeMirror 6 (their modules injected) | functions over a storage |

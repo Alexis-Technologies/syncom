@@ -1,9 +1,9 @@
 import { expectType } from 'tsd';
-import type { Storage } from '../index.js';
+import type { Database } from '../index.js';
 import { inspect, anonymize, indexAdvisor } from '../src/inspect/inspect.js';
 import type { Inspection, IndexSuggestion } from '../src/inspect/inspect.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 expectType<Promise<Inspection>>(inspect(storage, 'id'));
 const advisor = indexAdvisor(storage);
 expectType<IndexSuggestion[]>(advisor.suggest());

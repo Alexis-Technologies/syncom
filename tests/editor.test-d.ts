@@ -30,10 +30,10 @@ import type {
   Fit,
   UndoSteps,
 } from '../src/editor/editor.js';
-import type { Storage } from '../src/all/all.js';
+import type { Database } from '../src/all/all.js';
 import { createPresence } from '../src/presence/presence.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 declare const adapter: EditorAdapter;
 declare const spans: TextSpan[];
 declare const blocks: TextBlock[];

@@ -1,24 +1,24 @@
 import { expectAssignable, expectType } from 'tsd';
 import * as browser from '../browser.js';
-import type { CrdtDelta, Storage, StorageOptions } from '../browser.js';
+import type { CrdtDelta, Database, StorageOptions } from '../browser.js';
 import { memory } from '../src/memory/memory.js';
 
 // The split is the files layer; the crypto halves are the subpaths' (signing.browser.d.ts).
 expectType<CrdtDelta>(browser.diff({ a: 1 }, { a: 2 }));
 expectType<unknown>(browser.merge({ a: 1 }, { a: 2 }));
-expectType<Promise<Storage>>(browser.open({ path: 'data' }));
-expectType<Promise<Storage>>(browser.open({ path: 'data', getId: () => 'id' }));
-expectType<Promise<Storage>>(browser.open({ path: 'data', telemetry: { api: {} } }));
+expectType<Promise<Database>>(browser.createDatabase({ path: 'data' }));
+expectType<Promise<Database>>(browser.createDatabase({ path: 'data', getId: () => 'id' }));
+expectType<Promise<Database>>(browser.createDatabase({ path: 'data', telemetry: { api: {} } }));
 // The id generator is not part of the async asymmetry: sync in both halves.
-expectType<string>(browser.Storage.generateId());
-expectType<Promise<Storage>>(browser.open({ fsi: memory(), durable: true }));
+expectType<string>(browser.Database.generateId());
+expectType<Promise<Database>>(browser.createDatabase({ fsi: memory(), durable: true }));
 expectType<boolean>(browser.isFsi(memory()));
 expectType<'VALIDATION_FAILED'>(new browser.ValidationError('Post', []).code);
-declare const browserStorage: Storage;
+declare const browserStorage: Database;
 expectType<Promise<unknown>>(browserStorage.check('Post', {}));
 expectType<Promise<string>>(browser.read('dir', 'file.json'));
 
-declare const storage: Storage;
+declare const storage: Database;
 expectType<Promise<string[]>>(browser.list('dir'));
 expectType<Promise<void>>(storage.inc('id', 'hits'));
 expectType<boolean>(browser.isAlive(null));

@@ -900,7 +900,7 @@
     },
     {
       "subject": "storage",
-      "name": "record — cached Record instance",
+      "name": "document — cached Document instance",
       "opsPerSec": 8302835
     },
     {

@@ -3,12 +3,12 @@ import * as state from '@codemirror/state';
 import * as view from '@codemirror/view';
 import { createCodeMirror, deltaOfChanges, changesOfDelta } from '../src/codemirror/codemirror.js';
 import type { CodeMirrorBinding } from '../src/codemirror/codemirror.js';
-import type { Storage, DeltaOp } from '../src/all/all.js';
+import type { Database, DeltaOp } from '../src/all/all.js';
 import type { TextBinding } from '../src/editor/editor.js';
 import { createUndo } from '../src/undo/undo.js';
 import { createPresence } from '../src/presence/presence.js';
 
-declare const storage: Storage;
+declare const storage: Database;
 
 const cmb = createCodeMirror(storage, 'id', 'body', { state, view }, { onError: (error) => error.message });
 expectType<CodeMirrorBinding>(cmb);

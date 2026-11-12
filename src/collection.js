@@ -442,11 +442,6 @@ class Collection extends Emitter {
     this.#mine(id);
     return this.#storage.document(id);
   }
-
-  /** @deprecated `document()` — the name before the rename. */
-  record(id) {
-    return this.document(id);
-  }
 }
 
 // The collection's writers that take data and answer a value — what a follower of `@alexify/syncom/shared` forwards

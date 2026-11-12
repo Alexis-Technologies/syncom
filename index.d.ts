@@ -748,7 +748,7 @@ export interface OpLogOptions {
   telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   fsi?: Fsi;
   /**
-   * Seal only the batches the owner has marked `applied`: what Storage asks
+   * Seal only the batches the owner has marked `applied`: what the Database asks
    * for, so a reopen's replay always covers a batch whose records may not
    * have been written. A log on its own seals everything.
    */
@@ -798,7 +798,7 @@ export interface OpLog {
     eventId: string | null | undefined,
     options?: { scopes?: readonly string[] | null; limit?: number },
   ): LogEntry[] | null;
-  /** Every retained entry of the record `id`, oldest first — what `Storage.repair()` rebuilds from. */
+  /** Every retained entry of the record `id`, oldest first — what `Database.repair()` rebuilds from. */
   entriesOf(id: string): LogEntry[];
   advance(vector: VersionVector): Promise<void>;
   tail(): LogEntry[];
@@ -2081,7 +2081,7 @@ export interface ApplyRemoteResult {
   refused?: Array<{ origin: string; seq: number; scope: string | null; id: string; current: RecordData | null }>;
 }
 
-/** The events a Storage emits; listeners are contained. */
+/** The events a Database emits; listeners are contained. */
 export interface StorageEvents {
   /** Every op applied here — local (`via` null) or from a peer (`via` names it). */
   change: (op: SyncOp, via: PeerRef | null, detail: { changes: Change[]; seq: number | null }) => void;
@@ -2684,8 +2684,6 @@ export interface Database {
   }): Promise<{ migrated: number; counters: number; sets: number; lists: number; texts: number; trees: number }>;
   /** A live `Document` of `id` — `R` types its fields (`document<Post>(id)`). */
   document<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record<R = RecordData>(id: string): Promise<SyncomDocument<R>>;
   /** The raw data of a cached entry (no lens), `null` when not cached, absent or deleted. */
   getCachedData<R = RecordData>(id: string): R | null;
   /** Whether `id` is a live record here — from the catalog, no I/O. */
@@ -2924,8 +2922,6 @@ export interface Reference {
   readonly id: string;
   /** The live Document the reference names, or `null` when the record is not there. */
   document<R = RecordData>(): Promise<SyncomDocument<R> | null>;
-  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record<R = RecordData>(): Promise<SyncomDocument<R> | null>;
   toJSON(): string;
 }
 
@@ -3050,7 +3046,7 @@ export interface SyncomDocumentApi<R = RecordData> {
 
 /**
  * A live record: the methods, plus one getter/setter per field of the loaded
- * object — typed by `R` (`record<Post>(id)`, a typed collection's
+ * object — typed by `R` (`document<Post>(id)`, a typed collection's
  * `record()`), any name and `unknown` under `RecordData`. A field named
  * like a method never shadows it; `data()` has it.
  */
@@ -3061,10 +3057,6 @@ export type SyncomDocument<R = RecordData> = SyncomDocumentApi<R> & { -readonly 
  * under a name that does not.
  */
 export type Document<R = RecordData> = SyncomDocument<R>;
-/** @deprecated `SyncomDocumentApi` — the name before the rename; removed in 1.0. */
-export type SyncomRecordApi<R = RecordData> = SyncomDocumentApi<R>;
-/** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
-export type SyncomRecord<R = RecordData> = SyncomDocument<R>;
 
 /**
  * A collection, `storage.<Entity>`. `R` is the record as it reads, `I` what
@@ -3107,7 +3099,12 @@ export interface Attachment extends AttachmentEntry {
 /** `db.attachments` — the `attachments` plugin's. */
 export interface AttachmentStore {
   /** The bytes kept under the record as `name` (the engine's blobs store, by digest) and named on it. Rejects `NOT_FOUND` for a record that is not there. */
-  put(id: string, name: string, bytes: Uint8Array | ArrayBuffer | string, options?: { type?: string }): Promise<AttachmentEntry>;
+  put(
+    id: string,
+    name: string,
+    bytes: Uint8Array | ArrayBuffer | string,
+    options?: { type?: string },
+  ): Promise<AttachmentEntry>;
   /** The attachment named, or null; bytes this node lacks are asked of the peers it dials unless `fetch: false` — none has them, `BLOB_NOT_FOUND`. */
   get(id: string, name: string, options?: { fetch?: boolean }): Promise<Attachment | null>;
   /** Whether this node holds the bytes of the attachment named. */
@@ -3116,7 +3113,11 @@ export interface AttachmentStore {
   /** Takes the name off the record (replicated); the bytes stay in the store until a `sweep()`. */
   remove(id: string, name: string): Promise<void>;
   /** What a `put` would store and write, without storing or writing; the register's field name. */
-  prepare(name: string, bytes: Uint8Array | ArrayBuffer | string, options?: { type?: string }): Promise<{ stored: Uint8Array; entry: AttachmentEntry; field: string }>;
+  prepare(
+    name: string,
+    bytes: Uint8Array | ArrayBuffer | string,
+    options?: { type?: string },
+  ): Promise<{ stored: Uint8Array; entry: AttachmentEntry; field: string }>;
   field(name: string): string;
   /**
    * Mark-and-sweep over the blobs store: every digest a live record, a tag's copy (`tags`, on by default) or a put in
@@ -3187,7 +3188,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
    * Writes a new record: under the id its data names (the entity's composite id, or its id
    * field — a live record there is `EXISTS`, decided inside the queue), else under a minted one.
    */
-  insert(data: I, options?: StorageDataOptions): Promise<SyncomRecord<R>>;
+  insert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
   /** Writes the record its data names whole, new or not (`set()` by the named id; a TypeError without one). */
   upsert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
   /** Writes the record its data names unless a live one is there, inside the queue; the Document either way. */
@@ -3235,8 +3236,6 @@ export interface SyncomCollection<R = RecordData, I = R> {
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
   /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
   document(id: string): Promise<SyncomDocument<R>>;
-  /** @deprecated `document()` — the name before the rename; removed in 1.0. */
-  record(id: string): Promise<SyncomDocument<R>>;
 }
 /** `Collection<R, I>`: a collection, by its RxDB-style name. */
 export type Collection<R = RecordData, I = R> = SyncomCollection<R, I>;
@@ -3252,8 +3251,6 @@ export interface SyncomDocumentConstructor {
   readonly prototype: SyncomDocument;
   new <R = RecordData>(id: string, database: Database): Promise<SyncomDocument<R>>;
 }
-/** @deprecated `SyncomDocumentConstructor` — the name before the rename; removed in 1.0. */
-export type SyncomRecordConstructor = SyncomDocumentConstructor;
 
 export interface DatabaseConstructor {
   readonly prototype: Database;
@@ -3262,30 +3259,15 @@ export interface DatabaseConstructor {
   ): Promise<Database & Collections<S> & PluginMethods<P>>;
   Collection: SyncomCollectionConstructor;
   Document: SyncomDocumentConstructor;
-  /** @deprecated `Document` — the name before the rename; removed in 1.0. */
-  Record: SyncomDocumentConstructor;
   // The default `getId` — synchronous in both halves, unlike the crypto three.
   generateId(): string;
 }
-/** @deprecated `DatabaseConstructor` — the name before the rename; removed in 1.0. */
-export type StorageConstructor = DatabaseConstructor;
 
 export const Database: DatabaseConstructor;
 
 export namespace Database {
   export type DatabaseDocument<R = RecordData> = SyncomDocument<R>;
   export type DatabaseCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
-}
-
-/** @deprecated `Database` — the name before the rename (the class and the type); removed in 1.0. */
-export const Storage: DatabaseConstructor;
-/** @deprecated `Database` — the name before the rename; removed in 1.0. */
-export type Storage = Database;
-export namespace Storage {
-  /** @deprecated `SyncomDocument` — the name before the rename; removed in 1.0. */
-  export type StorageRecord<R = RecordData> = SyncomDocument<R>;
-  /** @deprecated `SyncomCollection` — the name before the rename; removed in 1.0. */
-  export type StorageCollection<R = RecordData, I = R> = SyncomCollection<R, I>;
 }
 
 /** The options of `createDatabase()` under the new name (`StorageOptions` keeps its name). */
@@ -3306,7 +3288,3 @@ export function createDatabase<S extends Schema = Schema, const P extends readon
  * database is `LOCKED`, never emptied under it; a path that holds nothing is nothing to do.
  */
 export function dropDatabase(path: string, options?: { engine?: Engine; fsi?: Fsi }): Promise<void>;
-/** @deprecated `createDatabase()` — the name before the rename; removed in 1.0. */
-export function open<S extends Schema = Schema, const P extends readonly Plugin<any>[] = []>(
-  options?: StorageOptions<S> & { plugins?: P },
-): Promise<Database & Collections<S> & PluginMethods<P>>;
