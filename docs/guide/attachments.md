@@ -44,7 +44,7 @@ it), and every store takes a blob of at most `MAX_BLOB_BYTES` (64 MiB —
 refuses a larger one before hashing it.
 
 The engine must keep blobs (`capabilities.blobs`): the memory, IndexedDB
-(a seventh object store; an older IndexedDB database is upgraded at its open),
+(a seventh object store),
 files (`blobs/<digest>`, as base64 text — an fsi carries text), SQLite (a
 `blobs` table) and MongoDB (a `blobs` collection) engines do, and the
 [at-rest](./backends#encrypted-at-rest) wrapper seals the bytes as it seals a record.

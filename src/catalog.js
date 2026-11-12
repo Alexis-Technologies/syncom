@@ -29,10 +29,12 @@ const FILE = 'catalog.json';
 const ALL = Symbol('syncom.catalog.all');
 // The sealed listing of a collection without sealed records: one frozen array, read by every cursor over it.
 const EMPTY = Object.freeze([]);
-// 4: a folded tombstone's stamps ride on its row (`folded`, the eighth cell; @alexify/syncom/cleanup).
-// 5: a tombstone's row keeps its collection (`type`) and the stamp of its delete (`deleted`, the seventh cell); a
-//    folded tombstone lives in the `tombstones` kv namespace, whole, and its row is any tombstone's.
-const FORMAT = 5;
+// The file's format. A row is `[id, type, v, encrypted, fields, gone, seventh]`, cut after its last cell that says
+// something: the seventh a live record's search text, or the stamp of a tombstone's delete (`deleted`) — a
+// tombstone's row keeps its collection (`type`) too; a folded tombstone lives in the `tombstones` kv namespace,
+// whole, and its row is any tombstone's. Nothing is published: the format is 1 whatever changed before the first
+// release, and a file of any other is not read.
+const FORMAT = 1;
 
 const isObject = (value) => typeof value === 'object' && value !== null;
 
@@ -1002,8 +1004,7 @@ class Catalog {
     }
     const usable =
       isObject(parsed) &&
-      // A tag's catalog (`strict: false`) saved as format 4 still reads; the live one asks for today's format.
-      (parsed.format === FORMAT || (!strict && parsed.format === 4)) &&
+      parsed.format === FORMAT &&
       (!strict || parsed.indexes === this.#indexKey) &&
       typeof parsed.stamp === 'string' &&
       Array.isArray(parsed.rows);

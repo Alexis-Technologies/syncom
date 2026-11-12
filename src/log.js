@@ -194,8 +194,6 @@ class OpLog {
       this.#entries.push(entry);
       if (entry.seq >= this.#next) this.#next = entry.seq + 1;
       if (entry.op) {
-        // A scrubbed entry's op says so (a line written before the op carried the mark: the flag alone).
-        if (entry.scrubbed === true) entry.op.scrubbed = true;
         vectorAdvance(this.#vector, entry.op);
         this.#observe(entry.op);
         this.#indexEntry(entry);

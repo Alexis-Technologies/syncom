@@ -125,6 +125,11 @@ hours after its last test). Coverage —
 - **Constructors that return promises.** `Database`, `Blockchain` and
   `SyncManager` all `return this.#init()` from the constructor, so they are
   used as `await new Blockchain(path)`. The types model this; keep it that way.
+- **Nothing is published: every stored format is its first version, and nothing reads an older one.** A format's
+  number — `FORMAT`, `VERSION`, `PROTOCOL`, an IndexedDB database's version, a header's — stays `1` until the first
+  release, whatever changes before it: no bump, and no reader, upgrade or fallback for what an earlier build wrote
+  (a development database is deleted, not migrated). `tests/package/formats.test.js` holds every such constant in
+  `src/` to 1; the rules for after the publication are "Compatibility" in `docs/reference/wire.md`.
 
 ## Skills
 

@@ -38,8 +38,9 @@ const KEYS = {
   meta: ['p', 'key'],
   blobs: ['p', 'digest'],
 };
-// 2: the `blobs` store (attachments). An older database is upgraded at its open: the stores it lacks are made.
-const VERSION = 2;
+// The database's version: every store is made in the one upgrade a new database gets. Nothing is published, so no
+// older database is upgraded — a store added before the first release joins STORES at this version.
+const VERSION = 1;
 
 const request = (req) =>
   new Promise((resolve, reject) => {
@@ -70,7 +71,7 @@ const parsed = (text) => {
 /**
  * `idbEngine({ name, indexedDB, IDBKeyRange, durability, channel })` — the engine over
  * IndexedDB: the database `name` is opened lazily and reopened after another
- * tab upgrades or deletes it; `durability` is the transactions' (`'default'`,
+ * tab deletes it; `durability` is the transactions' (`'default'`,
  * `'relaxed'`, `'strict'`); `close()` closes the connection.
  */
 const idbEngine = ({
@@ -102,13 +103,11 @@ const idbEngine = ({
       const req = indexedDB.open(name, VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
-        for (let i = 0; i < STORES.length; i++) {
-          if (!db.objectStoreNames.contains(STORES[i])) db.createObjectStore(STORES[i], { keyPath: KEYS[STORES[i]] });
-        }
+        for (let i = 0; i < STORES.length; i++) db.createObjectStore(STORES[i], { keyPath: KEYS[STORES[i]] });
       };
       req.onsuccess = () => {
         const db = req.result;
-        // Another tab upgrades or deletes the database: let go, and the next call opens it again.
+        // Another tab deletes the database: let go, and the next call opens it again.
         db.onversionchange = () => {
           db.close();
           opening = null;

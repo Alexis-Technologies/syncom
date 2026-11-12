@@ -28,8 +28,8 @@ const toBase64 = (buffer) => {
 
 const toBase64Url = (buffer) => toBase64(buffer).replaceAll('+', '-').replaceAll('/', '_').replace(PADDING, '');
 
-// Accepts standard AND url-safe base64: keys written by an earlier version
-// of this package were url-safe, and node's PEMs are standard.
+// Accepts standard AND url-safe base64: a node id and a signature are base64url
+// (src/signing/ed25519.browser.js), a PEM, an envelope and a blob standard.
 const fromBase64 = (base64) => {
   const normalized = base64.replaceAll('-', '+').replaceAll('_', '/');
   const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);

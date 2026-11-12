@@ -21,10 +21,10 @@ refusal at `hello`, since `PROTOCOL` stays 1 until the first publication. Keystr
 or typed through a transaction or a handle that continue each other are one op, so one `change`
 and one `commit` event, not one per call.
 
-**Upgrading a checkout from before review №6** (nothing published): the catalog is format 5 — a tombstone's row
-keeps its collection and its `deleted` stamp — so the live catalog is rebuilt once at the first open (a tag's
-format-4 catalog still reads). Tombstones folded by the format-4 build were stamps on a catalog row alone and were
-lost at any rebuild: a database that ran that build's `cleanup` is best re-synced from a peer.
+**Upgrading a checkout from before review №6** (nothing published): a tombstone's catalog row keeps its collection
+and its `deleted` stamp, and a folded tombstone lives whole in the `tombstones` kv namespace. Tombstones folded by the
+earlier build were stamps on a catalog row alone and were lost at any rebuild: a database that ran that build's
+`cleanup` is best re-synced from a peer.
 
 **Upgrading a checkout from before review №7** (nothing published): a blob sealed at rest is iv ‖ ciphertext bytes
 now and a MongoDB blob is chunked — blobs written by the older build do not read (fetch them from a peer again, or
@@ -32,6 +32,15 @@ re-put them); the channel between the tabs of `@alexify/syncom/shared` carries `
 follower of two builds do not speak; `syncom/blob` names the record (`{ digest, id, name }`) and a host serves a
 digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer `capped` beside the rows and refuse a
 `$regex` unless the unit takes them; the host's revocations live in `revoked.json` of the root kv.
+
+**Every stored format is its first version** (nothing published): no format was ever released, so none stands above
+1 and no reader, upgrade or fallback is kept for what an earlier build wrote. The catalog file is `format: 1` (it
+had climbed to 5, with a reader of 4 for a tag's catalog), the IndexedDB database is version 1 with its seven stores
+made at once (it was 2, upgraded at its open), and a log line's scrub is the op's own mark alone. A development
+database of an earlier build is deleted, not migrated: IndexedDB refuses to open a database of a higher version
+(`VersionError` — delete it in the browser), a live catalog of another format is rebuilt at the open, and a tag whose
+catalog is of another format is dropped (`tags.dropped`). `tests/package/formats.test.js` holds every format and
+version constant of `src/` to 1 until the first release.
 
 ### Changed
 
@@ -127,7 +136,7 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
 - **Tombstones are folded whole (review №6, E1).** `cleanup` moves an old, acknowledged tombstone — its data and its
   whole meta — into the `tombstones` kv namespace in ONE write set with its file's removal; the catalog is derived
   from the records and that namespace, a rebuild reads both, a fold changes no row, and a tombstone's row keeps the
-  record's collection and its `deleted` stamp (catalog format 5). A late op below the stamp stays moot on a folded
+  record's collection and its `deleted` stamp. A late op below the stamp stays moot on a folded
   node as on any other; a pipeline and a dump see a plain delete's collection.
 - **Writes made safe (review №6, E2).** A write by query and `ifMatch` go by the record's id — a data field named
   `id` names no other record; `drop()` is `READ_ONLY` on a follower or after a lost lease and sweeps under the lock;
@@ -217,7 +226,7 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   encoding? }`), which replicates like any field; `get` reads them — bytes this node lacks are asked of the peers it
   dials (`syncom/blob`: a stream, or base64 on a text transport), checked against the digest and kept; none has
   them, `BLOB_NOT_FOUND` — `has`, `list`, `remove`. Compression through `CompressionStream`. Every engine keeps blobs
-  (the IndexedDB database at version 2, upgraded at its open; the files engine as base64 under `blobs/`), the at-rest
+  (IndexedDB in a seventh object store; the files engine as base64 under `blobs/`), the at-rest
   wrapper seals them, `copyEngine()` carries them, a read-only database reads them. `unit({ allow: { blob } })`,
   `sync.fetchBlob(digest)`.
 - **`@alexify/syncom/testing`.** What a test over syncom stands on — the memory engine, `MemoryLink` (an in-process
@@ -320,7 +329,7 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   moot (below an unset or a set removal above the delete too), a revival above it writes a file again and
   takes the kv entry away in the same set, a snapshot still hands the deletion on whole, a rebuild of the
   catalog reads the namespace beside the records. The sweep reads no file: a tombstone's row keeps its
-  collection and its `deleted` stamp (catalog format 5). With `awaitSync` a tombstone this node made is folded
+  collection and its `deleted` stamp. With `awaitSync` a tombstone this node made is folded
   only once every enabled registered node acknowledged its delete (one the log no longer retains folds but is
   never dropped); `run({ drop: true })` takes the entry and the row too.
 - **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
@@ -1114,7 +1123,7 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   length, best first unless ordered, narrowed by any equality, with `limit`,
   `one()`, `count()` and `watch()` as for any cursor; text is normalized
   (marks stripped, lower case). The catalog keeps each record's search text
-  (format 3 — an older `catalog.json` is rebuilt once) and replays it into
+  (an older `catalog.json` is rebuilt once) and replays it into
   the index at open, so no record is read; an index that throws is logged
   (`catalog.search`), never failing the write. A `TextIndex` of your own fits
   too. Browser budget 40 → 41 KB.
@@ -2253,7 +2262,7 @@ digest alone only under `allow.blob: 'any'`; a host's `query` and `count` answer
   and a decrypt per sealed record just to skip it. The catalog now keeps a
   row for every entry with a file, tombstones included (`gone`), and a page
   is a slice of its sorted ids; a record this node cannot read is left out
-  of the page instead of failing it. The persisted catalog is format 2 (an
+  of the page instead of failing it. The persisted catalog changed shape (an
   older file is rebuilt once).
 - **The catalog was written on the mutation queue.** Every 64th write paid
   for a full serialization of the catalog before it returned; the save now

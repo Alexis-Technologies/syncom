@@ -218,7 +218,7 @@ test('Catalog', async (t) => {
       catalog.put('p5', { v: 1, gone: true, deleted: [1_700_000_000_000, 'A'] });
       await catalog.save('e.9');
       const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-      assert.strictEqual(file.format, 5);
+      assert.strictEqual(file.format, 1);
       const rowsById = Object.fromEntries(file.rows.map((row) => [row[0], row]));
       assert.deepStrictEqual(rowsById.p1, ['p1', 'Post', 2, false, { orgId: 'o1' }, false, 'Again']);
       assert.deepStrictEqual(rowsById.p2, ['p2', 'Post', 1, false, {}, true]);
@@ -311,7 +311,7 @@ test('Catalog', async (t) => {
     await catalog.save('epoch.7');
     assert.strictEqual(catalog.dirty, 0);
     const file = JSON.parse(await fsi.read('store/index', 'catalog.json'));
-    assert.strictEqual(file.format, 5);
+    assert.strictEqual(file.format, 1);
     assert.strictEqual(file.stamp, 'epoch.7');
     assert.deepStrictEqual(file.rows, [
       ['a', 'Post', 1, false, { orgId: 'o1', slug: 'a' }],
@@ -328,9 +328,12 @@ test('Catalog', async (t) => {
     const other = catalogOf({ entities: { Post: { index: ['title'] } } }, fsi);
     assert.strictEqual(await other.load(), null);
     assert.strictEqual(other.size, 0);
-    // Format 4 — before a tombstone's row kept its stamp — reads only where the indexes are not asked for (a tag's).
-    await fsi.write('store/index', 'catalog.json', JSON.stringify({ ...file, format: 4 }));
-    assert.strictEqual(await catalogOf(schema, fsi).load(), null, 'format 4 under strict');
+    // A file of another format is not read — a tag's catalog (`strict: false`) no more than the live one: nothing
+    // is published, so there is no older format to read.
+    await fsi.write('store/index', 'catalog.json', JSON.stringify({ ...file, format: 2 }));
+    assert.strictEqual(await catalogOf(schema, fsi).load(), null, 'another format under strict');
+    assert.strictEqual(await catalogOf(schema, fsi).load({ strict: false }), null, 'another format for a tag');
+    await fsi.write('store/index', 'catalog.json', JSON.stringify(file));
     assert.deepStrictEqual(await catalogOf(schema, fsi).load({ strict: false }), { stamp: 'epoch.7' });
     // Absent, unreadable, or of another shape.
     assert.strictEqual(await catalogOf(schema, memory()).load(), null);

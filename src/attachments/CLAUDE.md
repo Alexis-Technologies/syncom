@@ -44,7 +44,7 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   plugin never puts what it fetched. `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a
   read: an attachment reaches a node when that node reads it.
 - **The store is the engine's; the plugin refuses an engine without one.** Every shipped engine keeps `blobs` (memory: a Map;
-  IndexedDB: a seventh store, VERSION 2; files: `blobs/<digest>` as base64 text; SQLite: a table; MongoDB: a collection) and
+  IndexedDB: a seventh store; files: `blobs/<digest>` as base64 text; SQLite: a table; MongoDB: a collection) and
   says so in `capabilities.blobs`; the read-only wrapper reads them, the at-rest wrapper seals them as text at the blob's
   place (the digest a name, in the clear), the remote engine proxies them (a Uint8Array crosses the port), `copyEngine`
   copies them one by one. `setup()` throws a TypeError where `db.blobs` is absent — the plugin is not in `/all`, so a

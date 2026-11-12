@@ -417,9 +417,10 @@ The rest of a directory: `node.json` `{ id, plugins }` (the node's id and
 the kind plugins it was opened with), `keys/sign-public.pem` and
 `keys/sign-private.pem` (the Ed25519 pair the id is), `keys/public.pem` and
 `keys/private.pem` (the RSA pair that seals an encrypted record),
-`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 4, indexes,
-stamp, rows }` — derived, rebuilt when stale; a row is `[id, type, v, encrypted, fields, gone, text,
-folded]`, the eighth cell a folded tombstone's stamps, see [cleanup](../guide/cleanup)), `local/` (the
+`schema.json`, `lock.json`, `index/catalog.json` (`{ format: 1, indexes,
+stamp, rows }` — derived, rebuilt when stale; a row is `[id, type, v, encrypted, fields, gone, seventh]`, cut after
+its last cell that says something: the seventh a live record's search text, or the stamp of a tombstone's delete —
+a folded tombstone lives whole in the `tombstones` kv namespace, see [cleanup](../guide/cleanup)), `local/` (the
 local documents), `pipeline/` (the pipelines' checkpoints), `tags/`, `blobs/<digest>` (an attachment's bytes under
 their SHA-256, base64 text in the files engine), and the texts a block keeps in the root namespace or one of its own:
 `revoked.json` `{ v: 1, nodes: { "<node>": ["<scope>", …] } }` (the scopes a host took back from each node,
@@ -758,9 +759,12 @@ with 400 `PROTOCOL`. Version 1 is the wire as the first publication will
 have it: the fifteen types and the twenty slots above, the header under
 its version number `1` with `prev` in it, the log file with its hash, the
 index with every field it is written with, the `enc1:` ciphertext bound to
-its file name, the presence format `p: 1`. Nothing reads a shape from
+its file name, the presence format `p: 1`, the catalog file's `format: 1`,
+the IndexedDB database's version 1. Nothing reads a shape from
 before that publication: a log file without a hash is unreadable, an index
-with a field missing is no index (a new epoch). Before the publication the
+with a field missing is no index (a new epoch), a catalog of another format
+is rebuilt, and no stored format carries a number above 1 — a database made
+by an earlier build is deleted, not upgraded. Before the publication the
 shapes on this page may change without a bump; after it:
 
 - **A slot is appended, never reordered or removed.** A reader of fewer

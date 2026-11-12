@@ -80,7 +80,7 @@ const ENTRIES = [
   // signed at its three sites, the verify pre-pass over a peer's page with
   // its two refusals and the `sync.signatures` option — the raise to 40 KB
   // (39.8 measured). The search seam — an entity's `search` fields joined
-  // into its catalog row (format 3), the injected TextIndex contract, `$text`
+  // into its catalog row, the injected TextIndex contract, `$text`
   // seeding the candidates in the index's order — the raise to 41 KB (40.7
   // measured); the index itself is the @alexify/syncom/search subpath. The
   // fixes the RxDB comparison found — scope bounds on a push, a dialer that
@@ -179,7 +179,7 @@ const ENTRIES = [
   // 68.8 with the catalog's sorted indexes (compound keys, `scan`) and `compare` shared, an array keyed per element (collections plan, C3.1). 69.5, raised by name.
   // 69.8 with folded tombstones (Catalog.fold, EntryStore.fold, the row rebuilt on a read; collections plan,
   // C4.5) and the transaction event's eventId. 70, raised by name.
-  // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (catalog FORMAT 5; review №6, E1.1;
+  // 70.0 with a tombstone's row keeping its collection and the stamp of its delete (review №6, E1.1;
   // 2026-11-02). 70.5, raised by name. 70.5 with the folded tombstones in the `tombstones` kv namespace (EntryStore.foldMany,
   // the fallback read, the rebuild over both stores; review №6, E1.2–E1.3). 71, raised by name.
   // 71.0 with a row's id laid last, writes by query matched again inside the queue, drop() under the lock, dropDatabase()
