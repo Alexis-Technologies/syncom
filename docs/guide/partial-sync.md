@@ -126,6 +126,14 @@ reaches the server or any other node: the task is still on the board for everyon
 records and the scopes the node keeps stay. If a peer later sends an op of a forgotten record, the record
 is made again from that op.
 
+Revoking the last scope a node asked for works the same way. When Bob moves off the mobile team, the
+phone forgets the mobile tasks and its registry entry is left empty:
+
+<<< @/examples/partial-sync.mjs#last
+
+The phone stays connected, and its feed carries the global records alone: a new global task still
+arrives, a mobile one never does. Remove the node if it should receive nothing at all.
+
 To decide yourself, pass `sync: { hooks: { onRevoke({ url, node, scopes }) { … } } }`. The laptop then
 forgets nothing, and the hook can archive, encrypt or delete the records as your app requires; the feed
 is reopened under the new grant after it.
@@ -143,9 +151,9 @@ is reopened under the new grant after it.
   its stream. `beforeSend` (see [hooks](./hooks)) sends such an op as a header with no payload, and the
   host's `authorizeWrite` refuses writes the same way ([syncom server replication](./replication-server)).
   Decide what each node may read with scopes.
-- **A node with no scope left.** Revoking the last scope a node asked for leaves it nothing to subscribe
-  to: the host refuses its feed with 403 instead of keeping it on the global records. Re-register it with
-  the scopes it should have, or remove it.
+- **A node with no scope left still reads the global records.** A revoke takes scopes, never the
+  connection: a node whose last scope was revoked, or that asked for none, keeps the global records in
+  step. Remove the node, or refuse it in `authorize`, to stop that too.
 - **256 scopes per hello at most.** A node that needs more should get a coarser scope, such as the team
   instead of every project.
 

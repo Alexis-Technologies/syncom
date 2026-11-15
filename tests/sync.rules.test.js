@@ -501,6 +501,62 @@ test('Rules on the host and on the dialer', async (t) => {
   );
 
   await t.test(
+    'revoke of the last scope: the peer keeps the global records — its feed and its bootstrap ask for no scope, never a scoped record',
+    async (t2) => {
+      const mesh = await createMesh(
+        t2,
+        ['H', 'C', 'E'],
+        [
+          ['C', 'H'],
+          ['E', 'H'],
+        ],
+        createStorage,
+        {
+          sync: { scope },
+          scopes: { C: ['A'], E: [] },
+        },
+      );
+      const [h, c, e] = ['H', 'C', 'E'].map((name) => mesh.get(name));
+      const errors = [];
+      c.sync.on('error', (error) => errors.push(error));
+      await c.sync.awaitInitialReplication();
+      const a1 = await h.insert({ $type: 'A', n: 1 });
+      const g1 = await h.insert({ n: 'global 1' });
+      await waitUntil(() => c.hasRecord(a1) && c.hasRecord(g1));
+      h.sync.revoke(c.nodeId, ['A']);
+      await waitUntil(() => errors.some((error) => error.code === 'REVOKED'));
+      await waitUntil(() => !c.hasRecord(a1));
+      assert.deepStrictEqual(c.sync.listNodes()[0].scopes, [], 'the registry entry is empty');
+      // The feed opens again under the grant of no scope: the global records still come, the revoked never.
+      await waitUntil(() => c.sync.peers()[0].subscribed);
+      const a2 = await h.insert({ $type: 'A', n: 2 });
+      const g2 = await h.insert({ n: 'global 2' });
+      await waitUntil(() => c.hasRecord(g2));
+      await sleep(30);
+      assert.strictEqual(c.hasRecord(a2), false, 'a revoked scope never comes back');
+      assert.strictEqual(c.sync.peers()[0].terminal, false, 'the peer is not refused for good');
+      assert.deepStrictEqual(
+        errors.filter((error) => error.code !== 'REVOKED'),
+        [],
+        'no refusal after the revoke',
+      );
+      // A node granted no scope from the start bootstraps the global records and nothing scoped.
+      await e.sync.awaitInitialReplication();
+      assert.ok(e.hasRecord(g1) && e.hasRecord(g2), 'the global records reach a node granted no scope');
+      assert.strictEqual(e.hasRecord(a1) || e.hasRecord(a2), false);
+      // On the wire: no scope asked is the grant; a named scope none of which is granted is still 403.
+      const probe = new MemoryLink(mesh.units.get('H'));
+      await probe.call('syncom/hello', { node: 'empty', version: 1, scopes: [] });
+      const asked = await probe.call('syncom/snapshot', { scopes: [] });
+      const omitted = await probe.call('syncom/snapshot', {});
+      const ids = (page) => page.records.map((record) => record.id).sort();
+      assert.deepStrictEqual(ids(asked), ids(omitted));
+      assert.deepStrictEqual(ids(asked), [g1, g2].sort());
+      await assert.rejects(probe.call('syncom/snapshot', { scopes: ['A'] }), { code: 403, reason: 'SCOPES' });
+    },
+  );
+
+  await t.test(
     'query and count: a thin client reads a host’s records in its scopes, capped by rowsPerQuery; off by default',
     async (t2) => {
       const schema = { entities: { Task: { index: ['status', 'priority'] } } };

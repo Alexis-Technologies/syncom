@@ -124,6 +124,19 @@ await waitUntil(async () => (await laptop.Task.get(later.id)) !== null);
 assert.equal(await laptop.Task.get(lateLogo.id), null);
 assert.deepEqual(await laptop.Task.get(retro.id), { title: 'Book the retro', done: false, $type: 'Task' });
 
+// #region last
+// Bob moves off the mobile team: the phone loses the last scope it asked for.
+for (const [node, token] of tokenOf) if (token === 'bob') server.sync.revoke(node, ['mobile']);
+// #endregion last
+await waitUntil(async () => (await phone.Task.get(login.id)) === null);
+assert.deepEqual(phone.sync.listNodes()[0].scopes, []);
+// Its feed stays open on the global records: a new global task arrives, a new mobile one does not.
+const lateLogin = await server.Task.insert({ title: 'Test the login again', board: 'mobile', done: false });
+const standup = await server.Task.insert({ title: 'Move the standup', done: false });
+await waitUntil(async () => (await phone.Task.get(standup.id)) !== null);
+assert.equal(await phone.Task.get(lateLogin.id), null);
+assert.equal(phone.sync.peers()[0].terminal, false);
+
 await tablet.close();
 await reports.close();
 await phone.close();

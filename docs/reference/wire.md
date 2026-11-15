@@ -726,8 +726,9 @@ append to recover first), `marker` (the consumer did not reach it in time)
 or `stopped`. On a binary-capable transport a page under
 `pageBytes` (4 MiB) goes as a wrpc stream of NDJSON — one record per line
 — and the answer is `{ id, size, cursor, eventId, vector? }`, `id` the
-stream to read. `scopes` narrows what hello granted (403 `SCOPES` when
-nothing of what is asked was granted).
+stream to read. `scopes` narrows what hello granted (403 `SCOPES` when it
+names scopes none of which was granted; an empty list asks for the whole
+grant, as no list does).
 
 The dialer side of a bootstrap, entered when the feed answers `{ bootstrap:
 true }`: `beforeBootstrap` may refuse it (nothing is received from that host
@@ -793,7 +794,8 @@ grants it no more, and over a [shared log](#the-shared-log) appends it to the
 topic (`{ v: 1, node, revoke: { node, scopes } }`), so every hub takes it
 back. The dialer narrows its registry entry, reports `REVOKED`, runs
 `onRevoke` — without the hook it forgets every record of those scopes
-(`forget(id)`: no op) — and opens its feed again.
+(`forget(id)`: no op) — and opens its feed again, under an empty grant too
+(the global records alone) when the revoke took its last scope.
 
 ### The presence event
 
@@ -843,8 +845,11 @@ record, a `write` that would move one into the peer's own scope, a new record
 whose data puts it in another — is refused the same way, and so is one the
 host's scope function throws on; that refusal is a gap in the op's stream at
 this host. `snapshot` and `changes` serve the intersection of what is asked
-and what was granted: asking for `'*'` or for nothing is asking for the
-granted list, asking only for other scopes is 403 `SCOPES`. A peer granted
+and what was granted: asking for `'*'` or for nothing (no list, or an empty
+one) is asking for the granted list, asking only for other scopes is 403
+`SCOPES`. The granted list may be empty — a peer that asked for no scope, or
+whose last scope a revoke took — and is then the global records alone: the
+feed stays open on them. A peer granted
 `'*'` is bound by nothing. A scoped feed moves its cursor past the other
 scopes' ops without sending a page, so an op is looked at once however many
 feeds it does not concern; a scope function that throws on a record leaves
