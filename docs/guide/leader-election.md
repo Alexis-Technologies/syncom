@@ -74,7 +74,8 @@ follower's write is refused with `NOT_LEADER`. [SharedWorker storage](./storage-
 channel over wrpc, where a SharedWorker holds the election and every tab follows.
 
 `isLeader()` tells you the role now, `waitForLeadership()` resolves when this instance leads, and
-`onLeader(listener)` calls you at every promotion. The `leader` and `follower` events say the same on
+`onLeader(listener)` calls you at every promotion. A [pipeline](./pipeline#run-it-in-one-tab-of-several) and
+[cleanup](./cleanup#sweep-from-one-tab-of-several) take the handle as `leader` and run in the leading tab alone. The `leader` and `follower` events say the same on
 `shared.on()`. The engine must be one that several instances may open at once: [IndexedDB](./storage-indexeddb),
 [memory](./storage-memory) or [MongoDB](./storage-mongodb), never the filesystem or SQLite, whose files and
 connections belong to one instance.

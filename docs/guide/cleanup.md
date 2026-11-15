@@ -63,6 +63,16 @@ waited for; when it comes back it catches up through a snapshot, and a snapshot 
 closes. A sweep that fails on the timer is logged as `cleanup.failed` and the next one runs as planned. Folds go a
 hundred records at a time, each batch one write, so a sweep does not hold up the app's own writes for long.
 
+## Sweep from one tab of several
+
+Every instance that opens the database and starts cleanup sweeps. When several tabs share one database through
+[`openShared()`](./leader-election), give cleanup the tab's handle as `leader`, with its `db` as the database:
+
+<<< @/examples/cleanup.mjs#leader
+
+The timer then runs only in the tab that leads, and moves to the tab that takes over when the leader closes.
+`run()` in a tab that follows sweeps nothing and resolves to zero counts.
+
 ## Drop tombstones for good
 
 `run({ drop: true })` also removes the folded tombstone and the record's catalog entry. After that, the record is
@@ -75,8 +85,7 @@ no longer keeps is never dropped, because this node cannot prove it reached anyo
 
 - Folding is safe at any age, so `minimumDeletedTime` is a space setting. Dropping is not: `run({ drop: true })`
   drops every tombstone folded so far, and a device offline since before the deletion brings the record back.
-- Every instance that opens the database and starts cleanup sweeps. In a browser with several tabs, run it in the
-  [leading tab](./leader-election). The `leader` option is accepted but elects nothing yet.
+- Without `leader`, every instance that opens the database and starts cleanup sweeps.
 - Cleanup does not touch the operation log; [retention](./retention) decides how long ops are kept, and
   [purge](./purge) removes a record's data from the log.
 

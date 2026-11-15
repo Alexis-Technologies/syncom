@@ -793,15 +793,19 @@ const ENTRIES = [
     // 2.8 measured; 3.
     // 3.3 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
     // 3.5, raised by name.
-    budget: 3.5,
+    // 3.71 with `leader`: the pipeline on the leading instance of openShared(), bound again at every change of instance
+    // (docs found-bugs, infra; 2026-11-15). 3.8, raised by name.
+    budget: 3.8,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
   // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.
+  // 3.29 with `leader`: the sweeps and the timer on the leading instance of openShared() (docs found-bugs, infra;
+  // 2026-11-15). 3.4, raised by name.
   {
     label: 'cleanup — browser (@alexify/syncom/cleanup)',
     entry: 'src/cleanup/cleanup.js',
     platform: 'browser',
-    budget: 3.25,
+    budget: 3.4,
   },
 ];
 

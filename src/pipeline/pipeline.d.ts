@@ -23,22 +23,32 @@ export interface PipelineOptions {
    * before the turn (the database's `error` event carries `PIPELINE_FAILED`); `start()` hands the turn over again.
    */
   handler: (batch: PipelineBatch, tx: Transaction) => unknown;
-  /** Kept for a database shared by several instances (the leader runs it). */
-  leader?: boolean;
+  /**
+   * What `openShared()` answers, its `db` the database given: the pipeline runs on the instance that leads — started
+   * from the checkpoint in the shared engine on the instance a failover makes the leader, let go on the one that
+   * loses the lead. Without it, on `db`.
+   */
+  leader?: LeaderHandle;
+}
+
+/** What `openShared()` answers, as far as a pipeline or a cleanup reads it: duck-typed, nothing of `/shared` bundled. */
+export interface LeaderHandle {
+  readonly db: Database;
+  isLeader(): boolean;
+  live(make: (db: Database) => (() => void) | void | Promise<(() => void) | void>): () => void;
 }
 
 export interface Pipeline {
   readonly name: string;
   readonly source: string;
-  readonly leader: boolean;
   /** The log position handled last, or null. */
   readonly checkpoint: string | null;
   readonly rebuilt: boolean;
-  /** Whether the pipeline follows nothing now: not started, stopped, or a handler that threw. */
+  /** Whether the pipeline follows nothing now: not started, stopped, or a handler that threw (started under `leader` on an instance that follows, it waits for the lead: not stopped). */
   readonly stopped: boolean;
   /** What the handler threw, in order — the newest twenty. */
   readonly errors: Error[];
-  /** Reads the checkpoint, replays the turns since it (or rebuilds), then follows the turns. */
+  /** Reads the checkpoint, replays the turns since it (or rebuilds), then follows the turns — under `leader`, where this instance leads. */
   start(): Promise<void>;
   stop(): void;
   idle(): boolean;

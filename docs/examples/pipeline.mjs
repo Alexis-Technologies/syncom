@@ -2,6 +2,7 @@
 // tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
 import { createDatabase } from '@alexify/syncom/all';
+import { waitUntil } from '@alexify/syncom/testing';
 
 const schema = { entities: { Task: {}, Activity: {} } };
 
@@ -111,3 +112,47 @@ assert.notEqual(flaky.checkpoint, null);
 flaky.stop();
 resumed.stop();
 await reopened.close();
+
+const said = [];
+const print = console.log;
+console.log = (...args) => {
+  said.push(args.join(' '));
+  print(...args);
+};
+
+// #region leader
+import { openShared } from '@alexify/syncom/shared';
+import { memoryEngine } from '@alexify/syncom/all';
+
+const engine = memoryEngine(); // in a browser: idbEngine({ name: 'board' }), opened by every tab
+
+// What every tab runs: the pipeline is started everywhere and runs in the tab that leads.
+const openTab = async (name) => {
+  const tab = await openShared({ createDatabase, engine, path: 'tabs', schema, election: { locks: navigator.locks } });
+  const feed = createPipeline(tab.db, {
+    name: 'feed',
+    source: 'Task',
+    leader: tab,
+    handler: ({ ids, replay }) => console.log(`${name} handles ${ids.length} task(s)${replay ? ', replayed' : ''}`),
+  });
+  await feed.start();
+  return { tab, feed };
+};
+
+const first = await openTab('tab 1');
+const second = await openTab('tab 2');
+await first.tab.insert({ $type: 'Task', title: 'Plan the release', done: false });
+await first.feed.awaitIdle(); // tab 1 handles 1 task(s)
+
+first.feed.stop();
+await first.tab.insert({ $type: 'Task', title: 'Write the notes', done: false }); // nobody handles it yet
+await first.tab.close(); // the leading tab goes away
+await second.tab.waitForLeadership();
+// tab 2 handles 1 task(s), replayed: from the checkpoint tab 1 wrote, not every task again
+// #endregion leader
+await waitUntil(() => said.length === 2, { timeout: 3000 });
+await second.feed.awaitIdle();
+assert.deepEqual(said, ['tab 1 handles 1 task(s)', 'tab 2 handles 1 task(s), replayed']);
+assert.equal(second.feed.rebuilt, false);
+await second.tab.close();
+console.log = print;

@@ -11,7 +11,11 @@ const { memory } = require('../src/memory/memory.js');
 const { cleanup } = require('../src/cleanup/cleanup.js');
 const { SOURCE, DB } = require('../src/symbols.js');
 const { memoryEngine } = require('../src/memory/engine.js');
-const { createMesh, settle } = require('./utils/mesh.js');
+const { openShared } = require('../src/shared/shared.js');
+const { createFakeLocks } = require('./utils/fake-locks.js');
+const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 test('tombstone cleanup', async (t) => {
   await t.test(
@@ -240,6 +244,59 @@ test('tombstone cleanup', async (t) => {
       const row = page.records.find((record) => record.id === id);
       assert.deepStrictEqual(row.meta, theirs.meta);
       assert.strictEqual(row.data.why, 'gone');
+    },
+  );
+
+  await t.test(
+    'with leader the sweeps run on the leading instance alone, and the timer follows a failover to the next leader',
+    async (t2) => {
+      const engine = memoryEngine();
+      const locks = createFakeLocks();
+      const schema = { entities: { Post: {} } };
+      const open = async () => {
+        const shared = await openShared({
+          createDatabase: syncom.createDatabase,
+          engine,
+          path: 'board',
+          schema,
+          logger: false,
+          defer: 0,
+          election: { locks },
+          grace: 20,
+        });
+        t2.after(() => shared.close().catch(() => {}));
+        return shared;
+      };
+      const a = await open();
+      const b = await open();
+      const options = { minimumDeletedTime: 0, awaitSync: false, runEach: 10 };
+      const onA = cleanup(a.db, { ...options, leader: a });
+      const onB = cleanup(b.db, { ...options, leader: b });
+      const gone = await a.insert({ $type: 'Post', title: 'gone' });
+      await a.delete(gone);
+      // The follower sweeps nothing, by hand or on its timer; the leader folds.
+      onB.start();
+      assert.deepStrictEqual(await onB.run(), { folded: 0, dropped: 0, skipped: 0 });
+      await sleep(40);
+      assert.strictEqual(onB.stats.runs, 0, 'no sweep while it follows');
+      assert.deepStrictEqual(await onA.run(), { folded: 1, dropped: 0, skipped: 0 });
+      assert.ok(a.db[SOURCE].folded(gone));
+      // The leader goes: the follower leads, and its timer sweeps what was deleted since.
+      const later = await a.insert({ $type: 'Post', title: 'later' });
+      await a.delete(later);
+      const aDb = a.db;
+      await a.close();
+      await b.waitForLeadership();
+      await waitUntil(() => b.db[SOURCE].folded(later));
+      assert.ok(onB.stats.runs > 0);
+      assert.strictEqual(onB.stats.folded, 1);
+      onB.stop();
+      const runs = onB.stats.runs;
+      await sleep(40);
+      assert.strictEqual(onB.stats.runs, runs, 'stopped: no sweep after');
+      assert.throws(() => cleanup(b.db, { leader: true }), TypeError);
+      const other = { db: aDb, isLeader: () => true, live: () => () => {} };
+      assert.throws(() => cleanup(b.db, { leader: other }), { name: 'TypeError', message: /leader\.db/ });
     },
   );
 });

@@ -18,8 +18,11 @@
 // a late op then makes a new record, and a peer that never saw the deletion
 // keeps its copy: documented, not the default. Folds and drops go `BATCH`
 // ids a turn of the queue. `runEach` runs a sweep on a timer, stopped with
-// the database. `leader` is kept for a database shared by several instances.
-// Requires symbols.js and vector.js only.
+// the database. `leader` — what `openShared()` answers, duck-typed (`db`,
+// `isLeader()`, `live()`) — sweeps the leading instance alone: `run()`
+// sweeps nothing where this instance follows, and the timer runs while it
+// leads, armed again on the instance a failover makes the leader. Requires
+// symbols.js, vector.js and telemetry/writer.js only.
 
 const { SOURCE } = require('../symbols.js');
 const { opKey } = require('../vector.js');
@@ -37,6 +40,13 @@ const isDatabase = (value) =>
   typeof value.snapshot === 'function' &&
   typeof value.transact === 'function';
 
+// What `openShared()` answers, as far as a cleanup reads it.
+const isLeader = (value) =>
+  value !== null &&
+  typeof value === 'object' &&
+  typeof value.live === 'function' &&
+  typeof value.isLeader === 'function';
+
 // The delete op of `id` this node made, among the retained entries: the newest, or null (a peer's, or dropped).
 const ownDelete = (entries, nodeId) => {
   let found = null;
@@ -52,7 +62,9 @@ const ownDelete = (entries, nodeId) => {
  * `{ run({ drop }?), start(), stop(), stats }`: `run()` folds every
  * tombstone old enough (and, with `awaitSync`, acknowledged by every
  * enabled registered node where this node made the delete), resolving to
- * `{ folded, dropped, skipped }`; `start()` runs it every `runEach` ms.
+ * `{ folded, dropped, skipped }`; `start()` runs it every `runEach` ms. With
+ * `leader` (what `openShared()` answers, `db` its instance), on the leading
+ * instance alone.
  */
 const cleanup = (
   db,
@@ -60,7 +72,7 @@ const cleanup = (
     minimumDeletedTime = MINIMUM_DELETED_TIME,
     runEach = RUN_EACH,
     awaitSync = true,
-    leader = true,
+    leader = null,
     now = Date.now,
   } = {},
 ) => {
@@ -71,9 +83,13 @@ const cleanup = (
   if (!Number.isFinite(runEach) || runEach <= 0) {
     throw new TypeError('cleanup(): runEach must be a positive number of milliseconds');
   }
-  const seam = db[SOURCE];
+  if (leader !== null && !isLeader(leader)) {
+    throw new TypeError('cleanup(): leader is what openShared() answers (live, isLeader)');
+  }
+  if (leader !== null && leader.db !== db) throw new TypeError('cleanup(): db is leader.db, its instance');
   const stats = { runs: 0, folded: 0, dropped: 0, skipped: 0 };
-  let timer = null;
+  // What stops the timer: its own, or — with `leader` — the handle's live subscription.
+  let stopping = null;
   let running = null;
 
   // Whether every enabled registered node holds this node's delete op of the
@@ -81,9 +97,10 @@ const cleanup = (
   // this node's own folds (nothing is lost) and, under `awaitSync`, is never
   // dropped — a node that only hosts cannot prove its compacted delete
   // reached anyone, and a drop is the one irreversible outcome.
-  const acknowledged = (id, row, forDrop) => {
-    const op = ownDelete(seam.entriesOf(id), db.nodeId);
-    if (op === null) return row.deleted[1] !== db.nodeId || !forDrop;
+  const acknowledged = (target, id, row, forDrop) => {
+    const seam = target[SOURCE];
+    const op = ownDelete(seam.entriesOf(id), target.nodeId);
+    if (op === null) return row.deleted[1] !== target.nodeId || !forDrop;
     const key = opKey(op);
     const nodes = seam.nodes();
     for (let i = 0; i < nodes.length; i++) {
@@ -93,10 +110,11 @@ const cleanup = (
     return true;
   };
 
-  // One sweep over the catalog's rows: nothing of a record is read here —
-  // the stamp and the collection are on the row — and the folds and drops go
-  // `BATCH` at a time, one write set and one turn of the queue each.
-  const sweep = async ({ drop = false } = {}) => {
+  // One sweep over the catalog's rows of `target`: nothing of a record is
+  // read here — the stamp and the collection are on the row — and the folds
+  // and drops go `BATCH` at a time, one write set and one turn of the queue each.
+  const sweep = async (target, { drop = false } = {}) => {
+    const seam = target[SOURCE];
     const counts = { folded: 0, dropped: 0, skipped: 0 };
     const horizon = now() - minimumDeletedTime;
     const ids = seam.all().slice();
@@ -120,12 +138,12 @@ const cleanup = (
       if (row === null || !row.gone) continue;
       if (seam.folded(id)) {
         if (!drop) continue;
-        if (!awaitSync || acknowledged(id, row, true)) dropping.push(id);
+        if (!awaitSync || acknowledged(target, id, row, true)) dropping.push(id);
         else counts.skipped++;
       } else if (
         row.deleted === undefined ||
         row.deleted[0] > horizon ||
-        (awaitSync && !acknowledged(id, row, false))
+        (awaitSync && !acknowledged(target, id, row, false))
       ) {
         counts.skipped++;
       } else folding.push(id);
@@ -140,16 +158,16 @@ const cleanup = (
   };
 
   // A sweep as a span (`syncom.cleanup.sweep`) with its counts, the tombstones it took counted, and a debug line.
-  const swept = async (options) => {
-    const { otel } = seam;
+  const swept = async (target, options) => {
+    const { otel } = target[SOURCE];
     const started = Date.now();
     const run = async () => {
-      const counts = await sweep(options);
+      const counts = await sweep(target, options);
       if (otel.enabled) {
         otel.recordCleanup('folded', counts.folded);
         otel.recordCleanup('dropped', counts.dropped);
       }
-      db.logger.debug({ event: 'cleanup.sweep', ...counts, ms: Date.now() - started });
+      target.logger.debug({ event: 'cleanup.sweep', ...counts, ms: Date.now() - started });
       return counts;
     };
     if (!otel.enabled) return run();
@@ -160,27 +178,44 @@ const cleanup = (
     }));
   };
 
+  // The timer over one instance: a sweep every `runEach` ms, a failed one logged; answers what stops it.
+  const arm = (instance) => {
+    const timer = setInterval(() => {
+      handle.run().catch((error) => instance.logger.warn({ event: 'cleanup.failed', err: error }));
+    }, runEach);
+    timer.unref?.();
+    return () => clearInterval(timer);
+  };
+
   const handle = {
-    leader,
     stats,
-    /** One sweep; `drop: true` takes the folded tombstones away too. Resolves to `{ folded, dropped, skipped }`. */
+    /**
+     * One sweep; `drop: true` takes the folded tombstones away too. Resolves to `{ folded, dropped, skipped }` — with
+     * `leader`, all zero where this instance does not lead (nothing swept).
+     */
     run(options = {}) {
-      if (running === null) running = swept(options).finally(() => void (running = null));
+      const target = leader === null ? db : leader.isLeader() ? leader.db : null;
+      if (target === null) return Promise.resolve({ folded: 0, dropped: 0, skipped: 0 });
+      if (running === null) running = swept(target, options).finally(() => void (running = null));
       return running;
     },
-    /** Runs a sweep every `runEach` ms until `stop()` or the database closes; a failed sweep is logged. */
+    /**
+     * Runs a sweep every `runEach` ms until `stop()` or the database closes; a failed sweep is logged. With `leader`,
+     * while this instance leads: the timer armed on the instance that leads, now and at every change of instance.
+     */
     start() {
-      if (timer !== null) return;
-      timer = setInterval(() => {
-        handle.run().catch((error) => db.logger.warn({ event: 'cleanup.failed', err: error }));
-      }, runEach);
-      timer.unref?.();
+      if (stopping !== null) return;
+      if (leader !== null) {
+        stopping = leader.live((instance) => (leader.isLeader() ? arm(instance) : null));
+        return;
+      }
+      stopping = arm(db);
       db.on('close', handle.stop);
     },
     stop() {
-      if (timer === null) return;
-      clearInterval(timer);
-      timer = null;
+      if (stopping === null) return;
+      stopping();
+      stopping = null;
       db.off('close', handle.stop);
     },
   };

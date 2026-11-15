@@ -80,11 +80,23 @@ there yet; when you need them, `await pipeline.awaitIdle()` first.
 `stop()` stops following; whatever is queued waits for the next `start()`. `idle()` tells you whether anything is
 queued or running.
 
+## Run it in one tab of several
+
+A pipeline runs in the process that started it, so every instance that opens the database and starts the pipeline
+runs it. When several tabs share one database through [`openShared()`](./leader-election), start the pipeline in
+every tab and pass the tab's handle as `leader`, with its `db` as the database:
+
+<<< @/examples/pipeline.mjs#leader
+
+The pipeline then runs only in the tab that leads. In a tab that follows it waits: `stopped` is `false` and
+nothing is handed over there. When the leading tab closes, the pipeline starts in the tab that takes over and
+resumes from the checkpoint the old leader wrote, which lives in the shared storage, so a turn handled and
+checkpointed before the change is not handed over again. A batch the old leader was in the middle of can come
+again in the new one, as it would after a crash.
+
 ## Limitations
 
-- A pipeline runs in the process that started it. Every instance that opens the database and starts the pipeline
-  runs it, so in an app with several tabs over one database, start it in the [leading tab](./leader-election)
-  only. The `leader` option is accepted but does not elect anything yet.
+- Without `leader`, every instance that opens the database and starts the pipeline runs it.
 - A batch is one transaction, so a handler that calls a slow service holds that transaction open meanwhile. Fetch
   first, then write.
 - The handler sees only the source collection. To derive from two collections, run two pipelines into the same

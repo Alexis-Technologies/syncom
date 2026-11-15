@@ -60,3 +60,21 @@ console.log(await sweep.run()); // { folded: 1, dropped: 0, skipped: 0 }: acknow
 assert.deepEqual(await sweep.run(), { folded: 0, dropped: 0, skipped: 0 });
 assert.equal(await mesh.get('server').get(id), null);
 await mesh.close();
+
+// #region leader
+import { openShared } from '@alexify/syncom/shared';
+
+const engine = memoryEngine(); // in a browser: idbEngine({ name: 'board' }), opened by every tab
+const openTab = async () => {
+  const tab = await openShared({ createDatabase, engine, path: 'tabs', election: { locks: navigator.locks } });
+  cleanup(tab.db, { leader: tab }).start(); // the timer runs in the tab that leads, and moves with the lead
+  return tab;
+};
+const tab1 = await openTab();
+const tab2 = await openTab();
+console.log(await cleanup(tab2.db, { leader: tab2 }).run()); // { folded: 0, dropped: 0, skipped: 0 }: tab 2 follows
+// #endregion leader
+assert.equal(tab1.isLeader(), true);
+assert.deepEqual(await cleanup(tab2.db, { leader: tab2 }).run(), { folded: 0, dropped: 0, skipped: 0 });
+await tab2.close();
+await tab1.close();

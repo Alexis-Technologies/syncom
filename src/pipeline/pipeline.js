@@ -20,8 +20,12 @@
 // once, the changes in order, the newer position), up to PAGE ids: the
 // queue holds one live batch, however slow the handler. A handler's write
 // to the source is another turn and is handed over again: derive into
-// another collection. Reads of the target are never held up. Requires
-// symbols.js, engine.js, errors.js and hooks.js only.
+// another collection. Reads of the target are never held up. `leader` —
+// what `openShared()` answers, duck-typed (`db`, `isLeader()`, `live()`) —
+// runs it on the leading instance alone: followed from the checkpoint in the
+// shared engine's kv on the instance a failover makes the leader, let go on
+// the one that loses the lead. Requires symbols.js, engine.js, errors.js and
+// hooks.js only.
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
@@ -37,15 +41,29 @@ const PAGE = 500;
 const isDatabase = (value) =>
   value !== null && typeof value === 'object' && typeof value.transact === 'function' && typeof value.on === 'function';
 
+// What `openShared()` answers, as far as a pipeline reads it.
+const isLeader = (value) =>
+  value !== null &&
+  typeof value === 'object' &&
+  typeof value.live === 'function' &&
+  typeof value.isLeader === 'function';
+
+// What the pipeline reads of one database; `gone` once a change of instance let go of it (a failure of its batch in
+// flight is then nobody's to tell: the next leader hands the turn over).
+const bind = (db) => {
+  const seam = db[SOURCE];
+  return { db, seam, store: kvNamespace(db[DB].kv, NAMESPACE), otel: seam.otel, logger: db.logger, listener: null };
+};
+
 /**
  * A pipeline over `db`: `{ name, source, start(), stop(), idle(), awaitIdle(),
  * checkpoint, rebuilt, stopped, errors }`. `handler(batch, tx)` gets `{ ids, changes,
  * replay, rebuilt, eventId }` — the records of the source collection the
  * turn changed, their changes (null on a replay), and `tx`, the
- * transaction the handler writes through. `leader` is kept for a database
- * shared by several instances (the leader runs it); here every instance does.
+ * transaction the handler writes through. With `leader` (what `openShared()`
+ * answers, `db` its instance) it runs where this instance leads.
  */
-const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
+const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
   if (!isDatabase(db)) throw new TypeError('createPipeline() takes a database');
   if (typeof name !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,100}$/.test(name)) {
     throw new TypeError('createPipeline() takes a name: letters, digits, _ . -');
@@ -54,16 +72,20 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     throw new TypeError('createPipeline() takes a source collection');
   }
   if (typeof handler !== 'function') throw new TypeError('createPipeline() takes a handler');
-  const store = kvNamespace(db[DB].kv, NAMESPACE);
-  const seam = db[SOURCE];
-  const { otel } = seam;
-  const { logger } = db;
+  if (leader !== null && !isLeader(leader)) {
+    throw new TypeError('createPipeline(): leader is what openShared() answers (live, isLeader)');
+  }
+  if (leader !== null && leader.db !== db) throw new TypeError('createPipeline(): db is leader.db, its instance');
+  // Without `leader` the database given, bound once; with it the leading instance, bound at every change of it.
+  const own = leader === null ? bind(db) : null;
   const queue = [];
   let running = null;
   let stopped = true;
   let checkpoint = null;
   let rebuilt = false;
-  let listener = null;
+  // The binding followed now, or null; the handle's live subscription.
+  let bound = null;
+  let off = null;
   const waiters = [];
   const errors = [];
 
@@ -73,20 +95,50 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
 
   // One batch handled: the handler inside a transaction, the checkpoint after it landed — not after a page of a
   // replay or a rebuild before the last: a position reached only once every page is.
-  const handle = async ({ batch, final }) => {
-    await db.transact((tx) => handler(batch, tx));
-    if (otel.enabled) otel.recordPipeline('handled', batch.ts ?? null);
+  const handle = async ({ batch, final, binding }) => {
+    await binding.db.transact((tx) => handler(batch, tx));
+    if (binding.otel.enabled) binding.otel.recordPipeline('handled', batch.ts ?? null);
     if (!final) return;
     checkpoint = batch.eventId;
-    await store.put(name, JSON.stringify({ eventId: checkpoint }), { atomic: true });
+    await binding.store.put(name, JSON.stringify({ eventId: checkpoint }), { atomic: true });
   };
 
-  // Following stopped: the listener off, what is queued left for the next start (the checkpoint stands).
+  // Following one database stopped: its listener off, its batches queued left for the next start (the checkpoint
+  // stands).
+  const unfollow = (binding) => {
+    if (binding.listener !== null) binding.db.off('transaction', binding.listener);
+    binding.listener = null;
+    if (bound === binding) bound = null;
+    let kept = 0;
+    for (let i = 0; i < queue.length; i++) if (queue[i].binding !== binding) queue[kept++] = queue[i];
+    queue.length = kept;
+  };
+
+  // Following stopped until `start()`.
   const halt = () => {
     stopped = true;
-    if (listener !== null) db.off('transaction', listener);
-    listener = null;
+    if (bound !== null) unfollow(bound);
     queue.length = 0;
+    const live = off;
+    off = null;
+    live?.();
+  };
+
+  // A failed turn stops the pipeline BEFORE it: the checkpoint stays, and `start()` hands the turn over again —
+  // never skipped, never moved past.
+  const fail = (binding, cause, eventId) => {
+    if (errors.length >= MAX_ERRORS) errors.shift();
+    errors.push(cause);
+    if (binding.otel.enabled) binding.otel.recordPipeline('failed', null);
+    halt();
+    binding.logger.warn({ event: 'pipeline.failed', name, eventId, err: cause });
+    const message = `Pipeline ${name} failed at ${eventId} and stopped before the turn`;
+    notify(
+      binding.db,
+      binding.logger,
+      'error',
+      new SyncomError('PIPELINE_FAILED', message, { pipeline: name, eventId, cause }),
+    );
   };
 
   const drain = async () => {
@@ -94,24 +146,11 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
       // `stopped` moves under `stop()` and a failure, between two batches.
       if (queue.length === 0 || stopped) break;
       const item = queue.shift();
-      const { batch } = item;
       try {
         await handle(item);
       } catch (cause) {
-        // A failed turn stops the pipeline BEFORE it: the checkpoint stays, and `start()` hands the turn over
-        // again — never skipped, never moved past.
-        if (errors.length >= MAX_ERRORS) errors.shift();
-        errors.push(cause);
-        if (otel.enabled) otel.recordPipeline('failed', null);
-        halt();
-        logger.warn({ event: 'pipeline.failed', name, eventId: batch.eventId, err: cause });
-        const message = `Pipeline ${name} failed at ${batch.eventId} and stopped before the turn`;
-        notify(
-          db,
-          logger,
-          'error',
-          new SyncomError('PIPELINE_FAILED', message, { pipeline: name, eventId: batch.eventId, cause }),
-        );
+        if (item.binding.gone) continue;
+        fail(item.binding, cause, item.batch.eventId);
         break;
       }
     }
@@ -120,8 +159,9 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
   };
 
   // A batch queued; a live turn joins the live batch waiting ahead of it while that one holds under a page of ids.
-  const push = (batch, final = true) => {
-    const last = queue.length > 0 ? queue[queue.length - 1].batch : null;
+  const push = (binding, batch, final = true) => {
+    const tail = queue.length > 0 ? queue[queue.length - 1] : null;
+    const last = tail !== null && tail.binding === binding ? tail.batch : null;
     if (last !== null && !batch.replay && !last.replay && last.ids.length < PAGE) {
       const seen = new Set(last.ids);
       for (let i = 0; i < batch.ids.length; i++) {
@@ -134,20 +174,20 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
       last.ts = batch.ts;
       return;
     }
-    queue.push({ batch, final });
+    queue.push({ batch, final, binding });
     if (running === null) running = drain();
   };
 
   // The ids of a replay or a rebuild, PAGE per batch, the checkpoint after the last.
-  const paged = (ids, rebuilt, eventId) => {
+  const paged = (binding, ids, rebuilt, eventId) => {
     for (let at = 0; at < ids.length; at += PAGE) {
       const page = ids.slice(at, at + PAGE);
-      push({ ids: page, changes: null, replay: true, rebuilt, eventId }, at + PAGE >= ids.length);
+      push(binding, { ids: page, changes: null, replay: true, rebuilt, eventId }, at + PAGE >= ids.length);
     }
   };
 
   // Of a turn, the records of the source that changed, each once.
-  const ofSource = (changes) => {
+  const ofSource = ({ seam }, changes) => {
     const ids = [];
     const seen = new Set();
     const own = [];
@@ -164,36 +204,59 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     return { ids, changes: own };
   };
 
-  // Where the log cannot resume from the checkpoint: every record of the source, once, a page at a time.
-  const rebuild = () => {
-    rebuilt = true;
-    const ids = seam.ids(source);
-    logger.info({ event: 'pipeline.rebuild', name, records: ids.length });
-    paged(ids, true, db.log.lastEventId);
-  };
-
-  // The turns since the checkpoint, from the log: the ids of the source's records they touched.
-  const replay = () => {
-    const entries = checkpoint === null ? null : db.log.since(checkpoint);
-    if (entries === null) return rebuild();
+  // The turns since the checkpoint, from the log: the ids of the source's records they touched. Where the log cannot
+  // resume from the checkpoint: every record of the source, once, a page at a time.
+  const replay = (binding) => {
+    const { log } = binding.db;
+    const entries = checkpoint === null ? null : log.since(checkpoint);
+    if (entries === null) {
+      rebuilt = true;
+      const ids = binding.seam.ids(source);
+      binding.logger.info({ event: 'pipeline.rebuild', name, records: ids.length });
+      return paged(binding, ids, true, log.lastEventId);
+    }
     const ids = [];
     const seen = new Set();
     let last = checkpoint;
     for (let i = 0; i < entries.length; i++) {
       const { op, seq } = entries[i];
-      last = db.log.formatId(seq);
-      if (typeof op.id !== 'string' || seen.has(op.id) || seam.row(op.id)?.type !== source) continue;
+      last = log.formatId(seq);
+      if (typeof op.id !== 'string' || seen.has(op.id) || binding.seam.row(op.id)?.type !== source) continue;
       seen.add(op.id);
       ids.push(op.id);
     }
-    if (ids.length > 0) paged(ids, false, last);
+    if (ids.length > 0) paged(binding, ids, false, last);
     else if (last !== checkpoint) checkpoint = last;
+  };
+
+  // Following one database: the checkpoint read, the turns since it replayed (or a rebuild), the live turns heard.
+  const follow = async (binding) => {
+    bound = binding;
+    rebuilt = false;
+    const text = await binding.store.get(name);
+    // Stopped, failed or let go of meanwhile: nothing to follow.
+    if (bound !== binding) return;
+    if (text !== null) {
+      try {
+        checkpoint = JSON.parse(text).eventId ?? null;
+      } catch (cause) {
+        // Evidence, not a position: said so, and every record handed over again.
+        checkpoint = null;
+        binding.logger.warn({ event: 'pipeline.checkpoint.unreadable', name, err: cause });
+      }
+    }
+    binding.listener = (event) => {
+      const batch = ofSource(binding, event.changes);
+      if (batch.ids.length === 0) return;
+      push(binding, { ...batch, replay: false, rebuilt: false, eventId: event.eventId, ts: event.ts ?? null });
+    };
+    binding.db.on('transaction', binding.listener);
+    replay(binding);
   };
 
   const pipeline = {
     name,
     source,
-    leader,
     /** The checkpoint: the log position handled last, or null. */
     get checkpoint() {
       return checkpoint;
@@ -208,28 +271,28 @@ const createPipeline = (db, { name, source, handler, leader = true } = {}) => {
     },
     /** What the handler threw, in order — the newest twenty. */
     errors,
-    /** Reads the checkpoint, replays the turns since it (or rebuilds), then follows the turns. */
+    /**
+     * Reads the checkpoint, replays the turns since it (or rebuilds), then follows the turns. With `leader`, on the
+     * instance that leads — now, and at every change of instance — and nowhere else.
+     */
     async start() {
       if (!stopped) return;
       stopped = false;
-      rebuilt = false;
-      const text = await store.get(name);
-      if (text !== null) {
-        try {
-          checkpoint = JSON.parse(text).eventId ?? null;
-        } catch (cause) {
-          // Evidence, not a position: said so, and every record handed over again.
-          checkpoint = null;
-          logger.warn({ event: 'pipeline.checkpoint.unreadable', name, err: cause });
-        }
-      }
-      listener = (event) => {
-        const batch = ofSource(event.changes);
-        if (batch.ids.length === 0) return;
-        push({ ...batch, replay: false, rebuilt: false, eventId: event.eventId, ts: event.ts ?? null });
-      };
-      db.on('transaction', listener);
-      replay();
+      if (own !== null) return follow(own);
+      let first = null;
+      off = leader.live((instance) => {
+        if (!leader.isLeader()) return null;
+        const binding = bind(instance);
+        const following = follow(binding).catch((cause) => {
+          if (!binding.gone) fail(binding, cause, checkpoint);
+        });
+        first ??= following;
+        return () => {
+          binding.gone = true;
+          unfollow(binding);
+        };
+      });
+      await first;
     },
     /** Stops following; what is queued is left for the next start (the checkpoint stands). */
     stop() {

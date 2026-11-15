@@ -1,6 +1,7 @@
 import { expectError, expectType } from 'tsd';
 import { createPipeline } from '../src/pipeline/pipeline.js';
 import type { Pipeline } from '../src/pipeline/pipeline.js';
+import type { Shared } from '../src/shared/shared.js';
 import type { Database } from '../index.js';
 
 declare const db: Database;
@@ -20,3 +21,9 @@ expectType<string | null>(pipeline.checkpoint);
 expectType<boolean>(pipeline.idle());
 expectType<Promise<void>>(pipeline.awaitIdle());
 expectError(createPipeline(db, { name: 'x', source: 'Order' }));
+
+// `leader`: what openShared() answers, its `db` the database given — a boolean is none.
+declare const shared: Shared;
+expectType<Pipeline>(createPipeline(shared.db, { name: 'x', source: 'Order', handler: () => {}, leader: shared }));
+expectError(createPipeline(db, { name: 'x', source: 'Order', handler: () => {}, leader: true }));
+expectError(pipeline.leader);

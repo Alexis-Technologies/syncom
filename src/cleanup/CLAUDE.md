@@ -5,7 +5,7 @@ A tombstone folded whole into the `tombstones` kv namespace. The rules of the co
 ## Layout
 
 ```
-src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, { minimumDeletedTime, runEach, awaitSync }): old, acknowledged
+src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, { minimumDeletedTime, runEach, awaitSync, leader }): old, acknowledged
                           tombstones folded through [SOURCE].foldMany (EntryStore.foldMany), dropped through forgetMany
                           (EntryStore.dropMany), BATCH ids a turn of the queue; a timer stopped with the database — requires symbols.js, vector.js, telemetry/writer.js only
 ```
@@ -26,3 +26,9 @@ src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, { minimumDelet
   deliver and folds on age; an own delete the log no longer retains folds (lossless) but is never dropped under
   `awaitSync` — a node that only hosts cannot prove it was delivered. `drop: true` takes the kv entry and the row —
   documented danger.
+- **Under `leader`, the leading instance sweeps.** `leader` is what `openShared()` answers, duck-typed (`db`,
+  `isLeader()`, `live()`), `db` its instance — nothing of `/shared` is required: `run()` sweeps `leader.db` where
+  `isLeader()` and resolves zero counts elsewhere (a follower's database is read-only; no run counted), and
+  `start()` arms the timer through `live()` on the instance that leads — again at every change of instance, the
+  stop `live()` answers clearing it — so the timer follows a failover. Without it, the timer stops with `db`'s
+  `close`.

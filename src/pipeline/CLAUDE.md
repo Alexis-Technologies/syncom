@@ -5,7 +5,7 @@ A handler over every change of a collection, at least once, in order, with a che
 ## Layout
 
 ```
-src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler }): the `transaction` events of the
+src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name, source, handler, leader }): the `transaction` events of the
                           source's records handed to the handler inside one transaction each, the turn's eventId kept in the
                           `pipeline` kv namespace, a reopen replayed from `log.since(checkpoint)` or rebuilt; a failure stops it
                           before the turn — requires symbols.js, engine.js, errors.js, hooks.js only
@@ -27,3 +27,12 @@ src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name
   change is its row's collection — a tombstone's row keeps it — or, of a purge, the change's `type`. Reads of the
   target are never held up (RxDB's `awaitBeforeReads` was refused: a read that waits for a write that waits for the
   read).
+- **Under `leader`, the leading instance alone, and nothing of `/shared` required.** `leader` is what `openShared()`
+  answers, duck-typed (`db`, `isLeader()`, `live()`), `db` its instance: `start()` subscribes through `live()`, whose
+  `make(db)` runs at once and at every change of instance — where the instance leads it binds that database (its kv
+  namespace, its seam, its logger: `bind`) and follows it from the checkpoint the engine's kv holds, so the next
+  leader resumes where the last one left; the stop it answers marks the binding `gone`, takes its listener off and
+  drops its queued batches. `live()` calls the old stop a microtask AFTER the new `make`, so nothing is shared
+  between two bindings but the queue (each item carries its binding) and `bound` moves only to the newest. A batch
+  of a binding let go of that fails is nobody's to tell (no `PIPELINE_FAILED`): the next leader hands the turn over —
+  at least once, as after a crash. A started pipeline on a follower is not `stopped`: it waits for the lead.

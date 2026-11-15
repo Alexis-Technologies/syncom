@@ -9,6 +9,12 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createPipeline } = require('../src/pipeline/pipeline.js');
+const { openShared } = require('../src/shared/shared.js');
+const { memoryEngine } = require('../src/memory/engine.js');
+const { createFakeLocks } = require('./utils/fake-locks.js');
+const { waitUntil } = require('./utils/mesh.js');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const schema = { entities: { Order: { index: ['customer'] }, Total: {} } };
 
@@ -282,4 +288,138 @@ test('pipelines', async (t) => {
     pipeline.stop();
     await db.close();
   });
+
+  await t.test(
+    'with leader the pipeline runs on the leading instance alone; the next leader resumes it from the checkpoint, no turn handled twice',
+    async (t2) => {
+      const engine = memoryEngine();
+      const locks = createFakeLocks();
+      const open = async () => {
+        const shared = await openShared({
+          createDatabase: syncom.createDatabase,
+          engine,
+          path: 'shop',
+          schema,
+          logger: false,
+          defer: 0,
+          election: { locks },
+          grace: 20,
+        });
+        t2.after(() => shared.close().catch(() => {}));
+        return shared;
+      };
+      const seen = { a: [], b: [] };
+      // The handler writes through the transaction: only a leader's database takes it.
+      const pipelineOf = (shared, key) =>
+        createPipeline(shared.db, {
+          name: 'orders',
+          source: 'Order',
+          leader: shared,
+          handler: async ({ ids, replay }, tx) => {
+            for (const id of ids) {
+              seen[key].push(replay ? `replay:${id}` : id);
+              await tx.set(`seen.${id}`, { $type: 'Total', order: id });
+            }
+          },
+        });
+      const a = await open();
+      const b = await open();
+      assert.strictEqual(a.isLeader(), true);
+      assert.strictEqual(b.isLeader(), false);
+      const onA = pipelineOf(a, 'a');
+      const onB = pipelineOf(b, 'b');
+      await onA.start();
+      await onB.start();
+      assert.strictEqual(onB.stopped, false, 'started on the follower: it waits for the lead');
+      const first = await a.insert({ $type: 'Order', customer: 'ann', amount: 1 });
+      const second = await a.insert({ $type: 'Order', customer: 'bob', amount: 2 });
+      await onA.awaitIdle();
+      await sleep(30);
+      assert.deepStrictEqual(seen.a, [first, second]);
+      assert.deepStrictEqual(seen.b, [], 'the follower runs nothing');
+      assert.deepStrictEqual(onB.errors, []);
+      // A turn written while no pipeline follows: the next leader's start hands it over from the checkpoint.
+      onA.stop();
+      const third = await a.insert({ $type: 'Order', customer: 'cid', amount: 3 });
+      await a.close();
+      await b.waitForLeadership();
+      await waitUntil(() => seen.b.length === 1);
+      await onB.awaitIdle();
+      assert.deepStrictEqual(seen.b, [`replay:${third}`], 'resumed from the checkpoint the old leader wrote');
+      assert.strictEqual(onB.rebuilt, false);
+      const fourth = await b.insert({ $type: 'Order', customer: 'dan', amount: 4 });
+      await onB.awaitIdle();
+      assert.deepStrictEqual(seen.b, [`replay:${third}`, fourth]);
+      assert.deepStrictEqual(seen.a, [first, second], 'the old leader handled nothing more');
+      for (const id of [first, second, third, fourth]) assert.ok(await b.db.has(`seen.${id}`), id);
+      onB.stop();
+    },
+  );
+
+  await t.test(
+    'with leader the pipeline follows while the handle leads and lets go when it stops; the options are checked',
+    async () => {
+      const db = await syncom.createDatabase({ path: '/lead', fsi: memory(), defer: 0, logger: false, schema });
+      // A handle of openShared()'s shape (`db`, `isLeader`, `live`) whose lead the test moves.
+      let leading = false;
+      let make = null;
+      let stop = null;
+      const handle = {
+        db,
+        isLeader: () => leading,
+        live(fn) {
+          make = fn;
+          stop = fn(db);
+          return () => {
+            if (typeof stop === 'function') stop();
+            stop = null;
+            make = null;
+          };
+        },
+      };
+      const lead = (to) => {
+        if (typeof stop === 'function') stop();
+        leading = to;
+        stop = make(db);
+      };
+      const seen = [];
+      const pipeline = createPipeline(db, {
+        name: 'lead',
+        source: 'Order',
+        leader: handle,
+        handler: ({ ids, replay, rebuilt }) => void seen.push([ids.length, replay, rebuilt]),
+      });
+      await pipeline.start();
+      await db.Order.insert({ customer: 'ann', amount: 1 });
+      await pipeline.awaitIdle();
+      assert.deepStrictEqual(seen, [], 'not leading: nothing followed');
+      lead(true);
+      await waitUntil(() => seen.length === 1);
+      assert.deepStrictEqual(seen, [[1, true, true]], 'leading: no checkpoint, every record once');
+      await db.Order.insert({ customer: 'bob', amount: 2 });
+      await pipeline.awaitIdle();
+      assert.deepStrictEqual(seen[1], [1, false, false]);
+      lead(false);
+      await db.Order.insert({ customer: 'cid', amount: 3 });
+      await pipeline.awaitIdle();
+      assert.strictEqual(seen.length, 2, 'the lead lost: nothing followed');
+      lead(true);
+      await waitUntil(() => seen.length === 3);
+      assert.deepStrictEqual(seen[2], [1, true, false], 'the lead again: replayed from the checkpoint');
+      pipeline.stop();
+      assert.strictEqual(make, null, 'stop() lets go of the handle');
+      await db.Order.insert({ customer: 'dan', amount: 4 });
+      await pipeline.awaitIdle();
+      assert.strictEqual(seen.length, 3);
+      const handler = () => {};
+      assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: true }), TypeError);
+      assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: {} }), TypeError);
+      const other = { ...handle, db: {} };
+      assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: other }), {
+        name: 'TypeError',
+        message: /leader\.db/,
+      });
+      await db.close();
+    },
+  );
 });
