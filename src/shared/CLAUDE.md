@@ -40,7 +40,10 @@ args, retry }` (`callOf`), the token the election's — otherwise; the leader's 
   while a leader comes within `failover` ms, this instance's own where the election made it so meanwhile; past it,
   `LEADER_LOST` with the cause and `maybeApplied`. A follower's `transact(fn)` is RECORDED: `fn` runs here against a recorder
   (`TX_WRITERS` note the call and answer at once; `get`/`has` read this instance), the batch goes as one `transact`
-  call and runs in one transaction there — `insert` is refused on the recorder (its id would be the leader's). The
+  call and runs in one transaction there — `insert` is refused on the recorder (its id would be the leader's); an
+  `update` carrying the core's CREATE (createState's first write — `Symbol.for('syncom.create')`, so nothing of the
+  core is required) goes as `[name, args, { create: true }]`, the flag beside the args where a follower's own options
+  never reach: a symbol crosses no wire, and losing it made a follower's first state write `NOT_FOUND`. The
   leader validates every name of a recorded batch against `TX_WRITERS` and the transaction's api. Three procedures
   stand beside the writers (`PROCEDURES` = `MUTATORS` + `transact` + them; `[CALL]` runs them here on the leader,
   forwards them else): `collection` (`[name, method, args]`, `method` one of `COLLECTION_WRITERS` — the list of

@@ -71,7 +71,10 @@ const overRecord = (db, id) => ({
         return value;
       }
       const value = next('set', given, data === null ? undefined : valueAt(data, path));
-      await tx.update(id, { [path]: value }, data === null ? { [CREATE]: true } : undefined);
+      // Two arguments where the record stands: a recorded transaction (/shared) carries its args as JSON, an
+      // `undefined` third one as null.
+      if (data === null) await tx.update(id, { [path]: value }, { [CREATE]: true });
+      else await tx.update(id, { [path]: value });
       return value;
     }),
   delete: (path) =>

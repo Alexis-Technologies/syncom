@@ -92,6 +92,10 @@ const TX_WRITERS = Object.freeze([
   'treeMove',
   'treeRemove',
 ]);
+// The core's option of createState's first write (`update(id, delta, { [CREATE]: true })`, src/symbols.js — the
+// registry's symbol, so nothing of the core is required here). A symbol crosses no wire: a recorded `update` carrying
+// it goes as `[name, args, { create: true }]`, the flag beside the args where a follower's own options never reach.
+const CREATE = Symbol.for('syncom.create');
 // The readers the facade answers from the current instance; everything else — a collection's queries among them —
 // is the current `shared.db`'s.
 const READERS = Object.freeze(['get', 'has', 'hasRecord', 'list', 'getCachedData']);
@@ -944,7 +948,8 @@ class Shared extends Emitter {
     };
     for (let i = 0; i < TX_WRITERS.length; i++) {
       const name = TX_WRITERS[i];
-      tx[name] = async (...args) => void ops.push([name, args]);
+      tx[name] = async (...args) =>
+        void ops.push(args[2]?.[CREATE] === true ? [name, args, { create: true }] : [name, args]);
     }
     const result = await fn(tx);
     if (ops.length > 0) await this.#forward('transact', [ops, options]);
@@ -1014,11 +1019,13 @@ class Shared extends Emitter {
         if (!Array.isArray(ops)) throw new TypeError('transact: a list of [method, args]');
         return this.#db.transact(async (tx) => {
           for (let i = 0; i < ops.length; i++) {
-            const [name, args] = ops[i];
+            const [name, args, flags] = ops[i];
             if (!TX_WRITERS.includes(name) || typeof tx[name] !== 'function') {
               throw new TypeError(`transact: ${String(name)} is not a transaction writer`);
             }
-            await Reflect.apply(tx[name], tx, Array.isArray(args) ? args : []);
+            const list = Array.isArray(args) ? args : [];
+            if (name === 'update' && flags?.create === true) list[2] = { ...list[2], [CREATE]: true };
+            await Reflect.apply(tx[name], tx, list);
           }
         }, options ?? {});
       }),

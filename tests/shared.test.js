@@ -28,6 +28,7 @@ const { elect } = require('../src/shared/election.js');
 const { describe, revive, answerOf, unwrap, isChannel } = require('../src/shared/channel.js');
 const { createSharedChannel } = require('../src/wrpc/wrpc.js');
 const { SyncomError } = require('../src/errors.js');
+const { createState } = require('../src/state/state.js');
 const { createFakeLocks } = require('./utils/fake-locks.js');
 const { createLeaderPort, createBroadcastChannels } = require('./utils/fake-port.js');
 const { waitUntil } = require('./utils/mesh.js');
@@ -242,6 +243,30 @@ test('Shared database', async (t) => {
       await sleep(10);
       assert.strictEqual(heard, 0);
       assert.strictEqual(locks.held('g'), false);
+    },
+  );
+
+  await t.test(
+    'app state on a follower: its first path set goes through the recorded transaction and makes the record',
+    async (t2) => {
+      const { open } = profile(t2);
+      const a = await open();
+      const b = await open();
+      assert.strictEqual(b.leader, false);
+      // The first write of a state is a path's alone (`update` with the core's CREATE): a symbol crosses no wire, so
+      // the recorded batch carries it by name and the leader makes the record with a field set.
+      const ui = createState(b, 'ui');
+      assert.strictEqual(await ui.set('theme', 'dark'), 'dark');
+      await waitUntil(async () => (await b.get('state.ui'))?.theme === 'dark');
+      assert.deepStrictEqual(await createState(a, 'ui').get(), { theme: 'dark' });
+      await ui.set('lang', 'uk');
+      await waitUntil(async () => (await ui.get('lang')) === 'uk');
+      assert.deepStrictEqual(await ui.get(), { theme: 'dark', lang: 'uk' });
+      // Only the core's own symbol is carried: an option a follower names by that key on its own is not a create.
+      await assert.rejects(
+        () => b.transact(async (tx) => tx.update('state.other', { a: 1 }, { 'syncom.create': true })),
+        { code: 'NOT_FOUND' },
+      );
     },
   );
 
