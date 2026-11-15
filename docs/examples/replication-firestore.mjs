@@ -213,6 +213,43 @@ assert.deepEqual(await board.Task.get('t2'), { title: 'Review the PR today', don
 assert.equal(quiet.stats().conflicts, 1);
 await quiet.cancel();
 
+await sdk.setDoc(sdk.doc(tasks, 't3'), {
+  title: 'Ship the release',
+  done: false,
+  due: sdk.Timestamp.fromMillis(Date.UTC(2026, 11, 1)),
+  _deleted: false,
+  serverTimestamp: sdk.serverTimestamp(),
+});
+
+// #region timestamps
+// Another client stores `due` as a Firestore Timestamp: milliseconds in the collection, a Timestamp again on the way out.
+const dated = replicate(board, {
+  name: 'firestore',
+  collection: 'Task',
+  ...firestore({ sdk, database, collection: tasks }),
+  modifier: {
+    pull: (data) => (data.due instanceof sdk.Timestamp ? { ...data, due: data.due.toMillis() } : data),
+    push: (data) => (typeof data.due === 'number' ? { ...data, due: sdk.Timestamp.fromMillis(data.due) } : data),
+  },
+});
+await dated.awaitInitialReplication();
+console.log(await board.Task.get('t3')); // { title: 'Ship the release', done: false, due: 1796083200000, $type: 'Task' }
+// #endregion timestamps
+assert.deepEqual(await board.Task.get('t3'), {
+  title: 'Ship the release',
+  done: false,
+  due: 1796083200000,
+  $type: 'Task',
+});
+// An edit goes out with `due` a Timestamp again, through the transaction: what it assumed is Firestore's own shape.
+await board.Task.update('t3', { done: true });
+await dated.awaitInSync();
+assert.equal(sdk.read('t3').done, true);
+assert.ok(sdk.read('t3').due instanceof sdk.Timestamp);
+assert.equal(sdk.read('t3').due.toMillis(), 1796083200000);
+assert.equal(dated.stats().conflicts, 0);
+await dated.cancel();
+
 // #region fields
 const renamed = firestore({
   sdk,

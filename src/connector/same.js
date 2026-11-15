@@ -2,13 +2,17 @@
 
 // The connector zone's one notion of "the same reading": two values equal by
 // their canonical JSON — every object's keys sorted, `undefined` left out as
-// JSON leaves it. The adapters compare what a backend holds with what a push
-// assumed of it; the connector, a pulled document with the record. Kept apart
-// from the `canonical` of src/shape.js (the digests' and the signatures', 10 KB
-// with what it carries) so that an adapter weighs nothing of the core. No
-// requires.
+// JSON leaves it, an object read through its `toJSON()` as JSON reads it (a
+// Date by its ISO text, never `{}` for every Date alike; an SDK's class by its
+// own shape), a BigInt thrown as JSON throws it. The adapters compare what a
+// backend holds with what a push assumed of it; the connector, a pulled
+// document with the record. Kept apart from the `canonical` of src/shape.js
+// (the digests' and the signatures', 10 KB with what it carries) so that an
+// adapter weighs nothing of the core. No requires.
 
-const canonical = (value) => {
+const canonical = (input) => {
+  const value =
+    input !== null && typeof input === 'object' && typeof input.toJSON === 'function' ? input.toJSON() : input;
   if (value === null || typeof value !== 'object') return value === undefined ? undefined : JSON.stringify(value);
   if (Array.isArray(value)) {
     let out = '[';

@@ -36,6 +36,16 @@ record to Firestore's version, unless you pass `resolve`
 ([conflicts](./connectors#decide-what-wins-when-both-sides-changed-a-record)). A write that lands between the
 transaction's read and its commit makes Firestore run the transaction again, and the second run sees it.
 
+### Convert Firestore's own types
+
+A `Timestamp`, a `GeoPoint` or a reference in a document is not JSON, and a record holds JSON alone. Convert such a
+field in `modifier.pull`, and back in `modifier.push` if Firestore should keep its type:
+
+<<< @/examples/replication-firestore.mjs#timestamps
+
+What the modifier answers must be JSON: a `Timestamp` left in makes the document refused with the reason `value`. The
+connector still compares Firestore's own shape, so an edit's transaction checks the document as Firestore holds it.
+
 ### Rename the adapter's fields
 
 <<< @/examples/replication-firestore.mjs#fields
@@ -69,9 +79,9 @@ listener's error is an `END`, and the connector listens again after a backoff.
 - **Ids Firestore keeps for itself.** An id of the form `__name__` is refused by the SDK; the connector parks that row
   as `refused` with the SDK's error code, and the rest of the batch goes on. A value the SDK cannot store (a nested
   array) is refused the same way.
-- **Firestore types are not JSON.** A `Timestamp`, a `GeoPoint` or a reference in your own fields makes the document
-  refused on pull with the reason `value`. The check runs before `modifier.pull`, so store such values as JSON (an
-  ISO date, a pair of numbers), or wrap the adapter's `pull.handler` to convert them.
+- **Firestore types need a modifier.** A `Timestamp`, a `GeoPoint` or a reference in your own fields makes the
+  document refused on pull with the reason `value` unless `modifier.pull` turns it into JSON
+  ([above](#convert-firestore-s-own-types)).
 
 ## Coming from RxDB
 

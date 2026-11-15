@@ -147,8 +147,9 @@ its own beside the first:
 <<< @/examples/connectors.mjs#modifier
 
 The connector remembers and compares the backend's own shape, so `assumed` and a conflict's comparison use the
-document as the backend holds it. A modifier that throws on a document leaves that document out (`refused` with the
-reason `modifier`).
+document as the backend holds it. `modifier.pull` is also where a value of the backend's SDK becomes JSON (a `Date`
+an ISO string, a `Timestamp` a number), since what it answers must be JSON. A modifier that throws on a document
+leaves that document out (`refused` with the reason `modifier`).
 
 ## Know where a connector stands
 
@@ -256,8 +257,8 @@ in the [connector reference](../reference/connectors).
 - **One collection per connector.** A document lands in the connector's collection and never adopts or deletes a
   record of another one.
 - **JSON only.** A value the backend's SDK hands over that is not JSON (a `Date`, a `Timestamp`, a reference) is never
-  flattened into a string: the document is refused with the reason `value`. The check runs before `modifier.pull`, so
-  convert such values in the pull handler itself (wrap an adapter's `pull.handler` to do it).
+  flattened into a string: unless `modifier.pull` converts it, the document is refused with the reason `value`. A
+  `BigInt` is refused even with a modifier, because the connector cannot remember the backend's state of it as JSON.
 - **Sealed records stay local.** A record [sealed](./encryption) with `encrypted: true` is never pushed, and a pulled
   document never replaces one.
 - **One connector per backend.** On a mesh, run it on one node; with [several tabs](./leader-election), in one tab.

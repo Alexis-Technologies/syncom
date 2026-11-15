@@ -11,8 +11,9 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
                           with what the backend was assumed to hold (the canonical text of the backend's shape per id), conflicts
                           the backend wins, rows refused by name parked, the checkpoint `{ pull, pushed }` in the `connector` kv
                           namespace — requires symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only
-src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted), kept apart from shape.js's canonical so an
-                          adapter weighs nothing of the core — no requires
+src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted, an object read through its toJSON() as JSON
+                          reads it, a BigInt thrown), kept apart from shape.js's canonical so an adapter weighs nothing of the core —
+                          no requires
 src/connector/jsonfile.js jsonFile(store, { poll }) — one JSON file as a backend, what the two drives share: `n` the position of a document's
                           newest write, the ETag the compare-and-set (412 or 409 read again and tried RETRIES times; an empty text an
                           empty collection), a probe for the stream; requester — the fetch with the common headers that throws with the
@@ -67,9 +68,13 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   said (`connector.document.malformed`) and left out, never the page. A document is judged one by one, before
   the transaction and inside it (`#land`): another collection's record (`seam.row(id).type`, a tombstone's too —
   a backend's tombstone never deletes a record of another collection), a sealed one (`row.encrypted`: a connector
-  never reads it through the decrypting `get`), a value that is no JSON (`isJson`: a Date or an SDK's class is never
-  flattened), a `modifier.pull` that throws, and the engine's own refusal at `tx.set`/`tx.delete` (a validator's,
-  a field's) are each `#refuse('pull', id, reason, cause)` — the `refused` event, `connector.document.refused`,
+  never reads it through the decrypting `get`), a value with no JSON text (`textOf` throws: a BigInt — the known
+  text is the canonical of the RAW value, `same.js`'s canonical reading an object through its `toJSON()` as JSON
+  does, so a Date is its ISO text and never `{}`), a `modifier.pull` that throws, what it answers that is no JSON
+  (`isJson` AFTER the modifier, `#shaped`: a Date or an SDK's class is never flattened, and a modifier is where an
+  application converts it — the check once ran before it and refused what the modifier was written to convert), and
+  the engine's own refusal at `tx.set`/`tx.delete` (a validator's, a field's) are each `#refuse('pull', id, reason,
+cause)` — the `refused` event, `connector.document.refused`,
   `stats.refused` — and the rest of the page lands, the checkpoint moving past it. Only a landing that fails WHOLE
   (the engine, the database closing) is the pull's failure (`#failed('pull')`): the checkpoint stays, the page is
   tried again. Never let a throw of one document stop a page, and never let a page's failure move the checkpoint.
@@ -83,8 +88,10 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   the backend won, or a turn that leaves the record as the backend holds it, makes no second write. The handler's
   answer is judged row by row (`#answered`): a row not answered is the backend's now (`#learn`); `{ id, error }` is a
   row refused by name — parked (`#park`: out of pending, `#parked`, the `refused` event with the error's code),
-  tried again by a turn of the record or `reSync()`; a document is a conflict (`#resolveConflicts`): the backend
-  wins — the record set to its state under `source: 'connector:<name>:resolve'` — unless `resolve` says otherwise (a
+  tried again by a turn of the record or `reSync()`; a document is a conflict (`#resolveConflicts`), judged as a
+  pulled one first — its text (`textOf`), then `#shaped` (`modifier.pull` ONCE, `isJson` on its answer; a failure
+  parks the row, reason `value` or `modifier`; `#decide` takes the application's shape and applies no modifier — the
+  pull's conflict path once ran `modifier.pull` twice): the backend wins — the record set to its state under `source: 'connector:<name>:resolve'` — unless `resolve` says otherwise (a
   `resolve` that throws is `connector.resolve.failed` and the backend wins); the landing is one transaction with a
   try/catch per row (a resolution the engine refuses is `#refuse('push')`, the record stands), the backend's state
   learned and the `conflict` events told AFTER it landed, and the ids stay pending for the next round — equal to the

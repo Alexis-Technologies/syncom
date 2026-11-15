@@ -24,7 +24,7 @@ const { createFakeCouch } = require('./utils/fake-couch.js');
 const { createFakeGraphQL } = require('./utils/fake-graphql.js');
 const { createFakeMongo } = require('./utils/fake-mongo.js');
 const { createFakeSupabase } = require('./utils/fake-supabase.js');
-const { createFakeFirestore } = require('./utils/fake-firestore.js');
+const { createFakeFirestore, Timestamp } = require('./utils/fake-firestore.js');
 const { createFakeAppwrite, AppwriteException } = require('./utils/fake-appwrite.js');
 const { createFakeDrive, createFakeGraph } = require('./utils/fake-drive.js');
 const { waitUntil } = require('./utils/mesh.js');
@@ -687,6 +687,37 @@ test('Connector adapters', async (t) => {
           off();
           own.failStreams();
           assert.deepStrictEqual(ends, ['END']);
+        },
+      );
+      await t2.test(
+        'Firestore: a Timestamp of the application’s, made JSON by modifier.pull, lands; a local edit then assumes the backend’s own shape and goes through the transaction, no conflict',
+        async (t3) => {
+          const typed = createFakeFirestore();
+          typed.write('t1', { title: 'with a due date', due: Timestamp.fromMillis(86_400_000) });
+          const db = await syncom.createDatabase({ engine, path: `${t3.name}/A`, logger: false, defer: 0, schema });
+          t3.after(() => db.close().catch(() => {}));
+          const replication = replicate(db, {
+            name: 'typed',
+            collection: 'Task',
+            live: false,
+            ...firestore({ sdk: typed.sdk, database: typed.database, collection: typed.collection, stream: false }),
+            modifier: {
+              pull: (data) => ({ ...data, due: data.due instanceof Timestamp ? data.due.toMillis() : data.due }),
+              push: (data) => ({ ...data, due: Timestamp.fromMillis(data.due) }),
+            },
+          });
+          t3.after(() => replication.cancel().catch(() => {}));
+          const told = [];
+          replication.on('refused', (event) => told.push(['refused', event.id, event.reason]));
+          replication.on('conflict', (event) => told.push(['conflict', event.id]));
+          await replication.awaitInitialReplication();
+          assert.deepStrictEqual(await db.get('t1'), { title: 'with a due date', due: 86_400_000, $type: 'Task' });
+          await db.Task.update('t1', { title: 'edited' });
+          await replication.awaitInSync();
+          const held = typed.read('t1');
+          assert.strictEqual(held.title, 'edited');
+          assert.ok(held.due instanceof Timestamp && held.due.toMillis() === 86_400_000, 'a Timestamp again');
+          assert.deepStrictEqual(told, []);
         },
       );
     },

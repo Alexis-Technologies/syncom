@@ -751,6 +751,143 @@ test('Connectors', async (t) => {
   );
 
   await t.test(
+    'modifier.pull runs before the JSON check, on a pull and on a conflict alike: what it answers must be JSON; the backend’s state is known by the raw value’s text — a Date by its JSON, a BigInt refused',
+    async (t2) => {
+      class Stamp {
+        constructor(ms) {
+          this.ms = ms;
+        }
+      }
+      // What a backend's SDK hands over, made JSON by the application's modifier — once per document.
+      const calls = [];
+      const modifier = {
+        pull: (data, id) => {
+          calls.push(id);
+          const out = {};
+          for (const key of Object.keys(data)) {
+            const value = data[key];
+            if (value instanceof Date) out[key] = value.toISOString();
+            else if (value instanceof Stamp) out[key] = value.ms;
+            else if (key === 'n') out[key] = value * 10;
+            else out[key] = value;
+          }
+          // A modifier that leaves a Date in is held to JSON all the same.
+          if (id === 'd4') out.left = new Date(0);
+          return out;
+        },
+        push: (data) => (typeof data.n === 'number' ? { ...data, n: data.n / 10 } : data),
+      };
+      const a = await open(t2, 'A');
+      const pages = [
+        [
+          { id: 'd1', data: { title: 'date', due: new Date(0) } },
+          { id: 'd2', data: { title: 'bigint', size: 10n } },
+          { id: 'd3', data: { title: 'class', at: new Stamp(5) } },
+          { id: 'd4', data: { title: 'left a date' } },
+        ],
+        // The same document with another date: another state, not an echo (every Date once read as `{}`).
+        [{ id: 'd1', data: { title: 'date', due: new Date(1000) } }],
+      ];
+      let page = 0;
+      const typed = replicate(a, {
+        name: 'typed',
+        collection: 'Task',
+        live: false,
+        pull: {
+          handler: async (checkpoint) => {
+            const at = typeof checkpoint === 'number' ? checkpoint : 0;
+            if (at >= page) return { documents: [], checkpoint: at };
+            return { documents: pages[at], checkpoint: at + 1 };
+          },
+        },
+        modifier,
+      });
+      t2.after(() => typed.cancel().catch(() => {}));
+      const refused = [];
+      typed.on('refused', (event) => refused.push([event.direction, event.id, event.reason]));
+      page = 1;
+      await typed.awaitInitialReplication();
+      assert.deepStrictEqual(await a.get('d1'), { title: 'date', due: '1970-01-01T00:00:00.000Z', $type: 'Task' });
+      assert.deepStrictEqual(await a.get('d3'), { title: 'class', at: 5, $type: 'Task' });
+      assert.strictEqual(await a.get('d2'), null, 'a BigInt has no JSON text: refused before the modifier');
+      assert.strictEqual(await a.get('d4'), null, 'what the modifier answers must be JSON');
+      assert.deepStrictEqual(refused, [
+        ['pull', 'd2', 'value'],
+        ['pull', 'd4', 'value'],
+      ]);
+      assert.deepStrictEqual(calls, ['d1', 'd3', 'd4']);
+      page = 2;
+      await typed.reSync();
+      assert.deepStrictEqual(await a.get('d1'), { title: 'date', due: '1970-01-01T00:00:01.000Z', $type: 'Task' });
+      await typed.cancel();
+
+      // A conflict is judged the same way: through modifier.pull once, held to JSON — never flattened.
+      const backend = createFakeBackend();
+      const replication = connect(t2, a, backend, { name: 'conflicts', modifier, retryTime: 1500 });
+      const conflicts = [];
+      const errors = [];
+      const parked = [];
+      replication.on('conflict', (event) => conflicts.push(event));
+      replication.on('error', (error) => errors.push(error));
+      replication.on('refused', (event) => parked.push([event.direction, event.id, event.reason]));
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1', n: 10 });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read(id), { title: 'v1', n: 1 });
+      // On the pull path (the backend moved under an unpushed edit): the remote comes through the modifier once.
+      backend.fail('push', 1);
+      await a.Task.update(id, { title: 'v2' });
+      await waitUntil(() => errors.length === 1);
+      calls.length = 0;
+      backend.write(id, { title: 'backend v2', n: 2 });
+      await waitUntil(() => conflicts.length === 1);
+      assert.deepStrictEqual(conflicts[0].remote, { title: 'backend v2', n: 20 });
+      assert.deepStrictEqual(calls, [id], 'modifier.pull once for the conflict');
+      await waitUntil(async () => (await a.get(id))?.title === 'backend v2');
+      assert.deepStrictEqual(await a.get(id), { title: 'backend v2', n: 20, $type: 'Task' });
+      await replication.awaitInSync();
+      // On the push path: a conflict answered with a Date lands through a modifier that converts it, and without one
+      // is refused (value) — parked, never flattened into the record.
+      for (const converted of [true, false]) {
+        const db = await open(t2, converted ? 'converted' : 'raw');
+        let answered = false;
+        const dated = replicate(db, {
+          name: 'dated',
+          collection: 'Task',
+          live: false,
+          retryTime: 1500,
+          ...(converted ? { modifier: { pull: (data) => ({ ...data, when: data.when.toISOString() }) } } : {}),
+          push: {
+            handler: async (rows) => {
+              if (answered) return [];
+              answered = true;
+              return [{ id: rows[0].id, data: { title: 'remote', when: new Date(0) } }];
+            },
+          },
+        });
+        t2.after(() => dated.cancel().catch(() => {}));
+        const told = [];
+        dated.on('refused', (event) => told.push([event.direction, event.reason]));
+        await dated.awaitInitialReplication();
+        const { id: local } = await db.Task.insert({ title: 'local' });
+        await dated.awaitInSync();
+        if (converted) {
+          assert.deepStrictEqual(told, []);
+          assert.deepStrictEqual(await db.get(local), {
+            title: 'remote',
+            when: '1970-01-01T00:00:00.000Z',
+            $type: 'Task',
+          });
+        } else {
+          assert.deepStrictEqual(told, [['push', 'value']]);
+          assert.strictEqual(dated.stats().parked, 1);
+          assert.deepStrictEqual(await db.get(local), { title: 'local', $type: 'Task' }, 'never flattened');
+        }
+      }
+    },
+  );
+
+  await t.test(
     'a restart carries what the backend was assumed to hold: an offline edit lands through the compare-and-set, a backend that moved meanwhile is a conflict — the digests kept with the checkpoint',
     async (t2) => {
       const backend = createFakeBackend();

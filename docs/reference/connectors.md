@@ -48,8 +48,10 @@ A document that is no document (no valid record id, no object as `data` without 
 `connector.document.malformed` and skipped. A document that cannot land is a `refused` event
 `{ direction: 'pull', id, reason, cause }` and the rest of the page lands, the checkpoint moving past it. The reasons:
 `collection` (the id belongs to a record of another collection, a tombstone included), `sealed` (an encrypted
-record), `value` (not JSON), `modifier` (`modifier.pull` threw or returned no object), or the code of the write the
-engine refused (a validator's `VALIDATION_FAILED`, a field's `TypeError`). A landing that fails as a whole (the
+record), `value` (what `modifier.pull` returned is not JSON, or the document itself without a modifier; a `BigInt`,
+which has no JSON text to remember the backend's state by, even with one), `modifier` (`modifier.pull` threw or
+returned no object), or the code of the write the engine refused (a validator's `VALIDATION_FAILED`, a field's
+`TypeError`). A landing that fails as a whole (the
 engine, the database closing) is the pull's failure: `REPLICATION_FAILED`, the checkpoint unmoved, tried again.
 
 Pulled writes carry `source: 'connector:<name>'` on their `transaction` event and `actor: 'connector:<name>'` on their
@@ -79,9 +81,11 @@ itself: the row is parked with the reason `conflict` rather than pushed in a loo
 nothing but leaves that row out (`refused`, reason `modifier`).
 
 `modifier.pull` turns the backend's shape into the record's, `modifier.push` the record's into the backend's. What the
-connector remembers and compares is the backend's shape: a document as it came (before `modifier.pull`), a row as it
-went (after `modifier.push`). A conflict's `remote` passes through `modifier.pull`, and a resolution goes back through
-`modifier.push`.
+connector remembers and compares is the backend's shape: a document as it came (before `modifier.pull`, its canonical
+JSON text, an object with `toJSON()` such as a `Date` read through it), a row as it went (after `modifier.push`).
+`modifier.pull` runs once per document, before the JSON check: what it returns must be JSON. A conflict's `remote`
+passes through `modifier.pull` and the same check (a conflict that fails it parks the row with the reason `value` or
+`modifier`, the record untouched), and a resolution goes back through `modifier.push`.
 
 ## The checkpoint
 

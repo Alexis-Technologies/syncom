@@ -26,9 +26,9 @@
 // pulled record reaches every peer like a local one; a document equal to
 // what the record reads as is left alone (no op), which is how this node's
 // own writes, come back from the backend, make no echo; a document that
-// cannot land (another collection's record, a sealed one, no JSON, a
-// validator's no) is refused by name (`refused`) and the rest of the page
-// lands. What goes out follows
+// cannot land (another collection's record, a sealed one, no JSON after
+// `modifier.pull`, a validator's no) is refused by name (`refused`) and the
+// rest of the page lands. What goes out follows
 // the `transaction` events of the collection — every turn but a pull of this
 // connector's — pages of `batchSize` rows, in order, one push in flight. The
 // checkpoint text (`{ pull, pushed, known }`: the backend's position, this
@@ -91,8 +91,8 @@ const documentOf = (doc) => {
 };
 
 // JSON alone crosses: null, booleans, finite numbers, strings, arrays and plain objects of them. A Date, a Decimal, a
-// Timestamp or a reference of a backend's SDK is refused on pull (`reason: 'value'`) — never flattened into a record
-// and written back as a string.
+// Timestamp or a reference of a backend's SDK left in what `modifier.pull` answers (or in the document, without one)
+// is refused (`reason: 'value'`) — never flattened into a record and written back as a string.
 const MAX_DEPTH = 64;
 const isJson = (value, depth = 0) => {
   if (value === null || value === undefined) return true;
@@ -109,6 +109,10 @@ const isJson = (value, depth = 0) => {
   for (const key of Object.keys(value)) if (!isJson(value[key], depth + 1)) return false;
   return true;
 };
+
+// The canonical text of a backend's document — its state as this node knows it, in the backend's shape, before
+// `modifier.pull`: null for a deletion. A value JSON has no text for (a BigInt) throws: the document is refused.
+const textOf = (doc) => (doc.deleted ? null : canonical(doc.data));
 
 const failed = (direction, message, cause, name, retryIn = null) =>
   new SyncomError('REPLICATION_FAILED', message, { direction, connector: name, cause, retryIn });
@@ -671,13 +675,12 @@ class Replication extends Emitter {
 
   // The backend's documents, landed as this node's writes — one transaction a page, under the connector's source so
   // its own listener passes them — a document that reads as the record already does left alone. A document is
-  // judged before the transaction (no document at all, a value that is no JSON, another collection's record, a
-  // sealed one, a modifier that throws) and inside it (a validator's no, a field the engine refuses): one refused
-  // is said and left out, the rest of the page lands and the checkpoint moves.
+  // judged before the transaction (no document at all, another collection's record, a sealed one, a value with no
+  // JSON text, a modifier that throws, what it answers no JSON) and inside it (a validator's no, a field the engine
+  // refuses): one refused is said and left out, the rest of the page lands and the checkpoint moves.
   async #land(documents) {
     const docs = [];
     const refusals = [];
-    const modify = this.#modifier.pull;
     for (let i = 0; i < documents.length; i++) {
       const doc = documentOf(documents[i]);
       if (doc === null) {
@@ -694,23 +697,18 @@ class Replication extends Emitter {
         refusals.push([id, 'sealed']);
         continue;
       }
-      if (!isJson(doc.data)) {
-        refusals.push([id, 'value']);
+      // What the backend holds, in its own shape — before the modifier: what a push compares against; then the
+      // application's shape, through the modifier, which must be JSON.
+      try {
+        doc.text = textOf(doc);
+      } catch (error) {
+        refusals.push([id, 'value', error]);
         continue;
       }
-      // What the backend holds, in its own shape — before the modifier: what a push compares against.
-      doc.text = doc.deleted ? null : canonical(doc.data);
-      if (!doc.deleted && modify !== null) {
-        try {
-          doc.data = modify(doc.data, id);
-        } catch (error) {
-          refusals.push([id, 'modifier', error]);
-          continue;
-        }
-        if (!isPlainObject(doc.data)) {
-          refusals.push([id, 'modifier']);
-          continue;
-        }
+      const why = this.#shaped(doc);
+      if (why !== null) {
+        refusals.push([id, why.reason, why.cause]);
+        continue;
       }
       docs.push(doc);
     }
@@ -778,13 +776,27 @@ class Replication extends Emitter {
     return this.#digests.has(id) && this.#digests.get(id) === this.#digestOf(text);
   }
 
-  // A conflict decided: the document as the backend holds it (`remote`, its shape — through `modifier.pull` for the
-  // application) against the record here (`local`, plain). The backend wins — unless `resolve` answers the data to
+  // A backend's data in the application's shape: through `modifier.pull` (once), then held to JSON. Answers null, or
+  // why it cannot land — `modifier` (it threw or answered no object), `value` (no JSON) — with the cause.
+  #shaped(doc) {
+    if (doc.deleted) return null;
+    if (this.#modifier.pull !== null) {
+      try {
+        doc.data = this.#modifier.pull(doc.data, doc.id);
+      } catch (error) {
+        return { reason: 'modifier', cause: error };
+      }
+      if (!isPlainObject(doc.data)) return { reason: 'modifier', cause: undefined };
+    }
+    return isJson(doc.data) ? null : { reason: 'value', cause: undefined };
+  }
+
+  // A conflict decided: the document as the backend holds it (`remote`, in the application's shape: `#shaped`
+  // already) against the record here (`local`, plain). The backend wins — unless `resolve` answers the data to
   // keep or `null` to delete; a `resolve` that throws is said and the backend wins. Answers what to land and the
   // `conflict` event to tell once it has.
   async #decide(id, local, remote) {
-    let remoteData = remote.deleted ? null : remote.data;
-    if (remoteData !== null && this.#modifier.pull !== null) remoteData = this.#modifier.pull(remoteData, id);
+    const remoteData = remote.deleted ? null : remote.data;
     let resolved = remoteData;
     let deleted = remote.deleted;
     if (this.#resolve !== null) {
@@ -1154,7 +1166,13 @@ class Replication extends Emitter {
         this.#park(row.id, { code: 'answer', message: 'the handler answered neither a document nor an error' });
         continue;
       }
-      const text = remote.deleted ? null : canonical(remote.data);
+      let text;
+      try {
+        text = textOf(remote);
+      } catch (error) {
+        this.#park(row.id, { code: 'value', message: error?.message ?? String(error) });
+        continue;
+      }
       if (row.assumed === undefined) {
         // A probe answered: what the backend holds. The state this node knew durably (its digest), or — knowing
         // nothing — nothing held or the row itself: learned, and the row goes again in the next round with it
@@ -1206,19 +1224,22 @@ class Replication extends Emitter {
     const decided = [];
     for (let i = 0; i < conflicts.length; i++) {
       const [row, remote] = conflicts[i];
+      // The backend's state in the application's shape, as a pulled one: a modifier that throws, or what it answers
+      // no JSON, and the row cannot be judged — parked, said, never flattened into the record.
+      const why = this.#shaped(remote);
+      if (why !== null) {
+        const message = why.cause?.message ?? (why.reason === 'value' ? 'no JSON' : 'no object');
+        this.#park(row.id, { code: why.reason, message });
+        conflicts[i] = null;
+        continue;
+      }
       let local = null;
       try {
         local = plain(await this.#db.get(row.id));
       } catch {
         local = null;
       }
-      try {
-        decided.push(await this.#decide(row.id, local, remote));
-      } catch (error) {
-        // `modifier.pull` threw over the backend's state: the row cannot be judged — parked, said.
-        this.#park(row.id, { code: 'modifier', message: error?.message ?? String(error) });
-        conflicts[i] = null;
-      }
+      decided.push(await this.#decide(row.id, local, remote));
     }
     const refusals = [];
     await this.#db.transact(
