@@ -150,7 +150,10 @@ export interface ConnectorStats {
   pulls: number;
   pushes: number;
   pending: number;
-  /** Rows the backend refused by name, set aside until a turn of theirs or `reSync()`. */
+  /**
+   * Rows set aside until a turn of theirs or `reSync()`: refused by the backend by name, or met with a conflict whose
+   * resolution the database refused.
+   */
   parked: number;
   active: boolean;
   canceled: boolean;
@@ -170,7 +173,10 @@ export interface Replication {
   start(): Promise<void>;
   /** Stops for good. */
   cancel(): Promise<void>;
-  /** Pulls again from the checkpoint and pushes what the collection holds since `pushed`. */
+  /**
+   * Asks the backend again about the documents the database refused to land (a probe through the push handler),
+   * pulls again from the checkpoint and pushes what the collection holds since `pushed`, the parked rows too.
+   */
   reSync(): Promise<void>;
   awaitInitialReplication(options?: { signal?: AbortSignal | null }): Promise<void>;
   /** Resolves once nothing waits to go to the backend and nothing is in flight either way. */
