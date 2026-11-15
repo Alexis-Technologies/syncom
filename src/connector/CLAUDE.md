@@ -9,8 +9,9 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
                           batchSize, modifier, resolve }): pulled documents landed as one transaction a page (`source:
                           connector:<name>`), a document that cannot land refused by name, the collection's turns pushed as rows
                           with what the backend was assumed to hold (the canonical text of the backend's shape per id), conflicts
-                          the backend wins, rows refused by name parked, the checkpoint `{ pull, pushed }` in the `connector` kv
-                          namespace — requires symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only
+                          the backend wins, rows refused by name parked, a state the database refused never learned, the
+                          checkpoint `{ pull, pushed }` in the `connector` kv namespace — requires symbols.js, engine.js, shape.js,
+                          errors.js, hooks.js, emitter.js, same.js only
 src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted, an object read through its toJSON() as JSON
                           reads it, a BigInt thrown), kept apart from shape.js's canonical so an adapter weighs nothing of the core —
                           no requires
@@ -78,6 +79,16 @@ cause)` — the `refused` event, `connector.document.refused`,
   `stats.refused` — and the rest of the page lands, the checkpoint moving past it. Only a landing that fails WHOLE
   (the engine, the database closing) is the pull's failure (`#failed('pull')`): the checkpoint stays, the page is
   tried again. Never let a throw of one document stop a page, and never let a page's failure move the checkpoint.
+  A state is learned (`#learn`) only AFTER it landed — the page's `learned` pairs once its transaction has, a
+  resolution once `#landResolution` did — and a document refused for what it holds (every reason but `collection`
+  and `sealed`) is NOT learned: NOBODY WINS (the user's decision). Its id joins `#unlanded` (saved with the
+  checkpoint as `refused`), so a later local edit goes with the state known assumed and meets the backend's version as
+  a conflict `resolve` decides, and an edit of it counts as pending in `#land` though nothing else remembers it
+  (`#quiet`: the record against the state known — a parked row, a restart); `reSync()` asks first (`#reask`, on the
+  pull queue): a record still as last landed is PROBED through the push handler and the answer judged by `#land`
+  (landed, or refused again), one edited since goes pending. `#learn` clears the id, and so does an echo. Learning
+  before `tx.set` (as the first version did) made a refused state the backend's: never pulled again, and a local
+  edit pushed over the backend with no conflict.
 - **A push follows the turns and assumes the backend's state.** Every `transaction` event but this connector's own
   pulls hands the records of the collection it changed (the row's type, a purge's `type`; never a sealed one) to
   `#pending`, a Map of id → the log position BEFORE the turn (`#last`, the newest turn heard); one push is in flight
@@ -91,9 +102,12 @@ cause)` — the `refused` event, `connector.document.refused`,
   tried again by a turn of the record or `reSync()`; a document is a conflict (`#resolveConflicts`), judged as a
   pulled one first — its text (`textOf`), then `#shaped` (`modifier.pull` ONCE, `isJson` on its answer; a failure
   parks the row, reason `value` or `modifier`; `#decide` takes the application's shape and applies no modifier — the
-  pull's conflict path once ran `modifier.pull` twice): the backend wins — the record set to its state under `source: 'connector:<name>:resolve'` — unless `resolve` says otherwise (a
-  `resolve` that throws is `connector.resolve.failed` and the backend wins); the landing is one transaction with a
-  try/catch per row (a resolution the engine refuses is `#refuse('push')`, the record stands), the backend's state
+  pull's conflict path once ran `modifier.pull` twice): the backend wins — the record set to its state under
+  `source: 'connector:<name>:resolve'` — unless `resolve` says otherwise (a `resolve` that throws is
+  `connector.resolve.failed` and the backend wins); the landing is one transaction with a
+  try/catch per row (a resolution the engine refuses is `#refuse('push')`, the record stands, the backend's state NOT
+  learned — `#unlanded`, nobody wins — and the row parked, so a turn of the record or `reSync()` meets the same
+  conflict again; it once learned the refused state and pushed the record over the backend), the backend's state
   learned and the `conflict` events told AFTER it landed, and the ids stay pending for the next round — equal to the
   backend's state they say nothing, different they go with it assumed. A backend answering a conflict for a row that
   assumed exactly what it holds, twice in a row (`#contradicted`), has the row parked (`reason: 'conflict'`) — never
@@ -106,9 +120,9 @@ cause)` — the `refused` event, `connector.document.refused`,
   before its first entry there, `formatId(seq - 1)`) or every record of the collection once where the log cannot
   resume (`connector.rebuild`: each a probe, `#probing`; tombstones not among them). Durably, `#digests` names the
   backend's state per id (DIGEST_LENGTH of the seam's `digest` of the text; `[SOURCE].digest` is `hashText` so the
-  connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known }` (`#write`), loaded
-  into `#digests` alone: a pulled document is judged by digest where the text is not in memory (`#assumedText`), and
-  a push of such a record is a PROBE (`#assumedOf` → `assumed: undefined`): the handler answers what the backend
+  connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known, refused }`
+  (`#write`; `refused` the ids of `#unlanded`), loaded into `#digests` alone: a pulled document is judged by digest
+  where the text is not in memory (`#assumedText`), and a push of such a record is a PROBE (`#assumedOf` → `assumed: undefined`): the handler answers what the backend
   holds without writing, and `#answered` learns it where the digest names it (or, knowing nothing durably, where the
   backend holds nothing or the row itself) and keeps the id pending for the next round — the row then goes with that
   state assumed or says nothing — or lands a conflict. `#known` is bounded (KNOWN_MAX, the oldest not pending

@@ -487,9 +487,9 @@ local documents), `pipeline/` (the pipelines' checkpoints), `tags/`, `blobs/<dig
 their SHA-256, base64 text in the files engine), and the texts a block keeps in the root namespace or one of its own:
 `revoked.json` `{ v: 1, nodes: { "<node>": ["<scope>", …] } }` (the scopes a host took back from each node,
 [revoke](#the-revoke-event)), `shared/cursor.json` (a hub's cursors over the [shared log](#the-shared-log)),
-`connector/<name>` `{ pull, pushed, known: { "<id>": "<22 base64url characters of the SHA-256>" | null } }` (a
-connector's checkpoint: the backend's position, this node's log position pushed through, the backend's state per
-record as a digest — [connectors](../guide/connectors)), `moved.json` `{ to: { path, engine }, at }` (a
+`connector/<name>` `{ pull, pushed, known: { "<id>": "<22 base64url characters of the SHA-256>" | null }, refused: ["<id>"] }`
+(a connector's checkpoint: the backend's position, this node's log position pushed through, the backend's state per
+record as a digest, the ids whose state the database refused to land — [connectors](../guide/connectors)), `moved.json` `{ to: { path, engine }, at }` (a
 source `rotateAtRest` copied away, fenced: `createDatabase` refuses it as `MOVED`) and `copy.json` `{ from, started }`
 (a copy in flight into this directory, removed last; one left behind by a crash is taken away by the next copy).
 

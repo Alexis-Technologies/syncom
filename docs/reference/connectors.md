@@ -51,8 +51,18 @@ A document that is no document (no valid record id, no object as `data` without 
 record), `value` (what `modifier.pull` returned is not JSON, or the document itself without a modifier; a `BigInt`,
 which has no JSON text to remember the backend's state by, even with one), `modifier` (`modifier.pull` threw or
 returned no object), or the code of the write the engine refused (a validator's `VALIDATION_FAILED`, a field's
-`TypeError`). A landing that fails as a whole (the
-engine, the database closing) is the pull's failure: `REPLICATION_FAILED`, the checkpoint unmoved, tried again.
+`TypeError`). A landing that fails as a whole (the engine, the database closing) is the pull's failure:
+`REPLICATION_FAILED`, the checkpoint unmoved, tried again.
+
+A document refused for what it holds (every reason but `collection` and `sealed`) is not learned: the backend's
+state as known stays what this node last landed, and its id is kept (`refused` in the checkpoint). A later edit of
+the record is pushed with that state assumed and meets the backend's version as a conflict. When a document of such
+a record is pulled, an edit of it counts as one not yet pushed even where nothing else remembers it (a parked row, a
+restart): another state over it is a conflict, never a silent landing. `reSync()` first asks the backend about every
+such id through the push handler: a record still as last landed is probed (`assumed: undefined`, nothing written) and
+the answer is judged as a pulled document, landed or refused again; a record edited since is pushed with the state
+known assumed. A connector without a push handler cannot ask, and lands the document when a pull brings it again. A
+state learned later (a landing, a push the backend took, its echo) clears the id.
 
 Pulled writes carry `source: 'connector:<name>'` on their `transaction` event and `actor: 'connector:<name>'` on their
 ops; a resolution's ops carry `actor: 'connector:<name>:resolve'`, and a resolution landed after a push carries
@@ -73,7 +83,9 @@ The handler's answer is read row by row:
 - **`{ id, data }` or `{ id, deleted: true }`**: a conflict. The record is set to the backend's state, or to what
   `resolve` returns, in one transaction; the `conflict` events follow once it has landed. The id stays pending: equal
   to the backend's state it says nothing more, different it goes again with that state assumed. A resolution the
-  engine refuses is a `refused` event with `direction: 'push'`, and the record stands.
+  engine refuses is a `refused` event with `direction: 'push'`; the record stands, the backend's state is not
+  learned (its id kept as a refused pull's is) and the row is parked: a change to the record or `reSync()` pushes it
+  again with the state known assumed, which meets the same conflict.
 - **Neither a document nor an error**: parked with the reason `answer`.
 
 A backend that refuses a row which assumed exactly what the backend says it holds, twice in a row, contradicts
@@ -93,14 +105,15 @@ One JSON text in the database's `connector` key-value namespace, under the conne
 needs:
 
 ```json
-{ "pull": 42, "pushed": "mw6l.17", "known": { "t1": "b-SQXlGHTSadY8-j1RK7Vt", "t2": null } }
+{ "pull": 42, "pushed": "mw6l.17", "known": { "t1": "b-SQXlGHTSadY8-j1RK7Vt", "t2": null }, "refused": ["t3"] }
 ```
 
 `pull` is the backend's position as the pull handler last returned it. `pushed` is this node's log position pushed
 through; it never passes a change still waiting to go, so a restart pushes every pending change again (at least once,
 never lost). `known` names the backend's state per record: 22 characters of the SHA-256 (base64url) of the canonical
 JSON of the backend's shape, `null` where the backend holds nothing, no entry for a record gone on both sides. That is
-about 50 bytes a record. The text is saved coalesced (one write in flight, the next 200 ms later while pages keep
+about 50 bytes a record. `refused` lists the ids whose backend state the database refused to land, which `reSync()`
+asks about again. The text is saved coalesced (one write in flight, the next 200 ms later while pages keep
 landing) and at once at the end of a pull run, after a push, after a page of the stream and on `cancel()`. A crash
 between a landing and its save lands that page again.
 

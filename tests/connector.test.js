@@ -467,8 +467,9 @@ test('Connectors', async (t) => {
       await waitUntil(async () => (await a.get(id))?.title === 'backend v2');
       assert.strictEqual(conflicts.length, 1);
       assert.deepStrictEqual(conflicts[0].resolved, { title: 'backend v2' });
-      // A conflict whose resolution the engine refuses (the validator says no to the backend's state): the row is
-      // said (refused, direction push), the local record stands and goes to the backend with its state assumed.
+      // A conflict whose resolution the engine refuses (the validator says no to the backend's state): nobody wins —
+      // the row is said (refused, direction push) and parked, the backend's state is not learned, the local record
+      // stands and the backend keeps its own (once, the local record went over it with that state assumed).
       backend.set(id, { title: 'bad' });
       await a.Task.update(id, { title: 'A v3' });
       await replication.awaitInSync();
@@ -477,7 +478,9 @@ test('Connectors', async (t) => {
       assert.strictEqual(refused[0].id, id);
       assert.strictEqual(refused[0].reason, 'VALIDATION_FAILED');
       assert.strictEqual(conflicts.length, 2);
-      await waitUntil(() => backend.read(id)?.title === 'A v3', { timeout: 5000 });
+      assert.strictEqual(replication.stats().parked, 1);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      assert.deepStrictEqual(backend.read(id), { title: 'bad' }, 'the backend’s state, never overwritten');
       assert.deepStrictEqual(await a.get(id), { title: 'A v3', $type: 'Task' }, 'the local record stood');
       // A landing that fails whole after the handler: the rows stay pending, the failure is told, tried again.
       const original = a.transact.bind(a);
@@ -500,6 +503,181 @@ test('Connectors', async (t) => {
       assert.deepStrictEqual(backend.read(id), { title: 'backend v4' });
       await new Promise((resolve) => setImmediate(resolve));
       assert.deepStrictEqual(unhandled, []);
+    },
+  );
+
+  await t.test(
+    'a pulled document the database refuses is not learned — nobody wins: a local edit of it is a conflict resolve decides, never a silent overwrite of the backend; reSync() asks the backend for it again, across a restart',
+    async (t2) => {
+      const rules = { strict: true };
+      const validated = {
+        '~standard': {
+          version: 1,
+          vendor: 'test',
+          validate: (value) =>
+            rules.strict && value.title === 'bad' ? { issues: [{ message: 'no', path: ['title'] }] } : { value },
+        },
+      };
+      const a = await open(t2, 'A', { schema: { entities: { Task: { schema: validated }, Note: {} } } });
+      const backend = createFakeBackend();
+      backend.write('t1', { title: 'fine', n: 1 });
+      backend.write('t2', { title: 'fine', n: 1 });
+      const rows = [];
+      const handlers = backend.handlers();
+      const push = handlers.push.handler;
+      handlers.push.handler = async (batch) => {
+        for (const row of batch) rows.push([row.id, row.assumed]);
+        return push(batch);
+      };
+      const options = {
+        name: 'main',
+        collection: 'Task',
+        ...handlers,
+        live: false,
+        retryTime: 50,
+        resolve: ({ local, remote }) => (remote?.title === 'bad' ? { title: 'fixed', n: local.n } : undefined),
+      };
+      const refused = [];
+      const conflicts = [];
+      const start = () => {
+        const replication = replicate(a, options);
+        t2.after(() => replication.cancel().catch(() => {}));
+        replication.on('refused', (event) => refused.push([event.direction, event.id, event.reason]));
+        replication.on('conflict', (event) => conflicts.push(event));
+        return replication;
+      };
+      let replication = start();
+      await replication.awaitInitialReplication();
+      // Another client writes states this node's schema refuses: refused, and not taken as the backend's state.
+      backend.write('t1', { title: 'bad', n: 2 });
+      backend.write('t2', { title: 'bad', n: 2 });
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(refused, [
+        ['pull', 't1', 'VALIDATION_FAILED'],
+        ['pull', 't2', 'VALIDATION_FAILED'],
+      ]);
+      assert.deepStrictEqual(rows, [], 'nothing pushed');
+      // An edit of t1 goes out assuming what this node last landed: the backend's refused state is a conflict, and
+      // resolve decides — its answer lands, then goes to the backend with the backend's state assumed.
+      await a.Task.update('t1', { n: 3 });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(rows[0], ['t1', { title: 'fine', n: 1 }]);
+      assert.strictEqual(conflicts.length, 1);
+      assert.deepStrictEqual(conflicts[0].remote, { title: 'bad', n: 2 });
+      assert.deepStrictEqual(await a.get('t1'), { title: 'fixed', n: 3, $type: 'Task' });
+      assert.deepStrictEqual(backend.read('t1'), { title: 'fixed', n: 3 });
+      assert.deepStrictEqual(rows[1], ['t1', { title: 'bad', n: 2 }]);
+      // reSync() asks the backend for t2 again — a probe, nothing written — and it is refused again while the rule holds.
+      rows.length = 0;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(rows, [['t2', undefined]]);
+      assert.deepStrictEqual(refused.slice(2), [['pull', 't2', 'VALIDATION_FAILED']]);
+      assert.deepStrictEqual(backend.read('t2'), { title: 'bad', n: 2 });
+      // An ask that fails is told (the pull's, no retry of its own) and the id is asked again by the next reSync().
+      const errors = [];
+      replication.on('error', (error) => errors.push(error));
+      backend.fail('push', 1);
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.strictEqual(errors.length, 1);
+      assert.strictEqual(errors[0].direction, 'pull');
+      assert.strictEqual(errors[0].retryIn, null);
+      assert.strictEqual(refused.length, 3);
+      // The refused ids are kept with the checkpoint: after a restart, reSync() asks again, and the document lands
+      // once the database takes it — no conflict, the record was never edited here.
+      await replication.cancel();
+      const store = kvNamespace(a[DB].kv, 'connector');
+      assert.deepStrictEqual(JSON.parse(await store.get('main')).refused, ['t2']);
+      rules.strict = false;
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(await a.get('t2'), { title: 'bad', n: 2, $type: 'Task' });
+      assert.strictEqual(conflicts.length, 1);
+      assert.strictEqual(refused.length, 3);
+      await replication.cancel();
+      assert.deepStrictEqual(JSON.parse(await store.get('main')).refused, []);
+    },
+  );
+
+  await t.test(
+    'a resolution the database refuses is not learned either — nobody wins: the row is parked, the backend keeps its state, reSync() asks again with the state known assumed; a newer state of the backend over that edit is a conflict, never a silent landing',
+    async (t2) => {
+      const validated = {
+        '~standard': {
+          version: 1,
+          vendor: 'test',
+          validate: (value) => (value.title === 'bad' ? { issues: [{ message: 'no', path: ['title'] }] } : { value }),
+        },
+      };
+      const a = await open(t2, 'A', { schema: { entities: { Task: { schema: validated }, Note: {} } } });
+      const backend = createFakeBackend();
+      const refused = [];
+      const conflicts = [];
+      const errors = [];
+      const start = () => {
+        const replication = connect(t2, a, backend, { live: false });
+        replication.on('refused', (event) => refused.push([event.direction, event.reason]));
+        replication.on('conflict', (event) => conflicts.push(event));
+        replication.on('error', (error) => errors.push(error));
+        return replication;
+      };
+      let replication = start();
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await replication.awaitInSync();
+      // The backend moves to a state this node refuses, behind the connector's back; then the record is edited here.
+      backend.set(id, { title: 'bad' });
+      await a.Task.update(id, { title: 'mine' });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(refused, [['push', 'VALIDATION_FAILED']]);
+      assert.strictEqual(conflicts.length, 1);
+      assert.strictEqual(replication.stats().parked, 1);
+      assert.strictEqual(replication.stats().pending, 0, 'no loop: parked, not pending');
+      assert.deepStrictEqual(backend.read(id), { title: 'bad' });
+      assert.deepStrictEqual(await a.get(id), { title: 'mine', $type: 'Task' });
+      // reSync(): the pull brings the refused state over the edit — a conflict, refused again (the fake's feed answers
+      // a row per change) — and the parked row goes again with the state known assumed: the same conflict, refused
+      // again. Nothing is overwritten either side.
+      await replication.reSync();
+      await replication.awaitInSync();
+      const directions = [];
+      for (const [direction, reason] of refused) if (reason === 'VALIDATION_FAILED') directions.push(direction);
+      assert.strictEqual(directions.length, refused.length);
+      assert.deepStrictEqual([directions[0], directions[1], directions.at(-1)], ['push', 'pull', 'push']);
+      assert.strictEqual(directions.filter((direction) => direction === 'push').length, 2);
+      assert.strictEqual(replication.stats().parked, 1);
+      assert.deepStrictEqual(backend.read(id), { title: 'bad' });
+      assert.deepStrictEqual(await a.get(id), { title: 'mine', $type: 'Task' });
+      // A restart forgets the parked row, not the refusal: reSync() finds the record edited since the state known and
+      // pushes it with that state assumed — the same conflict, refused again, the row parked again.
+      await replication.cancel();
+      replication = start();
+      await replication.awaitInitialReplication();
+      assert.strictEqual(replication.stats().parked, 0);
+      const pushes = refused.length;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(refused.slice(pushes), [['push', 'VALIDATION_FAILED']]);
+      assert.strictEqual(replication.stats().parked, 1);
+      assert.deepStrictEqual(backend.read(id), { title: 'bad' });
+      assert.deepStrictEqual(await a.get(id), { title: 'mine', $type: 'Task' });
+      // A newer state of the backend, one the database takes, over the edit still waiting: a conflict (the backend
+      // wins here), never a silent landing; then nothing is left to push.
+      const before = conflicts.length;
+      backend.set(id, { title: 'theirs' });
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.strictEqual(conflicts.length, before + 1);
+      assert.deepStrictEqual(conflicts[before].local, { title: 'mine' });
+      assert.deepStrictEqual(conflicts[before].remote, { title: 'theirs' });
+      assert.deepStrictEqual(await a.get(id), { title: 'theirs', $type: 'Task' });
+      assert.deepStrictEqual(backend.read(id), { title: 'theirs' });
+      assert.strictEqual(replication.stats().parked, 0);
+      assert.deepStrictEqual(errors, []);
     },
   );
 
@@ -899,7 +1077,8 @@ test('Connectors', async (t) => {
       await first.awaitInSync();
       await first.cancel();
       const saved = JSON.parse(await store.get('main'));
-      assert.deepStrictEqual(Object.keys(saved).sort(), ['known', 'pull', 'pushed']);
+      assert.deepStrictEqual(Object.keys(saved).sort(), ['known', 'pull', 'pushed', 'refused']);
+      assert.deepStrictEqual(saved.refused, []);
       assert.match(saved.known[id], /^[A-Za-z0-9_-]{22}$/, 'the digest of what the backend holds, with the checkpoint');
       // An edit while no connector runs; the pull cursor is before this node's own echo. A restart: the echo is
       // skipped, the edit lands through the compare-and-set — no conflict, nothing lost.

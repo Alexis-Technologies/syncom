@@ -31,9 +31,10 @@
 // rest of the page lands. What goes out follows
 // the `transaction` events of the collection — every turn but a pull of this
 // connector's — pages of `batchSize` rows, in order, one push in flight. The
-// checkpoint text (`{ pull, pushed, known }`: the backend's position, this
-// node's log position pushed through — a frontier before the oldest pending
-// turn — and the digest of the backend's state per record) lives in the
+// checkpoint text (`{ pull, pushed, known, refused }`: the backend's
+// position, this node's log position pushed through — a frontier before the
+// oldest pending turn — the digest of the backend's state per record, and the
+// ids whose state the database refused to land, never learned) lives in the
 // `connector` kv namespace under the name: a restart pulls from `pull` and
 // pushes what the log holds since `pushed` — a record known by digest alone
 // as a probe — or every record of the collection once where the log cannot
@@ -173,7 +174,8 @@ class Replication extends Emitter {
   // The ids whose state is to go to the backend, in the order they came, each with the log position BEFORE the
   // turn that made it pending (where a restart resumes the push from; null: the start); the ids of the push in
   // flight, and among them the ones a newer turn touched meanwhile (pending again after it, from that turn's
-  // position); the ids the backend refused by name, set aside until a turn of theirs or `reSync()`.
+  // position); the ids the backend refused by name (or whose resolution the database refused), set aside until a turn
+  // of theirs or `reSync()`.
   #pending = new Map();
   #inflight = new Set();
   #redo = new Map();
@@ -204,6 +206,10 @@ class Replication extends Emitter {
   #known = new Map();
   #digests = new Map();
   #probing = new Set();
+  // The ids whose backend state the database refused to land (a validator's no, a field, no JSON): never learned —
+  // nobody wins. A local edit of one goes with the state known assumed (a conflict `resolve` decides), `reSync()`
+  // asks the backend for it again (`#reask`), and it is saved with the checkpoint (`refused`).
+  #unlanded = new Set();
   // The checkpoint text's save in flight, whether it is behind what is held, whether the next write is wanted at
   // once, and what wakes a gap early.
   #saving = null;
@@ -391,7 +397,10 @@ class Replication extends Emitter {
     notify(this, this.#logger, 'active', false);
   }
 
-  /** Pulls again from the checkpoint, and pushes what the collection holds since `pushed` — a backend that lost a change. */
+  /**
+   * Asks the backend again about the documents the database refused, pulls again from the checkpoint, and pushes what
+   * the collection holds since `pushed` — a backend that lost a change.
+   */
   async reSync() {
     if (!this.#active) {
       throw new SyncomError('REPLICATION_FAILED', `Connector ${this.#name} is not active`, {
@@ -401,10 +410,13 @@ class Replication extends Emitter {
     }
     // Behind a pull in flight: a pull again, from the checkpoint as it then stands.
     if (this.#pulling !== null) await this.#pulling.catch(NOOP);
+    // The documents the database refused, asked for again — before the pull, so one refused again is told once.
+    if (this.#push !== null && this.#unlanded.size > 0) await this.#reask();
     if (this.#pull !== null) await this.#pullAll();
     if (this.#canceled) return;
     if (this.#push === null) return;
-    // The rows the backend refused by name are tried again, with what the log holds since `pushed`.
+    // The parked rows (refused by name, or a resolution the database refused) are tried again, with what the log holds
+    // since `pushed`.
     for (const id of this.#parked) this.#pending.set(id, this.#last);
     this.#parked.clear();
     this.#collectPending();
@@ -455,10 +467,10 @@ class Replication extends Emitter {
     }
   }
 
-  // The checkpoint text from the kv — `{ pull, pushed, known: { id: digest | null } }`: the backend's position
-  // pulled through, this node's log position pushed through, and per record the digest of the backend's state as
-  // last known (null: it holds nothing). A text that does not read is said and read as none (a pull from the start,
-  // a push of every record).
+  // The checkpoint text from the kv — `{ pull, pushed, known: { id: digest | null }, refused: [id] }`: the backend's
+  // position pulled through, this node's log position pushed through, per record the digest of the backend's state
+  // as last known (null: it holds nothing), and the ids whose state the database refused to land. A text that does
+  // not read is said and read as none (a pull from the start, a push of every record).
   async #load() {
     this.#loaded = true;
     let text = null;
@@ -473,6 +485,8 @@ class Replication extends Emitter {
       pull: text.pull === undefined ? null : text.pull,
       pushed: typeof text.pushed === 'string' ? text.pushed : null,
     };
+    const refused = Array.isArray(text.refused) ? text.refused : [];
+    for (let i = 0; i < refused.length; i++) if (isRecordId(refused[i])) this.#unlanded.add(refused[i]);
     if (!isPlainObject(text.known)) return;
     for (const id of Object.keys(text.known)) {
       const digest = text.known[id];
@@ -536,7 +550,8 @@ class Replication extends Emitter {
   async #write() {
     const known = Object.create(null);
     for (const [id, digest] of this.#digests) known[id] = digest;
-    const text = JSON.stringify({ pull: this.#checkpoint.pull, pushed: this.#checkpoint.pushed, known });
+    const { pull, pushed } = this.#checkpoint;
+    const text = JSON.stringify({ pull, pushed, known, refused: [...this.#unlanded] });
     try {
       await this.#store.put(this.#name, text, { atomic: true });
     } catch (error) {
@@ -716,6 +731,8 @@ class Replication extends Emitter {
     this.#count('pull', 'pulled', documents.length);
     const collection = this.#collection;
     const conflicts = [];
+    // The backend's states landed, as id and text: learned once the transaction has (one that fails whole, nothing).
+    const learned = [];
     let applied = 0;
     if (docs.length > 0) {
       // Each document against what the backend was known to hold and whether an edit of the record waits to go:
@@ -723,7 +740,9 @@ class Replication extends Emitter {
       // edit is compared against it by the push — unless the record reads otherwise with no edit pending (a landing
       // that never happened), which lands; (2) another state over a pending edit is a conflict — the backend moved
       // under the edit: `resolve` or the backend wins, landed here under the resolve actor, told; (3) another state
-      // over a record with nothing pending is the backend's newer state: landed unless the record reads so already.
+      // over a record with nothing pending is the backend's newer state: landed unless the record reads so already. A
+      // state the database refuses to land is not learned (nobody wins: `#unlanded`), and an edit of such a record
+      // counts as pending though nothing else remembers it (a parked row, a restart): never landed over in silence.
       await this.#exclusive(() =>
         this.#db.transact(
           async (tx) => {
@@ -731,27 +750,28 @@ class Replication extends Emitter {
               const { id, deleted, data, text } = docs[i];
               try {
                 const local = await tx.get(id);
-                const pending = this.#pending.has(id);
+                const pending = this.#pending.has(id) || (this.#unlanded.has(id) && this.#quiet(id, local) === null);
                 const reads = deleted ? local === null : local !== null && same(plain(local), plain(data));
                 const echo = this.#assumedText(id, text);
-                if (echo && (pending || reads)) continue;
+                if (echo && (pending || reads)) {
+                  // The backend holds what this node knows: a state refused before is gone from it.
+                  this.#unlanded.delete(id);
+                  continue;
+                }
                 if (!echo && pending && !reads) {
                   const decided = await this.#decide(id, plain(local), { data, deleted });
-                  this.#learn(id, text);
                   await this.#landResolution(tx, decided);
+                  learned.push(id, text);
                   conflicts.push(decided.event);
                   continue;
                 }
-                // The backend's state, learned; a pending edit that reads as it has nothing to resolve.
-                this.#learn(id, text);
-                if (deleted) {
-                  if (local === null) continue;
-                  await tx.delete(id);
-                } else {
-                  if (local !== null && same(plain(local), plain(data))) continue;
-                  await tx.set(id, { ...data, $type: collection });
+                // The backend's newer state, landed; a pending edit that reads as it has nothing to resolve.
+                if (!reads) {
+                  if (deleted) await tx.delete(id);
+                  else await tx.set(id, { ...data, $type: collection });
+                  applied++;
                 }
-                applied++;
+                learned.push(id, text);
               } catch (error) {
                 refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
               }
@@ -761,7 +781,14 @@ class Replication extends Emitter {
         ),
       );
     }
-    for (let i = 0; i < refusals.length; i++) this.#refuse('pull', refusals[i][0], refusals[i][1], refusals[i][2]);
+    for (let i = 0; i < learned.length; i += 2) this.#learn(learned[i], learned[i + 1]);
+    for (let i = 0; i < refusals.length; i++) {
+      // Not learned: a later edit assumes the state known, `reSync()` asks again. Another collection's record and a
+      // sealed one are this node's own: nothing to ask the backend again.
+      const reason = refusals[i][1];
+      if (reason !== 'collection' && reason !== 'sealed') this.#unlanded.add(refusals[i][0]);
+      this.#refuse('pull', refusals[i][0], reason, refusals[i][2]);
+    }
     this.#count('pull', 'conflict', conflicts.length);
     for (let i = 0; i < conflicts.length; i++) notify(this, this.#logger, 'conflict', conflicts[i]);
     if (docs.length === 0) return;
@@ -774,6 +801,61 @@ class Replication extends Emitter {
   #assumedText(id, text) {
     if (this.#known.has(id)) return this.#known.get(id) === text;
     return this.#digests.has(id) && this.#digests.get(id) === this.#digestOf(text);
+  }
+
+  // A record as the backend is to hold it: `data` in the backend's shape (`modifier.push`; null for none) and its
+  // canonical `text`. A `modifier.push` that throws, throws.
+  #outgoing(id, local) {
+    let data = plain(local);
+    if (data !== null && this.#modifier.push !== null) data = this.#modifier.push(data, id);
+    return { data, text: data === null ? null : canonical(data) };
+  }
+
+  // The record as the backend is to hold it where it reads as the backend's state as known (knowing nothing, where
+  // there is no record); null where it reads otherwise — an edit the backend has not taken (a `modifier.push` that
+  // throws counts as one). Asked of an id whose landing was refused, where nothing else remembers the edit.
+  #quiet(id, local) {
+    let out;
+    try {
+      out = this.#outgoing(id, local);
+    } catch {
+      return null;
+    }
+    const known = this.#known.has(id) || this.#digests.has(id) ? this.#assumedText(id, out.text) : out.text === null;
+    return known ? out : null;
+  }
+
+  // `reSync()`'s ask about the documents whose landing the database refused, on the pull side's queue: a record
+  // still as the backend was last known to hold it is probed — the handler answers what the backend holds, writing
+  // nothing — and the answer judged as a pulled document: landed, or refused again; a record edited since is the
+  // push's (pending: it goes with the state known assumed, a conflict). A parked or pending id is the push's already.
+  #reask() {
+    return this.#enqueue(async () => {
+      try {
+        const ids = [];
+        for (const id of this.#unlanded) if (!this.#pending.has(id) && !this.#parked.has(id)) ids.push(id);
+        for (let at = 0; at < ids.length && !this.#canceled; at += this.#batchSize) {
+          const rows = [];
+          for (let i = at; i < ids.length && i < at + this.#batchSize; i++) {
+            const local = await this.#db.get(ids[i]);
+            const out = this.#quiet(ids[i], local);
+            if (out === null) this.#pending.set(ids[i], this.#last);
+            else rows.push({ id: ids[i], data: out.data, deleted: local === null, assumed: undefined });
+          }
+          if (rows.length === 0) continue;
+          this.#stats.probed += rows.length;
+          this.#count('push', 'probed', rows.length);
+          const answers = await this.#exclusive(() => this.#push.handler(rows));
+          const docs = [];
+          const list = Array.isArray(answers) ? answers : [];
+          for (let i = 0; i < list.length; i++) if (isPlainObject(list[i]) && list[i].error == null) docs.push(list[i]);
+          await this.#land(docs);
+        }
+        await this.#save(true);
+      } catch (error) {
+        this.#failed('pull', error, null);
+      }
+    });
   }
 
   // A backend's data in the application's shape: through `modifier.pull` (once), then held to JSON. Answers null, or
@@ -916,6 +998,7 @@ class Replication extends Emitter {
   // its digest for the checkpoint text. A record the backend holds nothing of and this node no longer has leaves
   // no digest behind.
   #learn(id, text) {
+    this.#unlanded.delete(id);
     this.#known.delete(id);
     this.#known.set(id, text);
     if (this.#known.size > KNOWN_MAX) this.#forget();
@@ -1100,22 +1183,16 @@ class Replication extends Emitter {
     const texts = [];
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
-      const data = await this.#db.get(id);
-      let out = null;
-      if (data !== null) {
-        out = plain(data);
-        if (this.#modifier.push !== null) {
-          try {
-            out = this.#modifier.push(out, id);
-          } catch (error) {
-            this.#pending.delete(id);
-            this.#refuse('push', id, 'modifier', error);
-            continue;
-          }
-        }
+      const local = await this.#db.get(id);
+      let out;
+      try {
+        out = this.#outgoing(id, local);
+      } catch (error) {
+        this.#pending.delete(id);
+        this.#refuse('push', id, 'modifier', error);
+        continue;
       }
-      const text = out === null ? null : canonical(out);
-      if (this.#known.has(id) && this.#known.get(id) === text) {
+      if (this.#known.has(id) && this.#known.get(id) === out.text) {
         this.#pending.delete(id);
         continue;
       }
@@ -1124,8 +1201,8 @@ class Replication extends Emitter {
         this.#stats.probed++;
         this.#count('push', 'probed');
       }
-      rows.push({ id, data: out, deleted: data === null, assumed });
-      texts.push(text);
+      rows.push({ id, data: out.data, deleted: local === null, assumed });
+      texts.push(out.text);
     }
     return { rows, texts };
   }
@@ -1254,15 +1331,25 @@ class Replication extends Emitter {
       },
       { source: `${this.#source}:resolve`, actor: this.#actor },
     );
+    // A resolution the engine refused learns nothing (nobody wins): the row is parked — a turn of the record or
+    // `reSync()` pushes it again with the state known assumed, the same conflict — the backend's state unlanded.
+    const refused = new Set();
+    for (let i = 0; i < refusals.length; i++) {
+      const id = refusals[i][0];
+      refused.add(id);
+      this.#unlanded.add(id);
+      this.#parked.add(id);
+      this.#count('push', 'parked');
+      this.#refuse('push', id, refusals[i][1], refusals[i][2]);
+    }
     // Landed: the backend's state is what the next push assumes, the ids stay pending for it. A landing that failed
     // whole learned nothing — the rows go again with what they assumed, and the backend answers the conflict again.
     for (let i = 0; i < conflicts.length; i++) {
-      if (conflicts[i] === null) continue;
+      if (conflicts[i] === null || refused.has(conflicts[i][0].id)) continue;
       const [row, , text] = conflicts[i];
       this.#conflicted.add(row.id);
       this.#learn(row.id, text);
     }
-    for (let i = 0; i < refusals.length; i++) this.#refuse('push', refusals[i][0], refusals[i][1], refusals[i][2]);
     this.#count('push', 'conflict', decided.length);
     for (let i = 0; i < decided.length; i++) notify(this, this.#logger, 'conflict', decided[i].event);
   }

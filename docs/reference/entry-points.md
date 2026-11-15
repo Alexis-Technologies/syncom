@@ -145,7 +145,7 @@ numbers below were measured on 2026-11-15; `pnpm size` prints the current ones w
 | `/codemirror` | 6.4 KB | `/prosemirror` | 7.8 KB |
 | `/store` | 1.2 KB | `/inspect` | 5.6 KB |
 | `/dump` | 7.2 KB | `/pipeline` | 3.3 KB |
-| `/cleanup` | 3.1 KB | `/connector` | 9.5 KB |
+| `/cleanup` | 3.1 KB | `/connector` | 9.9 KB |
 | `/connector/couchdb` | 1.6 KB | `/connector/graphql` | 0.8 KB |
 | `/connector/mongodb` | 1.1 KB | `/connector/supabase` | 1.4 KB |
 | `/connector/firestore` | 1.6 KB | `/connector/appwrite` | 1.4 KB |

@@ -77,6 +77,12 @@ does. A document that cannot land (a record of another collection, an [encrypted
 is not JSON, one a [validator](./schema-validation) refuses) is left out and reported, and the rest of the page
 lands.
 
+A document your database refuses is not taken as the backend's state, so neither side wins over it. An edit you make
+to that record later goes out assuming the state this node last landed, meets the backend's version as a conflict,
+and `resolve` decides; it never writes over the backend's version unseen. On a connector with a push handler,
+`reSync()` asks the backend again for every document refused this way, even after a restart, so a document an older
+version of your schema refused lands once the database accepts it.
+
 ## Write the push handler
 
 Every change to a record of the collection, made here or arriving from a peer, becomes a row for the push handler:
@@ -135,7 +141,9 @@ once more, and both sides edit `t3`:
 <<< @/examples/connectors.mjs#resolve
 
 The resolution lands here and goes back to the backend with the backend's state as what it assumed. A `resolve` that
-throws is logged and the backend wins.
+throws is logged and the backend wins. When your database refuses the resolution (a validator says no to the
+backend's state), neither side wins: the record keeps your edit, the backend keeps its version, and the row is set
+aside as `refused` until the record changes again or you call `reSync()`, each of which meets the same conflict.
 
 ## Reshape documents between the two sides
 
