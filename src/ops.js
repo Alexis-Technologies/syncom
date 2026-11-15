@@ -50,7 +50,10 @@
 //                 `v`, absent on a node without a schema): what a reader on
 //                 a newer schema lenses the record through. A `set` that
 //                 creates the entry takes its op's `v`; a later `set`, `inc`
-//                 or `delete` leaves it; a merge takes the higher one.
+//                 or `delete` leaves it; a merge takes the higher one. (A
+//                 node's own field op on a record of an older version than
+//                 its own is preceded by a `write` that migrates it —
+//                 src/commit.js `upgrading` — so the op lands on that.)
 //   purged      — the stamp of a `purge`: the record is gone for good. It
 //                 wins over every other op at any stamp (a purge is a right
 //                 to be forgotten, not a race), the entry holds no data, and

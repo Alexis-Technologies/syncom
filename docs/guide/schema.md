@@ -135,8 +135,9 @@ it last ran, and `schemaInfo` tells you when it changed:
 <<< @/examples/schema.mjs#version
 
 Nodes on different versions keep syncing. A record written under an older version is read through a lens
-of migrations you write and the validator's own aliases and defaults, and `migrate()` rewrites old records
-when you are ready; [Schema migration](./migration-schema) covers both.
+of migrations you write and the validator's own aliases and defaults; your first write to such a record
+rewrites it in the new shape, and `migrate()` rewrites the rest when you are ready. [Schema migration](./migration-schema)
+covers all three.
 
 ## Limitations
 

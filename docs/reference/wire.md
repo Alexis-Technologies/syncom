@@ -438,7 +438,7 @@ merge:
 | `sets` | Per field, per element (its canonical JSON as the key), per origin, `[added, removed]` stamps; live while `added > removed` |
 | `blocks` | Per list, text or tree field, the kind plugin's block under its code `k` — `t` text, `l` list, `tree` — with the block's `ts`; a text's or list's `runs` (`[anchor, content, extendedFrom?]` per `ts:origin`), `cuts`, `ext`, `pos`, `vals`, `marks`, `pending`; a tree's `moves` (`[ts, origin, parent, fi]` per node) |
 | `gone` | Per field removed by `unset`, the stamp of the removal — a register's tombstone an older `set` loses to |
-| `v` | The schema version of the last whole-record write |
+| `v` | The schema version of the last whole-record write — a field op leaves it; a node's local field op on a record of an older version than its own rewrites the record first (a `write` at its version, then the op, one transaction) |
 
 A list or text block of 1 024 runs or more (`PIECES_MIN`) is written in
 **pieces**: its `runs` leave the record file for files beside it,

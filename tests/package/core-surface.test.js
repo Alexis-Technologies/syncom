@@ -69,6 +69,7 @@ const MEMBERS = [
   'tags',
   'transact',
   'unpersisted',
+  'upgrade',
   'verify',
   'version',
   'view',

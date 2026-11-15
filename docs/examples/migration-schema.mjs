@@ -14,6 +14,7 @@ const v1 = await createDatabase({
   schema: { version: 1, entities: { Task: {} } },
 });
 const task = await v1.Task.insert({ title: 'Write the docs', done: false });
+const release = await v1.Task.insert({ title: 'Plan the release', done: false });
 await v1.close();
 // #endregion v1
 
@@ -45,6 +46,22 @@ const rows = await board.Task.select({ name: 'Write the docs' }).fetch();
 console.log(rows.length); // 1
 // #endregion query
 assert.equal(rows.length, 1);
+
+const changes = [];
+board.on('change', (op) => changes.push([op.type, op.v]));
+// #region write-old
+// A write to a record still of version 1 rewrites the record at version 2 first, in the same transaction.
+await board.Task.update(release.id, { name: 'Plan the 2.0 release' });
+console.log(await board.Task.get(release.id)); // { done: false, name: 'Plan the 2.0 release', $type: 'Task' }
+console.log(board.getCachedData(release.id)); // the same: stored at version 2 now
+// #endregion write-old
+const renamed = { done: false, name: 'Plan the 2.0 release', $type: 'Task' };
+assert.deepEqual(await board.Task.get(release.id), renamed);
+assert.deepEqual(board.getCachedData(release.id), renamed);
+assert.deepEqual(changes, [
+  ['write', 2],
+  ['set', 2],
+]);
 
 // #region migrate
 if (board.schemaInfo.previous) {

@@ -33,6 +33,11 @@ const { SyncomError, typed } = require('./errors.js');
 const MISMATCH = Symbol('syncom.mismatch');
 // `expect: ABSENT` — a named insert: a live record there already is EXISTS, decided inside the queue.
 const ABSENT = Symbol('syncom.absent');
+// An op of the migration a local write to a record of an older version runs first (`commitIn`): not validated
+// alone — the half state is read by no one — the write after it is, over the record as the two leave it.
+const UNCHECKED = Symbol('syncom.unchecked');
+// What the write after a migration came to when it makes nothing: the transaction thrown away whole.
+const NOTHING = Symbol('syncom.nothing');
 const commitResult = (op) => (op === undefined ? 'encrypted' : op === null || op === MISMATCH ? 'noop' : 'applied');
 
 // `$type` names the collection a record belongs to and never changes: a
@@ -266,6 +271,18 @@ const kindClash = (type, payload, current, plugins) => {
 // The ops that take a record as a whole; every other op is a field's, and a field op needs a record that reads.
 const WHOLE = new Set(['write', 'delete', 'purge', 'merge']);
 
+// Whether a local field op on `current` migrates it first: a live record an older schema version wrote, which
+// this node reads through the lens. Left so, the op would leave it of that version, and the lens — run over the
+// record and the op's fields at once — would read the op's fields over (`name: title` over the new `name`).
+const stale = (core, type, current) =>
+  core.upgrade !== null &&
+  !WHOLE.has(type) &&
+  current !== null &&
+  current !== undefined &&
+  !current.encrypted &&
+  isAlive(current) &&
+  (current.meta.v ?? 1) < core.version;
+
 const prepareOp = (core, type, id, payload, current, who, from) => {
   // Delete wins: a field op on a deleted (or purged) record would lie in its meta unseen — refused here as
   // update() refuses it; a whole-record write is what brings a deleted record back. An absent one it makes.
@@ -339,10 +356,12 @@ const assertUnique = async (core, id, entry) => {
 // throw leaves nothing durable. An `inc`, `add` or `remove` is checked but
 // carries no data to fold. Returns `{ entry, delta }`, or null for an op that
 // changes nothing.
-const validateLocal = async (core, op, current, visible, ctx) => {
+const validateLocal = async (core, op, current, visible, ctx, unchecked = false) => {
   const { id, type } = op;
   const applied = applyLocal(core, op, current);
   if (applied === null) return null;
+  // A migration's op (`UNCHECKED`): the write after it is checked, over the record as both leave it.
+  if (unchecked) return applied;
   let { entry, delta, changes } = applied;
   const def = core.definitionOf(entry.data);
   if (def?.validator && VALIDATED.has(type)) {
@@ -708,7 +727,7 @@ const prepare = async (core, type, id, payload, options) => {
   if (sealed) return { op: await commitSealed(core, type, id, payload, current, ctx, source), sealed: true };
   const op = opOf(core, type, id, payload, current, visible, who, from, msg, ctx);
   if (op === null) return { op: null };
-  const applied = await validateLocal(core, op, current, visible, ctx);
+  const applied = await validateLocal(core, op, current, visible, ctx, options[UNCHECKED] === true);
   if (applied === null) return { op: null };
   return prepared(core, op, applied, current, ctx, source, via);
 };
@@ -1108,11 +1127,16 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   };
   const commitIn = async (type, id, payload, options = {}) => {
     if (!isRecordId(id)) throw invalidId(id);
-    if (options.encrypted === true || (await tx.current(id))?.encrypted === true) {
+    const current = await tx.current(id);
+    if (options.encrypted === true || current?.encrypted === true) {
       throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted: an encrypted write stays outside a transaction`);
     }
     const given = { ...options, source, message: msg };
     if (given.actor === undefined) given.actor = actor;
+    // A record an older schema version wrote is migrated first, here (migrate() for one record, the schema
+    // plugin's): its view as a whole-record write at this version — unchecked, the op after it is what the
+    // validator sees — then this op over it. The ops after it in the transaction find it of this version.
+    if (stale(core, type, current)) await core.upgrade(tx, id, current, { actor: given.actor, [UNCHECKED]: true });
     const made = await tracedPrepare(tx, type, id, payload, given);
     const { op } = made;
     if (op === null || op === undefined || op === MISMATCH) return op;
@@ -1282,8 +1306,40 @@ const tracedCommit = async (core, type, id, payload, options) => {
  * is none).
  */
 const commit = (core, type, id, payload, options = {}) => {
+  if (core.upgrade !== null && !WHOLE.has(type) && options.encrypted !== true) {
+    return upgrading(core, type, id, payload, options);
+  }
+  return commitOne(core, type, id, payload, options);
+};
+
+const commitOne = (core, type, id, payload, options) => {
   if (!core.otel.enabled) return commitLocal(core, type, id, payload, options);
   return tracedCommit(core, type, id, payload, options);
+};
+
+// A local field op on a record of an older schema version: one transaction of the migration and the op
+// (`commitIn` migrates first), so nothing reads the half state; one that makes nothing — a swap whose
+// expectation no longer holds, an unset of nothing — throws the transaction away, the migration with it. (Inside
+// a transaction of the caller's, an op that makes nothing leaves the migration in it: a record of this version.)
+const upgrading = async (core, type, id, payload, options) => {
+  if (!stale(core, type, await core.current(id))) return commitOne(core, type, id, payload, options);
+  const { actor, source = null, message } = options;
+  let made = null;
+  try {
+    const { result, done } = await transact(
+      core,
+      async (tx) => {
+        made = await tx.commit(type, id, payload, options);
+        if (made === null || made === undefined || made === MISMATCH) throw NOTHING;
+        return made;
+      },
+      { actor, source, message },
+    );
+    return outcome(result, done);
+  } catch (error) {
+    if (error === NOTHING) return outcome(made);
+    throw error;
+  }
 };
 
 module.exports = { commit, commitAtOnce, transact, rehearse, link, prepareOp, applyLocal, MISMATCH, ABSENT };

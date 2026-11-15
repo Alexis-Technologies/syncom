@@ -726,7 +726,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
 
   for (const [variant, v2] of Object.entries(v2Variants)) {
     await t.test(
-      `a newer node reads an older record through the lens (${variant}), and migrate() rewrites it`,
+      `a newer node reads an older record through the lens (${variant}); migrate(), or its first write to one, rewrites it`,
       async (t2) => {
         const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
           nodes: { A: { schema: { entities: { Post: {} } } }, B: { schema: v2 } },
@@ -748,22 +748,6 @@ const runSchemaTests = async (t, assert, createStorage) => {
         assert.deepStrictEqual(b.getCachedData(post.id), { title: 'x', $type: 'Post' }, 'the cache peek is raw');
         const record = await b.document(post.id);
         assert.strictEqual(record.name, 'x', 'a Record view reads through the lens');
-        assert.strictEqual(await b.swap(post.id, { desc: 'swapped' }, { name: 'x' }), true, 'swap compares the view');
-        await settle([a, b]);
-        // A set is validated through the lens and carries only what changed.
-        const refreshed = new Promise((resolve) => record.once('update', () => resolve()));
-        await b.Post.update(post.id, { desc: 'd' });
-        await refreshed;
-        assert.deepStrictEqual(
-          [record.name, record.desc, record.title],
-          ['x', 'd', undefined],
-          'the Record stays lensed',
-        );
-        assert.deepStrictEqual(bOps.at(-1).data, { desc: 'd' });
-        await settle([a, b]);
-        assert.deepStrictEqual(await a.get(post.id), { title: 'x', desc: 'd', $type: 'Post' }, 'A keeps its shape');
-        assert.deepStrictEqual(await b.get(post.id), { name: 'x', desc: 'd', $type: 'Post' });
-        assert.strictEqual((await metaOf(b, post.id)).v, 1, 'a set does not move the record’s version');
         await a.inc(post.id, 'hits', 3);
         await a.add(post.id, 'tags', ['t']);
         await a.treeMove(post.id, 'outline', 'n1');
@@ -771,6 +755,7 @@ const runSchemaTests = async (t, assert, createStorage) => {
         await settle([a, b]);
         assert.strictEqual((await b.get(post.id)).hits, 3);
         assert.deepStrictEqual((await b.get(post.id)).tags, ['t']);
+        assert.strictEqual((await metaOf(b, post.id)).v, 1, 'a peer’s field ops leave the record’s version');
         // migrate(): a whole-record write of the view (v2, no `title`), then
         // the counter and the set added back.
         const before = bOps.length;
@@ -788,30 +773,51 @@ const runSchemaTests = async (t, assert, createStorage) => {
           ['tree', 'n1', null, 'tree', 'n2', 'n1'],
           'a tree comes back as one move per node, parents first',
         );
-        assert.deepStrictEqual(
-          [write.type, write.v, write.data],
-          ['write', 2, { name: 'x', desc: 'd', $type: 'Post' }],
-        );
+        assert.deepStrictEqual([write.type, write.v, write.data], ['write', 2, { name: 'x', desc: '', $type: 'Post' }]);
         assert.deepStrictEqual([inc.type, inc.key, inc.value], ['inc', 'hits', 3]);
         assert.deepStrictEqual([add.type, add.key, add.value], ['add', 'tags', ['t']]);
         const outline = [{ id: 'n1', children: [{ id: 'n2', children: [] }] }];
-        const migrated = { name: 'x', desc: 'd', hits: 3, tags: ['t'], outline, $type: 'Post' };
+        const migrated = { name: 'x', desc: '', hits: 3, tags: ['t'], outline, $type: 'Post' };
         assert.deepStrictEqual(await b.get(post.id), migrated);
         assert.strictEqual((await metaOf(b, post.id)).v, 2);
         await settle([a, b]);
         assert.deepStrictEqual(await a.get(post.id), migrated, 'A applies v2 ops as they are');
         assert.strictEqual((await metaOf(a, post.id)).v, 2);
-        // Every v2 op B made — its swap, its update, the migration's write and inc — was ahead of A.
+        // B's first write to a record A wrote under v1 migrates it first, in the same transaction: the view as a
+        // whole-record write at v2, then the write itself — a swap compares the view, a set carries what changed.
+        const second = await a.Post.insert({ title: 'y' });
+        await settle([a, b]);
+        const record2 = await b.document(second.id);
+        const from = bOps.length;
+        assert.strictEqual(await b.swap(second.id, { desc: 'swapped' }, { name: 'y' }), true, 'swap compares the view');
+        const [upgrade, swapped] = bOps.slice(from);
+        assert.deepStrictEqual(
+          [upgrade.type, upgrade.v, upgrade.data],
+          ['write', 2, { name: 'y', desc: '', $type: 'Post' }],
+          'the record as the lens reads it, written at v2',
+        );
+        assert.deepStrictEqual([swapped.type, swapped.data], ['set', { desc: 'swapped' }]);
+        assert.strictEqual((await metaOf(b, second.id)).v, 2, 'of B’s version now');
+        const refreshed = new Promise((resolve) => record2.once('update', () => resolve()));
+        await b.Post.update(second.id, { desc: 'd' });
+        await refreshed;
+        assert.deepStrictEqual([record2.name, record2.desc, record2.title], ['y', 'd', undefined]);
+        assert.deepStrictEqual(bOps.at(-1).data, { desc: 'd' });
+        assert.strictEqual(bOps.length, from + 3, 'migrated once: the record is of v2 from then on');
+        await settle([a, b]);
+        assert.deepStrictEqual(await a.get(second.id), { name: 'y', desc: 'd', $type: 'Post' }, 'A takes it as it is');
+        // Every v2 op B made — the migrations' writes, inc, add and moves, the swap and the update — was ahead of A.
         assert.deepStrictEqual(
           aEvents.map((event) => [event.kind, event.held, event.op.type]),
           [
-            ['ahead', false, 'set'],
-            ['ahead', false, 'set'],
             ['ahead', false, 'write'],
             ['ahead', false, 'inc'],
             ['ahead', false, 'add'],
             ['ahead', false, 'tree'],
             ['ahead', false, 'tree'],
+            ['ahead', false, 'write'],
+            ['ahead', false, 'set'],
+            ['ahead', false, 'set'],
           ],
         );
         assert.deepStrictEqual(
@@ -833,6 +839,138 @@ const runSchemaTests = async (t, assert, createStorage) => {
       },
     );
   }
+
+  await t.test(
+    'a local write to a record of an older version migrates it first, in its transaction: what it wrote reads back',
+    async (t2) => {
+      // v2 renames `title` to `name`. Without the migration first, the lens ran `up` over the v1 record AND the v2
+      // write — `name: title` read the new `name` over — and migrate() then wrote the loss down.
+      const v1 = { entities: { Task: {} } };
+      const rename = { 2: { Task: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } };
+      const v2 = { version: 2, entities: { Task: {} }, migrations: rename };
+      const old = await createStorage(t2, 'A', { schema: v1 });
+      const ids = [];
+      for (const title of ['update', 'inc', 'modify', 'same', 'tx']) {
+        ids.push((await old.Task.insert({ title, done: false })).id);
+      }
+      await old.close();
+      let db = await createStorage(t2, 'A', { schema: v2 });
+      const ops = [];
+      db.on('change', (op) => ops.push(op));
+      const turns = [];
+      db.on('transaction', (event) => turns.push(event.ops.map((op) => op.type)));
+      const [updated, counted, modified, same, inTx] = ids;
+      assert.deepStrictEqual(await db.Task.get(updated), { name: 'update', done: false, $type: 'Task' }, 'lensed');
+      await db.Task.update(updated, { name: 'Rewritten' });
+      assert.deepStrictEqual(await db.Task.get(updated), { name: 'Rewritten', done: false, $type: 'Task' });
+      assert.deepStrictEqual(
+        ops.map((op) => [op.type, op.v, op.data]),
+        [
+          ['write', 2, { name: 'update', done: false, $type: 'Task' }],
+          ['set', 2, { name: 'Rewritten' }],
+        ],
+        'the view written at v2 first, then the update',
+      );
+      assert.deepStrictEqual(turns, [['write', 'set']], 'one turn: nothing reads the half state');
+      assert.strictEqual((await metaOf(db, updated)).v, 2);
+      // An inc, modify(): the same.
+      await db.inc(counted, 'votes', 1);
+      assert.deepStrictEqual(await db.get(counted), { name: 'inc', done: false, votes: 1, $type: 'Task' });
+      const after = await db.Task.modify(modified, (task) => ({ ...task, name: `${task.name}!` }));
+      assert.deepStrictEqual(after, { name: 'modify!', done: false, $type: 'Task' });
+      // A write that makes nothing — a swap whose expectation does not hold — writes nothing: the migration neither.
+      const logged = db.log.length;
+      assert.strictEqual(await db.swap(same, { done: true }, { name: 'not this' }), false);
+      assert.strictEqual(db.log.length, logged, 'nothing appended');
+      assert.strictEqual((await metaOf(db, same)).v, 1, 'still of v1: read through the lens');
+      // Inside a transaction: migrated as its first op touches the record, once.
+      await db.transact(async (tx) => {
+        await tx.update(inTx, { name: 'in a transaction' });
+        await tx.update(inTx, { done: true });
+      });
+      assert.deepStrictEqual(turns.at(-1), ['write', 'set', 'set']);
+      assert.deepStrictEqual(await db.get(inTx), { name: 'in a transaction', done: true, $type: 'Task' });
+      assert.deepStrictEqual(await db.migrate(), {
+        migrated: 1,
+        counters: 0,
+        sets: 0,
+        lists: 0,
+        texts: 0,
+        trees: 0,
+      });
+      assert.deepStrictEqual(await db.get(updated), { name: 'Rewritten', done: false, $type: 'Task' }, 'kept');
+      // A cold read after a reopen, and a query by the new name.
+      await db.close();
+      db = await createStorage(t2, 'A', { schema: v2 });
+      assert.deepStrictEqual(await db.Task.get(updated), { name: 'Rewritten', done: false, $type: 'Task' });
+      if (db.plugins.includes('query')) {
+        const rows = await db.Task.select({ name: 'Rewritten' }).fetch();
+        assert.deepStrictEqual(
+          rows.map((row) => row.id),
+          [updated],
+        );
+      }
+    },
+  );
+
+  await t.test(
+    'a write that makes an old record valid lands: the migration is checked with it, not alone',
+    async (t2) => {
+      // The validator needs `slug`, which no v1 record has: the migration alone would be refused, the update that
+      // brings the slug is not. And one that leaves it invalid is refused whole — nothing of the migration written.
+      const old = await createStorage(t2, 'A', { schema: { entities: { Post: {} } } });
+      const post = await old.Post.insert({ title: 'x' });
+      await old.close();
+      const strict = standard((value) =>
+        value.slug ? { value } : { issues: [issue('is required', ['slug'], 'required')] },
+      );
+      const db = await createStorage(t2, 'A', {
+        schema: {
+          version: 2,
+          entities: { Post: { schema: strict } },
+          migrations: { 2: { Post: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } },
+        },
+      });
+      const logged = db.log.length;
+      await assert.rejects(db.Post.update(post.id, { draft: true }), { name: 'ValidationError', entity: 'Post' });
+      assert.strictEqual(db.log.length, logged, 'refused whole');
+      assert.strictEqual((await metaOf(db, post.id)).v, 1);
+      await db.Post.update(post.id, { slug: 'x' });
+      assert.deepStrictEqual(await db.Post.get(post.id), { name: 'x', slug: 'x', $type: 'Post' });
+      assert.strictEqual((await metaOf(db, post.id)).v, 2);
+    },
+  );
+
+  await t.test('two nodes: a v2 node’s write to a v1 record reads back on both v2 readers', async (t2) => {
+    const v1 = { entities: { Task: {} } };
+    const v2 = {
+      version: 2,
+      entities: { Task: {} },
+      migrations: { 2: { Task: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } },
+    };
+    const mesh = await createMesh(
+      t2,
+      ['server', 'phone', 'laptop'],
+      [
+        ['phone', 'server'],
+        ['laptop', 'server'],
+      ],
+      createStorage,
+      { nodes: { server: { schema: v2 }, phone: { schema: v1 }, laptop: { schema: v2 } } },
+    );
+    const [server, phone, laptop] = ['server', 'phone', 'laptop'].map((name) => mesh.get(name));
+    const made = await phone.Task.insert({ title: 'Made on the phone' });
+    await settle([server, phone, laptop]);
+    assert.deepStrictEqual(await laptop.Task.get(made.id), { name: 'Made on the phone', $type: 'Task' }, 'lensed');
+    await server.Task.update(made.id, { name: 'Renamed on the server' });
+    await settle([server, phone, laptop]);
+    const renamed = { name: 'Renamed on the server', $type: 'Task' };
+    assert.deepStrictEqual(await server.Task.get(made.id), renamed);
+    assert.deepStrictEqual(await laptop.Task.get(made.id), renamed);
+    // The v1 node takes the v2 ops as they are: the record of v2 now, read as v2 wrote it.
+    assert.deepStrictEqual(await phone.Task.get(made.id), renamed);
+    assert.strictEqual((await metaOf(phone, made.id)).v, 2);
+  });
 
   await t.test('lens options: which steps read an older record, what a migration may return', async (t2) => {
     const v1 = { entities: { Post: {} } };

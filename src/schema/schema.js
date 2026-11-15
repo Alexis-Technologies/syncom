@@ -18,7 +18,7 @@
 
 const { normalizeSchema, defineEntity } = require('./define.js');
 const { createLens } = require('./lens.js');
-const { loadVersion, migrate, check } = require('./api.js');
+const { loadVersion, migrate, migrateRecord, check } = require('./api.js');
 const { ValidationError } = require('../errors.js');
 
 const schema = Object.freeze({
@@ -31,7 +31,9 @@ const schema = Object.freeze({
     const load = () => loadVersion(ctx, normalized);
     // A collection defined after the open (`addCollections`): normalized as the schema's were.
     const define = (name, def, names) => defineEntity(name, def, options.validator, names);
-    return { schema: { ...normalized, given, view, load, define } };
+    // A record of an older version that a local write is about to change, rewritten first (src/commit.js).
+    const upgrade = given === null ? null : migrateRecord;
+    return { schema: { ...normalized, given, view, load, define, upgrade } };
   },
   methods: { migrate, check },
 });

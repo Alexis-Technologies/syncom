@@ -208,9 +208,10 @@ const ENTRIES = [
   // 77.8 with both tracks of review №7 merged — the sealed seam, the revert by patches, the blobs' door and the moved
   // source's fence (2026-11-07). 78, raised by name.
   // 78.0 (over by bytes) with a rule's scrub withheld — slot 20's second value, a refused purge applied nowhere — and
-  // a record outside the pusher's scopes logged as one (apply.js refuse, header.js withholdOp; 2026-11-15). 78.2,
-  // raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.2 },
+  // a record outside the pusher's scopes logged as one (apply.js refuse, header.js withholdOp; 2026-11-15); with delete
+  // wins (the guard on a field op of a deleted record) and a local write to a record of an older schema version
+  // migrated first, in one transaction (2026-11-15), 78.2 together. 78.4, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.4 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -483,8 +484,9 @@ const ENTRIES = [
   // 180.4 with the sync blocks, the tabs and the blobs observed — the writer's methods and the shared log's, the host's
   // and the manager's call sites (review №7, E9; 2026-11-07). 181, raised by name.
   // 181.9 with the attachments' bytes uploaded on push (syncom/blobPut: the host's door, the dialer's uploads in
-  // waiting and the bytes sent on as they land; 2026-11-15). 182, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 182 },
+  // waiting and the bytes sent on as they land; 2026-11-15); 182.2 with delete wins and a write to a record of an
+  // older schema version migrated first (2026-11-15). 182.4, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 182.4 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).

@@ -174,6 +174,7 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     const [a, b] = ['A', 'B'].map((name) => mesh.get(name));
     await waitUntil(() => a.sync.peers()[0]?.subscribed);
     const project = await a.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
+    const other = await a.Project.insert({ title: 'Mizar', slug: 'mizar', orgId: 'org1' });
     await settle([a, b]);
     assert.deepStrictEqual(await b.get(project.id), {
       name: 'Alioth',
@@ -182,26 +183,24 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
       desc: '',
       $type: 'Project',
     });
-    assert.deepStrictEqual((await b.snapshot()).records[0].data, {
+    assert.deepStrictEqual((await b.snapshot()).records.find((record) => record.id === project.id).data, {
       title: 'Alioth',
       slug: 'alioth',
       orgId: 'org1',
       $type: 'Project',
     });
+    // B's first write to a v1 record migrates it first: the v2 shape, then the field.
     await b.Project.update(project.id, { desc: 'A data modeler' });
     await settle([a, b]);
-    assert.deepStrictEqual(await a.get(project.id), {
-      title: 'Alioth',
-      slug: 'alioth',
-      orgId: 'org1',
-      desc: 'A data modeler',
-      $type: 'Project',
-    });
+    const written = { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: 'A data modeler', $type: 'Project' };
+    assert.deepStrictEqual(await b.get(project.id), written);
+    assert.deepStrictEqual(await a.get(project.id), written, 'A (v1) applies the v2 ops as they are');
+    // migrate() rewrites the rest.
     assert.deepStrictEqual(await b.migrate(), { migrated: 1, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 });
     await settle([a, b]);
-    const migrated = { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: 'A data modeler', $type: 'Project' };
-    assert.deepStrictEqual(await b.get(project.id), migrated);
-    assert.deepStrictEqual(await a.get(project.id), migrated, 'A (v1) applies the v2 write as it is');
+    const migrated = { name: 'Mizar', slug: 'mizar', orgId: 'org1', desc: '', $type: 'Project' };
+    assert.deepStrictEqual(await b.get(other.id), migrated);
+    assert.deepStrictEqual(await a.get(other.id), migrated, 'A (v1) applies the v2 write as it is');
     // What metaschema says of the change: a reader on v2 reads v1 data.
     assert.strictEqual(compatibility(diff(v1, model)), 'backward');
   });

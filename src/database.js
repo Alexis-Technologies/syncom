@@ -158,6 +158,8 @@ class Database extends Emitter {
   #schemaHash = null;
   #schemaPrevious = null;
   #lens = null;
+  // The schema plugin's `migrateRecord`: what a local write to a record of an older version runs first (src/commit.js).
+  #upgrade = null;
   #ahead = 'apply';
   #held = null;
   #actor;
@@ -349,6 +351,7 @@ class Database extends Emitter {
     this.#version = normalized.version;
     this.#ahead = normalized.ahead;
     this.#lens = normalized.view;
+    this.#upgrade = normalized.upgrade ?? null;
     // A held op lives in the log until this node runs its version;
     // retention that would drop it first makes the hold a silent loss.
     const retention = options.sync?.retention;
@@ -621,6 +624,9 @@ class Database extends Emitter {
       catalog: this.#catalog,
       nodeId: this.#nodeId,
       version: this.#version,
+      // A record of an older version a local write is about to change: rewritten first, in the write's transaction
+      // (the schema plugin's migrateRecord; null without a schema).
+      upgrade: this.#upgrade,
       ahead: this.#ahead,
       maxSkew: this.#maxSkew,
       limits: this.#limits,

@@ -100,7 +100,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing. The `schema` plugin's: `PLUGIN_MISSING` without it, as is `migrate()` |
-| `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Rewrites records of an older schema version through the lens — a `write` of the view, then the counters and the sets added back, a list or a text as one run, a tree as one move per node (an empty one is dropped); idempotent; `actor` rides on the ops it writes; a `TypeError` without `createDatabase({ schema })` (see [Reading across versions](../guide/migration-schema)) |
+| `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Rewrites records of an older schema version through the lens — a `write` of the view, then the counters and the sets added back, a list or a text as one run, a tree as one move per node (an empty one is dropped) — what a local write of a field to such a record does to it first; idempotent; `actor` rides on the ops it writes; a `TypeError` without `createDatabase({ schema })` (see [Reading across versions](../guide/migration-schema)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` — data naming another is a `TypeError` with `code: 'TYPE_IMMUTABLE'`; rejects with `FIELD_KIND` for a field held by another kind than a register. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
 | `update(id, delta, { actor, ifMatch }?)` | `Promise<void>` (`Promise<boolean>` with `ifMatch`) | Sets the listed fields (a `set` op) — a key may be a path (`'profile/city'`, see [Paths](../guide/fields#edit-part-of-an-object)) — or, written in operators (`$set`, `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max`, `$rename`; every key one, or none: mixed is a `TypeError`), the ops each one means by the kind of its field, decided inside the queue and written as one transaction (see [Update operators](../guide/fields#update-operators-pick-the-kind-for-you)); with `ifMatch` (a Mango query, the `query` plugin's — `PLUGIN_MISSING` without it) the write is made only where the record matches it, inside the queue, and resolves to whether it was. Rejects with `NOT_FOUND` when absent, `FIELD_KIND` on a counter, set, list, text or tree field, or under a prefix one holds — an operator on a field of another kind the same (`$inc` on a register, `$addToSet` on a counter), nothing of the update written |
 | `unset(id, fields, { actor }?)` | `Promise<void>` | Removes fields of any kind — one name or an array of them (an `unset` op: the fields' own reset, which an older concurrent write of them loses to and a newer one makes them again); a field the record does not hold is no op, so an absent record is too, and a deleted one is `NOT_FOUND`; also on a collection and a `Document` |
@@ -953,11 +953,20 @@ indexed values, a `Document` as it loads, `diff()`. What reads raw: `snapshot()`
 as it was written. A write validates the record as it reads and carries only the keys it changed (see
 [How a write is validated](#how-a-write-is-validated)).
 
+A local op of a field — `set` (an `update()`, a `swap()`, `modify()`'s difference), `unset`, `inc`, `add`,
+`remove`, a list, text or tree op, in a transaction or alone — on a live record whose `meta.v` is below this
+version first rewrites the record as `migrate()` would: a whole-record `write` of its view at this version, its
+fields of other kinds made again, then the op — one transaction, one turn, so nothing reads the record in between
+(the lens, run over the record and the op's fields at once, would read them over). The rewrite is not validated
+alone: the op after it is, over the record as both leave it. An op made alone that makes nothing (a `swap()`
+mismatch, an `unset` of nothing) throws the transaction away, the rewrite with it; a whole-record write needs none; an editor's handle
+(`openText()`) edits the record as it is.
+
 `migrate({ entities, batch, actor })` rewrites what the lens only reads: every record of an older version
 becomes a whole-record `write` of its view, at this version, then its fields of other kinds made again — an
 `inc` per counter, an `add` per set, one `splice` per list or text, one move per tree node. Run it on one
-node after an upgrade; the peers receive ordinary ops. It is idempotent, and `entities` keeps it to those
-collections.
+node after an upgrade; the peers receive ordinary ops. It is idempotent (a record a local write rewrote first is
+current already), and `entities` keeps it to those collections.
 
 An op from a **newer** version is `ahead`: `'apply'` applies it as it is, unvalidated (registers are
 forward-tolerant; the validator does not know its shape), with the `schema` event `{ kind: 'ahead', op,

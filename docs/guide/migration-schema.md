@@ -11,8 +11,9 @@ schedule, some stay on version 1 for weeks, and all of them keep syncing with ea
 
 syncom handles this without a migration step at startup. Every node stamps its schema version on each op it
 writes, every record remembers the version it was written under, and a node reads a record of an older version
-through a **lens** that turns it into the current shape as it is read. Nothing on disk changes until you decide to
-rewrite it, and a node on an older version keeps working with the records a newer one writes.
+through a **lens** that turns it into the current shape as it is read. Nothing on disk changes until you write to the
+record or decide to rewrite them all, and a node on an older version keeps working with the records a newer one
+writes.
 
 ## Read old records in the new shape
 
@@ -24,8 +25,8 @@ Give the schema a `version` and, for the step to it, a migration. A migration is
 <<< @/examples/migration-schema.mjs#v2
 
 The record on disk still has `title`: `getCachedData()` shows it as stored. Every read that returns a record
-(`get()`, a query, a [document](./document), the record a write is validated against) goes through the lens and
-sees `name`. `schemaInfo.previous` tells you that this database ran another version before this open; it is
+(`get()`, a query, a [document](./document)) goes through the lens and sees `name`, until a write
+[rewrites the record](#write-to-a-record-not-yet-migrated) in the new shape. `schemaInfo.previous` tells you that this database ran another version before this open; it is
 `null` when nothing changed.
 
 <FigLens />
@@ -54,6 +55,23 @@ A validator that refuses an old record leaves the migrations' result as the view
 `schema.lens` picks the steps: `'both'` (the default), `'migrations'` alone, or `'validate'` alone, which refuses a
 schema that also has `migrations`.
 
+## Write to a record not yet migrated
+
+A write to a field of a record still of an older version (an `update()`, an `inc()`, an `add()`, a `modify()`, a
+list or text edit, a write inside a transaction) rewrites that record first. syncom writes the record as the lens
+reads it, as a whole-record write under the current version, then your write, in one transaction, so nothing
+reads the record in between:
+
+<<< @/examples/migration-schema.mjs#write-old
+
+Without that step the record would stay of version 1 with a version 2 field in it, and the lens, which runs over
+the whole record, would read `name: title` over the `name` you just wrote. The rewrite is the one `migrate()` makes
+for that record (below), counters, sets, lists, texts and trees written again after it. The validator checks it
+together with your write, so an update that brings an old record a field it was missing lands, and one that
+leaves it invalid is refused whole. A write that makes nothing, such as a `swap()` whose expectation no longer
+holds, rewrites nothing either (inside a transaction of yours, the rewrite stays). A whole-record write (`set()`, `upsert()`) needs no such step: it writes the record
+under the current version.
+
 ## Rewrite the old records
 
 The lens means you never have to rewrite anything. When you do want the stored data in the new shape (to drop the
@@ -65,7 +83,8 @@ Each record of an older version becomes a whole-record write of its view, under 
 other kinds are written again after it, because a whole-record write resets them: an `inc` per counter, an `add`
 per set, one splice per list or text, one move per tree node. The result counts the records and the fields of
 each kind. The writes are ordinary ops, so the other nodes receive them through sync. `migrate()` skips records
-that are already current, so running it twice does nothing the second time. `{ entities: ['Task'] }` limits it to
+that are already current (a record a write rewrote first among them), so running it twice does nothing the second
+time. `{ entities: ['Task'] }` limits it to
 some collections and `{ batch }` sets how many records go between turns of the event loop.
 
 Run it on one node, after the nodes that write have upgraded. A node still on version 1 reads the rewritten
@@ -79,8 +98,9 @@ Two nodes on two versions sync like any other two nodes. Here the server runs ve
 
 Each side reads the other's records its own way. The server reads the phone's version 1 record through its lens.
 The phone has no idea what version 2 looks like, so it applies the server's op as it is, unvalidated, and emits a
-`schema` event with `kind: 'ahead'`. Field writes travel as fields: an update made on the server carries only
-the fields it changed, so the phone sees those fields next to the ones it already had.
+`schema` event with `kind: 'ahead'`. A write the server makes to a record of version 1 rewrites it first, so the
+phone receives that record in the version 2 shape and reads it as written from then on. An update the server makes
+to a record already of version 2 carries only the fields it changed.
 
 If applying ops from a newer version is wrong for your app, hold them instead:
 
@@ -114,7 +134,13 @@ can catch the change in CI before it ships.
   and replication carry the raw stored data, so a peer on another version receives exactly what was written.
 - A migration runs on read, so it must be fast and must not throw for a record it does not expect. A migration
   that returns something other than an object is a `TypeError`.
-- Encrypted records are not migrated by `migrate()`.
+- Encrypted records are not migrated by `migrate()`, nor by a write.
+- The first write to an old record rewrites it whole, as `migrate()` does: a field another node changed
+  concurrently, with an earlier stamp, is lost to the rewrite, as to any
+  [whole-record write](./fields#trade-offs), and a counter comes back as one increment of this node's. Upgrade
+  the nodes that write before old records are edited from both sides at once.
+- An editor's text handle (`openText()`) edits a record as it is: its keystrokes do not rewrite an old record
+  first. Write to the record once, or run `migrate()`, before you hand it to an editor.
 
 ## Coming from RxDB
 

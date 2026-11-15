@@ -69,13 +69,55 @@ const entityNames = (entities) => {
 };
 
 /**
- * Rewrites every record of an older version as this one, through the lens:
- * a whole-record write of the view, then the counters and the sets added
- * back (a write resets them), a plugin's field as the ops its module lays.
- * One designated node runs it; peers receive ordinary ops. Idempotent — a
- * record already of this version is left alone. `entities` limits it to
- * those collections; `batch` is how many records go between turns of the
- * event loop.
+ * One record of an older version rewritten as this one, through the lens: a
+ * whole-record write of the view, then the counters and the sets added back
+ * (a write resets them), a plugin's field as the ops its module lays — each
+ * through `core.commit` with `options`. What migrate() does per record, and
+ * what a local write to such a record runs first, inside its transaction
+ * (src/commit.js `commitIn`, the core's `upgrade`: the view of a lens that
+ * ran over the record AND the write would read the write's fields over).
+ * Counts what it laid into `result`, when given.
+ */
+const migrateRecord = async (core, id, entry, options, result = null) => {
+  const view = await core.view(id, entry);
+  const data = {};
+  const kinds = {};
+  for (const key of Object.keys(view)) {
+    const kind = core.kindOf(entry, key);
+    if (kind === undefined || kind === 'register') data[key] = view[key];
+    else kinds[key] = kind;
+  }
+  await core.commit('write', id, { data }, options);
+  for (const key of Object.keys(kinds)) {
+    const kind = kinds[key];
+    const value = entry.data[key];
+    if (kind === 'counter') {
+      await core.commit('inc', id, { key, value }, options);
+      if (result !== null) result.counters++;
+    } else if (kind === 'set') {
+      // A set with nothing live has nothing to add back: it is dropped.
+      if (value.length === 0) continue;
+      await core.commit('add', id, { key, value }, options);
+      if (result !== null) result.sets++;
+    } else {
+      // A plugin's field comes back as the ops its module lays — a list
+      // or a text as one run, a tree as one move per node, parents first
+      // — and one with nothing to read is dropped.
+      const ops = core.plugins.byName[kind].migrate(kind, key, value);
+      if (ops.length === 0) continue;
+      for (let i = 0; i < ops.length; i++) await core.commit(ops[i][0], id, ops[i][1], options);
+      if (result !== null) result[`${kind}s`] = (result[`${kind}s`] ?? 0) + 1;
+    }
+  }
+};
+
+/**
+ * Rewrites every record of an older version as this one, through the lens
+ * (`migrateRecord`, each op a commit of its own). One designated node runs
+ * it; peers receive ordinary ops. Idempotent — a record already of this
+ * version is left alone, and so is one a local write migrated first.
+ * `entities` limits it to those collections; `batch` is how many records go
+ * between turns of the event loop.
  */
 const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
   if (core.version === null) throw new TypeError('migrate() needs createDatabase({ schema })');
@@ -88,36 +130,7 @@ const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
     const entry = await core.entries.load(id);
     if (!entry || entry.encrypted || (entry.meta.v ?? 1) >= core.version) continue;
     if (names !== null && !names.has(entry.data.$type)) continue;
-    const view = await core.view(id, entry);
-    const data = {};
-    const kinds = {};
-    for (const key of Object.keys(view)) {
-      const kind = core.kindOf(entry, key);
-      if (kind === undefined || kind === 'register') data[key] = view[key];
-      else kinds[key] = kind;
-    }
-    await core.commit('write', id, { data }, { actor });
-    for (const key of Object.keys(kinds)) {
-      const kind = kinds[key];
-      const value = entry.data[key];
-      if (kind === 'counter') {
-        await core.commit('inc', id, { key, value }, { actor });
-        result.counters++;
-      } else if (kind === 'set') {
-        // A set with nothing live has nothing to add back: it is dropped.
-        if (value.length === 0) continue;
-        await core.commit('add', id, { key, value }, { actor });
-        result.sets++;
-      } else {
-        // A plugin's field comes back as the ops its module lays — a list
-        // or a text as one run, a tree as one move per node, parents first
-        // — and one with nothing to read is dropped.
-        const ops = core.plugins.byName[kind].migrate(kind, key, value);
-        if (ops.length === 0) continue;
-        for (let i = 0; i < ops.length; i++) await core.commit(ops[i][0], id, ops[i][1], { actor });
-        result[`${kind}s`] = (result[`${kind}s`] ?? 0) + 1;
-      }
-    }
+    await migrateRecord(core, id, entry, { actor }, result);
     result.migrated++;
     if (++since >= batch) {
       since = 0;
@@ -137,4 +150,4 @@ const check = async (core, entity, data) => {
   return def.validator(project(def, id, data));
 };
 
-module.exports = { SCHEMA_FILE, loadVersion, migrate, check };
+module.exports = { SCHEMA_FILE, loadVersion, migrate, migrateRecord, check };
