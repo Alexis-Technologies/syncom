@@ -8,6 +8,8 @@
 // Crypto async where node:crypto is not — are the `@alexify/syncom/signing`
 // and `@alexify/syncom/encryption` subpaths', under their own browser types.
 
+import type { Fsi } from './index.js';
+
 export type {
   JSONSafe,
   KeyPair,
@@ -195,3 +197,6 @@ export {
   ValidationError,
   isSharedLog,
 } from './index.js';
+
+/** The platform's own backend whole — OPFS here: the five functions, no `sync`, `create` or `append`; frozen. */
+export declare const defaultFsi: Readonly<Fsi>;

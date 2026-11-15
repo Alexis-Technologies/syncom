@@ -160,8 +160,8 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `observe(id, path?, listener)` | `() => void` | Watches record `id`: `listener(changes, event)` after every turn that changed it — a local write, a transaction, a peer's page, a joined snapshot — with the record's [changes](./events#changes) of that turn, tagged by `id`, and the `transaction` event they came in; under `path` (a field or a [path](../guide/fields#edit-part-of-an-object)), the changes of that field, of what hangs under it and of a prefix of it (a reset above), and the whole record's (a delete, a purge). A listener is contained like an event listener; a throw or a rejection is logged (`listener.error`). Returns the function that stops watching |
 | `close()` | `Promise<void>` | Logs what the open text handles hold (`edits.unlogged` where some could not be), then stops sync, lands what is in flight and the deferred files, and seals the log; further writes are refused (`CLOSED`). Called again, while it runs or after, it is the same close |
 
-Properties: `fsi` (the backend given to `createDatabase()`, wrapped when `durable`, or
-the platform's), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
+Properties: `fsi` (the files engine's backend: the one given to `createDatabase()` or to
+`filesEngine()`, or the platform's — wrapped when `durable` — and `null` under a native engine), `schema`, `schemaInfo` (`{ version, hash, previous, held }`,
 `null` without a schema — see [Versions and the lens](#versions-and-the-lens)),
 `sync`, `nodeId` (this node's Ed25519 public key, base64url — what its ops are
 verified against), `signatures` (`'verify'`, `'require'` or `false`), `path`,
@@ -1390,8 +1390,9 @@ server, OPFS in the browser — as those five functions, and:
 
 | Export | Notes |
 | --- | --- |
+| `defaultFsi` | The platform's backend whole, frozen: on the server the five functions and the three optional ones (`sync`, `create`, `append`), in the browser OPFS's five — what a backend built by hand starts from (`{ ...defaultFsi, sync: spy }`, `atRest(defaultFsi, …)`, `layered([…, defaultFsi])`) without losing fsync, the exclusive create or the journal's append. Not the three by name: `sync` is the replication plugin's name in `/all` and `/sync` |
 | `createDatabase({ fsi })` | Any object with the five functions, as `filesEngine(fsi)`; the storage, its log, chain, keys and registry all go through it. `storage.fsi` is what was given (wrapped when `durable`) |
-| `createDatabase({ durable: true })` | Every write is followed by the backend's `sync`; a backend without one (OPFS, memory) logs `durable.noop` at debug |
+| `createDatabase({ durable: true })` | Every write is followed by the backend's `sync`, by the files engine at `open()` — the one the database builds and one built by hand (`engine: filesEngine(fsi)`) alike; a backend without one (OPFS, memory, the five functions alone) logs `durable.noop` at debug |
 | `create(dir, file, content)` *(optional)* | Exclusive create (`EEXIST` when the file is there) — `node:fs` and the memory backend have it; the directory lock uses it to make a race deterministic |
 | `isFsi(value)` | Whether `value` has the five functions |
 | `memory()` (`@alexify/syncom/memory`) | A backend in memory: `size`, `dump()`, the exclusive `create`; two storages opened over one share it |

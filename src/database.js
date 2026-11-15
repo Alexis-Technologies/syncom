@@ -26,7 +26,7 @@ const { Clock } = require('./vector.js');
 const { notify, runHook, normalizeHooks } = require('./hooks.js');
 const { project, namedId, idReason } = require('./schema/entity.js');
 const defaultFsi = require('./fsi.js');
-const { checkFsi, withSync } = require('./backend.js');
+const { checkFsi } = require('./backend.js');
 const { checkEngine, checkEngineDb, kvNamespace } = require('./engine.js');
 const { readOnlyDb } = require('./readonly.js');
 const { filesEngine } = require('./files/files.js');
@@ -282,31 +282,25 @@ class Database extends Emitter {
     });
     this.#logger = createLogger(options.logger);
     this.#otel = DISABLED;
-    this.#engine = this.#engineOf(options, settings.durable);
+    this.#engine = this.#engineOf(options);
     this.#hooks = normalizeHooks(options.hooks, STORAGE_HOOKS, 'Storage');
     return this.#init();
   }
 
   // The engine: the one given, or the files engine over the backend —
   // node:fs or OPFS by default, anything with the five functions when
-  // injected (`durable` wraps every write with the adapter's fsync, where it
-  // has one). An engine and a backend together make no sense: refused.
-  #engineOf(options, durable) {
+  // injected. `durable` is the engine's to honour at `open()` (the files
+  // engine wraps every write with the adapter's fsync, where it has one —
+  // the same for a files engine built by hand). An engine and a backend
+  // together make no sense: refused.
+  #engineOf(options) {
     if (options.engine !== undefined) {
       if (options.fsi !== undefined) {
         throw new TypeError('createDatabase({ engine, fsi }): an engine or a backend, not both');
       }
       return checkEngine(options.engine, 'createDatabase({ engine })');
     }
-    return filesEngine(this.#backend(options, durable));
-  }
-
-  #backend(options, durable) {
-    const fsi = checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'createDatabase({ fsi })');
-    if (!durable) return fsi;
-    if (typeof fsi.sync === 'function') return withSync(fsi);
-    this.#logger.debug({ event: 'durable.noop' });
-    return fsi;
+    return filesEngine(checkFsi(options.fsi === undefined ? defaultFsi : options.fsi, 'createDatabase({ fsi })'));
   }
 
   // The schema is the plugin's to read (`createDatabase({ schema, validator })` into

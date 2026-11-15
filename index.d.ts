@@ -230,6 +230,12 @@ export function write(dir: string, filename: string, content: string): Promise<v
 export function exists(dir: string, filename: string): Promise<boolean>;
 export function remove(dir: string, filename: string): Promise<void>;
 export function list(dir: string): Promise<string[]>;
+/**
+ * The platform's own backend whole — node:fs here, with the three an adapter may add: `sync` (what `durable` calls),
+ * `create` (the lock's exclusive create), `append` (the journal's). What a backend built by hand starts from
+ * (`{ ...defaultFsi, sync: spy }`, `layered([defaultFsi, …])`, `atRest(defaultFsi, …)`), frozen.
+ */
+export const defaultFsi: Readonly<Fsi & Required<Pick<Fsi, 'sync' | 'create' | 'append'>>>;
 
 // ---------------------------------------------------------------------------
 // Replication model (src/ops.js, src/vector.js, src/log.js)

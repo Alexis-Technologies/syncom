@@ -1108,4 +1108,12 @@ storage.document<Post>('id').then((record) => {
   expectType<syncom.Engine>(viaEngine.engine);
   expectType<Fsi | null>(viaEngine.fsi);
   expectError(syncom.createDatabase({ engine: {} }));
+  // The platform's backend whole: node:fs, its three optional functions there; a files engine built by hand honours
+  // `durable` at open.
+  expectType<Promise<void>>(syncom.defaultFsi.sync('dir', 'file'));
+  expectType<Promise<void>>(syncom.defaultFsi.create('dir', 'file', 'text'));
+  expectType<Promise<void>>(syncom.defaultFsi.append('dir', 'file', 'text'));
+  const spied: Fsi = { ...syncom.defaultFsi, sync: async () => {} };
+  expectType<Promise<syncom.EngineDb>>(syncom.filesEngine(spied).open('app', { durable: true }));
+  expectError((syncom.defaultFsi.read = syncom.read));
 }

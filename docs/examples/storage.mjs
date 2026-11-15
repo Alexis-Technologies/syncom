@@ -47,11 +47,11 @@ assert.ok(existsSync('board/data'));
 assert.ok(existsSync('board.sqlite'));
 
 // #region move
-import { filesEngine, read, write, exists, remove, list } from '@alexify/syncom';
+import { filesEngine, defaultFsi } from '@alexify/syncom';
 import { copyEngine } from '@alexify/syncom/engines';
 
 // The files engine over Node's file system: where createDatabase() without an engine keeps a database.
-const files = filesEngine({ read, write, exists, remove, list });
+const files = filesEngine(defaultFsi);
 // The database in ./board, closed, copied into SQLite: the same node with the same log.
 const target = sqliteEngine({ file: 'moved.sqlite' });
 const counts = await copyEngine(files, target, { path: 'board' });

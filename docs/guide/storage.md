@@ -100,8 +100,8 @@ entry and its record does not fail the write: it resolves, the record stays read
 
 <<< @/examples/storage.mjs#move
 
-The root module exports Node's five file functions, so `filesEngine()` over them reads the files a database
-opened without `engine` keeps in Node.js; `createDatabase`, `sqliteEngine` and `schema` are those of the first
+The root module exports Node's backend whole as `defaultFsi`, so `filesEngine(defaultFsi)` reads the files a
+database opened without `engine` keeps in Node.js; `createDatabase`, `sqliteEngine` and `schema` are those of the first
 example. `copyEngine()`, from the `@alexify/syncom/engines` subpath, copies a closed database whole: records,
 tags, the op log, the [node](./glossary#node)'s identity. The node opens on the new storage as itself, so its
 peers resume where they were instead of sending everything again. Open it on the new storage only from then on.

@@ -53,10 +53,10 @@ assert.equal(await mesh.get('server').Task.count({}), 1);
 await mesh.close();
 
 // #region at-rest
-import { read, write, exists, remove, list } from '@alexify/syncom';
+import { defaultFsi } from '@alexify/syncom';
 import { atRest } from '@alexify/syncom/encryption';
 
-const disk = { read, write, exists, remove, list }; // the platform's own files
+const disk = defaultFsi; // the platform's own files
 const key = crypto.getRandomValues(new Uint8Array(32)); // keep it outside the database: a keychain, your server
 
 const vault = await createDatabase({ path: 'vault', fsi: atRest(disk, { key }) });

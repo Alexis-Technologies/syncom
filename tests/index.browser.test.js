@@ -46,6 +46,12 @@ test('browser barrel', async (t) => {
     assert.notStrictEqual(browser.read, node.read);
     assert.strictEqual(browser.read, require('../src/fsi.browser.js').read);
     assert.strictEqual(node.read, require('../src/fsi.js').read);
+    // The backend whole: node:fs with its three optional functions, OPFS with none of them.
+    assert.deepStrictEqual(Object.keys(node.defaultFsi), Object.keys(require('../src/fsi.js')));
+    assert.deepStrictEqual(Object.keys(browser.defaultFsi), Object.keys(require('../src/fsi.browser.js')));
+    assert.strictEqual(browser.defaultFsi.read, browser.read);
+    assert.strictEqual(browser.defaultFsi.sync, undefined);
+    assert.strictEqual(typeof node.defaultFsi.sync, 'function');
   });
 
   await t.test('the crdt half is shared, not duplicated; contracts are a subpath, not here', () => {

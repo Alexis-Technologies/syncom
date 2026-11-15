@@ -13,7 +13,13 @@
 // `verifyAsync` is the engine's (src/signing/ed25519.js), not the API's: it is left
 // out by name, and the root keeps one `verify`, synchronous in Node.js and a
 // promise in the browser.
-const { read, write, exists, remove, list } = require('./fsi.browser.js');
+//
+// The platform's backend: its five functions by name, and `defaultFsi`, the whole of it — OPFS has no `sync`, `create`
+// or `append`.
+const fsi = require('./fsi.browser.js');
+
+const { read, write, exists, remove, list } = fsi;
+const defaultFsi = Object.freeze({ ...fsi });
 const { isFsi } = require('./backend.js');
 const { isEngine } = require('./engine.js');
 const { filesEngine } = require('./files/files.js');
@@ -34,6 +40,7 @@ module.exports = {
   exists,
   remove,
   list,
+  defaultFsi,
   isFsi,
   isEngine,
   filesEngine,

@@ -18,7 +18,8 @@ database reads, such as records past the cache, and with write-back it takes the
 ### Stack the layers
 
 Pass the layers top first. A [backend](./storage-filesystem) is any object with `read`, `write`, `exists`,
-`remove` and `list`; the platform's own files are exported by the package, and `memory()` is a backend in memory:
+`remove` and `list`; the platform's own files are exported by the package as `defaultFsi`, and `memory()` is a
+backend in memory:
 
 <<< @/examples/storage-layered.mjs#through
 

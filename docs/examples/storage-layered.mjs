@@ -4,11 +4,11 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 // #region through
-import { createDatabase, read, write, exists, remove, list } from '@alexify/syncom/all';
+import { createDatabase, defaultFsi } from '@alexify/syncom/all';
 import { memory } from '@alexify/syncom/memory';
 import { layered } from '@alexify/syncom/layered';
 
-const disk = { read, write, exists, remove, list }; // the platform's own files
+const disk = defaultFsi; // the platform's own files
 const fsi = layered([memory(), disk]); // write: 'through' is the default
 
 const board = await createDatabase({ path: 'board', fsi, schema: { entities: { Task: {} } } });

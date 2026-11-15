@@ -5,7 +5,8 @@ The engine every fsi becomes: today's layout, byte for byte. The engine contract
 ## Layout
 
 ```
-src/files/files.js        filesEngine(fsi), a root export of @alexify/syncom: a kv namespace is a directory under the path and a key a file in it,
+src/files/files.js        filesEngine(fsi), a root export of @alexify/syncom — open(path, { durable }) wraps the fsi with withSync (or says
+                          durable.noop): a kv namespace is a directory under the path and a key a file in it,
                           a record data/<id>.json, its pieces data/<id>~<n>.json, a folded tombstone tombstones/<id> (a kv key: no suffix),
                           a tag's copies tags/<tag>/data/<id>.json; write(batch)
                           lands the kv puts, then the copies, then each record (its new pieces, its file, the pieces it drops), then the kv
@@ -39,3 +40,10 @@ src/files/journal.js      createJournalStore(fsi, path): the op log's medium —
   line parsed — with the entries at the scrubbed seqs swapped for what the log hands back (`entriesBetween(seq, seq)` is
   all a store is handed for certain: a proxy sends those alone). A file that is whole neither way is left as it is and
   said out loud (`log.journal.unrewritten`, `log.segment.unscrubbed`), never written short.
+- **`durable` is the engine's, at `open()`.** `open(path, { durable })` wraps the backend with `withSync` (src/backend.js)
+  where it has `sync` — every write, `create` and `append` followed by one fsync — and logs `durable.noop` at debug where
+  it has not; the database's `fsi` (`db.fsi` of the engine's database) is the wrapped backend, `engine.fsi` the one
+  given. The database never wraps: a files engine built by hand (`filesEngine(fsi)`, over `atRest(fsi)`, served over a
+  port) is as durable as the one it builds, and nothing is synced twice. The root's `defaultFsi` (src/index.js) is the
+  platform's backend whole — node:fs's `sync`, `create` and `append` included — what a backend built by hand starts from;
+  the three are not root exports by name (`sync` is the replication plugin's in `/all` and `/sync`).

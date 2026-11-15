@@ -108,6 +108,65 @@ test('Storage over an injected fsi', async (t) => {
     assert.ok(debug.includes('durable.noop'));
     await storage.close();
   });
+
+  await t.test(
+    'durable over a files engine built by hand syncs every write, once, sealed at rest too; the root exports a whole fsi',
+    async (t2) => {
+      const dir = await createTemp();
+      t2.after(() => cleanupTemp(dir));
+      // A backend built from the root's whole one: fsync, exclusive create and append included.
+      const { defaultFsi } = syncom;
+      assert.ok(Object.isFrozen(defaultFsi));
+      assert.strictEqual(defaultFsi.read, syncom.read);
+      assert.strictEqual(defaultFsi.sync, nodeFsi.sync);
+      const synced = [];
+      const spied = { ...defaultFsi, sync: (d, name) => synced.push(`${d}/${name}`) && defaultFsi.sync(d, name) };
+      const engine = syncom.filesEngine(spied);
+      assert.strictEqual(engine.capabilities.exclusiveCreate, true, 'the lock creates exclusively');
+      assert.strictEqual(engine.capabilities.append, true, 'the journal appends');
+      const count = (name) => {
+        let n = 0;
+        for (let i = 0; i < synced.length; i++) if (synced[i].endsWith(`/${name}`)) n++;
+        return n;
+      };
+      for (const [label, options] of [
+        ['filesEngine(fsi)', { path: path.join(dir, 'engine'), engine }],
+        [
+          'filesEngine(atRest(fsi))',
+          {
+            path: path.join(dir, 'sealed'),
+            engine: syncom.filesEngine(syncom.atRest(spied, { key: new Uint8Array(32).fill(7) })),
+          },
+        ],
+        ['createDatabase({ fsi })', { path: path.join(dir, 'fsi'), fsi: spied }],
+      ]) {
+        const storage = await syncom.createDatabase({ defer: 0, durable: true, logger: false, ...options });
+        assert.notStrictEqual(storage.fsi, spied, `${label}: the database's fsi is the wrapped one`);
+        synced.length = 0;
+        const id = await storage.insert({ n: 1 });
+        assert.ok(synced.length >= 3, `${label}: synced ${synced.length}`);
+        assert.strictEqual(count(`${id}.json`), 1, `${label}: the record synced once, not twice`);
+        await storage.close();
+      }
+      // Without `durable`, nothing is synced; over a backend without sync, the same debug line the database logs.
+      synced.length = 0;
+      const plain = await syncom.createDatabase({ defer: 0, path: path.join(dir, 'plain'), engine, logger: false });
+      await plain.insert({ n: 1 });
+      assert.deepStrictEqual(synced, []);
+      assert.strictEqual(plain.fsi, spied);
+      await plain.close();
+      const debug = [];
+      const noop = await syncom.createDatabase({
+        defer: 0,
+        path: 'mem-durable-engine',
+        engine: syncom.filesEngine(memory()),
+        durable: true,
+        logger: { debug: (entry) => debug.push(entry.event) },
+      });
+      assert.ok(debug.includes('durable.noop'));
+      await noop.close();
+    },
+  );
 });
 
 test('A backend that fails after the log append', async (t) => {

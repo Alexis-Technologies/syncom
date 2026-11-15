@@ -51,10 +51,10 @@ assert.equal(JSON.parse(await readFile('board.backup.json', 'utf8')).records.len
 await board.close();
 
 // #region cold
-import { filesEngine, read, write, exists, remove, list } from '@alexify/syncom';
+import { filesEngine, defaultFsi } from '@alexify/syncom';
 import { copyEngine } from '@alexify/syncom/engines';
 
-const files = filesEngine({ read, write, exists, remove, list }); // the files under the working directory
+const files = filesEngine(defaultFsi); // the files under the working directory
 await copyEngine(files, files, { path: 'board', targetPath: 'backups/board-2026-11-15' }); // board is closed
 // #endregion cold
 const copy = await createDatabase({ path: 'backups/board-2026-11-15', schema });

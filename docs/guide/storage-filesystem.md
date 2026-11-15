@@ -84,9 +84,11 @@ and the database's `error` event carries `UNPERSISTED` until the next open lands
 
 Without `durable`, a write is as safe as the operating system's page cache: a crash of the process loses
 nothing, a power loss can lose the last writes the disk had not flushed. `durable: true` fsyncs every file
-before the write resolves, at the price of the disk's write latency. `durable` applies when the database builds
-its own files engine, the default or `createDatabase({ fsi })`; a files engine passed as `engine` is used as it
-was made.
+before the write resolves, at the price of the disk's write latency. It applies to every files engine: the
+default, `createDatabase({ fsi })`, and one you build yourself and pass as `engine`
+(`filesEngine(defaultFsi)`, `filesEngine(atRest(defaultFsi, { key }))`), as long as its backend has `sync`.
+`defaultFsi`, exported by the package, is Node's backend whole, `sync` included; an object of the five functions
+alone has no `sync`, so `durable` can do nothing there and says so at debug level (`durable.noop`).
 
 ## Open the same directory twice
 

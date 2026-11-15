@@ -11,7 +11,7 @@
 // and `atRest` keep working as they are. Requires backend.js, engine.js,
 // layout.js, write-set.js, shape.js, errors.js and journal.js only.
 
-const { checkFsi } = require('../backend.js');
+const { checkFsi, withSync } = require('../backend.js');
 const { capabilitiesOf, checkKvKey, isKvKey, isKvNamespace, unreadableRecord } = require('../engine.js');
 const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { toBase64, fromBase64 } = require('../crypto/pem.js');
@@ -288,12 +288,22 @@ const openDb = (fsi, path, capabilities, logger) => {
   });
 };
 
+// The backend a database opened with `durable` writes through: every write followed by the adapter's fsync, where
+// it has one — said at debug level where it has none.
+const durableOf = (fsi, logger) => {
+  if (typeof fsi.sync === 'function') return withSync(fsi);
+  logger?.debug({ event: 'durable.noop' });
+  return fsi;
+};
+
 /**
  * `filesEngine(fsi)` — the engine over an fsi (the platform's by default
- * when the core builds it): `open(path)` is a database over the directory,
- * `remove(path)` empties every directory of the layout, the tags' included,
- * `branch.json` last (a removal cut short leaves a directory `drop()` still
- * takes). `engine.fsi` is the backend, for what still speaks fsi.
+ * when the core builds it): `open(path, { durable })` is a database over the
+ * directory — every write synced under `durable` (`withSync`, where the fsi
+ * has `sync`; its `fsi` the wrapped one) — `remove(path)` empties every
+ * directory of the layout, the tags' included, `branch.json` last (a removal
+ * cut short leaves a directory `drop()` still takes). `engine.fsi` is the
+ * backend, for what still speaks fsi.
  */
 const filesEngine = (fsi) => {
   checkFsi(fsi, 'filesEngine(fsi)');
@@ -306,7 +316,8 @@ const filesEngine = (fsi) => {
     name: 'files',
     capabilities,
     fsi,
-    open: async (path, { logger = null } = {}) => openDb(fsi, path, capabilities, logger),
+    open: async (path, { logger = null, durable = false } = {}) =>
+      openDb(durable ? durableOf(fsi, logger) : fsi, path, capabilities, logger),
     async remove(path) {
       const dirs = [];
       for (let i = 0; i < DIRS.length; i++) dirs.push(DIRS[i]);

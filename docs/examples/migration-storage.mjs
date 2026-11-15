@@ -16,12 +16,12 @@ await before.close(); // the copy holds the source's lock: close every instance 
 // #endregion close
 
 // #region copy
-import { filesEngine, read, write, exists, remove, list } from '@alexify/syncom';
+import { filesEngine, defaultFsi } from '@alexify/syncom';
 import { sqliteEngine } from '@alexify/syncom/sqlite';
 import { migrateStorage } from '@alexify/syncom/dump';
 
 const result = await migrateStorage({
-  from: filesEngine({ read, write, exists, remove, list }), // what createDatabase({ path }) opens in Node.js
+  from: filesEngine(defaultFsi), // what createDatabase({ path }) opens in Node.js
   to: sqliteEngine({ file: 'board.db' }),
   path: 'board',
 });
@@ -42,7 +42,7 @@ await board.close();
 
 // #region refused
 const again = await migrateStorage({
-  from: filesEngine({ read, write, exists, remove, list }),
+  from: filesEngine(defaultFsi),
   to: sqliteEngine({ file: 'board.db' }),
   path: 'board',
 }).catch((error) => error);

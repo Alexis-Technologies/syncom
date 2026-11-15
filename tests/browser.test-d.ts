@@ -20,6 +20,9 @@ expectType<Promise<string>>(browser.read('dir', 'file.json'));
 
 declare const storage: Database;
 expectType<Promise<string[]>>(browser.list('dir'));
+// OPFS whole: the five functions, none of the three optional ones promised.
+expectType<Promise<string>>(browser.defaultFsi.read('dir', 'file.json'));
+expectType<((dir: string, filename: string) => Promise<void>) | undefined>(browser.defaultFsi.sync);
 expectType<Promise<void>>(storage.inc('id', 'hits'));
 expectType<boolean>(browser.isAlive(null));
 

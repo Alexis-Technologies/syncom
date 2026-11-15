@@ -36,9 +36,9 @@ missing; `createDatabase({ engine, fsi })` is a `TypeError` (the files engine is
 engine). The database answers `db.engine` (the engine) and `db.fsi` (the files engine's backend, `null`
 under a native engine). A database never closes the engine it was handed.
 
-`open()` is called before the lock is taken, with the database's `logger` and its `durable` setting. Only
-the SQLite engine reads `durable` there; the files engine reads it when the database builds it from `fsi`
-(see [Durability](#durability)).
+`open()` is called before the lock is taken, with the database's `logger` and its `durable` setting. The
+files engine and the SQLite engine read `durable` there, the files engine however it was built: by the
+database from `fsi`, or by hand and handed in as `engine` (see [Durability](#durability)).
 
 ## Capabilities
 
@@ -265,8 +265,8 @@ handed: two databases may share one. `tests/suites/fsi.js` is the contract as a 
 
 | Backend | Where | Notes |
 | --- | --- | --- |
-| `node:fs/promises` | Node.js, the default | All three optional functions. `append` writes through a descriptor held open, one per directory and 64 at most in the process, the least recently used closed first; `remove` closes its own. The root of the package exports its five functions (`read`, `write`, `exists`, `remove`, `list`) and not the three optional ones: an fsi assembled from the root's exports (to wrap in `atRest()` or `layered()`) has no exclusive `create` for the lock, no `sync` for `durable` and no `append` for the journal (a file per log group) |
-| OPFS (`src/fsi.browser.js`) | A browser bundle, the default | Paths resolve against `navigator.storage.getDirectory()`; directory handles are cached and resolved again when stale. Writes go through `createWritable()`, durable when the writable closes. No `sync`, `create` or `append` |
+| `node:fs/promises` | Node.js, the default | All three optional functions. `append` writes through a descriptor held open, one per directory and 64 at most in the process, the least recently used closed first; `remove` closes its own. The root of the package exports its five functions by name (`read`, `write`, `exists`, `remove`, `list`) and the whole backend, frozen, as `defaultFsi` — with the three optional ones, so a backend built from it (`{ ...defaultFsi, sync: spy }`, `atRest(defaultFsi, …)`, `layered([…, defaultFsi])`) keeps the exclusive `create` for the lock, `sync` for `durable` and `append` for the journal; an object of the five functions alone has none of them (a file per log group, no fsync) |
+| OPFS (`src/fsi.browser.js`) | A browser bundle, the default | Paths resolve against `navigator.storage.getDirectory()`; directory handles are cached and resolved again when stale. Writes go through `createWritable()`, durable when the writable closes. No `sync`, `create` or `append`; the browser root's `defaultFsi` is the five functions |
 | `createIdbFsi({ name, store, indexedDB })` (`/idb`) | A browser | One IndexedDB database (`'syncom'`), one object store (`'files'`) keyed `[dir, name]` with an index on `dir`, version 1. A transaction per call; a write resolves on the transaction's `complete`. Opened on the first call, reopened after another tab deletes or upgrades it; `close()` is its own |
 | `memory()` (`/memory`) | Anywhere | A `Map` of `dir/name` to text; `create` and `append`; `size` and `dump()`. Nothing survives the process |
 | `layered(layers, options)` (`/layered`) | Anywhere | One backend over several (see [Layers](#layers)) |
@@ -395,9 +395,11 @@ it; `tag()` rejects with `UNPERSISTED` while such a record is held.
 | SQLite | `PRAGMA synchronous = FULL` for the connection |
 | memory, IndexedDB, MongoDB | Nothing more than the medium does (IndexedDB has its own `durability` option) |
 
-The files engine is wrapped for `durable` when the database builds it from `fsi` (or the platform's default).
-A files engine handed in as `engine` (`createDatabase({ engine: filesEngine(fsi), durable: true })`) is used
-as it was built: no fsync is added.
+The files engine wraps its backend for `durable` at `open(path, { durable })` (`withSync`: every write, `create`
+and `append` followed by `sync`, once; the database's `fsi` is the wrapped backend, `engine.fsi` the one given),
+however it was built: by the database from `fsi` (or the platform's default), or by hand and handed in as
+`engine` — `createDatabase({ engine: filesEngine(fsi), durable: true })`, `filesEngine(atRest(fsi, …))`, the
+engine served over a port, which forwards `durable` to the engine it serves.
 
 ## One instance per database
 
