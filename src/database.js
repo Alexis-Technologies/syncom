@@ -47,7 +47,7 @@ const { diffViews } = require('./patch.js');
 
 // The ids a `storage.unpersisted` line names; past them it says how many.
 const UNPERSISTED_NAMED = 32;
-const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB } = require('./symbols.js');
+const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB, CREATE } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
 const { SyncomError, typed, isQuotaError } = require('./errors.js');
 const { loadIdentity } = require('./identity.js');
@@ -2739,6 +2739,14 @@ class Database extends Emitter {
       const test = ifMatch === null ? null : this.#predicate(ifMatch);
       // Fields without a condition: the record's presence alone is read, never its view composed.
       if (test === null && !operators) {
+        // `[CREATE]` (createState's first write): a record absent here is made by this set, which keeps the fields
+        // another node made it with; a deleted one takes a whole-record write, the one op that revives (delete wins).
+        if (options[CREATE] === true) {
+          const entry = await current(id);
+          const dead = entry !== null && !entry.encrypted && !isAlive(entry);
+          await tx.commit(dead ? 'write' : 'set', id, { data: delta }, { actor: options.actor });
+          return undefined;
+        }
         if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
         await tx.commit('set', id, { data: delta }, { actor: options.actor });
         return undefined;

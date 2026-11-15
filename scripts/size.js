@@ -269,7 +269,9 @@ const ENTRIES = [
   // 7.4 with the paths (a reading taken back to its fields, src/compose.js).
   // 7.8 with transaction steps, groups, step meta and the scoped stack (trackedSources, records, paths).
   // 8.0 with the canonical JSON in shape.js.
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9 },
+  // 9.0 (over by bytes) once the docs found-bugs fixes met — delete wins, the CREATE symbol of createState's first
+  // write and the withheld scrub each add to what undo bundles of the core (2026-11-15). 9.1, raised by name.
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9.1 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   {
@@ -719,7 +721,9 @@ const ENTRIES = [
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
   // 3.1 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
   // 3.25, raised by name.
-  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3.25 },
+  // 3.3 with the first write of a path made by a set through the transaction's `[CREATE]` (symbols.js, which it now
+  // bundles) and delete() written as the record emptied (fix/core-docs-bugs; 2026-11-15). 3.4, raised by name.
+  { label: 'state — browser (@alexify/syncom/state)', entry: 'src/state/state.js', platform: 'browser', budget: 3.4 },
   // Dumps: export/import over snapshot pages, a move between engines — measured with the engines' copy it ships
   // (collections plan, C4.3).
   // 6.5 measured; 7.
@@ -763,11 +767,13 @@ const ENTRIES = [
   // E7.1–E7.6; 2026-11-07). 5, raised by name.
   // 5.6 with stats(), every blob counted with its bytes and the sweep as a span — the writer contract (telemetry/writer.js)
   // bundled for `traced` (review №7, E9; 2026-11-07). 5.75, raised by name.
+  // 5.8 (over by bytes) with symbols.js's `CREATE`, which it bundles (fix/core-docs-bugs; 2026-11-15). 5.9, raised by
+  // name.
   {
     label: 'attachments — browser (@alexify/syncom/attachments)',
     entry: 'src/attachments/attachments.js',
     platform: 'browser',
-    budget: 5.75,
+    budget: 5.9,
   },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).

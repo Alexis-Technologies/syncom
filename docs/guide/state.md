@@ -21,7 +21,7 @@ state.
 <<< @/examples/state.mjs#update
 
 `set(path, fn)` computes the value from the current one inside a transaction, so two such updates made at once do
-not lose each other. `delete(path)` removes a path, and `delete()` the whole state.
+not lose each other. `delete(path)` removes a path, and `delete()` empties the whole state.
 
 ## React to changes
 
@@ -44,10 +44,11 @@ change, and two that change the same path end up with the later write on both (s
 
 <<< @/examples/state.mjs#peers
 
-The very first write makes the record, and it makes it whole. If two devices create the same state at the same
-time, before either has synced the other's, one of the two first writes wins and the other is lost. Write a
-default from one place (a server, or the first device) before devices start changing settings independently, or
-accept that a setting made in that first moment may need to be made again.
+The very first write makes the record with that one path, the way every later write changes one. Two devices
+that create the same state at the same time, before either has synced the other's, keep both first writes, and a
+new device that sets one setting before its first sync wipes none of the settings the others made long before.
+`delete()` empties the state rather than leaving a [tombstone](./glossary#tombstone), so a setting made after it,
+on any device, lands. Only `set(object)` writes the whole state at once, replacing what every device had set.
 
 ## Keep it on this device only
 

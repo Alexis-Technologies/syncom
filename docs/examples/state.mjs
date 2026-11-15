@@ -61,25 +61,21 @@ const mesh = await createMesh(['laptop', 'phone'], [['phone', 'laptop']], {
 const onLaptop = createState(mesh.get('laptop'), 'settings');
 const onPhone = createState(mesh.get('phone'), 'settings');
 
-await onLaptop.set('theme', 'light'); // the first write makes the record...
-await settle(mesh.storages); // ...and both nodes have it
-
-await Promise.all([onLaptop.set('theme', 'dark'), onPhone.set('language', 'uk')]); // at the same time
+// Both devices make the state at the same time, before either has synced: each first write is one path.
+await Promise.all([onLaptop.set('theme', 'dark'), onPhone.set('language', 'uk')]);
 await settle(mesh.storages);
 console.log(await onPhone.get()); // { theme: 'dark', language: 'uk' }: both writes kept
 // #endregion peers
 assert.deepEqual(await onLaptop.get(), { theme: 'dark', language: 'uk' });
 assert.deepEqual(await onPhone.get(), { theme: 'dark', language: 'uk' });
-await mesh.close();
 
-// The first write of a state makes its record whole: two nodes that make it at the same time keep one of the two.
-const race = await createMesh(['laptop', 'phone'], [['phone', 'laptop']], {
-  createStorage: (name, options) => createDatabase({ ...options, engine: memoryEngine(), path: name }),
-});
-const a = createState(race.get('laptop'), 'settings');
-const b = createState(race.get('phone'), 'settings');
-await Promise.all([a.set('theme', 'dark'), b.set('language', 'uk')]);
-await settle(race.storages);
-assert.equal(Object.keys(await a.get()).length, 1);
-assert.deepEqual(await a.get(), await b.get());
-await race.close();
+// Later writes of different paths, at once, keep each other too; and after delete() a path set anywhere lands.
+await Promise.all([onLaptop.set('theme', 'light'), onPhone.set('filters/done', false)]);
+await settle(mesh.storages);
+assert.deepEqual(await onLaptop.get(), { theme: 'light', language: 'uk', filters: { done: false } });
+await onLaptop.delete();
+await settle(mesh.storages);
+await onPhone.set('theme', 'dark');
+await settle(mesh.storages);
+assert.deepEqual(await onLaptop.get(), { theme: 'dark' });
+await mesh.close();

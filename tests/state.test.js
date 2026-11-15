@@ -66,7 +66,7 @@ test('app state', async (t) => {
       assert.deepStrictEqual(await a.get(), { fresh: true });
       await a.delete();
       assert.deepStrictEqual(await a.get(), {});
-      assert.strictEqual(mesh.get('A').hasRecord('state.ui'), false);
+      assert.deepStrictEqual(await mesh.get('A').get('state.ui'), {}, 'the record written empty, no tombstone');
       // The arguments.
       await assert.rejects(a.set('x', undefined), TypeError);
       await assert.rejects(
@@ -123,4 +123,69 @@ test('app state', async (t) => {
     assert.strictEqual(await db.local.get('state.prefs'), null);
     assert.deepStrictEqual(await state.get(), {});
   });
+
+  await t.test(
+    'the first write of a state is a path’s alone: a device that writes before its first sync wipes no other node’s paths',
+    async (t2) => {
+      const fsi = memory();
+      const createStorage = async (t3, name, options = {}) => {
+        const db = await syncom.createDatabase({ path: `/${name}`, fsi, defer: 0, logger: false, ...options });
+        t3.after(() => db.close().catch(() => {}));
+        return db;
+      };
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+      const [a, b] = ['A', 'B'].map((name) => mesh.get(name));
+      const apart = async (fn) => {
+        await a.sync.enableNode('mem://B', false);
+        await fn();
+        await a.sync.enableNode('mem://B', true);
+        await settle([a, b]);
+      };
+      // Two nodes make one state at once, each with a path of its own: both kept.
+      await apart(async () => {
+        await createState(a, 'ui').set('theme', 'dark');
+        await tick();
+        await createState(b, 'ui').set('language', 'uk');
+      });
+      assert.deepStrictEqual(await createState(a, 'ui').get(), { theme: 'dark', language: 'uk' });
+      assert.deepStrictEqual(await createState(b, 'ui').get(), await createState(a, 'ui').get());
+      // A built its settings over time; B, a new device offline at its first launch, sets one: nothing is wiped.
+      const onA = createState(a, 'settings');
+      await apart(async () => {
+        await onA.set('theme', 'dark');
+        await onA.set('filters/done', false);
+        await onA.set('opened', 7);
+        await tick();
+        await createState(b, 'settings').set('language', 'uk');
+      });
+      const settings = { theme: 'dark', filters: { done: false }, opened: 7, language: 'uk' };
+      assert.deepStrictEqual(await onA.get(), settings);
+      assert.deepStrictEqual(await createState(b, 'settings').get(), settings);
+      // delete() empties the state for every node — and a path set after it, on either node, lands and stays.
+      const ui = createState(a, 'ui');
+      await ui.delete();
+      await settle([a, b]);
+      assert.deepStrictEqual(await createState(b, 'ui').get(), {});
+      await apart(async () => {
+        await ui.set('p', 1);
+        await tick();
+        await createState(b, 'ui').set('q', 2);
+      });
+      assert.deepStrictEqual(await ui.get(), { p: 1, q: 2 });
+      assert.deepStrictEqual(await createState(b, 'ui').get(), { p: 1, q: 2 });
+      // A record deleted through the database (a tombstone, which only a whole-record write brings back): the next
+      // set makes it again, with that path.
+      await a.delete('state.ui');
+      await settle([a, b]);
+      assert.deepStrictEqual(await ui.get(), {});
+      await ui.set('again', true);
+      await settle([a, b]);
+      assert.deepStrictEqual(await createState(b, 'ui').get(), { again: true });
+      // On one node, sets made at once on a state not made yet all land.
+      const fresh = createState(a, 'fresh');
+      const bump = (n) => (n ?? 0) + 1;
+      await Promise.all([fresh.set('a', 1), fresh.set('b', 2), fresh.set('n', bump), fresh.set('n', bump)]);
+      assert.deepStrictEqual(await fresh.get(), { a: 1, b: 2, n: 2 });
+    },
+  );
 });

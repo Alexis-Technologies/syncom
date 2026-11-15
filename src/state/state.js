@@ -8,10 +8,12 @@
 // replicates like any other) or, with `{ local: true }`, as the local
 // document `state.<name>` (the whole object, this node's alone; needs the
 // `local` plugin). `observe(path, listener)` follows the path; `toStore()`
-// takes a state. Requires paths.js and shape.js only: it ships to the browser.
+// takes a state. Requires paths.js, shape.js and symbols.js only: it ships to
+// the browser.
 
 const { valueAt, isPath } = require('../paths.js');
 const { isPlainObject } = require('../shape.js');
+const { CREATE } = require('../symbols.js');
 
 const PREFIX = 'state.';
 
@@ -44,7 +46,10 @@ const next = (method, given, current) => {
   return value;
 };
 
-// A state over a record: a path is a field of the record (a register of its own).
+// A state over a record: a path is a field of the record (a register of its own). The record is made by its first
+// path's set — never a whole-record write, whose reset would drop the paths another node set before the two met
+// (a new device's first launch) — and the whole state deleted is the record written empty, not a tombstone: a
+// field op never brings a deleted record back (delete wins), and a path set after delete() on any node must land.
 const overRecord = (db, id) => ({
   get: async (path) => {
     const data = await db.get(id);
@@ -66,14 +71,13 @@ const overRecord = (db, id) => ({
         return value;
       }
       const value = next('set', given, data === null ? undefined : valueAt(data, path));
-      if (data === null) await tx.set(id, { [path]: value });
-      else await tx.update(id, { [path]: value });
+      await tx.update(id, { [path]: value }, data === null ? { [CREATE]: true } : undefined);
       return value;
     }),
   delete: (path) =>
     db.transact(async (tx) => {
       if (!(await tx.has(id))) return;
-      if (path === null) await tx.delete(id);
+      if (path === null) await tx.set(id, {});
       else await tx.unset(id, [path]);
     }),
   observe: (path, listener) => db.observe(id, path, listener),

@@ -1148,8 +1148,8 @@ two nodes that write different paths both keep theirs, and the record replicates
 | Member | Notes |
 | --- | --- |
 | `get(path?)` | The value at the path (`undefined` for none), or the whole object |
-| `set(path?, value \| fn)` | Writes the value at the path — or what `fn(current)` answers, run inside a transaction over the record as it is — and resolves to it; `set(object)` replaces the whole state. A path set while the record does not exist yet writes the record whole (a `write` of that one path), so two nodes making one state at once keep one of the two first writes |
-| `delete(path?)` | Removes the path (an `unset`), or the whole state |
+| `set(path?, value \| fn)` | Writes the value at the path — or what `fn(current)` answers, run inside a transaction over the record as it is — and resolves to it; `set(object)` replaces the whole state (a `write`). A path set while the record does not exist yet makes it with that one path (a `set`, never a whole-record write), so two nodes making one state at once, or a device writing before its first sync, keep every path either side set; on a record deleted through the database, the path is a `write`, which brings it back |
+| `delete(path?)` | Removes the path (an `unset`), or empties the whole state: the record written empty (a `write` of `{}`), no tombstone, so a path set afterwards on any node lands |
 | `observe(path?, listener)` | `listener(value)` with the value at the path after every change of it; returns the stop |
 | `toStore(state, path?)` | A store of the value at the path, or of the whole object |
 

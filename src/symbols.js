@@ -27,5 +27,9 @@ const REWIND = Symbol('syncom.rewind');
 const ENTRIES = Symbol('syncom.entries');
 // The engine's database (src/engine.js EngineDb) behind a Database: what the sync registry and a branch keep their files in.
 const DB = Symbol('syncom.db');
+// An option of a transaction's `update(id, delta, { [CREATE]: true })` (src/state/state.js): a record absent here is
+// made by the `set` — two nodes that make it keep each other's fields — and a deleted one is brought back by a
+// whole-record write, the one op that revives; never NOT_FOUND.
+const CREATE = Symbol('syncom.create');
 
-module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND, ENTRIES, DB };
+module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND, ENTRIES, DB, CREATE };

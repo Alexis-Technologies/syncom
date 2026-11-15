@@ -26,8 +26,8 @@ Give the schema a `version` and, for the step to it, a migration. A migration is
 
 The record on disk still has `title`: `getCachedData()` shows it as stored. Every read that returns a record
 (`get()`, a query, a [document](./document)) goes through the lens and sees `name`, until a write
-[rewrites the record](#write-to-a-record-not-yet-migrated) in the new shape. `schemaInfo.previous` tells you that this database ran another version before this open; it is
-`null` when nothing changed.
+[rewrites the record](#write-to-a-record-not-yet-migrated) in the new shape. `schemaInfo.previous` tells you
+that this database ran another version before this open; it is `null` when nothing changed.
 
 <FigLens />
 
@@ -69,8 +69,8 @@ the whole record, would read `name: title` over the `name` you just wrote. The r
 for that record (below), counters, sets, lists, texts and trees written again after it. The validator checks it
 together with your write, so an update that brings an old record a field it was missing lands, and one that
 leaves it invalid is refused whole. A write that makes nothing, such as a `swap()` whose expectation no longer
-holds, rewrites nothing either (inside a transaction of yours, the rewrite stays). A whole-record write (`set()`, `upsert()`) needs no such step: it writes the record
-under the current version.
+holds, rewrites nothing either (inside a transaction of yours, the rewrite stays). A whole-record write (`set()`,
+`upsert()`) needs no such step: it writes the record under the current version.
 
 ## Rewrite the old records
 
