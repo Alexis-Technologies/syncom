@@ -28,7 +28,10 @@ src/testing/mesh.js       createMesh(names, edges, { createStorage, link, sync, 
   `changes` runs as an async generator with `{ lastEventId, signal }`, `disconnect()` aborts it and fails every call
   with code 503, `reconnect()` re-opens every subscription from the last event id it delivered against a fresh
   server-side client (its `data` bag empty, so the host greets it again) and then announces `reconnect` — wrpc's
-  restore, nothing wrpc does not do. The links of one host share a server (rooms, `sendTo`), as wrpc's do.
+  restore, nothing wrpc does not do. The event id moves only after a page is handed over (`onData` done), never for
+  a page `drop` lost: a socket never loses one message and carries on, so a dropped page takes the link down
+  (`disconnect()`, `close` announced) and nothing after it is delivered until `reconnect()` hands it over again. The
+  links of one host share a server (rooms, `sendTo`), as wrpc's do.
 - **Quiet is vectors AND nothing in flight, three polls in a row.** A peer's page moves the vector at the log append
   and lands its records after, inside the same `applyRemote`; `settle()` waits for every queue empty and every
   peer's `pending` zero as well, and ignores `@~` keys (a bootstrap stream never reaches the node it came from). A

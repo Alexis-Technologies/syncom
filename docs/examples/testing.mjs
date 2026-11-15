@@ -77,13 +77,26 @@ test('the board converges over a slow link that repeats pages', async () => {
 // #endregion hazards
 
 // #region drop
-test('a link that loses every page never settles', async () => {
+import { waitUntil } from '@alexify/syncom/testing';
+
+test('a page lost on the way takes the link down until it reconnects', async () => {
+  let lose = false;
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
     createStorage: boardOn(memoryEngine()),
-    link: { drop: () => true }, // every page of the feed lost on the way
+    link: { drop: (page) => lose && page.ops?.length > 0 }, // a page with ops lost while `lose` is on
   });
-  await mesh.get('server').Task.insert({ title: 'never arrives' });
+  await settle(mesh.storages);
+  const link = mesh.links.get('mem://server');
+
+  lose = true;
+  await mesh.get('server').Task.insert({ title: 'Lost on the way' });
+  await waitUntil(() => link.down); // the socket died with the page
   await assert.rejects(settle(mesh.storages, { timeout: 200 }), /did not settle/);
+
+  lose = false;
+  await link.reconnect(); // resumes after the last page delivered: the lost one comes again
+  await settle(mesh.storages);
+  assert.equal(await mesh.get('laptop').Task.select({}).count(), 1);
   await mesh.close();
 });
 // #endregion drop

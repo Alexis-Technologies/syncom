@@ -5,8 +5,8 @@
 // tracked symbol stripped), `changes` is driven as an async generator with `{ lastEventId, signal }`, a dropped
 // connection aborts the generator, and a reconnect re-opens every subscription from the last event id it delivered —
 // exactly wrpc's restore — before announcing `reconnect`. Its options are the hazards a transport has: `latency` (ms
-// on every call and event), `drop(page)` (a page lost), `duplicate(page)` (a page delivered twice); its hooks
-// `disconnect()` and `reconnect()`.
+// on every call and event), `drop(page)` (a page lost, and the link down with it: a socket never loses one message
+// and carries on), `duplicate(page)` (a page delivered twice); its hooks `disconnect()` and `reconnect()`.
 
 const { Emitter } = require('../utils.js');
 
@@ -110,9 +110,11 @@ class MemoryLink extends Emitter {
         const isTracked = value && typeof value === 'object' && value[TRACKED] === true;
         const eventId = isTracked ? value.id : undefined;
         const data = clone(isTracked ? value.data : value);
-        if (eventId !== undefined) record.lastEventId = eventId;
-        if (this.#options.drop?.(data)) continue;
+        // A page lost: the socket died with it — nothing after it arrives until `reconnect()`, which resumes from the
+        // last page delivered, as wrpc's restore does.
+        if (this.#options.drop?.(data)) return void this.disconnect();
         await onData?.(data, eventId);
+        if (eventId !== undefined) record.lastEventId = eventId;
         // A page delivered twice, as a flaky transport might: the engine must take the second as the duplicate it is.
         if (this.#options.duplicate?.(data)) await onData?.(clone(data), eventId);
       }

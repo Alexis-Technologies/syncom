@@ -42,7 +42,10 @@ export interface MeshServer {
 export interface MemoryLinkOptions {
   /** Milliseconds every call and every event waits. */
   latency?: number;
-  /** A page of a subscription lost on the way: answer true to drop it. */
+  /**
+   * A page of a subscription lost on the way: answer true to drop it — the link goes down with it, as a socket that
+   * died (`disconnect()`), and `reconnect()` resumes after the last page delivered, so the lost page comes again.
+   */
   drop?: (page: unknown) => boolean;
   /** A page delivered twice, as a flaky transport might: answer true to duplicate it. */
   duplicate?: (page: unknown) => boolean;

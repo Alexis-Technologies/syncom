@@ -777,7 +777,8 @@ const ENTRIES = [
   },
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
-  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7 },
+  // 7.003 with `drop` taking the link down with the page lost (docs found-bugs, infra; 2026-11-15). 7.1, raised by name.
+  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7.1 },
   // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
   // 2.7 with `$regex` refused at the door, the `tools` allowlist, `annotations` on every tool and `changes` paged by
   // `limit` through `log.read` (review №7, E5.4; 2026-11-07). 2.75, raised by name — the plan's cap.

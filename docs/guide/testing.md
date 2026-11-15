@@ -78,9 +78,11 @@ arrives at once. `duplicate` delivers a page of the change feed twice; syncom re
 applies nothing from it. `prng(seed)` returns the same sequence of numbers for the same seed, so a randomized
 test that fails can be run again with the same choices.
 
-`drop` loses a page of the change feed on the way. A real WebSocket does not lose a message without closing, and
-syncom does not fetch a lost page again, so a dropped page leaves the receiving node behind for good and
-`settle()` times out. Use it to test what your code does when nodes never converge:
+`drop` loses a page of the change feed on the way, and the link goes down with it. A real WebSocket does not lose
+one message and carry on: the connection dies, and nothing after the lost message arrives. So a dropped page takes
+the link down as `link.disconnect()` would (below): calls fail, `link.down` is `true` and `settle()` times out
+until `link.reconnect()`, which resumes after the last page delivered, so the lost page comes again and the nodes
+converge:
 
 <<< @/examples/testing.mjs#drop
 
