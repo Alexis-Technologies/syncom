@@ -4,6 +4,12 @@ import './custom.css';
 import FromRxdb from './components/FromRxdb.vue';
 import NotInSyncom from './components/NotInSyncom.vue';
 import DocsOverview from './components/DocsOverview.vue';
+import FigureGallery from './components/FigureGallery.vue';
+import './components/figures/figures.css';
+
+// Every figure (components/figures/Fig*.vue) and live demo (components/live/Live*.vue) is
+// registered under its file name, so a page writes <FigReplication /> without an import.
+const figures = import.meta.glob<{ default: object }>('./components/{figures,live}/{Fig,Live}*.vue', { eager: true });
 
 // Extends the default VitePress theme with the syncom brand styling (see custom.css).
 // This is exactly the pattern Pinia / Vite / Vue use to brand their docs — the
@@ -15,6 +21,10 @@ export default {
     app.component('FromRxdb', FromRxdb);
     app.component('NotInSyncom', NotInSyncom);
     app.component('DocsOverview', DocsOverview);
+    app.component('FigureGallery', FigureGallery);
+    for (const [file, module] of Object.entries(figures)) {
+      app.component(file.slice(file.lastIndexOf('/') + 1, -4), module.default);
+    }
     // Vercel Web Analytics + Speed Insights. The framework-agnostic `inject`
     // entrypoints are used rather than the `/vue` components: those require
     // `vue-router`, which VitePress does not use (it ships its own router).

@@ -1,0 +1,210 @@
+/* ─── Figures of the guide (<SyncFigure> and the scenes inside it) ─────────
+ * A scene draws with these classes only, so a look is a set of variables:
+ *   .f-link (a line between nodes; .f-link-off when the link is down)
+ *   .f-node (a node's disc; filled with the logo's gradient through the `grad` slot prop)
+ *   .f-label, .f-text, .f-muted, .f-mono (text)
+ *   .f-card (a record's card), .f-cell (a cell of a log), .f-packet (an op on its way)
+ *   .f-peer-a / -b / -c (a peer's colour), .f-ok (the converged badge), .f-hidden
+ * Every element that moves between steps has a transition; a reader who asked for reduced motion
+ * gets the states without the motion. */
+
+.sc-fig {
+  --f-bg: var(--vp-c-bg-soft);
+  --f-border: var(--vp-c-divider);
+  --f-text: var(--vp-c-text-1);
+  --f-muted: var(--vp-c-text-2);
+  --f-link: var(--vp-c-gray-1);
+  --f-card-fill: var(--vp-c-bg);
+  --f-card-stroke: var(--vp-c-divider);
+  --f-cell-fill: var(--vp-c-default-soft);
+  --f-grid: transparent;
+  margin: 24px 0;
+  padding: 12px 12px 4px;
+  border: 1px solid var(--f-border);
+  border-radius: 12px;
+  background-color: var(--f-bg);
+}
+
+.sc-fig-scene {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+  font-family: var(--vp-font-family-base);
+}
+.sc-fig-scene * {
+  transition:
+    transform 0.9s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.45s ease,
+    fill 0.45s ease,
+    stroke 0.45s ease;
+}
+.sc-fig-scene g {
+  transform-box: view-box;
+}
+
+.f-link {
+  stroke: var(--f-link);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  fill: none;
+}
+.f-link-off {
+  stroke-dasharray: 2 8;
+  opacity: 0.55;
+}
+.f-node-text {
+  fill: #ffffff;
+  font-size: 13px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.f-label {
+  fill: var(--f-text);
+  font-size: 13px;
+  font-weight: 600;
+  text-anchor: middle;
+}
+.f-text {
+  fill: var(--f-text);
+  font-size: 12px;
+}
+.f-muted {
+  fill: var(--f-muted);
+  font-size: 11px;
+}
+.f-mono {
+  font-family: var(--vp-font-family-mono);
+}
+.f-card {
+  fill: var(--f-card-fill);
+  stroke: var(--f-card-stroke);
+  stroke-width: 1.2;
+}
+.f-cell {
+  fill: var(--f-cell-fill);
+}
+.f-peer-a {
+  fill: var(--sc-peer-a);
+}
+.f-peer-b {
+  fill: var(--sc-peer-b);
+}
+.f-peer-c {
+  fill: var(--sc-peer-c);
+}
+.f-stroke-a {
+  stroke: var(--sc-peer-a);
+}
+.f-stroke-b {
+  stroke: var(--sc-peer-b);
+}
+.f-stroke-c {
+  stroke: var(--sc-peer-c);
+}
+.f-packet-text {
+  fill: #ffffff;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--vp-font-family-mono);
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+.f-ok {
+  fill: var(--sc-accent);
+}
+.f-hidden {
+  opacity: 0;
+}
+.f-changed {
+  fill: var(--sc-accent);
+  font-weight: 700;
+}
+
+/* The caption: the controls, the current step, the figure's title. */
+.sc-fig figcaption {
+  padding: 4px 4px 6px;
+}
+.sc-fig-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.sc-fig-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+  color: var(--vp-c-text-1);
+  background: transparent;
+  cursor: pointer;
+}
+.sc-fig-button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.sc-fig-button svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.sc-fig-button svg path[d^='M10.5'],
+.sc-fig-button svg path[d^='M5.5'] {
+  fill: none;
+}
+.sc-fig-dots {
+  display: inline-flex;
+  gap: 5px;
+  margin-left: 6px;
+}
+.sc-fig-dot {
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--vp-c-gray-2);
+  cursor: pointer;
+}
+.sc-fig-dot-on {
+  background: var(--vp-c-brand-3);
+}
+.sc-fig-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--vp-c-text-2);
+  font-variant-numeric: tabular-nums;
+}
+.vp-doc .sc-fig-step {
+  min-height: 3em;
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.vp-doc .sc-fig-caption {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  color: var(--vp-c-text-2);
+}
+.sc-fig-alt {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sc-fig-scene * {
+    transition: none !important;
+  }
+}

@@ -1,5 +1,8 @@
 import { readdirSync, readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { build as esbuild } from 'esbuild';
+import type { Plugin } from 'vite';
 import { defineConfig } from 'vitepress';
 import { withMermaid } from 'vitepress-plugin-mermaid';
 
@@ -90,6 +93,31 @@ const jsonLd = {
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
 };
 
+// The live demos run real syncom in the page: `virtual:syncom-demo` is demo/entry.mjs bundled from
+// src/ for the browser on demand, every source file it reached watched, so a demo always runs what
+// this checkout does. Nothing is generated into the repository.
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+const syncomDemo = (): Plugin => ({
+  name: 'syncom-demo',
+  resolveId: (id) => (id === 'virtual:syncom-demo' ? '\0syncom-demo' : null),
+  async load(id) {
+    if (id !== '\0syncom-demo') return null;
+    const result = await esbuild({
+      entryPoints: [fileURLToPath(new URL('./demo/entry.mjs', import.meta.url))],
+      absWorkingDir: repoRoot,
+      bundle: true,
+      format: 'esm',
+      platform: 'browser',
+      target: 'es2022',
+      write: false,
+      metafile: true,
+      logLevel: 'silent',
+    });
+    for (const input of Object.keys(result.metafile.inputs)) this.addWatchFile(path.join(repoRoot, input));
+    return result.outputFiles[0].text;
+  },
+});
+
 // https://vitepress.dev/reference/site-config
 export default withMermaid({
   ...defineConfig({
@@ -102,7 +130,7 @@ export default withMermaid({
     lastUpdated: true,
     sitemap: { hostname },
     // docs/CLAUDE.md holds the rules for agents who edit these pages; it is not a page of the site.
-    srcExclude: ['**/CLAUDE.md'],
+    srcExclude: ['**/CLAUDE.md', 'examples/**'],
 
     head: [
       ['link', { rel: 'icon', type: 'image/svg+xml', href: `${base}logo-mark.svg` }],
@@ -126,7 +154,11 @@ export default withMermaid({
     // dev server hands them to the browser unbundled, where `import dayjs from` has
     // no default export and the whole app fails to boot. Pre-bundling them fixes dev;
     // noExternal keeps mermaid inlined for the SSR build.
+    // The examples are .mjs files (docs/examples/): highlighted as JavaScript.
+    markdown: { languageAlias: { mjs: 'js' } },
+
     vite: {
+      plugins: [syncomDemo()],
       optimizeDeps: { include: ['mermaid', 'dayjs'] },
       ssr: { noExternal: ['mermaid'] },
     },
