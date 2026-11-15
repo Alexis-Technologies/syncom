@@ -41,7 +41,8 @@ src/connector/appwrite.js @alexify/syncom/connector/appwrite — appwrite({ clie
 src/connector/gdrive.js   @alexify/syncom/connector/gdrive — gdrive({ fetch, token, headers, name, fileId, folder, endpoint, poll }): one JSON
                           file of the collection in the user's Drive (the application data folder) through an injected fetch — the oldest
                           by createdTime, the v2 metadata's ETag, alt=media, the media upload under If-Match (never without: no ETag is
-                          a 428), a create listed again (an older file wins, ours deleted) — requires jsonfile.js only
+                          a 428, the file read all the same), a create listed again (an older file wins, ours deleted), a file found
+                          where the last read found none a 412 — requires jsonfile.js only
 src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetch, token, headers, path, drive, endpoint, poll }): one JSON file
                           of the collection in the user's OneDrive through Microsoft Graph — root:/<path> for the eTag, /content, PUT
                           under If-Match or, for a file not known, conflictBehavior=fail (a 409 another device's) — requires jsonfile.js only
@@ -152,6 +153,8 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   a 412 or a 409 reads the file again, and the collection stays under the drive's simple-upload size (Graph: 4 MB).
   A drive's write is NEVER unconditional: where no file is known, Graph is asked with `conflictBehavior=fail` (a 409
   is another device's file, judged like a 412) and Drive is asked to list again after the create — the oldest file by
-  `createdTime` is the collection's, ours is deleted, the rows judged against it (a 412) — and a file whose metadata
-  answers no ETag is refused (428). Two devices' first pushes into an empty drive once left the second over the first,
-  then deleted the first's record through "the backend wins".
+  `createdTime` is the collection's, ours is deleted, the rows judged against it (a 412); a device whose last read
+  found no file and whose push finds one another device made since is answered the same 412 (its ETag asked first) —
+  and a file whose metadata answers no ETag is read but refused (428), never taken for no file. Two devices' first
+  pushes into an empty drive once left the second over the first, then deleted the first's record through "the
+  backend wins"; a 428 for a file another device made once left a device retrying the same push until its next pull.

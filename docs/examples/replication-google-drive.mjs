@@ -107,16 +107,18 @@ await Promise.all([replication.reSync(), onPhone.reSync()]);
 assert.deepEqual(await laptop.Task.get(fromPhone.id), { title: 'From the phone', done: false, $type: 'Task' });
 assert.deepEqual(await phone.Task.get(fromLaptop.id), { title: 'From the laptop', done: false, $type: 'Task' });
 
-// Two devices that start on an empty drive at the same time each make a file; the oldest wins and holds both. (A
-// device that read the drive before the file existed and pushes after the other made it is refused once with a 428
-// and goes through after its next pull: a short `retryTime` keeps this run fast.)
+// Two devices that start on an empty drive at the same time each make a file; the oldest wins and holds both. A
+// device that read the drive before the file existed and pushes after the other made it reads that file and writes
+// into it at once (a 412 inside the adapter): no error, no wait for its next pull.
 const store = createDrive('https://www.googleapis.com');
 globalThis.fetch = store.fetch;
 const a = await createDatabase({ path: 'a', schema: { entities: { Task: {} } } });
 const b = await createDatabase({ path: 'b', schema: { entities: { Task: {} } } });
 const fresh = () => gdrive({ token: accessToken, name: 'tasks.json' });
-const ra = replicate(a, { name: 'drive', collection: 'Task', retryTime: 50, ...fresh() });
-const rb = replicate(b, { name: 'drive', collection: 'Task', retryTime: 50, ...fresh() });
+const ra = replicate(a, { name: 'drive', collection: 'Task', ...fresh() });
+const rb = replicate(b, { name: 'drive', collection: 'Task', ...fresh() });
+const failures = [];
+for (const r of [ra, rb]) r.on('error', (error) => failures.push(error));
 await Promise.all([ra.awaitInitialReplication(), rb.awaitInitialReplication()]);
 const [ta, tb] = await Promise.all([
   a.Task.insert({ title: 'A', done: false }),
@@ -126,6 +128,24 @@ await Promise.all([ra.awaitInSync(), rb.awaitInSync()]);
 assert.equal(store.files.size, 1, 'one collection file');
 const one = JSON.parse([...store.files.values()][0].text);
 assert.ok(one.docs[ta.id] && one.docs[tb.id]);
+assert.deepEqual(failures, [], 'no push refused on the way');
 
-for (const r of [replication, onPhone, ra, rb]) await r.cancel();
-for (const db of [laptop, phone, a, b]) await db.close();
+// A device whose last read found no file pushes after the other made it: the file is read, the row written into it.
+const late = await createDatabase({ path: 'late', schema: { entities: { Task: {} } } });
+const elsewhere = createDrive('https://www.googleapis.com');
+globalThis.fetch = elsewhere.fetch;
+const rl = replicate(late, { name: 'drive', collection: 'Task', live: false, ...fresh() });
+rl.on('error', (error) => failures.push(error));
+await rl.awaitInitialReplication(); // no file yet
+const made = await createDatabase({ path: 'made', schema: { entities: { Task: {} } } });
+const rm = replicate(made, { name: 'drive', collection: 'Task', live: false, ...fresh() });
+await rm.awaitInitialReplication();
+await made.Task.insert({ title: 'Made the file', done: false });
+await rm.awaitInSync();
+const fromLate = await late.Task.insert({ title: 'Late', done: false });
+await rl.awaitInSync();
+assert.ok(JSON.parse(elsewhere.file('tasks.json').text).docs[fromLate.id], 'into the file the other device made');
+assert.deepEqual(failures, []);
+
+for (const r of [replication, onPhone, ra, rb, rl, rm]) await r.cancel();
+for (const db of [laptop, phone, a, b, late, made]) await db.close();

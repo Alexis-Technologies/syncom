@@ -895,6 +895,67 @@ test('Connector adapters', async (t) => {
           assert.strictEqual(shared.store.unconditional, 0);
         },
       );
+      await t2.test(
+        'Google Drive: a file another device made after this one read none is read and its rows judged against it (a 412), never a 428 loop; a file with no ETag is read, never written',
+        async (t3) => {
+          const late = createFakeDrive({ name: 'late.json' });
+          const laptop = gdrive({ fetch: late.fetch, token: 't', name: 'late.json' });
+          const phone = gdrive({ fetch: late.fetch, token: 't', name: 'late.json' });
+          // The phone reads the drive while it holds no file; then the laptop makes the file.
+          assert.deepStrictEqual(await phone.pull.handler(null, 10), { documents: [], checkpoint: 0 });
+          assert.deepStrictEqual(
+            await laptop.push.handler([{ id: 'from-laptop', data: { a: 1 }, deleted: false, assumed: null }]),
+            [],
+          );
+          // The phone's push finds the laptop's file: read again and the rows judged against it — a row the file
+          // contradicts a conflict, the other written into it.
+          assert.deepStrictEqual(
+            await phone.push.handler([
+              { id: 'from-phone', data: { b: 1 }, deleted: false, assumed: null },
+              { id: 'from-laptop', data: { a: 9 }, deleted: false, assumed: null },
+            ]),
+            [{ id: 'from-laptop', data: { a: 1 } }],
+          );
+          assert.deepStrictEqual(late.read('from-laptop'), { a: 1 });
+          assert.deepStrictEqual(late.read('from-phone'), { b: 1 });
+          assert.strictEqual(late.store.byName('late.json').length, 1);
+          assert.strictEqual(late.store.unconditional, 0);
+          // Over the connector with live: false (no pull between): the push lands, no 428 retried.
+          const drive = createFakeDrive({ name: 'tasks.json' });
+          const db = await syncom.createDatabase({ engine, path: `${t3.name}/phone`, logger: false, defer: 0, schema });
+          t3.after(() => db.close().catch(() => {}));
+          const replication = replicate(db, {
+            name: 'drive',
+            collection: 'Task',
+            ...gdrive({ fetch: drive.fetch, token: 't', name: 'tasks.json' }),
+            live: false,
+            retryTime: 20,
+            maxRetryTime: 40,
+          });
+          t3.after(() => replication.cancel().catch(() => {}));
+          const errors = [];
+          replication.on('error', (error) => errors.push(error));
+          await replication.awaitInitialReplication();
+          drive.write('from-laptop', { a: 1 });
+          const { id } = await db.Task.insert({ title: 'from the phone' });
+          await replication.awaitInSync();
+          assert.deepStrictEqual(drive.read(id), { title: 'from the phone' });
+          assert.deepStrictEqual(drive.read('from-laptop'), { a: 1 });
+          assert.deepStrictEqual(errors, []);
+          // A file whose metadata answers no ETag: its documents are read, a push into it refused (428).
+          drive.noEtag = true;
+          const blind = gdrive({ fetch: drive.fetch, token: 't', name: 'tasks.json' });
+          const ids = [];
+          for (const doc of (await blind.pull.handler(null, 10)).documents) ids.push(doc.id);
+          assert.deepStrictEqual(ids.sort(), [id, 'from-laptop'].sort());
+          await assert.rejects(
+            () => blind.push.handler([{ id: 'from-c', data: { c: 1 }, deleted: false, assumed: null }]),
+            { status: 428, message: /no ETag/ },
+          );
+          assert.strictEqual(drive.read('from-c'), null);
+          assert.strictEqual(drive.store.unconditional, 0);
+        },
+      );
     },
   );
 

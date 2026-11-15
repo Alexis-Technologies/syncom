@@ -10,9 +10,10 @@
 // under `If-Match` (a 412 the conflict) and made with `POST /drive/v3/files`
 // where there is none: the list is read again after the create, and a file
 // older than ours (another device's, made meanwhile) is the collection's —
-// ours is deleted and the rows are judged against it (a 412). A write is
-// never unconditional: a file without an ETag is refused (428). Requires
-// jsonfile.js only.
+// ours is deleted and the rows are judged against it (a 412), as they are
+// where the last read found no file and another device has made it since. A
+// write is never unconditional: a file without an ETag is read but refused
+// (428). Requires jsonfile.js only.
 
 const { jsonFile, requester } = require('./jsonfile.js');
 
@@ -82,9 +83,15 @@ const gdrive = ({
       if ((await resolve()) === null) return null;
       return etagOf().catch(notFound);
     },
+    // A file whose metadata answers no ETag is read all the same (its write is refused): never taken for no file.
     async load() {
-      const etag = await store.probe();
-      if (etag === null) return null;
+      if ((await resolve()) === null) return null;
+      let etag;
+      try {
+        etag = await etagOf();
+      } catch (error) {
+        return notFound(error);
+      }
       const response = await request(`${base}/drive/v3/files/${encodeURIComponent(id)}?alt=media`, {}, 'files.get');
       return { etag, text: await response.text() };
     },
@@ -107,6 +114,9 @@ const gdrive = ({
         }
         id = made;
         match = await etagOf();
+      } else if (match === null && (await etagOf().catch(notFound)) !== null) {
+        // The last read found no file and another device has made it since: read, the rows judged against it.
+        throw refused(412, 'Google Drive: another device made the collection file first');
       }
       if (match === null) throw refused(428, 'Google Drive answered no ETag: no compare-and-set, nothing written');
       const init = { method: 'PATCH', headers: { 'content-type': 'application/json', 'if-match': match }, body: text };

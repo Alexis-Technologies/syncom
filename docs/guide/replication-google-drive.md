@@ -49,8 +49,10 @@ read.
 Every push is a read, a change and a write of the whole file under `If-Match`. When another device wrote in between,
 Drive answers `412`; the adapter reads the file again, judges each row against what it now holds (a row whose document
 changed since this device last saw it is a conflict, which Drive's version wins unless you pass `resolve`), and writes
-again, up to three more times before the push fails and the connector retries it later. A write is never
-unconditional: a file whose metadata answers no ETag is refused with a `428` rather than written blind.
+again, up to three more times before the push fails and the connector retries it later. A device whose last read
+found no file, and which pushes after another device made it, is answered the same way: the adapter reads that file
+and judges its rows against it before it writes. A write is never unconditional: a file whose metadata answers no ETag
+is read, but a push into it is refused with a `428` rather than written blind.
 
 Two devices that start on an empty Drive at the same moment each create a file. After its create, a device lists the
 files of that name again: the oldest by creation time is the collection's file, so the device whose file is newer
@@ -96,10 +98,6 @@ the file was last read. A pull downloads the file only when its ETag moved since
   first, unless `resolve` merges them.
 - **Live means polling.** Drive has no push notification the adapter uses; `poll` probes the ETag, one small request
   each time.
-- **A file made after this device last read.** A device whose last read found no file, and which pushes after another
-  device made it, is refused with a `428` (`REPLICATION_FAILED` on the `error` event) until its next pull reads the
-  file: the live pull or the `poll` probe heals it within `retryTime` or `poll`, and with `live: false` only `reSync()`
-  does.
 - **Not yet run against Drive itself.** The adapter reads the ETag from the v2 metadata (v3 answers none) and sends it
   as `If-Match` to the v3 media upload, following the API's documentation; its tests run against a stand-in. If every
   upload answers `412`, the v2 upload endpoint takes the same `If-Match`.
