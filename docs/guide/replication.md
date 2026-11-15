@@ -11,9 +11,10 @@ signal, so he closes a task there. At the same moment Ada renames that task on h
 phone is back online, both devices should show the renamed task, closed, without anyone being asked
 which version to keep and without either edit getting lost.
 
-That is what the sync engine does. Each node keeps a complete database of its own, reads and writes it
-offline, and exchanges with the others only what they are missing. This page shows how that works from
-the outside: what a node sends, when it sends it, and what you can wait for and listen to.
+That is what the sync engine does. Each [node](./glossary#node), a database that takes part in sync,
+keeps a complete copy of its own, reads and writes it offline, and exchanges with the others only what
+they are missing. This page shows how that works from the outside: what a node sends, when it sends it,
+and what you can wait for and listen to.
 
 <LiveReplication />
 
@@ -28,25 +29,25 @@ the same log, so the log is the node's history of everything it applied, in orde
 <FigWritePath />
 
 Replication is the exchange of ops, not of whole records. A node knows how far it has read every other
-node's stream of ops (a version vector), so two nodes that meet compare their vectors and send only the
-ops the other lacks. An op that arrives twice is recognized and dropped, so delivering one again is
-always safe.
+node's stream of ops (its [version vector](./glossary#version-vector)), so two nodes that meet compare
+their vectors and send only the ops the other lacks. An op that arrives twice is recognized and dropped,
+so delivering one again is always safe.
 
 ## How nodes connect: host and dial
 
-A node connects to another in one of two roles. A node that **hosts** mounts its sync unit,
-`db.sync.unit()`, on a server, and other nodes connect to it. A node that **dials** registers a host with
-`db.sync.addNode()` and opens links to it through the `connect` function you give it. Both roles are the
-same database class: a node can host, dial, or do both, which is how a desktop app can dial the cloud and
-serve the phones on the office network at the same time ([syncom server replication](./replication-server)
-shows it).
+A node connects to another in one of two roles. A node that **hosts** mounts its sync
+[unit](./glossary#unit), the set of procedures other nodes call (`db.sync.unit()`), on a server, and
+other nodes connect to it. A node that **dials** registers a host with `db.sync.addNode()` and opens
+links to it through the `connect` function you give it. Both roles are the same database class: a node
+can host, dial, or do both, which is how a desktop app can dial the cloud and serve the phones on the
+office network at the same time ([syncom server replication](./replication-server) shows it).
 
-When a dialer reaches a host, three things happen. It says **hello**, and the two exchange their node ids
-and vectors. It **pushes** the ops the host lacks. It **subscribes** to the host's feed, which sends
-every op that lands on the host from the dialer's last position onward, including ops from other nodes.
-After that the link stays live: each new op on the dialer is pushed, and each op that lands on the host
-comes down the feed. That is how Ada's write reaches Bob's phone: laptop to server by push, server to
-phone by feed.
+When a dialer reaches a host, three things happen. It says [**hello**](./sync-protocol#say-hello): the two
+exchange their node ids and vectors. It **pushes** the ops the host lacks. It **subscribes** to the host's
+[feed](./sync-protocol#follow-the-host-s-feed), a live stream of every op that lands on the host from the
+dialer's last position onward, including ops from other nodes. After that the link stays live: each new
+op on the dialer is pushed, and each op that lands on the host comes down the feed. That is how Ada's
+write reaches Bob's phone: laptop to server by push, server to phone by feed.
 
 <FigHandshake />
 
@@ -56,20 +57,23 @@ The details of the protocol (the procedures, their arguments, the codes a host a
 ## Set up the nodes
 
 The examples on this page run all three nodes in one process. `MemoryLink` from
-`@alexify/syncom/testing` stands in for the network: it behaves like a wrpc connection, including
-dropping and coming back. In an app, `connect` opens a WebSocket instead
-([WebSocket](./replication-websocket) shows the two lines).
+`@alexify/syncom/testing` is a test stand-in for the network: it behaves like a wrpc connection,
+including dropping and coming back. In an app, the server mounts its unit on a wrpc server and `connect`
+opens a wrpc client; the [Quickstart](./quickstart#sync-with-another-node) shows both, and
+[WebSocket](./replication-websocket) the options.
 
 <<< @/examples/replication.mjs#nodes
 
-The server opens a database and mounts its unit. The laptop and the phone open theirs with a `connect`
-function and register the server with `addNode()`. A node with `connect` starts dialing as soon as it
-opens, and the registry is saved in its storage, so on the next start it dials the same nodes again
-without another `addNode()`. The `url` is whatever your `connect` understands; syncom never parses it.
+The server opens a database and mounts its unit. Every other node opens with a `connect` function,
+registers the server with `addNode()` and waits for its first sync. A node with `connect` starts dialing
+as soon as it opens, and the registry is saved in its storage, so on the next start it dials the same
+nodes again without another `addNode()`. The `url` is whatever your `connect` understands; syncom never
+parses it, and `MemoryLink` ignores it.
 
 `awaitInitialReplication()` resolves once every registered node has been reached and its feed read to
-the end once. Use it before the first read on a new device, but do not make the app wait for it before
-it can be used: it resolves only once the host has answered, and the database works offline anyway. A
+the end once. Await it where the next step needs the host's data, as `open()` does here, or behind a
+first-run screen that says the board is loading. Do not hold the rest of the app on it: the database
+already reads and writes offline, and on a slow network the promise takes as long as the host does. A
 node whose dial failed is not waited for.
 
 ## Write on one node, read on another
@@ -98,9 +102,12 @@ for example because the host could not be reached when the app started, the node
 the next `db.sync.sync()` dials it again, so call it when the device comes back online.
 
 A node that dials also keeps its own ops in its log until every registered node holds them, even past the
-log's normal retention. A laptop that works offline for a month still delivers every write when it
-reconnects. Register the host before going offline: ops written before the first `addNode()` are
-retained like any other ops.
+log's normal retention, so a laptop that works offline for a month still delivers every write when it
+reconnects. That guarantee starts with the first `addNode()`. Ops written before any host is registered
+are kept only as long as the log's retention keeps any op (about the newest 10 000 by default). If older ones
+were dropped by the time you add a host, that host can never be sent this node's writes: the node reports
+`UNDELIVERABLE`, and its data stays on this node alone. Register the host when the app first starts,
+before it writes ([Retention](./retention#when-a-host-can-no-longer-be-caught-up) has the details).
 
 ## Edit the same field on two nodes
 
@@ -109,20 +116,22 @@ field without seeing each other's write, one value has to win, and every node mu
 
 <<< @/examples/replication.mjs#same-field
 
-A plain field (a register) keeps the write with the later timestamp, and when two timestamps are equal,
-the node id decides. Every node applies that rule to the same ops, so all of them agree whatever order the
-ops arrive in. There is no conflict handler to write. Fields that should not lose writes merge instead:
-counters add up, sets keep concurrent additions, and lists and text keep both insertions.
-[Fields that merge](./fields) covers each kind, and [Transactions and conflicts](./transactions-conflicts)
-shows how to notice when a write lost.
+A plain field (a [register](./glossary#register)) keeps the write with the later timestamp, and when two
+timestamps are equal, the node id decides. Every node applies that rule to the same ops, so all of them
+agree whatever order the ops arrive in. There is no conflict handler to write. Fields that should not
+lose writes merge instead: counters add up, sets keep concurrent additions, and lists and text keep both
+insertions. [Fields that merge](./fields) covers each kind, and
+[Transactions and conflicts](./transactions-conflicts) shows how to notice when a write lost.
 
 ## Add a node later, or come back after a long time
 
 A new node reads the host's log from the start, as long as the host still holds all of it. A host keeps
-about the last 10 000 ops by default (`sync.retention`), and once it has dropped older ones, a new node, or one
-that was away longer than that, cannot be caught up from the log. The host sends a **snapshot** instead:
-every record in the node's [scopes](./partial-sync), page by page. Here the server keeps a tiny log so the
-example shows it:
+about the last 10 000 ops by default (`sync.retention`), and once it has dropped older ones, a new node,
+or one that was away longer than that, cannot be caught up from the log. The host sends a
+[**snapshot**](./glossary#snapshot) instead: every record the node may see (all of them, unless you use
+[partial sync](./partial-sync)), page by page, with what each needs to merge. Here the server keeps a
+tiny log so the example shows it, and `open()` is the helper from [Set up the nodes](#set-up-the-nodes),
+dialing this server:
 
 <<< @/examples/replication-bootstrap.mjs#retention
 
@@ -160,13 +169,17 @@ waited for.
 <<< @/examples/replication.mjs#events
 
 `peer` fires when a link comes up, drops or comes back. `sync` fires after every push (`pushed`) and every
-page received (`received`, `applied` and the counts of what was skipped). `bootstrap` fires when a
-snapshot was joined. `error` carries the failures on the way to a peer, each with `url`: a host that
-refused the hello (a numeric code such as `403`), a page that could not be applied (`PAGE_FAILED`, retried
-from the saved position, `STUCK` after the third failure in a row), or a scope taken back (`REVOKED`). A
-listener that throws is logged and never breaks replication. To take part instead of watching, for
-example to refuse a peer's op, use [hooks](./hooks). The full payloads are in the
-[reference](../reference/api#syncmanager).
+page received (`applied`, and counts of what was skipped). `bootstrap` fires when a snapshot was joined.
+`error` carries the failures on the way to a peer, each with its `url`. Three of them are worth handling
+in an app. A numeric `403` means the host refused the hello: a wrong token, or [scopes](./partial-sync)
+it does not grant. `STUCK` means a page of the feed failed three times in a row and nothing more is taken
+from that host until you fix the cause and call `enableNode(url, false)`, then `enableNode(url, true)`.
+`REVOKED` means the host took scopes back ([Partial sync](./partial-sync#take-access-back)). The other
+codes and every payload are in the [events reference](../reference/events#sync-manager-events) and the
+[error codes](../reference/api#syncomerror).
+
+A listener that throws is logged and never breaks replication. To take part instead of watching, for
+example to refuse a peer's op, use [hooks](./hooks).
 
 `peers()` is the live view of every dialed node: whether it is `connected` and `subscribed`, how many ops
 are `pending`, whether it is `behind` after a failed push, `caughtUp` with its feed, and its `lastError`.
@@ -175,8 +188,8 @@ are `pending`, whether it is `behind` after a failed push, `caughtUp` with its f
 
 <<< @/examples/replication.mjs#control
 
-`enableNode(url, false)` hangs up but keeps the node, its saved position and what it has acknowledged;
-`enableNode(url, true)` dials it again and resumes where it stopped. `removeNode(url)` hangs up and
+`enableNode(url, false)` hangs up but keeps the node, its saved position and how far it holds this
+node's ops; `enableNode(url, true)` dials it again and resumes where it stopped. `removeNode(url)` hangs up and
 forgets the node, and adding the same url twice rejects with `NODE_EXISTS`. `stop()` closes every link
 and `start()` dials every enabled node again; a database with `connect` starts on open unless you pass
 `sync: { autoStart: false }`. `sync()` pushes what the peers lack right now and dials a node whose dial

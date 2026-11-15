@@ -13,18 +13,43 @@ its own records.
 <<< @/examples/collection.mjs#define
 
 A collection name may not clash with something the database already answers to (`get`, `close`, `sync`
-and so on): `createDatabase()` refuses it with a `TypeError`. `entities` may also be a `Map`.
+and so on): `createDatabase()` refuses it with a `TypeError`.
 
 ## Insert a record
 
-`insert()` writes a new record and resolves to a live [document](./document) for it. The id is minted
-unless the data names one: by default a string `id` field becomes the record id and leaves the data, and a
-schema can name another field or build the id from several ([Choose how records are identified](./schema#choose-how-records-are-identified)).
+`insert()` writes a new record and resolves to a live [document](./document) for it: an object whose
+properties are the record's fields and whose `id` is the record's id. It is live because it follows every later
+change to the record, whether your app made it or it came from another [node](./glossary#node), and you can
+assign its properties and `save()` them. The id is minted unless the data names one: by default a string `id`
+field becomes the record id and leaves the data, and a schema can name another field or build the id from
+several ([Choose how records are identified](./schema#choose-how-records-are-identified)).
 
 <<< @/examples/collection.mjs#insert
 
 Inserting under an id a live record already holds rejects with `EXISTS`, decided inside the write queue so
 that two concurrent inserts cannot both pass.
+
+## Which calls are the collection's and which the database's
+
+A collection has the calls that work on the records of its kind: `insert()`, `upsert()`, `update()`,
+`delete()`, `get()`, `select()` and the rest of this page. The methods of a field's [kind](./fields) are the
+database's and take the record's id first: `inc()` for a counter, `add()` and `remove()` for a set, `splice()`
+for a list or a text. A document has them too, with the id filled in, and a collection's `update()` reaches the
+same kinds through `$inc` and `$addToSet`.
+
+<<< @/examples/collection.mjs#split
+
+Two more differences catch newcomers. The database's own `insert()` resolves to the new record's id, while a
+collection's resolves to a document ([Records outside a collection](#records-outside-a-collection) shows the
+first). And `get()` returns a copy of the record alone, without its id, while each row of a
+[query](./query)'s `fetch()` carries the `id` beside the fields.
+
+::: warning remove() means two different things
+`db.remove(id, field, elements)` takes elements out of a set field of one record. `db.Task.remove()` deletes
+every record of the collection ([Add or remove collections at runtime](#add-or-remove-collections-at-runtime)).
+A collection's `remove()` takes no id: `db.Task.remove('ship-it')` is a `TypeError`, not a deletion, and
+`bulkRemove(ids)` or `delete(id)` is how you delete chosen records.
+:::
 
 ## Write a record whole, or only if it is absent
 
@@ -46,9 +71,9 @@ record compose instead of overwriting each other:
 
 <<< @/examples/collection.mjs#update
 
-`delete()` leaves a tombstone so that the deletion reaches other nodes. With `data`, the tombstone carries
-those fields (a reason, who deleted it) for a hook, a [pipeline](./pipeline) or a peer to read, while
-`get()` answers `null` all the same:
+`delete()` leaves a [tombstone](./glossary#tombstone) so that the deletion reaches other nodes. With
+`data`, the tombstone carries those fields (a reason, who deleted it) for a hook, a [pipeline](./pipeline) or
+a peer to read, while `get()` answers `null` all the same:
 
 <<< @/examples/collection.mjs#delete
 
@@ -61,8 +86,8 @@ would have thrown.
 
 <<< @/examples/collection.mjs#bulk
 
-A batch that cannot reach the disk at all writes nothing. One call takes at most 10,000 rows; a larger
-batch is a `TypeError` before anything lands, so page through big imports.
+A batch that cannot reach the disk at all writes nothing. One call has a bound on its rows (in the
+[reference](../reference/api#collection)), so split a big import into batches.
 
 ## Read records by id
 
@@ -93,8 +118,9 @@ another collection) a `remove`. To follow the records that match a condition, a 
 ## Add or remove collections at runtime
 
 `addCollections()` defines collections on an open database, with the same definitions the schema takes;
-records already stored with that `$type` are indexed as they are found. `remove()` deletes every record of
-a collection, and `removeCollection()` forgets the definition while keeping its records:
+records already stored with that `$type` are indexed as they are found. A collection's `remove()` deletes every
+record of the collection (not the elements of a set, which is the database's `remove()`), and
+`removeCollection()` forgets the definition while keeping its records:
 
 <<< @/examples/collection.mjs#runtime
 
@@ -112,10 +138,8 @@ never changes.
 ## Limitations
 
 - Collections added with `addCollections()` are not saved: add them again after every open.
-- Counters and sets have no method of their own on a collection. Use `$inc` and `$addToSet` in `update()`,
-  the database's `inc()` and `add()`, or the document's.
-- A batch holds at most 10,000 rows, and `remove()` works through a collection 500 records at a time, each
-  page its own transaction.
+- A collection's `remove()` is not one transaction. It deletes the records in pages, each page its own
+  transaction, so a crash midway leaves the rest of the collection in place.
 
 ## Coming from RxDB
 

@@ -83,7 +83,7 @@ import { replicate } from '@alexify/syncom/connector';
 
 const board = await createDatabase({ path: 'board', schema: { entities: { Task: {} } } });
 
-// Your backend's API, wrapped in the two handlers the connector calls.
+// The two handlers the connector calls, over your backend's client (`api`).
 const handlersFor = (api) => ({
   pull: {
     // The backend's documents changed since `checkpoint`, at most `batchSize`, and the position after them.
@@ -129,12 +129,13 @@ assert.equal(api.read(task.id), null, 'a deletion goes out as a deletion');
 api.write('t2', { title: 'Review the PR', done: false });
 await replication.reSync();
 assert.deepEqual(await board.Task.get('t2'), { title: 'Review the PR', done: false, $type: 'Task' });
-await replication.cancel();
 
 // #region stream
+await replication.cancel(); // one connector per backend: stop it, then create it again with a stream
+
 const { pull, push } = handlersFor(api);
 const live = replicate(board, {
-  name: 'tasks-api',
+  name: 'tasks-api', // the same name: it resumes from the checkpoint the first one saved
   collection: 'Task',
   push,
   pull: {
@@ -151,30 +152,33 @@ assert.equal(api.listeners, 1, 'the stream is followed once the first pull is th
 api.write('t3', { title: 'Fix the build', done: false });
 for (let i = 0; i < 100 && (await board.Task.get('t3')) === null; i++) await sleep(10);
 assert.deepEqual(await board.Task.get('t3'), { title: 'Fix the build', done: false, $type: 'Task' });
-await live.cancel();
-assert.equal(api.listeners, 0, 'cancel() stops the stream');
 
 // #region conflict
-const quiet = replicate(board, { name: 'tasks-api', collection: 'Task', live: false, ...handlersFor(api) });
-quiet.on('conflict', ({ id, local, resolved }) => console.log(id, local.title, '->', resolved.title));
-await quiet.awaitInitialReplication();
+await live.cancel(); // no connector runs for a while, as when the app is offline
 
 api.write('t2', { title: 'Review the PR today', done: false }); // another app edits t2
-await board.Task.update('t2', { done: true }); // and so does this node, before it heard of that edit
-await quiet.awaitInSync();
+await board.Task.update('t2', { done: true }); // and so does this node, before it hears of that edit
+
+const back = replicate(board, { name: 'tasks-api', collection: 'Task', ...handlersFor(api) });
+back.on('conflict', ({ id, local, resolved }) => console.log(id, local.title, '->', resolved.title));
+await back.awaitInSync();
 // t2 Review the PR -> Review the PR today
 console.log(await board.Task.get('t2')); // { title: 'Review the PR today', done: false, $type: 'Task' }
 // #endregion conflict
+assert.equal(api.listeners, 0, 'cancel() stops the stream');
 assert.deepEqual(await board.Task.get('t2'), { title: 'Review the PR today', done: false, $type: 'Task' });
 assert.deepEqual(api.read('t2'), { title: 'Review the PR today', done: false }, 'nothing of the edit went back');
-assert.equal(quiet.stats().conflicts, 1);
-await quiet.cancel();
+assert.equal(back.stats().conflicts, 1);
 
 // #region resolve
+await back.cancel(); // offline again, and both sides edit t3
+
+api.write('t3', { title: 'Fix the build first', done: false });
+await board.Task.update('t3', { done: true });
+
 const merging = replicate(board, {
   name: 'tasks-api',
   collection: 'Task',
-  live: false,
   ...handlersFor(api),
   // Keep the backend's fields but this node's `done`. Return null to delete; undefined takes the backend's state.
   resolve({ local, remote, deleted }) {
@@ -182,16 +186,12 @@ const merging = replicate(board, {
     return { ...remote, done: local.done };
   },
 });
-await merging.awaitInitialReplication();
-
-api.write('t3', { title: 'Fix the build first', done: false });
-await board.Task.update('t3', { done: true });
 await merging.awaitInSync();
 console.log(api.read('t3')); // { title: 'Fix the build first', done: true }
 // #endregion resolve
 assert.deepEqual(api.read('t3'), { title: 'Fix the build first', done: true });
 assert.deepEqual(await board.Task.get('t3'), { title: 'Fix the build first', done: true, $type: 'Task' });
-await merging.cancel();
+assert.equal(merging.stats().conflicts, 1);
 
 const legacy = createApi();
 legacy.write('l1', { name: 'An old task', completed: true });
@@ -216,49 +216,41 @@ assert.deepEqual(legacy.read('t3'), { name: 'Fix the build first', completed: tr
 await shaped.cancel();
 
 // #region events
-const watched = replicate(board, {
-  name: 'tasks-api',
-  collection: 'Task',
-  ...handlersFor(api),
-  retryTime: 1_000, // the first wait after a failure, doubled per failure in a row
-  maxRetryTime: 30_000,
-});
-watched.on('received', ({ documents, applied }) => console.log(`pulled ${documents}, ${applied} changed a record`));
-watched.on('sent', ({ rows }) => console.log(`pushed ${rows}`));
-watched.on('refused', ({ direction, id, reason }) => console.log(`${direction} refused ${id}: ${reason}`));
-watched.on('error', (error) => console.log(error.code, error.direction, `retry in ${error.retryIn} ms`));
+merging.on('received', ({ documents, applied }) => console.log(`pulled ${documents}, ${applied} changed a record`));
+merging.on('sent', ({ rows }) => console.log(`pushed ${rows}`));
+merging.on('refused', ({ direction, id, reason }) => console.log(`${direction} refused ${id}: ${reason}`));
+merging.on('error', (error) => console.log(error.code, error.direction, `retry in ${error.retryIn} ms`));
 // #endregion events
 const seen = { errors: [], refused: [] };
-watched.on('error', (error) => seen.errors.push(error));
-watched.on('refused', (event) => seen.refused.push(event));
-await watched.awaitInitialReplication();
+merging.on('error', (error) => seen.errors.push(error));
+merging.on('refused', (event) => seen.refused.push(event));
 
-// A pull that fails is told and tried again after the backoff; nothing is skipped.
+// A pull that fails is told and tried again after the backoff (5 s, a quarter either way); nothing is skipped.
 api.failNext(1);
 api.write('t4', { title: 'Answer issues', done: false });
-await watched.reSync();
+await merging.reSync();
 assert.equal(seen.errors.length, 1);
 assert.equal(seen.errors[0].code, 'REPLICATION_FAILED');
 assert.equal(seen.errors[0].direction, 'pull');
-assert.ok(seen.errors[0].retryIn >= 750 && seen.errors[0].retryIn <= 1250);
-assert.equal(watched.errors.length, 1);
-for (let i = 0; i < 300 && (await board.Task.get('t4')) === null; i++) await sleep(10);
+assert.ok(seen.errors[0].retryIn >= 3750 && seen.errors[0].retryIn <= 6250);
+assert.equal(merging.errors.length, 1);
+assert.equal(await board.Task.get('t4'), null, 'the failed page has not landed');
+await merging.reSync(); // the retry, without waiting for it: the checkpoint did not move
 assert.deepEqual(await board.Task.get('t4'), { title: 'Answer issues', done: false, $type: 'Task' });
 
 // #region refused
 api.refuse('huge', { code: 'too_large', message: 'the body is over 1 MB' });
 await board.Task.set('huge', { title: 'A task with a very long description', done: false });
-await watched.awaitInSync();
+await merging.awaitInSync();
 // push refused huge: too_large
-console.log(watched.stats().parked); // 1: set aside until the record changes again or reSync()
+console.log(merging.stats().parked); // 1: set aside until the record changes again or reSync()
 // #endregion refused
-assert.equal(watched.stats().parked, 1);
+assert.equal(merging.stats().parked, 1);
 assert.deepEqual(
   seen.refused.map(({ direction, id, reason }) => [direction, id, reason]),
   [['push', 'huge', 'too_large']],
 );
 assert.equal(api.read('huge'), null);
-await watched.cancel();
 
 // #region restart
 await board.close(); // cancels the database's connectors too
@@ -280,7 +272,6 @@ assert.deepEqual(await reopened.Task.get('t5'), {
 });
 assert.deepEqual(api.read(offline.id), { title: 'Written offline', done: false });
 assert.deepEqual(resumed.errors, []);
-await resumed.cancel();
 
 // #region adapter
 // An adapter: a function of the client the application hands in, answering the two handlers.
@@ -307,6 +298,7 @@ const tasksApi = ({ client }) => ({
   },
 });
 
+await resumed.cancel(); // one connector per backend: the adapter's replaces the one above
 const adapted = replicate(reopened, { name: 'tasks-api', collection: 'Task', ...tasksApi({ client: api }) });
 // #endregion adapter
 await adapted.awaitInitialReplication();

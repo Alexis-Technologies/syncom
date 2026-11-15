@@ -1,15 +1,9 @@
 // The Quickstart page (docs/guide/quickstart.md) shows the regions of this file.
 // tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
-import { Server, defineRouter, WrpcClient } from '@alexify/wrpc';
-// #region open
+// #region collection
 import { createDatabase } from '@alexify/syncom/all';
 
-const db = await createDatabase({ path: 'board' });
-// #endregion open
-await db.close();
-
-// #region collection
 const board = await createDatabase({
   path: 'board',
   schema: {
@@ -70,16 +64,24 @@ console.log(await board.Task.get(task.id)); // null
 assert.equal(await board.Task.get(task.id), null);
 
 // #region host
-// server.mjs: the node other nodes dial
+// server.mjs: the node the others dial, here the `board` database opened above
+import { Server, defineRouter } from '@alexify/wrpc';
+
 const router = defineRouter({
-  syncom: board.sync.unit({ access: 'public' }),
+  // `syncom` is the name the other side calls: syncom/hello, syncom/push, syncom/changes…
+  syncom: board.sync.unit({
+    access: 'public', // let any connection greet the unit…
+    authorize: (context, hello) => hello.token === 'board-secret', // …and admit only nodes with the token
+  }),
 });
-const server = new Server({ router, host: '127.0.0.1', port: 8000, protocol: 'http' });
+// 0.0.0.0 listens on every network interface; the WebSocket endpoint is ws://<this host>:8000/api
+const server = new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http' });
 await server.listen();
 // #endregion host
 
 // #region dial
-// client.mjs: a second node, anywhere, that dials the first one
+// laptop.mjs: a second node, on another device, with the same collections
+import { WrpcClient } from '@alexify/wrpc';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 
 const laptop = await createDatabase({
@@ -89,11 +91,12 @@ const laptop = await createDatabase({
     connect: async (node) => createWrpcLink(await WrpcClient.connect(node.url)),
   },
 });
-await laptop.sync.addNode({ url: 'ws://127.0.0.1:8000/api' });
+// the server's address on your network, e.g. ws://192.168.1.20:8000/api
+await laptop.sync.addNode({ url: 'ws://127.0.0.1:8000/api', token: 'board-secret' });
 await laptop.sync.awaitInSync();
 
 console.log((await laptop.Task.select({}).fetch()).length); // 3: every task the server has
-await laptop.Task.insert({ title: 'Written offline, synced later', done: false });
+await laptop.Task.insert({ title: 'Written on the laptop', done: false });
 // #endregion dial
 assert.equal((await laptop.Task.select({}).fetch()).length, 4);
 

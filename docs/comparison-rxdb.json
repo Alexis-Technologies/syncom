@@ -3018,8 +3018,8 @@
         },
         "ci": {
           "mark": "",
-          "text": "2,461 `node:test` tests, every docs example among them; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux",
-          "source": "pnpm test (2026-11-15: 2,461 tests, 2,457 pass, 4 skipped); package.json scripts.test:coverage; .github/workflows/ci.yml",
+          "text": "2,462 `node:test` tests, every docs example among them; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux",
+          "source": "pnpm test (2026-11-15: 2,462 tests, 2,458 pass, 4 skipped); package.json scripts.test:coverage; .github/workflows/ci.yml",
           "detail": "Browser halves run under Node with an OPFS mock and fake-indexeddb; no real browser in CI."
         },
         "docs": {

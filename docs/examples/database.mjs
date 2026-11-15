@@ -23,7 +23,7 @@ const board = await createDatabase({
   path: 'board', // where the data lives: a directory, or a path in OPFS
   schema: { entities: { Task: { index: ['done'] } } }, // the collections
   logger: false, // or a console- or pino-shaped logger
-  actor: 'ada', // who writes: stamped on every operation
+  actor: 'ada', // who is writing, e.g. the signed-in user: kept with every op
 });
 // #endregion options
 assert.deepEqual(await board.get(id), { title: 'Write the docs', done: false });
@@ -121,7 +121,7 @@ assert.match(await counted.insert({ title: 'x' }), /^task-[0-9a-z]+-2$/);
 
 // #region flush
 await counted.insert({ title: 'Durable in the log already' });
-await counted.flush(); // the record files and their chain block are on disk too
+await counted.flush(); // the record files are on disk too
 // #endregion flush
 await counted.close();
 

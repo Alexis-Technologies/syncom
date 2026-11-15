@@ -27,8 +27,9 @@ one over expo-sqlite.
 ## Choose the storage when you open the database
 
 Leave the `engine` option out and the database writes JSON files under its `path`: on the file system in
-Node.js, in the Origin Private File System in a browser. Pass an engine and the same database lives there
-instead.
+Node.js, in the Origin Private File System in a browser. Pass an engine and the database lives there instead.
+The three opens below are alternatives, and an app makes one of them; the example opens all three side by side,
+each under a path of its own, so that the next one can run the same code on each.
 
 <<< @/examples/storage.mjs#pick
 
@@ -42,15 +43,19 @@ another instance's writes) makes the database faster or safer, never different.
 
 ## Engines and backends
 
-An **engine** is the storage contract: a factory that opens a database as a set of stores (small named texts,
-the records, the op log's medium, the attachments' bytes) and lands each write as one write set. The memory,
-IndexedDB, SQLite and MongoDB engines keep rows in their own structures.
+Every storage in the table above is an **engine**: the object you pass as `engine`, or the files engine when you
+pass none. The memory, IndexedDB, SQLite and MongoDB engines keep the records in their own medium. The
+**files engine**, the default, keeps them as JSON files and writes those through a **backend**: five file
+functions (`read`, `write`, `exists`, `remove`, `list`) known as an [fsi](./glossary#backend-fsi). Node's file
+system and OPFS are the default backends; `memory()`, `createIdbFsi()`, [`layered()`](./storage-layered) and
+[`atRest()`](./encryption) are others, passed as `createDatabase({ fsi })` instead of an `engine` (passing both is
+a `TypeError`).
 
-The **files engine** turns a **backend**, an `fsi` of five functions over a directory and a file name (`read`,
-`write`, `exists`, `remove`, `list`), into an engine. Node's file system and the browser's OPFS are the two
-defaults; `memory()`, `createIdbFsi()`, [`layered()`](./storage-layered) and [`atRest()`](./encryption) are
-backends too, given with `createDatabase({ fsi })`. A database takes an `engine` or an `fsi`, never both: the
-pair is a `TypeError`.
+The two in-memory storages are one of each. `memoryEngine()` is an engine that keeps records as objects and
+writes no files at all, the one to use for tests and server-side rendering; `memory()` is a backend, a `Map` of
+file names the files engine writes into exactly as it would write to disk, for a test that should see those
+files ([Memory](./storage-memory)). [Engines and backends](../reference/engines) specifies both contracts:
+the stores, the write set, the capabilities and the fsi.
 
 ## What each storage can do
 
@@ -85,20 +90,22 @@ writes nothing, which only a storage several instances may open at once can serv
 
 <<< @/examples/storage.mjs#quota
 
-`quota()` answers `{ usage, quota }` in bytes, or `null` for what the storage cannot say. In a browser the
-numbers come from the Storage API for the whole origin, and `db.persist()` asks the browser not to evict the
-origin's storage. A storage that fills up between a write's log entry and its record does not fail the write:
-it resolves, the record stays readable from memory, the database's `error` event carries `UNPERSISTED` with
-`quota: true`, and the next open lands the record.
+`inSqlite` is the SQLite database of the first example. `quota()` answers `{ usage, quota }` in bytes, or `null`
+for what the storage cannot say. In a browser the numbers come from the Storage API for the whole origin, and
+`db.persist()` asks the browser not to evict the origin's storage. A storage that fills up between a write's log
+entry and its record does not fail the write: it resolves, the record stays readable from memory, the database's
+`error` event carries `UNPERSISTED` with `quota: true`, and the next open lands the record.
 
 ## Move a database to another storage
 
 <<< @/examples/storage.mjs#move
 
-`copyEngine()` copies a closed database whole: records, tags, the op log, the node's identity. The node opens
-on the new storage as itself, so its peers resume where they were instead of sending everything again. Open it
-on the new storage only from then on. [Storage migration](./migration-storage) covers the rest, including
-moving through a JSON dump.
+The root module exports Node's five file functions, so `filesEngine()` over them reads the files a database
+opened without `engine` keeps in Node.js; `createDatabase`, `sqliteEngine` and `schema` are those of the first
+example. `copyEngine()`, from the `@alexify/syncom/engines` subpath, copies a closed database whole: records,
+tags, the op log, the [node](./glossary#node)'s identity. The node opens on the new storage as itself, so its
+peers resume where they were instead of sending everything again. Open it on the new storage only from then on.
+[Storage migration](./migration-storage) covers the rest, including moving through a JSON dump.
 
 ## Write your own engine
 
@@ -108,10 +115,11 @@ that exists:
 
 <<< @/examples/storage.mjs#wrap
 
-A new medium (a key-value store, a cloud database) implements the stores itself. The contract is specified
-in [Engines and backends](../reference/engines), and `tests/suites/engine.js` in the repository is the contract
-as a test: run it against your engine. Where the medium holds files rather than rows, a backend of five
-functions is less work, as [localStorage](./storage-localstorage) shows.
+`createDatabase`, `memoryEngine` and `schema` are those of the first example. A new medium (a key-value store, a
+cloud database) implements the stores itself. The contract is specified in
+[Engines and backends](../reference/engines), and `tests/suites/engine.js` in the repository is the contract as a
+test: run it against your engine. Where the medium holds files rather than rows, a backend of five functions is
+less work, as [localStorage](./storage-localstorage) shows.
 
 ## Coming from RxDB
 

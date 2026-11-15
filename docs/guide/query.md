@@ -15,6 +15,11 @@ board:
 
 <<< @/examples/query.mjs#data
 
+`index` lists what the catalog keeps sorted for this collection. `'done'` is one field, and `['done', 'due']`,
+an array inside the list, is a compound index: the tasks sorted by `done` and, among equal `done`, by `due`. It
+lets `select({ done: false }).order('due')` read the open tasks already in due order, as
+[Make queries fast](#make-queries-fast) shows. Without an index every query still works; it reads more records.
+
 ## Find records
 
 `fetch()` returns every match as a plain object with the record's `id`. `one()` returns the first match or
@@ -51,9 +56,9 @@ room between two neighbors, so moving a task writes one field and never renumber
 
 <<< @/examples/query.mjs#position
 
-Two nodes that drop a task into the same gap at once pick their own keys, and `jitter` adds random digits
-so they rarely pick the same one; if they do, the two tasks tie and sort by id until one moves. To order the
-elements inside one record instead, use a [list](./lists) field, which merges by position on its own.
+Two [nodes](./glossary#node) that drop a task into the same gap at once pick their own keys, and `jitter` adds
+random digits so they rarely pick the same one; if they do, the two tasks tie and sort by id until one moves. To
+order the elements inside one record instead, use a [list](./lists) field, which merges by position on its own.
 
 ## Page through results
 
@@ -104,8 +109,8 @@ not counted in `written`:
 <<< @/examples/query.mjs#write
 
 `update()` takes the same fields and operators as a collection's `update()`, and `delete({ data })` puts
-the data on every tombstone. One call writes at most 10,000 records; past that it is a `TypeError` before
-anything lands, so narrow the query or page through it with `limit()`.
+the data on every [tombstone](./glossary#tombstone). One call writes at most 10,000 records; past that it is a
+`TypeError` before anything lands, so narrow the query or page through it with `limit()`.
 
 ## Count distinct values
 
@@ -141,15 +146,6 @@ than the window it returns. Declare the fields you filter and sort on in the ent
 [Full-text search](./fulltext-search). `nearest()` ranks matches by distance to a vector:
 [Vector search](./vector-search).
 
-## Encrypted records in results
-
-A record written with `encrypted: true` is sealed for this node, and the catalog knows nothing of its
-fields. A query on the node that holds the key still finds it: the sealed records of the collection are
-decrypted and matched beside the indexed ones. `select(query, { sealed: false })` leaves them out. Reads
-that leave the node (a host serving queries to a thin client, an agent's tools, a connector) never include
-them, and neither does `$text`. Each sealed record costs a read and a decryption per query, so keep them
-few; [Encryption](./encryption) has the details.
-
 ## Limitations
 
 - The catalog of indexed fields lives in memory, and a query that no index serves reads every record of
@@ -158,6 +154,8 @@ few; [Encryption](./encryption) has the details.
 - A `$regex` runs on the event loop of the node that answers it, and a pathological pattern can block it.
   A host that answers queries from peers refuses a `$regex` from the wire unless you allow it.
 - Comparisons only hold between values of one kind: `{ due: { $gt: 5 } }` never matches a string `due`.
+- A record [sealed](./encryption) with `encrypted: true` is found only on the node that holds its key, and
+  each one costs a read and a decryption per query, since no index covers it.
 
 ## Coming from RxDB
 

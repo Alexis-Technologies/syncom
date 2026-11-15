@@ -172,6 +172,7 @@ is no conflict handler. One API in Node.js and the browser.
 ## Reference
 
 - [API reference](https://syncomjs.vercel.app/reference/api): Every export of syncom and its subpaths with its signature, options, events and error codes, the specification the guide links into.
+- [Connectors](https://syncomjs.vercel.app/reference/connectors): The connector's rules as a specification: every option, how a pulled document is judged, how a push answer is read, the checkpoint and the retries.
 - [Engines and backends](https://syncomjs.vercel.app/reference/engines): The storage contract as a specification, from engines, stores and write sets to capabilities, the five-function fsi, durability and locking.
 - [Entry points](https://syncomjs.vercel.app/reference/entry-points): Every subpath of @alexify/syncom, how each is registered or called, what a missing plugin does, and the size of each entry.
 - [Events and hooks](https://syncomjs.vercel.app/reference/events): Every hook syncom runs and every event it emits — when each runs, what it receives, what its return value and a throw do.

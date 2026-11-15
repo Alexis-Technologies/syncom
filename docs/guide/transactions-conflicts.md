@@ -16,58 +16,59 @@ node got there first, and no conflict handler to write.
 
 <LiveReplication />
 
+## Set up a server and two nodes
+
+Every example on this page runs three [nodes](./glossary#node) in one process: a `server` that hosts,
+and Ada's `laptop` and Bob's `phone` that dial it. `MemoryLink` from `@alexify/syncom/testing` is a test
+stand-in for the network, which lets `links.phone.disconnect()` take the phone offline; in an app,
+`connect` opens a wrpc client, as in the [Quickstart](./quickstart#sync-with-another-node). The schema
+gives every task a unique `slug` and adds a `Stats` collection for the board's totals:
+
+<<< @/examples/transactions-conflicts.mjs#nodes
+
 ## Write several records as one
 
-`transact(fn)` runs `fn` with a transaction object, `tx`, that has the database's write methods. Every
-write made through `tx` becomes an op, and when `fn` returns, all of them are appended to the log
-together:
-
-<<< @/examples/transactions-conflicts.mjs#schema
+[Database](./database#make-several-writes-atomic) shows `transact(fn)`: every write `fn` makes through
+`tx` lands together, or none does when `fn` throws. Here one transaction closes a task and counts it in
+the board's totals, and labels the change:
 
 <<< @/examples/transactions-conflicts.mjs#transact
 
-All the ops are durable or none is. Inside `fn`, `tx.get()` and `tx.has()` read the records as the
-transaction has left them so far, hooks and validators run on each write as it is made, and the
-`commit` events fire once the whole transaction has landed, in order. A throw from `fn`, or a write the
-database refuses (a validator, a unique key, an index out of range), leaves nothing written:
+The record `stats` gets its `closed` field from `inc()`, which makes it a counter
+([Fields that merge](./fields#counters-add-up)), so closings on two nodes add up. Inside `fn`, `tx.get()`
+and `tx.has()` read the records as the transaction has left them so far, hooks and validators run on each
+write as it is made, and the `commit` events fire once the whole transaction has landed, in order. A write
+the database refuses (a validator, a unique key, an index out of range) undoes the transaction like a
+throw.
 
-<<< @/examples/transactions-conflicts.mjs#rollback
-
-Pass `{ message }` to label the change: the message rides on every op of the transaction, peers receive
-it with the ops, and [`history()`](./versions) lists it. `tx` has every write method except `purge()`,
-which rewrites the log and cannot be undone with the rest. Bulk writes, `modify()` and update operators
-use transactions too, so each of them lands whole.
+The `message` rides on every [op](./glossary#op) of the transaction, peers receive it with the ops, and
+[`history()`](./versions) lists it. `tx` has every write method except `purge()`, which rewrites the log
+and cannot be undone with the rest. Bulk writes, `modify()` and update operators use transactions too, so
+each of them lands whole.
 
 A transaction is local. It makes the ops land together on this node and travel together to the others,
 but each op still merges on its own when it arrives, by the rules below.
 
 ## Write only if the record still holds what you expect
 
-To claim a task only if it is still unassigned, use `swap(id, changes, expected)`:
-
-<<< @/examples/transactions-conflicts.mjs#swap
-
-`swap()` compares the fields of `expected` with the record and writes `changes` only if every one
-matches. The comparison and the write happen in the node's write queue, one after the other with nothing
-in between, so two swaps on the same expectation can never both succeed. It resolves to `false` and
-writes nothing on a mismatch, and rejects when the record does not exist.
-
-For a condition that is more than equality, `update()` takes a query to match first:
+`swap(id, changes, expected)` writes only if the fields of `expected` still hold those values, compared
+inside the node's write queue so that two swaps on one expectation can never both succeed; claiming a task
+is the example on [Database](./database#write-only-if-a-value-has-not-changed). For a condition that is
+more than equality, `update()` takes a [query](./query) to match first:
 
 <<< @/examples/transactions-conflicts.mjs#if-match
 
-`ifMatch` is a [query](./query) evaluated against the record inside the write queue, and the update
-resolves to whether it wrote.
-
-Both are checks on this node, against what this node holds. They prevent two writes on one node from
-overwriting each other; they cannot stop another node from writing the same field while offline. Across
-nodes, the merge rules decide.
+`ifMatch` is evaluated against the record inside the write queue, and the update resolves to whether it
+wrote. Both are checks on this node, against what this node holds. They prevent two writes on one node
+from overwriting each other; they cannot stop another node from writing the same field while offline.
+Across nodes, the merge rules decide.
 
 ## Why there is no revision field
 
-Databases that resolve conflicts by revision keep a `_rev` on every document: a write names the revision
-it started from and is rejected if the document moved on. That protects a server's copy from a client
-that did not see the latest change.
+Databases that resolve conflicts by revision, such as CouchDB and RxDB, keep a `_rev` on every document: a
+version tag that changes with every write. A write names the revision it started from and is rejected if
+the document has moved on since. That protects a server's copy from a client that did not see the latest
+change.
 
 A syncom node does not need it for its own writes, because they go through one queue: each write sees
 the result of the one before, `modify()` calls on one record compose, and `swap()` covers the
@@ -80,23 +81,21 @@ in any order, and agree.
 
 ## How concurrent edits merge
 
-Ada renames the task and Bob closes it, each also voting and tagging it, while Bob's phone is offline:
+When Ada renames a task and Bob closes it, each also voting and tagging it, while Bob's phone is offline,
+nothing is lost once the phone is back. The rules, which every node applies the same way, depend on the
+field's kind:
 
-<<< @/examples/transactions-conflicts.mjs#fields
-
-Nothing was lost. The rules, which every node applies the same way, depend on the field's kind:
-
-- **Different fields** never conflict: the title came from the laptop, `done` from the phone.
+- **Different fields** never conflict: the title comes from the laptop, `done` from the phone.
 - **A counter** adds up. Each node keeps its own running total and the field reads their sum, so two
   votes made at the same time count twice.
-- **A set** keeps concurrent additions: `docs` and `urgent` are both there.
-- **A plain field (a register)** keeps one value, the write with the later timestamp, with the node id
-  deciding a tie.
+- **A set** keeps concurrent additions: both tags are there.
+- **A plain field (a [register](./glossary#register))** keeps one value, the write with the later
+  timestamp, with the node id deciding a tie.
 - **A list or a text** keeps both insertions, each in place; see [Lists](./lists) and
   [Text](./text).
 
 A field's kind is set by the first call that writes it: `update()` makes a register, `inc()` a counter,
-`add()` a set. [Fields that merge](./fields) shows each kind in full.
+`add()` a set. [Fields that merge](./fields) runs this very scenario and shows each kind in full.
 
 ## Edit the same field on two nodes
 
@@ -136,6 +135,21 @@ nodes disagree, and emits `conflict` with `kind: 'unique'`:
 Resolve it in your app, for example by renaming one of the two from the listener; the rename then
 replicates like any write.
 
+## Know which object to listen to
+
+Three objects emit events, and each answers a different question:
+
+| Listen on | To learn | Events you will use |
+| --- | --- | --- |
+| `db.on()` | what happened to the data on this node, from any source | `conflict`, `commit` (a local write is durable), `change` (every op logged), `error` (a peer's op refused) |
+| `db.sync.on()` | what happened on the links to other nodes | `peer`, `sync`, `bootstrap`, `error` (with the peer's `url`) |
+| `db.Task.on()` | which records of one collection arrived, changed or left | `insert`, `update`, `remove`, `change` |
+
+A conflict is a fact about the data, so it comes from the database, whether the losing write was made here
+or arrived from a peer. [Hooks and events](./hooks#watch-what-happened-with-events) shows the database's and
+the collection's events, [Sync engine](./replication#watch-replication) the sync manager's, and the
+[events reference](../reference/events) lists every payload.
+
 ## Trade-offs
 
 - **Last writer wins on plain fields.** A concurrent overwrite keeps one value. Timestamps come from each
@@ -144,11 +158,10 @@ replicates like any write.
   skew decides which one wins, never whether the nodes agree.
 - **A nested object is one register.** Two nodes changing different keys of one nested object keep one of
   the objects, not both changes. Write keys that change independently as their own fields or as
-  [paths](./fields).
+  [paths](./fields#edit-part-of-an-object).
 - **A field keeps its kind.** Writing a counter with `update()` is refused locally (`FIELD_KIND`). If two
-  nodes make one field two different kinds at the same time, a fixed precedence (register, counter, set,
-  list, text, tree) picks the kind on every node, and the other kind's edits are dropped (a node that
-  held the winning kind first reports the refused op as an `OP_REFUSED` error event).
+  nodes make one field two different kinds at the same time, a fixed rule picks the same kind on every
+  node and the other kind's edits are dropped ([Fields that merge](./fields#a-field-is-one-kind)).
 - **One counter case does not merge.** A counter incremented by one node both before and after another
   node's concurrent `set()` of the whole record can read differently on different nodes. Avoid resetting a
   record with `set()` while others increment its counters.

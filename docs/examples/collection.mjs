@@ -24,12 +24,35 @@ console.log(named.id); // 'ship-it': the id came from the data
 assert.deepEqual(await db.Task.get(task.id), { title: 'Write the docs', done: false, $type: 'Task' });
 assert.deepEqual(await db.Task.get('ship-it'), { title: 'Ship it', done: false, $type: 'Task' });
 
+// #region split
+await db.inc(named.id, 'votes', 1); // a counter: the database's inc(), by id
+await db.add(named.id, 'tags', ['release', 'urgent']); // a set: the database's add()
+await db.remove(named.id, 'tags', ['urgent']); // takes 'urgent' out of the set, and nothing else
+const record = await db.Task.get(named.id);
+console.log(record.votes, record.tags, record.id); // 1 [ 'release' ] undefined: get() returns the record alone
+
+const [row] = await db.Task.select({ title: 'Ship it' }).fetch();
+console.log(row.id); // 'ship-it': a query's rows carry the id
+// #endregion split
+assert.deepEqual(await db.Task.get(named.id), {
+  title: 'Ship it',
+  done: false,
+  $type: 'Task',
+  votes: 1,
+  tags: ['release'],
+});
+assert.equal(row.id, 'ship-it');
+assert.equal('id' in record, false);
+await assert.rejects(() => db.Task.remove('ship-it'), TypeError); // never a by-id call that empties the collection
+assert.equal(typeof (await db.insert({ note: 'by id' })), 'string', "the database's insert() resolves to an id");
+
 // #region upsert
 await db.Task.upsert({ id: 'ship-it', title: 'Ship it on Friday', done: false }); // written whole
 const same = await db.Task.insertIfAbsent({ id: 'ship-it', title: 'Ignored' }); // already there
 console.log(same.title); // 'Ship it on Friday'
 // #endregion upsert
 assert.equal(same.title, 'Ship it on Friday');
+assert.deepEqual(await db.Task.get('ship-it'), { title: 'Ship it on Friday', done: false, $type: 'Task' }); // reset
 
 // #region update
 await db.Task.update(task.id, { done: true });
@@ -109,7 +132,7 @@ assert.equal(removed, 1);
 assert.equal(db.Tag, undefined);
 
 // #region outside
-const loose = await db.insert({ note: 'In no collection' });
+const loose = await db.insert({ note: 'In no collection' }); // the database's insert() resolves to the id
 console.log(await db.get(loose)); // { note: 'In no collection' }
 await db.Task.set(loose, { title: 'Now a task', done: false }); // joins Task
 console.log(await db.Task.get(loose)); // { title: 'Now a task', done: false, $type: 'Task' }

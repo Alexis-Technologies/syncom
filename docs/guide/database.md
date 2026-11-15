@@ -5,10 +5,10 @@ description: Open a syncom database, choose where it stores data, read and write
 
 # Database
 
-A database is one node's copy of your data: its records, the log of every operation it made or received,
-and the collections you define over them. `createDatabase()` opens one (creating it on first use) and
-resolves once it is ready. Everything else, from [collections](./collection) to [replication](./replication),
-hangs off the object it returns.
+A database is one [node](./glossary#node)'s copy of your data: its records, the log of every
+[op](./glossary#op) (the record of one write) it made or received, and the collections you define over
+them. `createDatabase()` opens one (creating it on first use) and resolves once it is ready. Everything
+else, from [collections](./collection) to [replication](./replication), hangs off the object it returns.
 
 <<< @/examples/database.mjs#open
 
@@ -36,10 +36,13 @@ a path passed as a bare string is a `TypeError` right away. Most apps set a hand
 
 `schema` defines your collections ([Schema](./schema)), `plugins` adds what the core does not do on its own
 ([Installation](./install#pick-only-the-plugins-you-need)), `sync` configures [replication](./replication),
-and `hooks` runs your code inside writes ([Hooks](./hooks)). syncom logs what it does at `info` level to
-`console` unless you pass a `logger` of your own or `false`. The other options tune caching, durability and
-locking; [`createDatabase()` options](../reference/api#createdatabase-options) lists all of them with
-their defaults.
+and `hooks` runs your code inside writes ([Hooks](./hooks)). `actor` names who is writing, such as the
+signed-in user: the node id names the device, so set `actor` when [history](./versions) and the `commit`
+event should say which person made a change. It is kept with every op in the log, never in the record.
+
+syncom logs what it does at `info` level to `console` unless you pass a `logger` of your own or `false`.
+The other options tune caching, durability and locking; [`createDatabase()`
+options](../reference/api#createdatabase-options) lists all of them with their defaults.
 
 ## Read and write records by id
 
@@ -49,11 +52,12 @@ in none. Collections are a layer over these same calls.
 <<< @/examples/database.mjs#by-id
 
 `insert()` generates the id; `update()` changes the fields it names and leaves the rest; `set()` replaces
-the record whole; `unset()` removes fields; `delete()` leaves a small tombstone so the deletion reaches
-other nodes. What `get()` returns is a copy: editing it changes nothing until you write it back.
+the record whole; `unset()` removes fields; `delete()` leaves a small [tombstone](./glossary#tombstone) so
+the deletion reaches other nodes. `get()` returns the record's fields, without the id you passed it, and
+as a copy: editing it changes nothing until you write it back.
 
-Each write is an operation: it is applied here, appended to the log, and sent to other nodes when sync is
-on. A plain field keeps the last value written, while counters and sets merge their own way;
+Each write is an op: it is applied here, appended to the log, and sent to other nodes when sync is on. A
+plain field keeps the last value written, while counters and sets merge their own way;
 [Fields that merge](./fields) shows each kind and the `inc()`, `add()` and update operators that make them.
 
 ## Make several writes atomic
@@ -89,9 +93,9 @@ The generator takes no arguments and may be async.
 
 <<< @/examples/database.mjs#get-id
 
-An id is also a file name on every platform, so it may hold letters, digits, `.`, `_`, `-` and `@`, must
-not start with a dot, and is at most 128 characters. UUIDs, ULIDs, CUID2s and nanoids all fit. Anything
-else is refused before it is written:
+An id must be safe to store as a file name on every platform. UUIDs, ULIDs, CUID2s and nanoids all fit;
+an id with a space or a slash is refused before anything is written (the exact rule is under `getId` in
+[the options](../reference/api#createdatabase-options)):
 
 <<< @/examples/database.mjs#invalid-id
 
@@ -100,7 +104,7 @@ A collection can also take the id from the record's own data, from one field or 
 
 ## Open one instance per path
 
-Two instances writing to one database would number their operations the same way, and peers would drop
+Two instances writing to one database would number their ops the same way, and peers would drop
 one of them as a duplicate. So `createDatabase()` holds the path while it is open: through the Web Locks
 API in the browser, and through a lock file elsewhere. A second open of the same path rejects with
 `LOCKED`:
@@ -108,7 +112,8 @@ API in the browser, and through a lock file elsewhere. A second open of the same
 <<< @/examples/database.mjs#lock
 
 `lock: 'wait'` waits until the other instance closes instead, and `lock: false` leaves coordination to
-you. A lock file left behind by a crashed process is taken over once that process is gone.
+you. A crashed process does not leave the path locked for good; the [`lock`
+option](../reference/api#createdatabase-options) has the details.
 
 <<< @/examples/database.mjs#lock-wait
 
@@ -118,14 +123,14 @@ several tabs, let one tab lead and the others follow: [Leader election](./leader
 
 ## Know when a write is on disk
 
-A write resolves once its operation is in the log on disk, so it survives a crash from that moment. The
-record's own file follows a moment later: writes to one record within a 16 ms window are combined into one
-file write, which is what typing into a text needs. Every read sees the write at once, and a crash in
-between is repaired from the log at the next open. `flush()` writes the waiting files now:
+A write resolves once its op is in the log on disk, so it survives a crash from that moment. The record's
+own file follows a moment later, so that a burst of writes to one record, such as typing into a text,
+becomes one file write. Every read sees the write at once, and a crash in between is repaired from the log
+at the next open. `flush()` writes the waiting files now:
 
 <<< @/examples/database.mjs#flush
 
-`defer: 0` writes every record file at once, at the cost of a file write per operation, and
+`defer: 0` writes every record file at once, at the cost of a file write per op, and
 `durable: true` asks the file system to sync every write to the device where it can. `close()` flushes for
 you.
 

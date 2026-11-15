@@ -8,7 +8,7 @@ description: Give each node only the records it may see with scopes, let the hos
 The task board now serves a whole company. The design team should not carry the mobile team's tasks on
 their laptops, a reporting job should read every board but write nothing back, and when Ada leaves the
 design team her laptop should stop receiving design tasks and drop the ones it already has. A server that
-sends every record to every node cannot do any of that.
+sends every record to every [node](./glossary#node) cannot do any of that.
 
 syncom solves it with **scopes**. Every record belongs to one scope, a node asks for the scopes it wants
 when it registers a host, and the host decides whether the node may have them. From then on the node
@@ -32,29 +32,41 @@ board, and an `update()` that changes `board` moves it.
 
 ## Let the host decide what a node may claim
 
-A node names its scopes in its hello, and the host's `authorize` decides whether to accept them. It sees
-whatever the transport established about the caller (`context`, such as a wrpc session) and the hello
-itself, with the node's `token` and `scopes`:
+A node names its scopes in its [hello](./sync-protocol#say-hello), the greeting that opens every
+connection, and the host's `authorize` decides whether to accept them. It sees whatever the transport
+established about the caller (`context`, such as a wrpc session) and the hello itself: the node's id
+(`node`), its `token` and its `scopes`:
 
 <<< @/examples/partial-sync.mjs#authorize
 
-Once a node is accepted, the scopes it asked for are a boundary, not a hint. The host serves it ops and
-snapshots of those scopes alone, and refuses any op it pushes for a record outside them. The host checks
-the record itself, before and after the op, with its own `sync.scope`, so a node cannot write a record
-into or out of a scope by claiming another one in the op.
+In an app the token is a credential your sign-in gives the device, such as a session token, and
+`authorize` checks it with your auth service; the names in `boards` stand in for that here. With wrpc's
+own sessions you can read `context.session` instead and leave the token out
+([syncom server replication](./replication-server#decide-who-may-connect)). `authorize` also notes each
+node's id with its token, which is how the server knows later which nodes to
+[take access back](#take-access-back) from; keep that map where your app keeps its users.
+
+Once a node is accepted, the scopes it asked for are a boundary, not a hint. The host serves it
+[ops](./glossary#op) and [snapshots](./glossary#snapshot) of those scopes alone, and refuses any op it
+pushes for a record outside them. The host checks the record itself, before and after the op, with its
+own `sync.scope`, so a node cannot write a record into or out of a scope by claiming another one in the
+op.
 
 ## Register a host with scopes
 
-The examples run every node in one process with `createMesh` from `@alexify/syncom/testing`, which stands
-in for the network: the server hosts at `mem://server` with the `authorize` above, and every node opens
-with `sync: { scope }`.
+The examples run the server and four nodes in one process over a real wrpc server on `127.0.0.1`, the
+wiring an app uses ([Quickstart](./quickstart#sync-with-another-node) walks through it). The server mounts
+its [unit](./glossary#unit) with the `authorize` above, and every node opens with `sync: { scope }`:
 
-<<< @/examples/partial-sync.mjs#mesh
+<<< @/examples/partial-sync.mjs#nodes
 
 Each node then registers the server with the scopes it should carry, and the token its `authorize` will
 check:
 
 <<< @/examples/partial-sync.mjs#dial
+
+A node that leaves `scopes` out asks for `'*'`, every scope there is, as the `reports` node does
+[below](#sync-in-one-direction), so its token must allow that.
 
 Now write a task on each board, and one that belongs to no board:
 
@@ -69,18 +81,11 @@ not cover is refused at hello, receives nothing and gets the code on its `error`
 
 ## Why a scope is more than a filter
 
-Sequence numbers run per node and per scope: the laptop's design tasks and its web tasks are two streams
-of ops, each numbered on its own. A node that carries only some scopes therefore sees no holes in the
-streams it reads, and the host can resume its feed exactly where it stopped. A filter over documents
-could not do that, because a skipped op would look like a missing one.
-
-One subscription serves all the scopes a node carries. When an op of another scope lands on the host,
-the node's feed moves past it without sending anything, so a node pays nothing for the scopes it does not
-carry.
-
-On a wrpc server, a greeted node also joins the room `syncom:<scope>` for every scope it asked for, so
-`server.rooms.count('syncom:design')` and wrpc's cluster tools tell you who carries what. The ops
-themselves never travel through rooms: a room broadcast cannot be resumed, the feed can.
+A node that carries only some scopes still resumes its [feed](./sync-protocol#follow-the-host-s-feed)
+exactly where it stopped after a reconnect, and pays nothing for the scopes it does not carry: the host
+moves its feed past their ops without sending anything. A filter over documents could not promise that,
+because a skipped op would look like a missing one. How the ops are numbered to make that work, and how a
+wrpc server tells you who carries which scope, is in the [wire reference](../reference/wire#scopes).
 
 ## Sync in one direction
 
@@ -100,7 +105,8 @@ different callers need different ones.
 
 ## Take access back
 
-When Ada leaves the design team, the server revokes the scope from her laptop's node:
+When Ada leaves the design team, the server revokes the scope from every node she signed in from, by the
+node ids `authorize` noted:
 
 <<< @/examples/partial-sync.mjs#revoke
 

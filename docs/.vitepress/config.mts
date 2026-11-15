@@ -203,6 +203,7 @@ export default withMermaid({
               { text: 'API', link: '/reference/api' },
               { text: 'Events and hooks', link: '/reference/events' },
               { text: 'Engines and backends', link: '/reference/engines' },
+              { text: 'Connectors', link: '/reference/connectors' },
               { text: 'Entry points', link: '/reference/entry-points' },
               { text: 'Lists, text and trees', link: '/reference/text' },
               { text: 'Versions and tags', link: '/reference/versions' },

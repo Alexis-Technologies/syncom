@@ -11,7 +11,7 @@ converge on the same records without a central coordinator. It runs in Node.js a
 runtime dependencies.
 
 New here? Start with the [Quickstart](./quickstart), then read [Sync engine](./replication) to see how
-nodes stay in step. If you know RxDB, every page ends with a "Coming from RxDB" section, and
+nodes stay in step. The [Glossary](./glossary) explains every term (node, op, vector, scope…) in a sentence or two. If you know RxDB, every page ends with a "Coming from RxDB" section, and
 [Compared with RxDB](./vs-rxdb) has the whole comparison.
 
 <DocsOverview />

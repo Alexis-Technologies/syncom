@@ -22,24 +22,22 @@ published:
 npm install @alexify/syncom
 ```
 
-### Open a database
+### Open a database with a collection
 
 `createDatabase()` opens (or creates) a database in a directory and resolves once it is ready to use.
 `@alexify/syncom/all` is the core with every plugin the package ships, which is the easiest way to start;
 [Installation](./install#pick-only-the-plugins-you-need) shows how to import only what you use.
 
-<<< @/examples/quickstart.mjs#open
-
-In Node.js the data lives in the `board` directory. In a browser the same call stores it in the
-[Origin Private File System](./storage-opfs), and other [storages](./storage) are one option away.
-
-### Add a collection
-
-A collection groups records of one kind and lets you query them. Declare it in the `schema` option. The
-`index` makes queries on `done` fast; a schema can also validate every record, which the
-[Schema](./schema) page shows.
+A collection groups records of one kind and lets you query them. You declare collections under
+`schema.entities`; each name becomes a property of the database (`board.Task`). The `index` makes queries on
+`done` fast, and a schema can also validate every record, which the [Schema](./schema) page shows.
 
 <<< @/examples/quickstart.mjs#collection
+
+In Node.js the data lives in the `board` directory. In a browser the same call stores it in the
+[Origin Private File System](./storage-opfs), and other [storages](./storage) are one option away. One
+database is one **node**: it keeps its own copy of the records and its own log of every write, which is what
+other nodes sync from later.
 
 ### Insert a task
 
@@ -62,7 +60,9 @@ operators.
 
 A field written with `update()` keeps the last value written. Some fields should merge instead: `inc()`
 makes a counter, so votes cast on two devices at the same time add up, and `add()` makes a set, so tags
-added on two devices are all kept. You pick the behavior per field by the call that first writes it.
+added on two devices are all kept. You pick the behavior per field by the call that first writes it. These
+calls address the record by id on the database itself (`board.inc`, `board.add`), so they work the same for a
+record in a collection or outside one.
 
 <<< @/examples/quickstart.mjs#update
 
@@ -84,22 +84,32 @@ A deleted record leaves a small marker behind so that the deletion reaches every
 
 ### Sync with another node
 
-Every write is also an operation in a log that other nodes replicate. To sync, one node hosts the sync
-protocol and another dials it. syncom does not ship a network stack of its own: it plugs into
-[wrpc](./replication-websocket), which you install next to it (`npm install @alexify/wrpc`).
+Every write is also an operation (an **op**) in the node's log, and other nodes replicate that log. To sync,
+one node hosts the sync protocol and the others dial it. syncom ships no network stack of its own: it plugs
+into [wrpc](./replication-websocket), which you install next to it (`npm install @alexify/wrpc`).
 
-The server mounts the database's sync unit on a wrpc router:
+On the server, mount the database's sync unit on a wrpc router and start the server:
 
 <<< @/examples/quickstart.mjs#host
 
-The laptop dials the server, receives every task it has, and sends its own writes back:
+The router key `syncom` matters: it is the name the other side calls (`syncom/hello`, `syncom/push`…). The server
+speaks plain HTTP and accepts WebSocket connections on the same port, under wrpc's default base path `/api`, so
+other devices reach it at `ws://<server address>:8000/api`. `access: 'public'` lets any connection greet the unit,
+and `authorize` decides which nodes are admitted, here by a shared token. Without `authorize` anyone who can
+reach the port can read and write your data; [Hosting a node](./server) covers sessions, write rules and limits.
+
+On the laptop, open a database with the same collections, tell it how to connect, and register the server:
 
 <<< @/examples/quickstart.mjs#dial
+
+`connect` is called with each registered node and returns a link; `createWrpcLink` turns a wrpc client into
+one. `addNode()` is stored with the database, so on the next start the laptop dials the server again by itself.
+The laptop receives every task the server has, and its own writes go back the same way.
 
 The laptop keeps working when the connection drops. Its writes wait in its log, and when the link comes
 back the two nodes exchange what the other is missing. When both edited the same task, each field
 resolves the same way on both nodes, so they end up identical without asking you to resolve a conflict.
-[Sync engine](./replication) explains how.
+[Sync engine](./replication) explains how, and the [Glossary](./glossary) has every term in one place.
 
 </div>
 

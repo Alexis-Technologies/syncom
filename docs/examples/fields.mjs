@@ -1,11 +1,11 @@
 // The Fields that merge page (docs/guide/fields.md) shows the regions of this file.
 // tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
+
+// #region register
 import { createDatabase } from '@alexify/syncom/all';
 
 const db = await createDatabase({ path: 'board', schema: { entities: { Task: {} } } });
-
-// #region register
 const task = await db.Task.insert({ title: 'Write the docs', done: false });
 await db.Task.update(task.id, { done: true }); // `done` keeps the last value written
 // #endregion register
@@ -45,6 +45,13 @@ console.log(assignee, stats); // { name: 'ada', team: 'core' } { views: 1 }
 // #endregion paths
 assert.deepEqual(assignee, { name: 'ada', team: 'core' });
 assert.deepEqual(stats, { views: 1 });
+
+// #region path-query
+await db.Task.update(task.id, { 'assignee/name': 'ada' }); // a write names the field: segments joined by `/`
+const ada = await db.Task.select({ 'assignee.name': 'ada' }).count(); // a query reads the nested object: dots
+console.log(ada); // 1
+// #endregion path-query
+assert.equal(ada, 1);
 
 // #region operators
 await db.Task.update(task.id, {

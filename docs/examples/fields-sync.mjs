@@ -1,30 +1,50 @@
 // The Fields that merge page (docs/guide/fields.md) shows the regions of this file: two nodes that edit one task
 // while they cannot reach each other. tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
+import { settle } from '@alexify/syncom/testing';
+
+// #region nodes
 import { createDatabase } from '@alexify/syncom/all';
-import { createMesh, settle, memoryEngine } from '@alexify/syncom/testing';
+import { memoryEngine } from '@alexify/syncom/memory';
+import { MemoryLink } from '@alexify/syncom/testing';
 
-// Two nodes linked in memory: the phone dials the laptop.
-const mesh = await createMesh(['laptop', 'phone'], [['phone', 'laptop']], {
-  createStorage: (name, options) =>
-    createDatabase({
-      engine: memoryEngine(),
-      path: name,
-      logger: false,
-      schema: { entities: { Task: {} } },
-      ...options,
-    }),
-});
-const laptop = mesh.get('laptop');
-const phone = mesh.get('phone');
+const engine = memoryEngine(); // every node keeps its data in memory
+const schema = { entities: { Task: {} } };
 
+// The server hosts: its unit answers the nodes that dial it.
+const server = await createDatabase({ engine, path: 'server', schema });
+const unit = server.sync.unit({ access: 'public' }); // any connection may say hello
+
+// A node that dials the server. MemoryLink is a test stand-in for the network: an app's
+// connect returns createWrpcLink(await WrpcClient.connect(node.url)) instead.
+const links = {};
+const open = async (name) => {
+  const db = await createDatabase({
+    engine,
+    path: name,
+    schema,
+    sync: { connect: () => (links[name] = new MemoryLink(unit)) },
+  });
+  await db.sync.addNode({ url: 'mem://server' });
+  await db.sync.awaitInitialReplication(); // the node's first sync with the server
+  return db;
+};
+
+const laptop = await open('laptop');
 const task = await laptop.Task.insert({ title: 'Write the docs', done: false });
 await laptop.add(task.id, 'tags', ['docs']);
-await settle([laptop, phone]);
-const link = mesh.links.get('mem://laptop'); // the phone's connection to the laptop
+await laptop.sync.awaitDocumentPushed(task.id); // the server holds the task
+const phone = await open('phone'); // its first sync brings the task down
+// #endregion nodes
+assert.deepEqual(await phone.Task.get(task.id), {
+  title: 'Write the docs',
+  done: false,
+  $type: 'Task',
+  tags: ['docs'],
+});
 
 // #region offline
-link.disconnect(); // the two nodes cannot reach each other
+links.phone.disconnect(); // the train goes into a tunnel
 
 await laptop.Task.update(task.id, { title: 'Write the user guide' }); // a register
 await phone.Task.update(task.id, { done: true }); // another register of the same task
@@ -35,9 +55,9 @@ await phone.add(task.id, 'tags', ['urgent']);
 await laptop.Task.update(task.id, { 'assignee/name': 'ada' }); // two paths under one prefix
 await phone.Task.update(task.id, { 'assignee/team': 'core' });
 
-await link.reconnect(); // back online: each node receives what the other did
+await links.phone.reconnect(); // back online: each node receives what the other did
 // #endregion offline
-await settle([laptop, phone]);
+await settle([server, laptop, phone]);
 
 // #region merged
 console.log(await laptop.Task.get(task.id));
@@ -57,14 +77,46 @@ assert.deepEqual(await laptop.Task.get(task.id), expected);
 assert.deepEqual(await phone.Task.get(task.id), expected);
 
 // #region same-field
-link.disconnect();
+links.phone.disconnect();
 await laptop.Task.update(task.id, { title: 'Draft the guide' });
 await new Promise((resolve) => setTimeout(resolve, 5)); // a moment later, on the other device
 await phone.Task.update(task.id, { title: 'Publish the guide' });
-await link.reconnect();
+await links.phone.reconnect();
 // #endregion same-field
-await settle([laptop, phone]);
+await settle([server, laptop, phone]);
 const titles = [(await laptop.Task.get(task.id)).title, (await phone.Task.get(task.id)).title];
 console.log(titles); // [ 'Publish the guide', 'Publish the guide' ]: the later write, on both
 assert.deepEqual(titles, ['Publish the guide', 'Publish the guide']);
-await mesh.close();
+
+// #region delete
+links.phone.disconnect();
+await laptop.Task.delete(task.id); // Ada deletes the task
+await new Promise((resolve) => setTimeout(resolve, 5)); // a moment later, on the other device
+await phone.Task.update(task.id, { done: false }); // Bob, offline, reopens it
+await links.phone.reconnect();
+// #endregion delete
+await settle([server, laptop, phone]);
+
+// #region revived
+console.log(await laptop.get(task.id)); // { done: false }: back, with only what was written after the delete
+console.log(await laptop.Task.get(task.id)); // null: its `$type` went with the delete, so Task no longer lists it
+// #endregion revived
+assert.deepEqual(await laptop.get(task.id), { done: false });
+assert.deepEqual(await phone.get(task.id), { done: false });
+assert.equal(await laptop.Task.get(task.id), null);
+
+// The other order: an edit made before the delete loses to it, and the record stays deleted.
+const older = await laptop.Task.insert({ title: 'Book the room', done: false });
+await settle([server, laptop, phone]);
+links.phone.disconnect();
+await phone.Task.update(older.id, { done: true });
+await new Promise((resolve) => setTimeout(resolve, 5));
+await laptop.Task.delete(older.id);
+await links.phone.reconnect();
+await settle([server, laptop, phone]);
+assert.equal(await laptop.get(older.id), null);
+assert.equal(await phone.get(older.id), null);
+
+await phone.close();
+await laptop.close();
+await server.close();

@@ -19,8 +19,9 @@ repository: a git dependency, or a workspace link if you keep it next to your ap
 npm install @alexify/syncom
 ```
 
-Replication runs over [wrpc](./replication-websocket), which you install beside it when you sync nodes
-over the network. syncom never requires it: you hand the client to syncom yourself.
+Replication runs over [wrpc](./replication-websocket), which you install beside it when you sync
+[nodes](./glossary#node) (databases on different devices) over the network. syncom never requires it:
+you hand the client to syncom yourself.
 
 ```bash
 npm install @alexify/wrpc
@@ -52,10 +53,14 @@ registered.
 <<< @/examples/install-all.mjs#all
 
 Everything beyond the core is a plugin, and a plugin works only on the database you open with it. The
-core alone keeps records with registers, counters and sets, the operation log, transactions and the
-explicit API by id. A local-first app that wants collections and queries adds two plugins:
+core alone keeps records with [registers, counters and sets](./fields), the
+[operation log](./operation-log), transactions and the explicit API by id. A local-first app that wants
+collections and queries adds two plugins:
 
 <<< @/examples/install-lean.mjs#lean
+
+`db.Task.insert()` resolves to a [document](./document) of the new record, an object that carries its
+`id`; the database's own `db.insert()`, which the CommonJS example below uses, resolves to the id alone.
 
 Nothing is registered for the whole process: two databases in one process can run with different
 plugins. Calling a method whose plugin the database was not opened with rejects with a `TypeError` whose
@@ -74,7 +79,7 @@ These are the plugins `/all` registers, and what each one adds:
 | --- | --- | --- |
 | `schema` | `@alexify/syncom/schema` | Collections, validation, indexes and schema versions ([Schema](./schema)) |
 | `query` | `@alexify/syncom/query` | `select()`, `count()` and live queries on a collection ([Query](./query)) |
-| `sync` | `@alexify/syncom/sync` | Replication with other nodes ([Sync engine](./replication)) |
+| `sync` | `@alexify/syncom/sync` | Replication with other nodes ([Sync engine](./replication)); to dial over wrpc, add `createWrpcLink` from `@alexify/syncom/wrpc` ([below](#sync-a-lean-database)) |
 | `text` | `@alexify/syncom/text` | List and text fields ([Lists](./lists), [Text](./text)) |
 | `tree` | `@alexify/syncom/tree` | Tree fields ([Trees](./trees)) |
 | `versions` | `@alexify/syncom/versions` | A record's past, tags, diff and restore ([Versions](./versions)) |
@@ -86,13 +91,26 @@ These are the plugins `/all` registers, and what each one adds:
 
 The last three change what opening costs. With `signing` and `encryption` a new database generates two
 key pairs on its first open, and with `chain` every write also adds a block. The core alone has none of
-that: its node id is a UUID, and its operations go out unsigned. Leave those plugins out when you do not
-need them, or keep `/all` and pass `chain: false` to skip the chain alone.
+that: its node id is a UUID, and its [ops](./glossary#op) go out unsigned. Leave those plugins out when
+you do not need them, or keep `/all` and pass `chain: false` to skip the chain alone.
 
 The other subpaths are not plugins. Storage engines (`/memory`, `/idb`, `/sqlite`, `/mongodb`) go in the
-`engine` option, and tools such as `/dump`, `/pipeline`, `/connector` or `/undo` are functions you call
-with a database. [Entry points](../reference/entry-points) lists every subpath, and [Plugins](./plugins)
-explains how a plugin hooks into the core.
+`engine` option, `/wrpc` makes the link replication runs over, and tools such as `/dump`, `/pipeline`,
+`/connector` or `/undo` are functions you call with a database. [Entry points](../reference/entry-points)
+lists every subpath, and [Plugins](./plugins) explains how a plugin hooks into the core.
+
+## Sync a lean database
+
+A lean database syncs once it has the `sync` plugin and a `connect` function. `connect` returns the link
+to another node, and `createWrpcLink()` from `@alexify/syncom/wrpc` makes one from a wrpc client. That
+subpath is not a plugin, so it stays out of `plugins`:
+
+<<< @/examples/install-sync.mjs#sync
+
+The node it dials is a server like the one the [Quickstart](./quickstart#sync-with-another-node) hosts,
+which needs the `sync` plugin too for `db.sync.unit()`. Give every node the plugins of the field kinds
+your app writes: a node without `text` keeps a peer's list and text ops in its log and passes them on,
+but does not apply them.
 
 ## Use it from ESM or CommonJS
 

@@ -15,7 +15,7 @@ schema on the device, query them with Mango selectors, watch them live, and repl
 a server of the project's own. They differ in what crosses the wire and in who decides the outcome
 of a conflict. RxDB replicates the latest state of each document through checkpoints, and a
 conflict is settled per document: the master's state wins by default, or your handler or its
-CRDT plugin decides. syncom replicates every write as a signed operation and merges concurrent
+CRDT plugin decides. syncom replicates every write as an operation (signed, with the `signing` plugin) and merges concurrent
 writes field by field on every node, with counters that add up and sets that keep every
 concurrent add.
 
@@ -38,7 +38,7 @@ other libraries, and [Benchmarks](/guide/benchmarks) measures them on the same s
   are not equal in weight, so read the sections that matter to you.
 - **syncom is the stricter replicator.** Every write is an operation that merges field by field
   on every node, with no plugin to turn on: concurrent edits to different fields both stay,
-  counters add up, sets keep every concurrent add. Every op is signed by the key that is the
+  counters add up, sets keep every concurrent add. With the `signing` plugin every op is signed by the key that is the
   node's id, a hash-linked chain re-checks what is read, `repair(id)` rebuilds a record from the
   log, and `purge()` erases a payload on every replica it reaches. Any node hosts, a browser
   included; the host limits, validates and reports. Its storage engines — memory, IndexedDB, SQLite
@@ -764,7 +764,7 @@ in code. Pages marked *Not in syncom* explain why the feature is missing and wha
 <tr class="sc-matrix-group"><td colspan="3"><strong>Developer tooling</strong></td></tr>
 <tr><td>Development mode</td><td>— no separate mode: argument checks and full error messages always on</td><td>✅ <code>rxdb/plugins/dev-mode</code>: readable errors, deep-freeze, schema and query checks<sup>66</sup></td></tr>
 <tr><td>Test helpers</td><td>✅ <code>@alexify/syncom/testing</code>: the memory engine, an in-process link with a transport's hazards (latency, a page dropped or doubled, a disconnect and reconnect), a mesh of nodes from an adjacency list, <code>settle()</code>, <code>withDatabase()</code></td><td>✅ memory storage; <code>rxdb/plugins/test-utils</code> (fixtures, replication test suite); <code>using</code> closes databases<sup>67</sup></td></tr>
-<tr><td>Own test suite and CI</td><td>2,461 <code>node:test</code> tests, every docs example among them; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux</td><td>74 test files per storage; Linux, Windows, browsers, Bun, Deno, 11 example apps; no coverage gate</td></tr>
+<tr><td>Own test suite and CI</td><td>2,462 <code>node:test</code> tests, every docs example among them; coverage gate 95/95/90/95; CI on Node 24 and 26, Linux</td><td>74 test files per storage; Linux, Windows, browsers, Bun, Deno, 11 example apps; no coverage gate</td></tr>
 <tr><td>Documentation</td><td>110 guide pages in RxDB's order, each answering an RxDB page ending with a "Coming from RxDB" section, a reference beside them; animated figures and live demos running syncom in the page</td><td>271 pages, about 463,000 words: 98 articles, 46 landing pages</td></tr>
 <tr><td>Example apps</td><td>✅ every code block of the docs is a file of <code>docs/examples/</code> that the suite runs (<code>tests/package/docs-examples.test.js</code>), RxDB's side of each comparison run against rxdb; plus two scripts in <code>examples/</code></td><td>✅ 13 example apps; 11 run in CI: Angular, React, React Native, Electron, Tauri, Vue, Svelte…</td></tr>
 </tbody>

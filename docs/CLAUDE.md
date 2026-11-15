@@ -23,7 +23,8 @@ A guide page teaches one task or one concept to a developer who has not read the
 specification: every option, bound, invariant, error code, event payload and byte. When a guide page needs a
 rule only for completeness, the rule goes to the reference and the page links to its anchor. `reference/api.md`
 and `reference/wire.md` stay specifications; `reference/events.md` (events and hooks), `reference/engines.md`
-(the engine and backend contracts), `reference/entry-points.md` (the subpaths), `reference/text.md` (the list, text
+(the engine and backend contracts), `reference/connectors.md` (how a connector decides),
+`reference/entry-points.md` (the subpaths), `reference/text.md` (the list, text
 and tree rules), `reference/versions.md` (versions, tags, patches, undo and branches) and `reference/telemetry.md`
 (spans, metrics, log events) hold the tables the guide used to carry. The error-code table stays in `api.md`
 (`tests/package/consistency.test.js` reads it there), the telemetry tables in `reference/telemetry.md`
@@ -45,7 +46,12 @@ and tree rules), `reference/versions.md` (versions, tags, patches, undo and bran
   catalogue. The catalogue is `reference/api.md#syncomerror`.
 - **Be honest about trade-offs.** A "Limitations" or "When not to use this" section is welcome. Never claim a
   number nobody measured; link `/guide/benchmarks` for measured ones.
-- **Link densely**: the first mention of a concept that has a page links to it (`[scopes](./partial-sync)`).
+- **Link densely**: the first mention of a concept that has a page links to it (`[scopes](./partial-sync)`); a
+  term of the engine (node, op, stamp, register, vector, feed, unit, tombstone, scope, fsi) links the
+  [glossary](./glossary) on a page's first use unless a page teaches it right there.
+- **A shown region runs when copied.** It carries the imports it uses and every variable it reads, or the
+  page shows (or says in one sentence) where they come from; a test stand-in (`createMesh`, `MemoryLink`, a
+  fake backend) is named as such, with a line on what an app writes instead.
 - **Frontmatter**: every page has `title` (the name the sidebar shows, or a longer one) and `description` (one
   sentence, 80 to 160 characters, what the reader learns). `<DocsOverview>` and `scripts/llms.js` read them.
   A value with `: ` or `#` in it, or that starts with a quote or a backtick, is in double quotes: one bad

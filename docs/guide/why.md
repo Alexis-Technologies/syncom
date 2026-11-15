@@ -6,10 +6,10 @@ description: What syncom is for, what sets it apart from other local-first datab
 # Why syncom?
 
 syncom keeps your application's data on the device and replicates it between servers, browsers and
-peers. Every write lands locally first, as an operation in a log kept on disk. From there it travels to
-every node the device talks to, and every copy ends up with the same records without a central server
-deciding who wins. Your app reads and writes local data at local speed, keeps working offline, and catches
-up when the network comes back.
+peers. Every write lands locally first, as an operation in a [log](./operation-log) kept on disk. From there it
+travels to every [node](./glossary#node) (every database taking part) the device talks to, and every copy ends up
+with the same records without a central server deciding who wins. Your app reads and writes local data at local
+speed, keeps working offline, and catches up when the network comes back.
 
 It is a database as much as a sync engine. One package gives you storage on disk, OPFS, IndexedDB,
 SQLite, MongoDB or memory; collections with schemas, indexes and live queries; the past of every record;
@@ -44,9 +44,11 @@ and every operational failure is an [error with a code](./errors).
 Every node can dial other nodes and host them. The same database works as a hub on a server, as a
 browser tab that dials it, and as a peer that browsers reach over WebRTC; hubs can dial each other. A node
 resumes from the last operation it saw, and a newcomer, or a node away longer than the host keeps its log,
-starts from a streamed snapshot. There is no service to run, and the transport is something you hand in:
-[wrpc](./replication-websocket) over WebSocket or [WebRTC](./replication-webrtc) out of the box. The
-[sync engine](./replication) page shows how it works.
+starts from a streamed snapshot. There is no hosted service and no vendor in the middle: the server the
+[Quickstart](./quickstart) starts is a database of your own hosting the others, and any node can play that part,
+a browser tab over WebRTC included. The transport is something you hand in: [wrpc](./replication-websocket) over
+WebSocket or [WebRTC](./replication-webrtc) out of the box. The [sync engine](./replication) page shows how it
+works.
 
 ### Records that merge field by field
 

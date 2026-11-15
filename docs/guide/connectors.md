@@ -8,8 +8,8 @@ description: Keep a collection in step with a backend that does not run syncom, 
 Your task board syncs between the server, the laptop and the phone, but the company also has a REST API that
 other apps read and write, and it owns the tasks too. Those apps will never run syncom. A connector keeps one
 collection in step with such a backend: it pulls the backend's changes since a checkpoint and lands them as
-writes of this node, and it pushes this node's changes back, telling the backend what it assumed was there so a
-change made behind its back is caught as a conflict.
+writes of this [node](./glossary#node) (the database the connector runs in), and it pushes this node's changes back,
+telling the backend what it assumed was there so a change made behind its back is caught as a conflict.
 
 `@alexify/syncom/connector` is the mechanism, and adapters beside it write the two handlers for
 [CouchDB](./replication-couchdb), [GraphQL](./replication-graphql), [MongoDB](./replication-mongodb),
@@ -21,9 +21,9 @@ handlers yourself, which is what this page does. [HTTP](./replication-http) show
 
 Use a connector when the other side is a system you do not control or that does not run syncom: an existing
 database, a SaaS backend, a file in the user's cloud drive. When the other side can run syncom (your own server, a
-worker, another device), use [native sync](./replication) instead. Native sync replicates every operation with its
-full history, merges counters, sets and text field by field, and needs no code from you; a connector sees whole
-documents and leaves the backend's own rules in charge.
+worker, another device), use [native sync](./replication) instead. Native sync replicates every
+[op](./glossary#op) with its full history, merges counters, sets and text field by field, and needs no code from
+you; a connector sees whole documents and leaves the backend's own rules in charge.
 
 The two work together. A record a connector pulls is an ordinary write of the node that runs it, so it reaches
 every peer of that node through native sync, and a write any peer makes goes out to the backend through the
@@ -32,12 +32,26 @@ conflict.
 
 <FigConnector />
 
+### Counters and sets stay out of a connector's collection
+
+A connector's collection holds plain fields only, so the Quickstart's `votes` (a counter) and `tags` (a set) do not
+belong in one. The backend stores whole documents of plain values: it cannot hold a counter's count per node or a
+set's concurrent adds, so everything the connector pulls lands as plain fields, and `inc()`, `add()` or `remove()` on
+such a field rejects with `FIELD_KIND`. A field you make a counter or a set here goes out as a plain value, but the
+backend's next version of that record is refused with `FIELD_KIND` and never lands. Write such fields as plain
+values (`update(id, { votes: 4 })`), and keep [fields that merge](./fields) to collections that sync natively.
+
 ## Connect a collection to a backend
 
 A connector takes a database, a `name` that keys its checkpoint, the `collection` it keeps in step, and two
 handlers. Here `api` stands for your backend's client: `changes()` reads its change feed and `bulk()` writes rows.
 
 <<< @/examples/connectors.mjs#connect
+
+In your app, `api` is your REST client, SDK or driver. On this page it is a stand-in, a backend kept in memory by
+the example file: `changes()` and `bulk()` as above, `write()` playing another app that writes to the backend,
+`read()` showing what the backend holds, and `refuse()` making it refuse one row. Every example below builds on this
+one: `board`, `api` and `handlersFor` come from it.
 
 `replicate()` starts at once. It pulls every page the backend has since the checkpoint (none the first time), pushes
 what the collection holds that the backend does not, and then follows both sides. `awaitInitialReplication()`
@@ -76,15 +90,17 @@ still holds what the row assumed (a compare-and-set, the way an `If-Match` heade
 change made behind the connector's back.
 
 The handler answers the rows the backend did not write. A row it refused because the backend holds something else is
-answered as the backend holds it, `{ id, data }` or `{ id, deleted: true }`: that is a conflict, and the next
-section shows what happens to it. A row it cannot write at all is answered `{ id, error }`. Every row not in the
-answer counts as written. One push is in flight at a time, `batchSize` rows per call.
+answered as the backend holds it, `{ id, data }` or `{ id, deleted: true }`: that is a conflict, and
+[Decide what wins](#decide-what-wins-when-both-sides-changed-a-record) shows what happens to it. A row it cannot
+write at all is answered `{ id, error }`. Every row not in the answer counts as written. One push is in flight at a
+time, `batchSize` rows per call.
 
 ## Follow the backend's changes live
 
 Without a stream, a live connector pulls again every `retryTime` (5 seconds by default). When your backend can tell
 you something changed (a WebSocket message, Server-Sent Events, a database change feed), give the pull side a
-`stream`:
+`stream`. A connector's options are fixed when you create it, so the example cancels the first one and creates it
+again under the same `name`, which resumes from the checkpoint the first one saved:
 
 <<< @/examples/connectors.mjs#stream
 
@@ -100,19 +116,21 @@ pushes the collection's changes and pulls when you call `reSync()`.
 
 ## Decide what wins when both sides changed a record
 
-When another app edits a record while this node has its own edit waiting to go out, the push assumes the old state
-and the backend refuses it. The backend wins by default: the record is set to the backend's state here, and the
-local edit is dropped rather than written over a change it never saw.
+When another app edits a record while this node has its own edit waiting to go out, the two meet as a conflict. The
+backend wins by default: the record is set to the backend's state here, and the local edit is dropped rather than
+written over a change it never saw. Here the connector is stopped while both sides edit `t2`, as when the app is
+offline, and started again:
 
 <<< @/examples/connectors.mjs#conflict
 
-The same holds when the conflict shows up on the pull side first: a pulled document that differs from what this node
-assumed, over a local edit not yet pushed, is a conflict too, never a silent overwrite of the edit. Each conflict is
-a `conflict` event with the record as it was here (`local`), the backend's state (`remote`) and what the record became
-(`resolved`).
+The restarted connector pulls first, and the backend's new `t2` arrives over an edit this node has not pushed yet: a
+conflict, never a silent overwrite of the edit. When the push meets the change first, it assumes the old state, the
+backend refuses it, and the outcome is the same. Each conflict is a `conflict` event with the record as it was here
+(`local`), the backend's state (`remote`) and what the record became (`resolved`).
 
 To decide yourself, pass `resolve`. It receives `{ id, local, remote, deleted }` and returns the data to keep, `null`
-to delete the record, or anything else (such as `undefined`) to take the backend's state:
+to delete the record, or anything else (such as `undefined`) to take the backend's state. The example goes offline
+once more, and both sides edit `t3`:
 
 <<< @/examples/connectors.mjs#resolve
 
@@ -122,7 +140,9 @@ throws is logged and the backend wins.
 ## Reshape documents between the two sides
 
 When the backend's documents do not look like your records, `modifier.pull(data, id)` reshapes a document before it
-lands and `modifier.push(data, id)` reshapes a record before it goes out:
+lands and `modifier.push(data, id)` reshapes a record before it goes out. Here `legacy` is a second stand-in like
+`api`, an older backend whose documents say `name` and `completed`; it is another backend, so it gets a connector of
+its own beside the first:
 
 <<< @/examples/connectors.mjs#modifier
 
@@ -133,7 +153,8 @@ reason `modifier`).
 ## Know where a connector stands
 
 A connector is an event emitter. `received` and `sent` report each page, `conflict` each conflict, `refused` each
-document or row left out and why, `error` each failure, and `active` when it starts and stops:
+document or row left out and why, `error` each failure, and `active` when it starts and stops. The listeners here go
+on `merging`, the connector the `resolve` example started:
 
 <<< @/examples/connectors.mjs#events
 
@@ -146,10 +167,10 @@ failures. With the [telemetry](./telemetry) plugin the same counts are the `sync
 
 A handler that throws is reported as an `error` event carrying `REPLICATION_FAILED`, the `direction` (`'pull'` or
 `'push'`) and `retryIn`, the wait before the next attempt. The wait starts at `retryTime`, doubles with each failure
-in a row up to `maxRetryTime` (60 seconds by default), and varies by a quarter either way so that many clients do not
-retry in step. The first success resets it. Nothing is skipped: the rows stay pending and the checkpoint stays where
-it was, so the retry picks up exactly what failed. A failing push never delays the pull's retry, or the other way
-around.
+in a row up to `maxRetryTime` (60 seconds by default; both are options of `replicate()`), and varies by a quarter
+either way so that many clients do not retry in step. The first success resets it. Nothing is skipped: the rows stay
+pending and the checkpoint stays where it was, so the retry picks up exactly what failed. A failing push never delays
+the pull's retry, or the other way around.
 
 ## Rows the backend refuses outright
 
@@ -164,8 +185,9 @@ pushes again from the checkpoint. A restart does not retry a parked row by itsel
 
 ## Restart where you left off
 
-The checkpoint lives in the database, so a connector created again with the same `name` resumes. The backend is
-pulled from the saved position, and every change the log holds since the last push goes out:
+The checkpoint lives in the database, so a connector created again with the same `name` resumes, after a restart of
+the app as after a `cancel()`. The backend is pulled from the saved position, and every change the
+[operation log](./operation-log) holds since the last push goes out:
 
 <<< @/examples/connectors.mjs#restart
 
@@ -188,7 +210,8 @@ Pass `autoStart: false` to create a connector without starting it and call `star
 
 An adapter is a function that takes the backend's client from the application and answers `{ pull, push }` for
 `replicate()`. The adapters syncom ships require nothing: they take `fetch`, the driver's collection or the vendor's
-SDK as an argument, so the backend's code stays a dependency of your app, not of syncom.
+SDK as an argument, so the backend's code stays a dependency of your app, not of syncom. The example's connector
+replaces the one the restart started, so that one is canceled first:
 
 <<< @/examples/connectors.mjs#adapter
 
@@ -216,21 +239,27 @@ document exists.
 | [Google Drive](./replication-google-drive) | `@alexify/syncom/connector/gdrive` | the file's ETag (`If-Match`) | an ETag probe every `poll` ms |
 | [OneDrive](./replication-onedrive) | `@alexify/syncom/connector/onedrive` | the file's eTag (`If-Match`) | an eTag probe every `poll` ms |
 
+## How the connector decides
+
+A pulled document is judged against the backend's state as this node last knew it, not against the record alone:
+that is how an echo of this node's own push makes no write and how an unpushed edit is never overwritten in silence.
+The push handler's answer is read row by row, and the checkpoint keeps a short digest of the backend's state per
+record. Every option with its default, every rule and reason code, the checkpoint's format and the retry timing are
+in the [connector reference](../reference/connectors).
+
 ## Trade-offs
 
 - **Documents, not operations.** The backend sees whole documents and keeps its own rules, and a conflict with it is
   decided per document, not merged field by field.
-- **Plain fields.** A pulled document is written as a whole record of plain fields. A field you made a counter or a
-  set with `inc()` or `add()` refuses a pulled value (the whole document is `refused` with the reason `FIELD_KIND`),
-  and `inc()` on a field that came from the backend fails with `FIELD_KIND`. Keep a connector's collection to plain
-  fields; [fields that merge](./fields) are for native sync.
+- **Plain fields.** A pulled document is written as a whole record of plain fields, so counters and sets stay out of a
+  connector's collection ([see above](#counters-and-sets-stay-out-of-a-connector-s-collection)).
 - **One collection per connector.** A document lands in the connector's collection and never adopts or deletes a
   record of another one.
 - **JSON only.** A value the backend's SDK hands over that is not JSON (a `Date`, a `Timestamp`, a reference) is never
   flattened into a string: the document is refused with the reason `value`. The check runs before `modifier.pull`, so
   convert such values in the pull handler itself (wrap an adapter's `pull.handler` to do it).
-- **Encrypted records stay local.** A record [encrypted at rest](./encryption) is never pushed, and a pulled document
-  never replaces one.
+- **Sealed records stay local.** A record [sealed](./encryption) with `encrypted: true` is never pushed, and a pulled
+  document never replaces one.
 - **One connector per backend.** On a mesh, run it on one node; with [several tabs](./leader-election), in one tab.
   syncom does not pick that instance for you yet.
 
@@ -252,119 +281,5 @@ the backend (a probe) before it writes. A failure is retried with a growing wait
 
 :::
 
-The full list of members is in the [reference](../reference/api#connector-subpath).
-
-## How the connector decides
-
-### Options
-
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `name` | (required) | The checkpoint's key in the `connector` key-value namespace: letters, digits, `_`, `.`, `-` (up to 101 characters, not starting with `.`) |
-| `collection` | (required) | The collection replicated |
-| `pull.handler(checkpoint, batchSize)` | | Answers `{ documents: [{ id, data, deleted }], checkpoint }` |
-| `pull.stream(emit, { checkpoint })` | | Calls `emit({ documents })`, `emit('RESYNC')` or `emit('END')`; returns what stops it |
-| `push.handler(rows)` | | Takes `[{ id, data, deleted, assumed }]`; answers conflicts `[{ id, data, deleted }]` and rows refused by name `[{ id, error }]` |
-| `live` | `true` | Follow the backend after the first pull: its stream, or a pull every `retryTime` |
-| `retryTime` | `5000` | The first wait after a failure (doubled per failure in a row), and the pull interval without a stream, in ms |
-| `maxRetryTime` | `60000` | The longest wait between retries, in ms; at least `retryTime` |
-| `safetyTime` | `60000` | With a stream, a pull from the checkpoint this often anyway, in ms; `0` for none |
-| `batchSize` | `100` | Documents per pull, rows per push |
-| `modifier` | | `{ pull(data, id), push(data, id) }` |
-| `resolve` | | `({ id, local, remote, deleted })` → the data to keep, `null` to delete, anything else for the backend's state |
-| `autoStart` | `true` | Start at once |
-
-At least one of `pull` and `push` is required; a connector with one side only replicates in that direction. Every
-other wrong option is a `TypeError` thrown by `replicate()`.
-
-### What a pulled document is judged against
-
-A pulled document is compared with the backend's state as this node knows it (what it pulled, pushed, or learned in a
-conflict), not with the record alone:
-
-- **The state already known** is an echo: this node's own write come back, or another client's write that left the
-  document as it was. It makes no write. Over a local edit not yet pushed it changes nothing either, because the push
-  compares that edit against the same state. Over a record that reads otherwise with nothing pending, it lands.
-- **Another state over a local edit not yet pushed** is a conflict: `resolve` decides or the backend wins, the
-  resolution lands in the page's transaction, and the `conflict` event follows.
-- **Another state over a record with nothing pending** is the backend's newer state and lands, unless the record
-  already reads that way.
-
-A document that is no document (no valid record id, no object as `data` without `deleted: true`) is logged as
-`connector.document.malformed` and skipped. A document that cannot land is a `refused` event
-`{ direction: 'pull', id, reason, cause }` and the rest of the page lands, the checkpoint moving past it. The reasons:
-`collection` (the id belongs to a record of another collection, a tombstone included), `sealed` (an encrypted
-record), `value` (not JSON), `modifier` (`modifier.pull` threw or returned no object), or the code of the write the
-engine refused (a validator's `VALIDATION_FAILED`, a field's `TypeError`). A landing that fails as a whole (the
-engine, the database closing) is the pull's failure: `REPLICATION_FAILED`, the checkpoint unmoved, tried again.
-
-Pulled writes carry `source: 'connector:<name>'` on their `transaction` event and `actor: 'connector:<name>'` on their
-ops; a resolution's ops carry `actor: 'connector:<name>:resolve'`, and a resolution landed after a push carries
-`source: 'connector:<name>:resolve'`.
-
-### What goes out, and how the answer is read
-
-Every turn of the database that changed a record of the collection is pushed: a local write, a transaction, a peer's
-page, a joined snapshot. This connector's own pulls are not. A row whose data equals the state the backend is known to
-hold is not sent (a resolution the backend won, a change that leaves the record as the backend has it). An encrypted
-record never goes. A change that arrives while its row is in flight is pushed again after that push.
-
-The handler's answer is read row by row:
-
-- **Not in the answer**: written. Its state is what the next push assumes.
-- **`{ id, error }`**: refused by name. The row is parked (`refused` with `direction: 'push'` and `reason` the error's
-  `code`, or `backend` without one) until a change to the record or `reSync()`.
-- **`{ id, data }` or `{ id, deleted: true }`**: a conflict. The record is set to the backend's state, or to what
-  `resolve` returns, in one transaction; the `conflict` events follow once it has landed. The id stays pending: equal
-  to the backend's state it says nothing more, different it goes again with that state assumed. A resolution the
-  engine refuses is a `refused` event with `direction: 'push'`, and the record stands.
-- **Neither a document nor an error**: parked with the reason `answer`.
-
-A backend that refuses a row which assumed exactly what the backend says it holds, twice in a row, contradicts
-itself: the row is parked with the reason `conflict` rather than pushed in a loop. A `modifier.push` that throws parks
-nothing but leaves that row out (`refused`, reason `modifier`).
-
-`modifier.pull` turns the backend's shape into the record's, `modifier.push` the record's into the backend's. What the
-connector remembers and compares is the backend's shape: a document as it came (before `modifier.pull`), a row as it
-went (after `modifier.push`). A conflict's `remote` passes through `modifier.pull`, and a resolution goes back through
-`modifier.push`.
-
-### The checkpoint
-
-One JSON text in the database's `connector` key-value namespace, under the connector's `name`, holds what a restart
-needs:
-
-```json
-{ "pull": 42, "pushed": "mw6l.17", "known": { "t1": "b-SQXlGHTSadY8-j1RK7Vt", "t2": null } }
-```
-
-`pull` is the backend's position as the pull handler last returned it. `pushed` is this node's log position pushed
-through; it never passes a change still waiting to go, so a restart pushes every pending change again (at least once,
-never lost). `known` names the backend's state per record: 22 characters of the SHA-256 (base64url) of the canonical
-JSON of the backend's shape, `null` where the backend holds nothing, no entry for a record gone on both sides. That is
-about 50 bytes a record. The text is saved coalesced (one write in flight, the next 200 ms later while pages keep
-landing) and at once at the end of a pull run, after a push, after a page of the stream and on `cancel()`. A crash
-between a landing and its save lands that page again.
-
-In memory the connector keeps the backend's state as text for up to 10 000 records (the oldest not pending forgotten
-first); a push of a record known only by digest is a probe. `start()` reads the checkpoint, pulls from `pull` (judging
-a document by its digest where the text is not in memory, so this node's own echo over an offline edit is skipped),
-then pushes what the log holds since `pushed`. Where the log cannot resume there (compacted past it, another epoch, a
-connector never run) every live record of the collection is probed once (`connector.rebuild` in the log): equal
-records say nothing, differing ones are conflicts, records the backend lacks are created.
-
-### Live, retries and waiting
-
-The live side begins once the first pull run is through. Everything the pull side lands, the pages of a pull run and
-the pages of the stream, goes through one queue in order, and a landing and a push take turns, so neither judges a
-record against a state the other is changing. A `RESYNC` while a pull runs makes that run go once more after its
-pages. A page of the stream delivered out of order is judged again by the next pull.
-
-A failure in either direction is kept (`errors`, the newest twenty), logged as `connector.failed`, and retried after
-`retryTime · 2^n` ms (n the failures in a row in that direction), capped at `maxRetryTime`, times a random factor
-between 0.75 and 1.25. `reSync()` on a connector that is not active rejects with `REPLICATION_FAILED` and a `null`
-direction, and `start()` on a canceled one throws the same.
-
-`awaitInitialReplication()` resolves when the first pull run and the first push drain have both succeeded;
-`awaitInSync()` when, in addition, nothing is pending, no push is in flight and nothing waits on the pull queue. Both
-take `{ signal }` to stop waiting, and both reject once the connector is canceled.
+The options and the rules are in the [connector reference](../reference/connectors), and every member is in the
+[API reference](../reference/api#connector-subpath).

@@ -2,30 +2,36 @@
 // tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
 import { settle } from '@alexify/syncom/testing';
+
 // #region nodes
 import { createDatabase } from '@alexify/syncom/all';
-import { MemoryLink, memoryEngine } from '@alexify/syncom/testing';
+import { memoryEngine } from '@alexify/syncom/memory';
+import { MemoryLink } from '@alexify/syncom/testing';
 
-const engine = memoryEngine(); // every node of this example keeps its data in memory
+const engine = memoryEngine(); // every node keeps its data in memory
 const schema = { entities: { Task: {} } };
 
-// The server hosts the sync protocol: its unit is what the other nodes dial.
+// The server hosts: its unit answers the nodes that dial it.
 const server = await createDatabase({ engine, path: 'server', schema });
-const unit = server.sync.unit({ access: 'public' });
+const unit = server.sync.unit({ access: 'public' }); // any connection may say hello
 
-// The laptop and the phone dial the server. connect() is called for every dial: in an app it
-// opens a WebSocket, here it opens an in-process link to the server's unit instead.
+// A node that dials the server. MemoryLink is a test stand-in for the network: an app's
+// connect returns createWrpcLink(await WrpcClient.connect(node.url)) instead.
 const links = {};
-const dial = (name) => () => (links[name] = new MemoryLink(unit));
+const open = async (name) => {
+  const db = await createDatabase({
+    engine,
+    path: name,
+    schema,
+    sync: { connect: () => (links[name] = new MemoryLink(unit)) },
+  });
+  await db.sync.addNode({ url: 'mem://server' });
+  await db.sync.awaitInitialReplication(); // the node's first sync with the server
+  return db;
+};
 
-const laptop = await createDatabase({ engine, path: 'laptop', schema, sync: { connect: dial('laptop') } });
-await laptop.sync.addNode({ url: 'wss://board.example.com/api' });
-
-const phone = await createDatabase({ engine, path: 'phone', schema, sync: { connect: dial('phone') } });
-await phone.sync.addNode({ url: 'wss://board.example.com/api' });
-
-await laptop.sync.awaitInitialReplication();
-await phone.sync.awaitInitialReplication();
+const laptop = await open('laptop');
+const phone = await open('phone');
 // #endregion nodes
 
 // #region write
@@ -99,7 +105,7 @@ assert.ok(seen.some((event) => event.connected === false));
 assert.ok(seen.some((event) => event.reconnected === true));
 
 // #region control
-const url = 'wss://board.example.com/api';
+const url = 'mem://server';
 console.log(laptop.sync.peers()[0]);
 // { url, node, connected: true, subscribed: true, pending: 0, behind: false, caughtUp: true, … }
 
