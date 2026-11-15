@@ -2,7 +2,7 @@
 
 // The names are a surface: every `event:` a logger receives, every span,
 // every metric and gauge, and every attribute a span or a metric carries
-// has a row in docs/guide/telemetry.md, and a log event is emitted at the
+// has a row in docs/reference/telemetry.md, and a log event is emitted at the
 // level its row names. This keeps the code and the page in step — a new
 // name needs its row, a level changed needs its row changed.
 
@@ -25,7 +25,7 @@ const files = (dir) =>
         : [],
   );
 const sources = () => files(SRC).map((file) => readFileSync(file, 'utf8'));
-const page = () => readFileSync(path.join(ROOT, 'docs', 'guide', 'telemetry.md'), 'utf8');
+const page = () => readFileSync(path.join(ROOT, 'docs', 'reference', 'telemetry.md'), 'utf8');
 
 const names = (pattern) => {
   const found = new Set();
@@ -33,7 +33,7 @@ const names = (pattern) => {
   return [...found].sort();
 };
 
-test('every log event, span and metric name in src/ has a row in docs/guide/telemetry.md', () => {
+test('every log event, span and metric name in src/ has a row in docs/reference/telemetry.md', () => {
   const text = page();
   const documented = (name) => text.includes(`\`${name}\``);
   const events = names(/\bevent: '([a-z][a-z0-9._]*)'/g);
@@ -47,7 +47,7 @@ test('every log event, span and metric name in src/ has a row in docs/guide/tele
   for (const name of [...events, ...spans, ...metrics]) assert.ok(documented(name), `no row for ${name}`);
 });
 
-test('every attribute a span or a metric carries has a row in docs/guide/telemetry.md', () => {
+test('every attribute a span or a metric carries has a row in docs/reference/telemetry.md', () => {
   const text = page();
   // An attribute is a `syncom.*` key of an object literal: a span's or a
   // metric's labels, wherever they are built.
@@ -56,7 +56,7 @@ test('every attribute a span or a metric carries has a row in docs/guide/telemet
   for (const name of attributes) assert.ok(text.includes(`\`${name}\``), `no row names the attribute ${name}`);
 });
 
-test('a log event is emitted at the level its row in docs/guide/telemetry.md names', () => {
+test('a log event is emitted at the level its row in docs/reference/telemetry.md names', () => {
   // The rows of the log events table: `| level | `name`, `name` (note) | when |`.
   const levels = new Map();
   for (const row of page().matchAll(/^\| (error|warn|info|debug) \| ([^|]+) \|/gm)) {

@@ -204,6 +204,8 @@ export default withMermaid({
               { text: 'Events and hooks', link: '/reference/events' },
               { text: 'Engines and backends', link: '/reference/engines' },
               { text: 'Entry points', link: '/reference/entry-points' },
+              { text: 'Lists, text and trees', link: '/reference/text' },
+              { text: 'Versions and tags', link: '/reference/versions' },
               { text: 'Telemetry', link: '/reference/telemetry' },
               { text: 'Wire format', link: '/reference/wire' },
             ],
