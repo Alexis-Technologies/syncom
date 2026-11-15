@@ -13,6 +13,7 @@ expectType<'subscription'>(SYNC_INTROSPECTION.syncom.changes.kind);
 expectType<{}>(SYNC_INTROSPECTION.syncom.blob);
 expectType<void>(link.send('syncom/presence', { node: 'a' }));
 expectAssignable<WrpcClientLike>({ ...client, sendEvent: (event: string, data: unknown) => void [event, data] });
+expectType<{}>(SYNC_INTROSPECTION.syncom.blobPut);
 createWrpcLink(client, { unit: 'replication' });
 expectError(createWrpcLink(client, { unit: 1 }));
 expectError(createWrpcLink({}));

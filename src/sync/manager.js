@@ -27,7 +27,7 @@ const { isSyncLink } = require('./link.js');
 const { writerOf, traced } = require('../telemetry/writer.js');
 const { notify, runHook, normalizeHooks } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf, proveMessage } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf, proveMessage } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
@@ -36,7 +36,7 @@ const { wellFormed, VERDICT, isPlainObject } = require('../shape.js');
 const { withholdOp } = require('../header.js');
 const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
-const { fromBase64 } = require('../crypto/pem.js');
+const { fromBase64, toBase64 } = require('../crypto/pem.js');
 const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
@@ -56,6 +56,24 @@ const encoder = new TextEncoder();
 // A failed recovery waits this long (doubling, by timestamp) before the next.
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
+// The attachments a peer waits for the bytes of (`peer.uploads`) beyond this: the oldest let go — a reader of them
+// fetches them from a peer that holds them.
+const MAX_UPLOADS = 1024;
+// What a host's refusal of an upload is, rather than a failure of the transport: the same bytes would be refused
+// again (a digest that is none, bytes that are not it, a record that does not name them, past a limit).
+const FINAL_UPLOAD = new Set([400, 403, 404, 413]);
+
+// The attachments an op's data names — the `_attachments/<name>` registers, kept apart as an op and a record file
+// keep every path — each `[name, digest]`, pushed onto `out`.
+const ATTACHMENTS_PREFIX = `${ATTACHMENTS_FIELD}/`;
+const namedBlobs = (data, out) => {
+  for (const key of Object.keys(data)) {
+    const entry = data[key];
+    if (key.startsWith(ATTACHMENTS_PREFIX) && isPlainObject(entry) && isDigest(entry.digest)) {
+      out.push([key.slice(ATTACHMENTS_PREFIX.length), entry.digest]);
+    }
+  }
+};
 
 // The hooks a manager accepts (`createDatabase({ sync: { hooks } })`).
 // `beforeSend({ op, peer })` sees every op about to go to a peer: `false`
@@ -590,6 +608,10 @@ class SyncManager extends Emitter {
       pushing: Promise.resolve(),
       inflight: false,
       flushQueued: false,
+      // The attachments this node pushed the registers of and the host may lack the bytes of, by digest (the record
+      // and the name that named it, `waiting` while this node lacks the bytes): uploaded after a push (#upload), or
+      // once the bytes land here (#blobLanded).
+      uploads: new Map(),
       // A relay that failed: what the host lacks is pushed from the vector
       // at the next sign of life on the link (see #recover), backed off by
       // timestamp after a failed recovery.
@@ -1092,8 +1114,12 @@ class SyncManager extends Emitter {
         this.#storage.logger.warn({ event: 'sync.push.gaps', url: peer.node.url, gaps: answer.gaps });
       }
       if (Array.isArray(answer?.refused) && answer.refused.length > 0) await this.#refused(peer, answer.refused);
+      this.#noteUploads(peer, page, answer);
       sent += page.length;
     }
+    // The bytes of the attachments the pages named, behind them: the host names them now. A handshake's push, empty
+    // or not, tries again what a transport's failure left.
+    await this.#upload(peer);
     peer.backoff = 0;
     if (sent > 0 && !peer.closed) {
       peer.node.lastSync = Date.now();
@@ -1101,6 +1127,82 @@ class SyncManager extends Emitter {
       notify(this, this.#storage.logger, 'sync', { url: peer.node.url, pushed: sent });
     }
     return sent;
+  }
+
+  // The attachments a page the host took names — every register a pushed op sets — kept for #upload by digest
+  // (the first record and name naming it), MAX_UPLOADS at most, the oldest let go. An op the host refused names
+  // nothing it holds; a hub that forwarded the page cannot write the bytes; a withheld op names nothing.
+  #noteUploads(peer, page, answer) {
+    if (answer?.forwarded === true || this.#storage[DB]?.blobs === undefined) return;
+    let refused = null;
+    if (Array.isArray(answer?.refused)) {
+      refused = new Set();
+      for (let i = 0; i < answer.refused.length; i++) {
+        const { origin, scope, seq } = answer.refused[i];
+        refused.add(`${origin}@${scope ?? ''}:${seq}`);
+      }
+    }
+    const { uploads } = peer;
+    const named = [];
+    for (let i = 0; i < page.length; i++) {
+      const op = page[i];
+      if (!isPlainObject(op.data) || typeof op.id !== 'string') continue;
+      if (refused !== null && refused.has(`${op.origin}@${op.scope ?? ''}:${op.seq}`)) continue;
+      named.length = 0;
+      namedBlobs(op.data, named);
+      for (let j = 0; j < named.length; j++) {
+        const [name, digest] = named[j];
+        if (uploads.has(digest)) continue;
+        uploads.set(digest, { id: op.id, name, waiting: false });
+        if (uploads.size > MAX_UPLOADS) uploads.delete(uploads.keys().next().value);
+      }
+    }
+  }
+
+  // The bytes this node holds of the attachments the peer waits for, uploaded (`syncom/blobPut`): a probe first,
+  // so bytes the host holds never cross, then the bytes as base64. Bytes this node lacks (a relay that never read
+  // them) wait — asked after no push again — until they land here (#blobLanded hands their digest). A refusal is
+  // final and a transport's failure tried again at the next push; both are reported (`BLOB_UPLOAD_FAILED`), never
+  // thrown — the push stands. Runs on the push chain.
+  async #upload(peer, landed = null) {
+    const { uploads } = peer;
+    if (uploads.size === 0) return;
+    const store = this.#storage[DB]?.blobs;
+    for (const [digest, entry] of uploads) {
+      if (peer.closed || !peer.connected || peer.link === null) return;
+      if (entry.waiting && digest !== landed) continue;
+      const { id, name } = entry;
+      let size = 0;
+      try {
+        entry.waiting = !(await store.has(digest));
+        if (entry.waiting) continue;
+        const args = { digest, id, name };
+        const probe = await peer.link.call('syncom/blobPut', args);
+        if (probe?.have !== true) {
+          const bytes = await store.get(digest);
+          if (bytes === null) continue;
+          size = bytes.length;
+          await peer.link.call('syncom/blobPut', { digest, id, name, base64: toBase64(bytes) });
+        }
+        uploads.delete(digest);
+        if (size > 0) this.#otel.recordBlob('uploaded', 'ok', size);
+      } catch (error) {
+        const final = FINAL_UPLOAD.has(error?.code);
+        if (final) uploads.delete(digest);
+        this.#otel.recordBlob('uploaded', final ? 'refused' : 'failed', 0);
+        const message = `${peer.node.url} did not take the bytes of ${id}/${name}`;
+        const fields = { digest, id, attachment: name, cause: error, retry: !final };
+        this.#fail(peer, new SyncomError('BLOB_UPLOAD_FAILED', message, fields));
+      }
+    }
+  }
+
+  // Bytes that landed here — a peer's upload, a fetch — go on to every peer that waits for them, on its push chain.
+  #blobLanded(digest) {
+    for (const peer of this.#peers.values()) {
+      if (peer.closed || !peer.connected || !peer.uploads.has(digest)) continue;
+      this.#serializePush(peer, () => this.#upload(peer, digest)).catch(() => {});
+    }
   }
 
   // A page as it goes out: every op `beforeSend` says no to goes as a scrub leaves it — a copy, the log's op
@@ -1443,6 +1545,8 @@ class SyncManager extends Emitter {
       if (store !== undefined) {
         try {
           await store.put(digest, bytes);
+          // Kept: what this node pushed the register of goes on to the hosts that wait for it.
+          this.#blobLanded(digest);
         } catch (error) {
           // Kept next time: the checked bytes are answered all the same.
           this.#storage.logger.warn({ event: 'sync.blob.keep.failed', digest, err: error });
@@ -1670,6 +1774,7 @@ class SyncManager extends Emitter {
       sessions: this.#sessions,
       revoked: this.#revocations,
       scopeOf: (id, data) => (typeof this.#options.scope === 'function' ? this.#options.scope(id, data) : GLOBAL_SCOPE),
+      landed: (digest) => this.#blobLanded(digest),
     });
   }
 

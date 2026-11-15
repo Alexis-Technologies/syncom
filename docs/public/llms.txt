@@ -108,7 +108,7 @@ is no conflict handler. One API in Node.js and the browser.
 - [Testing](https://syncomjs.vercel.app/guide/testing): Test code that uses syncom with a database in memory, a mesh of nodes in one process, a link that misbehaves on purpose, and settle().
 - [Schema migration](https://syncomjs.vercel.app/guide/migration-schema): Change the shape of your records without a migration step at startup, read old records through the lens, and keep nodes on different versions in sync.
 - [Storage migration](https://syncomjs.vercel.app/guide/migration-storage): Move a database from one storage engine to another with migrateStorage(), keeping the node's identity, its log and its place in sync.
-- [Attachments](https://syncomjs.vercel.app/guide/attachments): Store files next to a record, keep them by their SHA-256, sync their names with the record and fetch the bytes from a peer only when a node reads them.
+- [Attachments](https://syncomjs.vercel.app/guide/attachments): Store files next to a record by their SHA-256, sync their names with the record, upload the bytes with a push and fetch them only when a node reads them.
 - [Pipelines](https://syncomjs.vercel.app/guide/pipeline): Derive one collection from another with createPipeline(), in order, at least once per change, and resumed from a checkpoint after a restart.
 - [Reactivity](https://syncomjs.vercel.app/guide/reactivity): Turn queries, records and events into stores that UI frameworks and signal libraries read, through one small contract with no framework inside.
 - [App state](https://syncomjs.vercel.app/guide/state): Keep app settings and UI state by name and path with createState(), synced across a user's devices or kept on one device only.

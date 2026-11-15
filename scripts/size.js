@@ -482,7 +482,9 @@ const ENTRIES = [
   // name.
   // 180.4 with the sync blocks, the tabs and the blobs observed — the writer's methods and the shared log's, the host's
   // and the manager's call sites (review №7, E9; 2026-11-07). 181, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 181 },
+  // 181.9 with the attachments' bytes uploaded on push (syncom/blobPut: the host's door, the dialer's uploads in
+  // waiting and the bytes sent on as they land; 2026-11-15). 182, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 182 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -622,7 +624,9 @@ const ENTRIES = [
   // 2026-11-07). 31.5, raised by name.
   // 31.5 (at the line) with proveMessage the protocol's and the blobs' MAX_STORED_BYTES (review №7, E11–E12; 2026-11-07).
   // 31.75, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 31.75 },
+  // 32.6 with the attachments' bytes uploaded on push (hosting.js blobPut, manager.js #noteUploads/#upload/#blobLanded;
+  // 2026-11-15). 32.7, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 32.7 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

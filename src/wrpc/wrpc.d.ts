@@ -57,5 +57,6 @@ export const SYNC_INTROSPECTION: {
     readonly query: {};
     readonly count: {};
     readonly blob: {};
+    readonly blobPut: {};
   };
 };

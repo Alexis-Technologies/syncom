@@ -459,6 +459,157 @@ test('Attachments', async (t) => {
   );
 
   await t.test(
+    'a dialer uploads the bytes of the registers it pushed (syncom/blobPut): A — H — B and A — H1 — H2 — B read what A attached; bytes the dialer lacks wait until they land; a refused upload is reported, never fatal',
+    async (t2) => {
+      // A and B both dial the hub H: the bytes go up with A's push, and B reads them from H.
+      const hub = await createMesh(
+        t2,
+        ['H', 'A', 'B'],
+        [
+          ['A', 'H'],
+          ['B', 'H'],
+        ],
+        createStorage,
+      );
+      const [h, a, b] = ['H', 'A', 'B'].map((name) => hub.get(name));
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const id = await a.insert({ title: 'with a file' });
+      await a.attachments.put(id, 'notes.txt', bytesOf('from A'), { type: 'text/plain' });
+      await settle([h, a, b]);
+      assert.strictEqual(await h.attachments.has(id, 'notes.txt'), true, 'the hub holds the bytes');
+      assert.strictEqual(await b.attachments.has(id, 'notes.txt'), false, 'down on a read, not ahead of it');
+      assert.strictEqual(new TextDecoder().decode((await b.attachments.get(id, 'notes.txt')).bytes), 'from A');
+      // Two hubs: A2 dials H1, H1 dials H2, B2 dials H2. H1 relays the register before A2's bytes reach it; once
+      // they land there, H1 uploads them to H2.
+      const chain = await createMesh(
+        t2,
+        ['H1', 'H2', 'A2', 'B2'],
+        [
+          ['A2', 'H1'],
+          ['H1', 'H2'],
+          ['B2', 'H2'],
+        ],
+        createStorage,
+      );
+      const [h1, h2, a2, b2] = ['H1', 'H2', 'A2', 'B2'].map((name) => chain.get(name));
+      await a2.sync.awaitInitialReplication();
+      await h1.sync.awaitInitialReplication();
+      await b2.sync.awaitInitialReplication();
+      const far = await a2.insert({ title: 'two hubs away' });
+      await a2.attachments.put(far, 'far.bin', new Uint8Array(3000).fill(7), { type: 'application/octet-stream' });
+      await settle([h1, h2, a2, b2]);
+      await waitUntil(() => h2.attachments.has(far, 'far.bin'));
+      const got = await b2.attachments.get(far, 'far.bin');
+      assert.strictEqual(got.bytes.length, 3000);
+      // A relay that never fetched the bytes has nothing to upload: it waits, and uploads once they land (here a read
+      // on the relay fetches them from its host).
+      const relay = await createMesh(
+        t2,
+        ['R0', 'R1', 'R2'],
+        [
+          ['R1', 'R0'],
+          ['R1', 'R2'],
+        ],
+        createStorage,
+      );
+      const [r0, r1, r2] = ['R0', 'R1', 'R2'].map((name) => relay.get(name));
+      await r1.sync.awaitInitialReplication();
+      const kept = await r0.insert({ title: 'on the first host' });
+      await r0.attachments.put(kept, 'kept.txt', bytesOf('on R0'), { type: 'text/plain' });
+      await settle([r0, r1, r2]);
+      assert.strictEqual(await r2.attachments.has(kept, 'kept.txt'), false, 'R1 held no bytes to upload');
+      await r1.attachments.get(kept, 'kept.txt');
+      await waitUntil(() => r2.attachments.has(kept, 'kept.txt'));
+      // A host whose limit refuses the bytes: the push stands, the upload is reported (BLOB_UPLOAD_FAILED).
+      const strict = await createMesh(t2, ['S', 'C'], [['C', 'S']], createStorage, {
+        unit: { access: 'public', limits: { bytesPerBlob: 10 } },
+      });
+      const [s, c] = ['S', 'C'].map((name) => strict.get(name));
+      const errors = [];
+      c.sync.on('error', (error) => errors.push(error));
+      await c.sync.awaitInitialReplication();
+      const big = await c.insert({ title: 'too big for S' });
+      const bigEntry = await c.attachments.put(big, 'big.bin', new Uint8Array(100).fill(1), { type: 'x/y' });
+      await settle([s, c]);
+      assert.deepStrictEqual((await s.get(big))[FIELD], { 'big.bin': bigEntry }, 'the push stands');
+      assert.strictEqual(await s.attachments.has(big, 'big.bin'), false);
+      const [failed] = errors.filter((error) => error.code === 'BLOB_UPLOAD_FAILED');
+      assert.strictEqual(failed.digest, bigEntry.digest);
+      assert.strictEqual(failed.id, big);
+      assert.strictEqual(failed.attachment, 'big.bin');
+      assert.strictEqual(failed.cause.code, 413);
+      assert.strictEqual(failed.retry, false, 'a refusal is final');
+    },
+  );
+
+  await t.test(
+    'syncom/blobPut takes the bytes a live record in the peer’s scopes names, checked against the digest and the limits; a probe without bytes answers whether the host holds them',
+    async (t2) => {
+      const scope = (id, data) => data.$type ?? '*';
+      const host = await createStorage(t2, 'H', { sync: { scope } });
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const { toBase64 } = require('../src/crypto/pem.js');
+      const bytes = bytesOf('the bytes');
+      const digest = await hashBytes(bytes);
+      const register = { digest, type: 'text/plain', length: bytes.length };
+      const id = await host.insert({ $type: 'A', [`${FIELD}/f`]: register });
+      const open = async (scopes, options = {}) => {
+        const link = new MemoryLink(host.sync.unit({ access: 'public', ...options }));
+        await link.call('syncom/hello', { node: `peer-${scopes.join('-')}`, version: 1, scopes });
+        return (args) => link.call('syncom/blobPut', args);
+      };
+      const put = await open(['A']);
+      assert.deepStrictEqual(await put({ digest, id, name: 'f' }), { digest, have: false }, 'a probe');
+      await assert.rejects(put({ digest: 'xyz', id, name: 'f' }), { code: 400, reason: 'BAD_DIGEST' });
+      await assert.rejects(put({ digest, id, name: 'f', base64: 7 }), { code: 400, reason: 'BAD_BLOB' });
+      // The digest under another name, another digest, no record: one answer, nothing told.
+      await assert.rejects(put({ digest, id, name: 'g', base64: toBase64(bytes) }), {
+        code: 404,
+        reason: 'NOT_NAMED',
+      });
+      const other = await hashBytes(bytesOf('other'));
+      await assert.rejects(put({ digest: other, id, name: 'f', base64: toBase64(bytesOf('other')) }), {
+        code: 404,
+        reason: 'NOT_NAMED',
+      });
+      await assert.rejects(put({ digest, name: 'f', base64: toBase64(bytes) }), { code: 404, reason: 'NOT_NAMED' });
+      // A record outside the peer's scopes is none.
+      const outsider = await open(['B']);
+      await assert.rejects(outsider({ digest, id, name: 'f', base64: toBase64(bytes) }), {
+        code: 404,
+        reason: 'NOT_NAMED',
+      });
+      // Bytes that are not the digest.
+      await assert.rejects(put({ digest, id, name: 'f', base64: toBase64(bytesOf('forged!!!')) }), {
+        code: 400,
+        reason: 'BLOB_MISMATCH',
+      });
+      // Past the unit's limit.
+      const small = await open(['A'], { limits: { bytesPerBlob: 4 } });
+      await assert.rejects(small({ digest, id, name: 'f', base64: toBase64(bytes) }), {
+        code: 413,
+        reason: 'BYTES_PER_BLOB',
+      });
+      assert.throws(() => host.sync.unit({ limits: { bytesPerBlob: 0 } }), { name: 'TypeError' });
+      // A unit that takes no pushes takes no bytes.
+      const mirror = await open(['A'], { allow: { push: false } });
+      await assert.rejects(mirror({ digest, id, name: 'f', base64: toBase64(bytes) }), {
+        code: 403,
+        reason: 'READ_ONLY',
+      });
+      assert.strictEqual(await host[DB].blobs.has(digest), false, 'nothing refused was kept');
+      // Taken: kept, and a probe after says so.
+      assert.deepStrictEqual(await put({ digest, id, name: 'f', base64: toBase64(bytes) }), { digest, have: true });
+      same(await host[DB].blobs.get(digest), bytes);
+      assert.deepStrictEqual(await put({ digest, id, name: 'f' }), { digest, have: true });
+      // Before hello there is no peer to take bytes from.
+      const stranger = new MemoryLink(host.sync.unit({ access: 'public' }));
+      await assert.rejects(stranger.call('syncom/blobPut', { digest, id, name: 'f' }), { code: 428 });
+    },
+  );
+
+  await t.test(
     'sweep() removes the blobs no live record and no tag names, keeps the rest and a put in flight; dryRun counts; a follower cannot sweep',
     async (t2) => {
       // A gate inside the queue: a write held open holds a put between its blob and its register.

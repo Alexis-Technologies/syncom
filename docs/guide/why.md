@@ -94,7 +94,7 @@ tracer and meter you inject, nested under wrpc's spans, and `stats()` reports wh
 Nothing is installed with it. It uses `node:fs` and `node:crypto` on the server, and OPFS (or IndexedDB)
 and Web Crypto in the browser, picked by the bundler with no configuration. The code is CommonJS without a
 build step, the hand-written types type your records from their schema, and every block is a subpath of its
-own: the core is about 78 KB minified and gzipped, everything together about 181 KB, each held to a budget
+own: the core is about 78 KB minified and gzipped, everything together about 182 KB, each held to a budget
 in CI ([Installation](./install)).
 
 ## How fast it is

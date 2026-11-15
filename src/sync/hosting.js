@@ -14,14 +14,18 @@
 // procedures stand on — refusals, the peer of a call, the options, the limits,
 // the grant, the proof, the sessions — are src/sync/rules.js; the reads a thin
 // client makes (`query`, `count`, `blob`) are src/sync/reads.js; here are the
-// hello, the push, the snapshot, the two feeds, the presence and the unit.
+// hello, the push and the bytes a push names (`blobPut`), the snapshot, the two
+// feeds, the presence and the unit.
 
 const { packOps, unpackOps } = require('./wire.js');
 const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
 const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js');
-const { SIGNER, SOURCE } = require('../symbols.js');
+const { DB, SIGNER, SOURCE } = require('../symbols.js');
+const { hashBytes } = require('../crypto/digest.js');
+const { fromBase64 } = require('../crypto/pem.js');
+const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 const {
   refuse,
   refuseCall,
@@ -38,7 +42,7 @@ const {
   remember,
   handPresence,
 } = require('./rules.js');
-const { normalizeQuery, query, count, blob } = require('./reads.js');
+const { normalizeQuery, query, count, blob, blobNamed } = require('./reads.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
 const MAX_SCOPES = 256;
@@ -321,6 +325,44 @@ const push = (host) => async (context, args) => {
   return { vector, ...result, outOfScope: outOfScope + result.outOfScope };
 };
 
+// `syncom/blobPut { digest, id, name, base64? }`: the bytes of an attachment whose register the peer pushed — the
+// dialer uploads them after a push this host took (src/sync/manager.js #upload), so a node behind this host reads
+// them here. Taken only where a live record in the peer's scopes names the digest under that name (`blobNamed`: one
+// 404 `NOT_NAMED` for every miss, so nothing is told), within `limits.bytesPerBlob` and MAX_BLOB_BYTES (413), and
+// when their SHA-256 is the digest (400 `BLOB_MISMATCH`). Without `base64` it is a probe: `have` says whether this
+// host holds them, so the bytes cross once. A unit that takes no pushes takes no bytes (403 `READ_ONLY`), nor a hub
+// that cannot write (503), nor a host without a blobs store (403 `NOT_SERVED`). Kept, the bytes go on to the hosts
+// this node pushed the register to (`landed`).
+const blobPut = (host) => async (context, args) => {
+  const { storage, limits } = host;
+  const state = peerOf(host, context, 'blobPut');
+  const no = (message, code, reason) => refuseCall(host, 'blobPut', message, code, reason, state.node);
+  if (!host.allow.push) throw no('This host takes no pushes', 403, 'READ_ONLY');
+  if (storage.readOnly) throw no('This hub is read-only', 503, 'READ_ONLY');
+  const store = storage[DB]?.blobs;
+  if (store === undefined) throw no('This host keeps no blobs', 403, 'NOT_SERVED');
+  const { digest, id, name, base64 } = args ?? {};
+  if (!isDigest(digest)) throw no('blobPut needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST');
+  const text = base64 === undefined || typeof base64 === 'string';
+  if (!text) throw no('blobPut takes the bytes as base64', 400, 'BAD_BLOB');
+  // `bytesPerBlob` where it is under the cap; told by the text's length before a byte is decoded (four characters
+  // carry three bytes), then by the bytes.
+  const own = limits.bytesPerBlob < MAX_BLOB_BYTES;
+  const max = own ? limits.bytesPerBlob : MAX_BLOB_BYTES;
+  const past = () => no(`A blob past ${max} bytes`, 413, own ? 'BYTES_PER_BLOB' : 'BLOB_TOO_LARGE');
+  if (base64 !== undefined && base64.length > Math.ceil(max / 3) * 4) throw past();
+  if (!(await blobNamed(host, state, digest, id, name))) throw no('No record of yours names it', 404, 'NOT_NAMED');
+  if (await store.has(digest)) return { digest, have: true };
+  if (base64 === undefined) return { digest, have: false };
+  const bytes = fromBase64(base64);
+  if (bytes.length > max) throw past();
+  if ((await hashBytes(bytes)) !== digest) throw no('The bytes are not the digest', 400, 'BLOB_MISMATCH');
+  await store.put(digest, bytes);
+  host.otel.recordBlob('received', 'ok', bytes.length);
+  host.landed(digest);
+  return { digest, have: true };
+};
+
 // Over a shared log a snapshot is positioned in the log, not in this hub's
 // own: a marker appended first (behind every op the hub offered, refused
 // while its relay is behind), the first page taken once the consumer passed
@@ -601,7 +643,18 @@ const presence = (host) => async (context, update) => {
 const createUnit = (
   manager,
   options,
-  { storage, otel, wakers, feeds, drift, shared = null, sessions = new Map(), revoked = new Map(), scopeOf = null },
+  {
+    storage,
+    otel,
+    wakers,
+    feeds,
+    drift,
+    shared = null,
+    sessions = new Map(),
+    revoked = new Map(),
+    scopeOf = null,
+    landed = null,
+  },
 ) => {
   const {
     access = 'session',
@@ -653,6 +706,8 @@ const createUnit = (
     sessions,
     revoked,
     scopeOf: scopeOf ?? (() => GLOBAL_SCOPE),
+    // Bytes a peer uploaded, kept: the manager's to send on (src/sync/manager.js #blobLanded).
+    landed: landed ?? (() => {}),
     authorize,
     authorizeWrite,
     prove: proving,
@@ -678,6 +733,7 @@ const createUnit = (
     changes: procedure(changes(host)),
     prove: procedure(prove(host)),
     blob: procedure(blob(host)),
+    blobPut: procedure(blobPut(host)),
     // An inbound event (wrpc's `on` block): fire-and-forget, never answered.
     on: { presence: procedure(presence(host)) },
   };

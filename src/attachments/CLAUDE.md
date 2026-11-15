@@ -41,8 +41,13 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   blob of another `length`, a compressed one that inflates past `length` — `inflate` counts the chunks and cancels the
   reader there, nothing inflated whole on a register's word — or to another length). A fetched blob is kept ONCE: the
   dialer's `fetchBlob` puts it (a store that refuses is `sync.blob.keep.failed`, the bytes answered all the same), the
-  plugin never puts what it fetched. `get(id, name, { fetch: false })` asks nobody. The bytes are never pushed ahead of a
-  read: an attachment reaches a node when that node reads it.
+  plugin never puts what it fetched. `get(id, name, { fetch: false })` asks nobody. The bytes never come DOWN ahead of
+  a read — an attachment reaches a dialer when it reads it — and go UP with a push: the dialer uploads the bytes of
+  the registers a page the host took names (`syncom/blobPut`, src/sync/manager.js `#noteUploads`/`#upload`, a probe
+  first so they cross once; the host's door is `blobNamed` again, the digest checked over the bytes, `bytesPerBlob`
+  and the cap); bytes a relay lacks wait in `peer.uploads` until they land (`#blobLanded`: an upload taken, a fetch
+  kept), so a chain of hubs carries them. A refused upload is final, a failed one retried at the next push, both
+  `BLOB_UPLOAD_FAILED`, never the push's failure; a follower takes no bytes, and what waits is in memory alone.
 - **The store is the engine's; the plugin refuses an engine without one.** Every shipped engine keeps `blobs` (memory: a Map;
   IndexedDB: a seventh store; files: `blobs/<digest>` as base64 text; SQLite: a table; MongoDB: a collection) and
   says so in `capabilities.blobs`; the read-only wrapper reads them, the at-rest wrapper seals them as text at the blob's

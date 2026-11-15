@@ -10,7 +10,7 @@ const { refuseCall, peerOf, grant } = require('./rules.js');
 const { ATTACHMENTS_FIELD } = require('./protocol.js');
 const { safeRegex } = require('../query/safe-regex.js');
 const { inScope } = require('../scope.js');
-const { isPlainObject } = require('../shape.js');
+const { isPlainObject, own } = require('../shape.js');
 const { CURSOR, DB, SOURCE } = require('../symbols.js');
 const { toBase64 } = require('../crypto/pem.js');
 const { isDigest } = require('../blobs.js');
@@ -188,7 +188,8 @@ const query = (host) => async (context, args) => {
 // forgotten, purged, sealed, out of scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing
 // of what this host holds is told; a revoke, a purge, a forget follow the record for free. Under 'any' the digest
 // alone serves (a capability: a trusted mesh's). 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for
-// what is no digest, 404 where this host holds no bytes (or has no blobs store).
+// what is no digest, 404 where this host holds no bytes (or has no blobs store). `blobNamed` is `blobPut`'s door
+// too (src/sync/hosting.js): a peer uploads only the bytes a record it may read names.
 
 const blobNamed = async (host, state, digest, id, name) => {
   if (typeof id !== 'string' || typeof name !== 'string') return false;
@@ -203,7 +204,7 @@ const blobNamed = async (host, state, digest, id, name) => {
   }
   if (data === null) return false;
   const named = data[ATTACHMENTS_FIELD];
-  const entry = isPlainObject(named) ? named[name] : undefined;
+  const entry = isPlainObject(named) ? own(named, name) : undefined;
   if (!isPlainObject(entry) || entry.digest !== digest) return false;
   if (state.scopes === null) return true;
   try {
@@ -272,4 +273,4 @@ const count = (host) => async (context, args) => {
  * a schema that disagrees with this node's.
  */
 
-module.exports = { normalizeQuery, query, count, blob };
+module.exports = { normalizeQuery, query, count, blob, blobNamed };

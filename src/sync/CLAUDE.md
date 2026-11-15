@@ -8,8 +8,8 @@ The dialing side and the host: scopes, the feed's cursor, failed pages, reconnec
 src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` after the replay hands the core its SyncManager
 src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
 src/sync/registry.js      NodeRegistry — the dialed nodes on disk (remote/<url>.json), saves coalesced per node — no requires
-src/sync/hosting.js       createUnit — the hosting side: hello/greet, push, snapshot, the two feeds (changes, sharedChanges), the presence
-                          event and the unit itself; the rules and the reads below
+src/sync/hosting.js       createUnit — the hosting side: hello/greet, push and the bytes a push names (blobPut), snapshot, the two feeds
+                          (changes, sharedChanges), the presence event and the unit itself; the rules and the reads below
 src/sync/rules.js         what the procedures stand on: a refusal on the wire (coded, refuse, refuseCall), the peer of a call (peerOf: greeted,
                           proven under `prove`), the refusals told (announceRefused, refuseOps), the unit's options (normalizeAllow,
                           normalizeLimits), the push limits (limit), the scopes a read covers (grant), the proof of the key (challengeOf,
@@ -17,7 +17,7 @@ src/sync/rules.js         what the procedures stand on: a refusal on the wire (c
                           hooks.js, protocol.js, scope.js, symbols.js only
 src/sync/reads.js         the thin client's reads: query/count (normalizeQuery, the $regex gate regexRefusal, cursorOf, the scoped walk
                           walkScoped, greeted/ungreet for a hello carried by the call) and blob (blobNamed: served by the record that names
-                          it) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js, blobs.js only
+                          it; blobPut's door too) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js, blobs.js only
 src/sync/protocol.js      PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf, proveMessage — what both halves of the sync protocol
                           agree on — no requires
 src/sync/wire.js          packOps / unpackOps and the type codes — the ops as they cross between peers; the core's ops.js re-exports
@@ -136,14 +136,18 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   reported, never reverted again — the answer's `actor` tells one, the log compacted or not; a purge refused is
   reported alone). A sealed record at the host is skipped before the rule is asked: a sealed entry has no meta an op
   could be tried over.
-  `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, snapshot,
+  `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, blobPut, snapshot,
   changes, query, count and blob (403 `UNPROVEN`) until `syncom/prove` carries its signature under the peer's key —
   `[1, 'prove', challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no
   signing plugin: `UNPROVEN` reported, nothing pushed); the rooms are joined and the presence handed at the proof,
   not at hello (`joinRooms`, `state.keep`), and an unproven presence update is `PRESENCE_UNPROVEN`. `blob` serves a
   digest under `allow.blob` `'named'` (the default) only where a live record in the peer's scopes names it under the
   name the call gives (`blobNamed`: the catalog's row, the seam's `load`, `ATTACHMENTS_FIELD` of protocol.js, the
-  scope function) — one 404 for every miss, so nothing is told — and by digest alone under `'any'`. A `beforeSend`
+  scope function) — one 404 for every miss, so nothing is told — and by digest alone under `'any'`. `blobPut` takes
+  bytes through the same door (404 `NOT_NAMED`; `allow.push`, a writing hub, a blobs store, `limits.bytesPerBlob` and
+  the cap, the digest hashed over the bytes) and hands what it kept to `landed` — the manager uploads it on to the
+  hosts that wait for it (`#blobLanded`); the dialer uploads what a page the host took names after the page, on the
+  push chain (`#noteUploads`, `#upload`), never as a push of its own. A `beforeSend`
   rules a hosted page too (`manager.sendable(ops, ref)` in `changes` and `sharedChanges`), never a snapshot page or
   a query row (records: the scopes'). An op flagged `scrubbed` that carries a payload is scrubbed before it is
   logged (`applyOne`): the flag is the peer's word, the payload goes all the same. `sync.revoke(node, scopes)` lives on the manager, never on the unit

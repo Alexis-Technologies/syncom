@@ -96,3 +96,27 @@ console.log(missing.code); // BLOB_NOT_FOUND: not here, and nobody was asked
 // #endregion offline
 assert.equal(missing.code, 'BLOB_NOT_FOUND');
 await mesh.close();
+
+// #region hub
+const office = await createMesh(
+  ['server', 'laptop', 'phone'],
+  [
+    ['laptop', 'server'],
+    ['phone', 'server'],
+  ],
+  {
+    createStorage: (name, options) =>
+      createDatabase({ ...options, engine: memoryEngine(), path: name, plugins: [attachments()] }),
+  },
+);
+const laptop = office.get('laptop');
+const note = await laptop.insert({ title: 'Field notes' });
+await laptop.attachments.put(note, 'sketch.png', new Uint8Array(2048), { type: 'image/png' });
+await settle(office.storages);
+
+console.log(await office.get('server').attachments.has(note, 'sketch.png')); // true: uploaded with the push
+const sketch = await office.get('phone').attachments.get(note, 'sketch.png'); // fetched from the server
+// #endregion hub
+assert.equal(await office.get('server').attachments.has(note, 'sketch.png'), true);
+assert.equal(sketch.bytes.length, 2048);
+await office.close();

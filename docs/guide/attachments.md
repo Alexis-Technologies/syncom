@@ -1,6 +1,6 @@
 ---
 title: Attachments
-description: Store files next to a record, keep them by their SHA-256, sync their names with the record and fetch the bytes from a peer only when a node reads them.
+description: Store files next to a record by their SHA-256, sync their names with the record, upload the bytes with a push and fetch them only when a node reads them.
 ---
 
 # Attachments
@@ -8,7 +8,8 @@ description: Store files next to a record, keep them by their SHA-256, sync thei
 A record is JSON. A screenshot on a bug report, a PDF on an invoice or a recording on a note is bytes, and bytes
 do not belong in JSON. The `attachments` plugin keeps them beside the record: the bytes go into the engine's blob
 store under their SHA-256 digest, and the record gets a field that names them. The field syncs like any other
-field. The bytes do not travel with it; a node fetches them from a peer the first time it reads the attachment.
+field. The bytes travel apart from it: up to a host with the push that names them, and down to a node the first
+time that node reads the attachment.
 
 ## Add the plugin
 
@@ -66,6 +67,21 @@ to read only what this node holds:
 
 <<< @/examples/attachments.mjs#offline
 
+## Attach on a node that dials a server
+
+Bytes go up with a push. When a node pushes the op that names an attachment and the host takes it, the node
+uploads the bytes to that host too, asking first whether the host holds them so they cross once. Here a laptop and
+a phone both dial a server; the laptop attaches a sketch and the phone reads it from the server:
+
+<<< @/examples/attachments.mjs#hub
+
+`createMesh` from `@alexify/syncom/testing` wires the three nodes in one process; an app dials a real
+[server](./replication-server) the same way. The host takes the bytes only for a live record in the node's [scopes](./partial-sync) that names them under that
+name, and only if they hash to the digest. A hub that relays the entry before the bytes reach it uploads them to
+its own host once they arrive, so a chain of hubs carries them as well. An upload the host refuses (past
+`limits.bytesPerBlob`, say) is reported on the manager's `error` event as `BLOB_UPLOAD_FAILED` and never fails the
+push; one that failed on the way is tried again at the next push.
+
 ## Remove an attachment and free the space
 
 `remove(id, name)` takes the name off the record, and that removal syncs. The bytes stay in the blob store,
@@ -100,14 +116,14 @@ An attachment is at most 64 MiB; a larger `put()` is refused with `BLOB_TOO_LARG
 bytes in the clear, which the record's key does not cover. To encrypt the bytes on disk, wrap the engine in
 encryption at rest, which seals blobs as it seals records.
 
-The bytes are never pushed ahead of a read. A node that must work offline with every file has to read each
+The bytes never come down ahead of a read. A node that must work offline with every file has to read each
 attachment once while it is online.
 
-Bytes travel only from a node to the nodes that dial it: `get()` asks the peers this node dials, and a host never
-asks the nodes that dial it. With a laptop and a phone that both dial a server, a file the laptop attached does not
-reach the server on its own, so the phone's read ends in `BLOB_NOT_FOUND`. Attach on the node the others dial (the
-server in this setup). A [JSON export](./import-export) carries the `_attachments` entries but not
-the bytes.
+They go up only with the push of the entry that names them, from a node that holds them, and only to a host that
+writes: a follower of a [shared log](./replication-nats) takes no bytes. What a node still has to upload is kept in
+memory, so a node restarted before its upload ran does not send those bytes; a read on the host then fetches them
+from a peer the host dials, or rejects with `BLOB_NOT_FOUND`. A [JSON export](./import-export) carries the
+`_attachments` entries but not the bytes.
 
 A peer's entry is believed only as far as it is a valid entry. A digest that is not 64 lowercase hex characters, or
 a length past the limit, makes `get()` and `has()` reject with `ATTACHMENT_INVALID`, and bytes that do not match
@@ -117,8 +133,8 @@ the entry's length reject with `BLOB_MISMATCH`.
 
 RxDB stores attachments per document and needs `attachments: {}` in the collection's schema. In syncom any record
 can carry attachments, the same bytes are stored once whoever names them, and replication moves the names at once
-and the bytes on demand. RxDB's replication carries attachment data with the document on the protocols that
-support it.
+and the bytes apart: up to a host with a push, down to a node when it reads them. RxDB's replication carries
+attachment data with the document on the protocols that support it.
 
 ::: code-group
 

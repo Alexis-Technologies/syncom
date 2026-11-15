@@ -136,7 +136,7 @@ One consequence of Web Crypto shows in your code: the hashing, signing and encry
 return values in Node.js. Their browser types say so.
 
 Every entry is measured on each CI run against a size budget, and the build fails when one grows past
-it. Today the core is about 78 KB minified and gzipped, and `/all` about 181 KB; what you import is what
+it. Today the core is about 78 KB minified and gzipped, and `/all` about 182 KB; what you import is what
 you ship, and a block shares the core modules it stands on, so the numbers do not add up. The same check
 fails on any bare import that reaches a browser bundle, so syncom cannot pick up a dependency unnoticed.
 

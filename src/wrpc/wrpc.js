@@ -37,6 +37,7 @@ const SYNC_INTROSPECTION = Object.freeze({
     query: Object.freeze({}),
     count: Object.freeze({}),
     blob: Object.freeze({}),
+    blobPut: Object.freeze({}),
   }),
 });
 

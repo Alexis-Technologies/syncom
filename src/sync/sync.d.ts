@@ -149,6 +149,8 @@ export interface SyncLimits {
    * budget ended it (500 by default; `Infinity` for none).
    */
   rowsPerQuery?: number;
+  /** The bytes one `syncom/blobPut` may carry (413 `BYTES_PER_BLOB` past it); 64 MiB, the blob cap, whatever it says. */
+  bytesPerBlob?: number;
 }
 
 export interface SyncProcedure {
@@ -167,6 +169,11 @@ export interface SyncUnit {
   prove: SyncProcedure;
   /** An attachment's bytes by digest (`syncom/blob { digest, id, name }`), as `allow.blob` serves them. */
   blob: SyncProcedure;
+  /**
+   * The bytes of an attachment whose register the peer pushed — `{ digest, id, name, base64? }`, taken where a live
+   * record in its scopes names the digest under that name; without `base64` a probe answering `{ digest, have }`.
+   */
+  blobPut: SyncProcedure;
   /** `unit({ query: true })`: a query over an entity, its rows in the peer's scopes; a count. */
   query?: SyncProcedure;
   count?: SyncProcedure;

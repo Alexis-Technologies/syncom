@@ -51,7 +51,9 @@ const coded = (message, code, reason) => {
   return error;
 };
 
-const LIMIT_KEYS = new Set(['opsPerPush', 'bytesPerPush', 'opsPerSecond', 'rowsPerQuery']);
+// `bytesPerBlob`: the bytes one `syncom/blobPut` may carry (413 `BYTES_PER_BLOB` past it; MAX_BLOB_BYTES, src/blobs.js,
+// bounds it whatever it says — 413 `BLOB_TOO_LARGE`).
+const LIMIT_KEYS = new Set(['opsPerPush', 'bytesPerPush', 'opsPerSecond', 'rowsPerQuery', 'bytesPerBlob']);
 
 // The rows one `query` answers at most, and a scoped `count` reads, when the host says nothing.
 const DEFAULT_ROWS_PER_QUERY = 500;

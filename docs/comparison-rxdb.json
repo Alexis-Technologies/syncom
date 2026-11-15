@@ -1566,7 +1566,7 @@
         },
         "sizeGate": {
           "mark": "✅",
-          "text": "`pnpm size` fails CI when any entry passes its budget (the core 78 KB, `/all` 181 KB, each subpath its own)",
+          "text": "`pnpm size` fails CI when any entry passes its budget (the core 78.2 KB, `/all` 182 KB, each subpath its own)",
           "source": "scripts/size.js (ENTRIES budgets)"
         },
         "node": {
@@ -2702,8 +2702,8 @@
         },
         "replAttachments": {
           "mark": "⚠️",
-          "text": "the register replicates with the record; the bytes are fetched on demand from a peer that holds them (`syncom/blob`, checked by digest) when a node reads the attachment — never pushed ahead of a read",
-          "source": "src/attachments/attachments.js; src/sync/hosting.js (blob); src/sync/manager.js (fetchBlob); docs/guide/attachments.md; tests/attachments.test.js",
+          "text": "the register replicates with the record; the bytes go up with a push (`syncom/blobPut`, a hub uploading on what it receives) and come down from a peer that holds them when a node reads the attachment (`syncom/blob`), checked by digest both ways — never sent down ahead of a read",
+          "source": "src/attachments/attachments.js; src/sync/hosting.js (blobPut); src/sync/reads.js (blob); src/sync/manager.js (#upload, fetchBlob); docs/guide/attachments.md; tests/attachments.test.js",
           "detail": "A phone syncing a thousand records downloads no photo it does not open; a node offline when it first reads one has `BLOB_NOT_FOUND`."
         },
         "lifecycle": {

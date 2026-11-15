@@ -663,11 +663,41 @@ inbox entry it names in the topic (`dropped`), and the hold is let go.
 
 The `challenge` hello answered, signed under the caller's key as
 `Ed25519( JSON([1, "prove", challenge, hostNodeId, callerNodeId]) )`, base64url.
-Until it is answered `push`, `snapshot`, `changes`, `query`, `count` and `blob` are 403 `UNPROVEN`, a presence
+Until it is answered `push`, `blobPut`, `snapshot`, `changes`, `query`, `count` and `blob` are 403 `UNPROVEN`, a presence
 update is refused (`PRESENCE_UNPROVEN`), and the caller joins no room and is handed no presence; a
 signature over another message or under another key is 403 `BAD_PROOF`, a call
 without one (or without a challenge pending) 400 `BAD_PROOF`. Every hello is a
 new challenge.
+
+### `blobPut`
+
+```
+→ { digest, id, name }                 (a probe)
+→ { digest, id, name, base64 }         (the bytes)
+← { digest, have }
+```
+
+The bytes of an attachment whose entry the caller pushed, uploaded to the host after a push it took, so a node
+behind the host reads them there ([Attachments](../guide/attachments#attach-on-a-node-that-dials-a-server)). The
+host takes them only where a live record in the caller's scopes names the digest under that name — the same door
+as `blob`'s: a record forgotten, purged, sealed, out of scope, or naming another digest is one answer, 404
+`NOT_NAMED`, so nothing is told — and only when their SHA-256 is the digest (400 `BLOB_MISMATCH`). Without `base64`
+the call is a probe: `have` says whether the host holds the bytes, so they cross once; with it the host keeps them
+and answers `have: true` (also when it held them already). Kept, the bytes go on to the hosts this host pushed the
+entry to, the same way. Past `limits.bytesPerBlob` it is 413 `BYTES_PER_BLOB`, past 64 MiB (`MAX_BLOB_BYTES`, the one
+cap, told by the text's length before a byte is decoded) 413 `BLOB_TOO_LARGE`; 400 `BAD_DIGEST` for what is no
+digest, 400 `BAD_BLOB` for bytes that are no base64 text; 403 `READ_ONLY` where the unit takes no pushes
+(`allow.push` false), 503 `READ_ONLY` on a hub that cannot write (a follower takes no bytes: upload to a hub that
+writes), 403 `NOT_SERVED` on a host without a blobs store; 428 `HELLO_FIRST` before a hello, 403 `UNPROVEN` under
+`prove`.
+
+The dialer keeps, per host, the attachments a page the host took names (every `_attachments/<name>` entry a
+pushed op sets, by digest, 1 024 at most; none of an op the host refused, none on a page a follower forwarded) and
+uploads the bytes it holds after the page, on the push chain: a probe, then the bytes. Bytes it lacks — a relay
+that never read them — wait until they land here (an upload from a node behind it, a `fetchBlob`), then go up. A
+refusal (400, 403, 404, 413) is final; a failure on the way is tried again at the next push, a reconnect's
+included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
+`retry`); neither fails the push. What waits is kept in memory: a restart forgets it.
 
 ### `blob`
 
@@ -1260,6 +1290,7 @@ a snapshot buys nothing an op could not:
 | The fold's walk up from a move's parent (`MAX_WALK`) | 512 ancestors | the move is moot, like one that would make a cycle — the same on every node |
 | A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |
 | Ops per push, bytes per push, ops per second | `unit({ limits })`, none by default | 413, 429 |
+| Bytes one `blobPut` carries | `unit({ limits: { bytesPerBlob } })`, and 64 MiB whatever it says | 413 `BYTES_PER_BLOB`, `BLOB_TOO_LARGE` |
 | Records per snapshot page, ops per `changes` page | `unit({ pageSize })`, 500 | — |
 | Presence state | 16 KiB, 64 keys, 8 deep; a stamp no more than 60 s ahead; 1 024 entries per update; 20 updates a second (kept across a repeated hello) | refused — by the receiver and by the host, which keeps and relays nothing it would refuse |
 | Scopes a hello asks for | 256, each a stream name or `*`, each once | `BAD_HELLO` |

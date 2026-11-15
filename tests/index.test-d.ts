@@ -378,6 +378,7 @@ const coded = new syncom.SyncomError('NOT_FOUND', 'Record x not found', { cause:
 expectType<SyncomErrorCode>(coded.code);
 expectAssignable<Error>(coded);
 expectAssignable<SyncomErrorCode>('LOCKED');
+expectAssignable<SyncomErrorCode>('BLOB_UPLOAD_FAILED');
 expectAssignable<SyncomErrorCode>('IDENTITY_MISMATCH');
 expectAssignable<SyncomErrorCode>('BAD_SIGNATURE');
 expectAssignable<SyncomErrorCode>('UNSIGNED');
