@@ -277,9 +277,12 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
      */
     async start() {
       if (!stopped) return;
-      stopped = false;
-      if (own !== null) return follow(own);
+      if (own !== null) {
+        stopped = false;
+        return follow(own);
+      }
       let first = null;
+      // A handle that refuses (closed) throws here: nothing started, the pipeline stays stopped.
       off = leader.live((instance) => {
         if (!leader.isLeader()) return null;
         const binding = bind(instance);
@@ -292,6 +295,7 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
           unfollow(binding);
         };
       });
+      stopped = false;
       await first;
     },
     /** Stops following; what is queued is left for the next start (the checkpoint stands). */

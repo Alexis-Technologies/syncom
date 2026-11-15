@@ -419,6 +419,17 @@ test('pipelines', async (t) => {
         name: 'TypeError',
         message: /leader\.db/,
       });
+      // A handle that refuses the subscription (a closed facade): start() rejects and the pipeline stays stopped.
+      const closed = {
+        db,
+        isLeader: () => true,
+        live() {
+          throw new Error('closed');
+        },
+      };
+      const refused = createPipeline(db, { name: 'refused', source: 'Order', handler, leader: closed });
+      await assert.rejects(() => refused.start(), /closed/);
+      assert.strictEqual(refused.stopped, true);
       await db.close();
     },
   );
