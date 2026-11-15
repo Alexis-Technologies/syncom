@@ -207,7 +207,10 @@ const ENTRIES = [
   // door; review №7, E7.1; 2026-11-07). 77.5, raised by name.
   // 77.8 with both tracks of review №7 merged — the sealed seam, the revert by patches, the blobs' door and the moved
   // source's fence (2026-11-07). 78, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78 },
+  // 78.0 (over by bytes) with a rule's scrub withheld — slot 20's second value, a refused purge applied nowhere — and
+  // a record outside the pusher's scopes logged as one (apply.js refuse, header.js withholdOp; 2026-11-15). 78.2,
+  // raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.2 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check

@@ -186,21 +186,19 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   and an op that lands on a record purged BEFORE it is stripped (`scrubOp`, src/header.js) and
   appended `scrubbed` — never logged or relayed with its payload. Never log a payload for a
   purged id through another path.
-- **`packOps` is 20 positional slots, both halves together.** `v` (13),
-  `actor` (14), `sig`, `digest` and `nonce` (15–17), `msg` (18, a
-  transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed
-  header), `prev` (19, the fingerprint of the op before it in its stream, in
-  the signed header), `scrubbed` (20: `1` on an op whose payload was taken — `scrubOp` in src/header.js sets it;
-  `applyOne` logs and relays such an op skipped and scrubbed, applies nothing, a `purge` excepted — never
-  malformed, so a withheld or refused op travels as a header and leaves no gap) were appended; a reader
-  of fewer slots ignores the rest, a reader of more takes an absent slot as
-  null. Append, never reorder — the
-  shape is on the wire between every pair of peers (the log itself stores
-  keyed `{ seq, op, fp }` JSON; `packOps` — src/sync/wire.js — is for `push` and `changes` only). An
-  op type is one character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set
-  ops). Once the package is published, an older reader counts an unknown type
-  as malformed and its stream stalls there — a new type, or a slot an older
-  reader cannot take as null, is then a `PROTOCOL` bump (`src/sync/protocol.js`).
+- **`packOps` is 20 positional slots, both halves together.** `v` (13), `actor` (14), `sig`, `digest` and `nonce`
+  (15–17), `msg` (18, a transaction's message, ≤ `MAX_MESSAGE` in `src/shape.js`, in the signed header), `prev` (19,
+  the fingerprint of the op before it in its stream, in the signed header), `scrubbed` (20: `1` on an op whose
+  payload was taken — `scrubOp` in src/header.js sets it; `applyOne` logs and relays such an op skipped and scrubbed,
+  applies nothing, a `purge` excepted — never malformed, so a withheld or refused op travels as a header and leaves
+  no gap; `2` on a rule's scrub — `withholdOp`: `withheld: true` beside `scrubbed`, kept in the log line's rest —
+  which applies nowhere, a purge included: `beforeSend`, `authorizeWrite`, a record outside the pusher's scopes)
+  were appended; a reader of fewer slots ignores the rest, a reader of more takes an absent slot as null. Append,
+  never reorder — the shape is on the wire between every pair of peers (the log itself stores keyed
+  `{ seq, op, fp }` JSON; `packOps` — src/sync/wire.js — is for `push` and `changes` only). An op type is one
+  character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set ops). Once the package is published, an older reader
+  counts an unknown type as malformed and its stream stalls there — a new type, or a slot an older reader cannot
+  take as null, is then a `PROTOCOL` bump (`src/sync/protocol.js`).
 - **A field may be a path; the op model keeps every path apart.** `profile/city`
   is a field of its own in every map of the meta (src/paths.js `isPath`:
   segments by `/`, at most MAX_PATH_DEPTH 16 and MAX_PATH 512, never
@@ -583,7 +581,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   waits for it. Hook calls live in `src/commit.js`, `src/bootstrap.js`
   (`core.hook`), `get`, `src/apply.js`, `#connect`, `#bootstrap` and `#outgoing` only; the hook on the ops that
   leave for a peer (`beforeSend`, src/sync/manager.js) never withholds one — a missing op is a gap that stops that
-  stream — it sends a scrubbed copy (slot 20), and the host's `authorizeWrite` refuses the same way; scopes are
+  stream — it sends a withheld copy (slot 20 `2`), and the host's `authorizeWrite` refuses the same way; scopes are
   the per-peer filter. Only the hooks that run inside the
   mutation queue go through `#hook` (`core.hook`) and its `#inHook` guard;
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook

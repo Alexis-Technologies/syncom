@@ -628,7 +628,7 @@ The closest counterpart of each building block, in each library. The Yjs column 
 170. Third-party <code>y-utility</code> offers undo across docs, not atomic changes.
 171. Runs inside the mutation queue before the op is stamped; an entity validator then folds defaults into the op.
 172. Observers may add edits in a follow-up transaction, but cannot cancel one.
-173. A skipped op is still logged and relayed. A host refuses outright what is out of scope, malformed, skewed, forged, or unsigned under <code>'require'</code>.
+173. A skipped op is still logged and relayed; one a host's rule refuses, or that writes a record outside the pusher's scopes, travels on as a header that applies nowhere. A host refuses outright an op of a scope the pusher was not granted, and what is malformed, skewed, forged, or unsigned under <code>'require'</code>.
 174. The threat model calls server-side update filtering an antipattern and suggests a separate fork for untrusted writers.
 175. No per-change rule. On main only (unreleased), <code>maskAuthor(doc, author, heads)</code> hides an author's later changes in this replica's view.
 176. The doc also emits <code>beforeTransaction</code>, <code>beforeObserverCalls</code>, <code>afterAllTransactions</code>, <code>updateV2</code>, <code>subdocs</code>.

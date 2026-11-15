@@ -317,13 +317,129 @@ test('Rules on the host and on the dialer', async (t) => {
       assert.strictEqual(answer.applied, 3, 'the refused op is accepted (logged, skipped): the stream moves on');
       assert.strictEqual(answer.skipped, 1);
       assert.deepStrictEqual(answer.refused, [
-        { origin: 'other', seq: 2, scope: null, id: 'no', current: null, actor: null },
+        { origin: 'other', seq: 2, scope: null, id: 'no', current: null, actor: null, reason: 'rule' },
       ]);
       assert.deepStrictEqual(answer.vector, { other: 3 });
       assert.deepStrictEqual(await host.get('yes'), { n: 1 });
       assert.strictEqual(await host.get('no'), null);
       assert.deepStrictEqual(await host.get('also'), { n: 3 });
       assert.throws(() => host.sync.unit({ authorizeWrite: 'no' }), { name: 'TypeError' });
+    },
+  );
+
+  await t.test(
+    'a write the host refuses as out of scope is logged as a withheld scrub: the pusher’s later ops of the stream land, nodes behind the host take a no-op, the pusher is told without the record (WRITE_REFUSED, reason scope)',
+    async (t2) => {
+      const board = (id, data) => data.board ?? '*';
+      const mesh = await createMesh(
+        t2,
+        ['H', 'C', 'B'],
+        [
+          ['C', 'H'],
+          ['B', 'H'],
+        ],
+        createStorage,
+        { sync: { scope: board }, scopes: { C: ['Other'] } },
+      );
+      const [h, c, b] = ['H', 'C', 'B'].map((name) => mesh.get(name));
+      const errors = [];
+      c.sync.on('error', (error) => errors.push(error));
+      const refusedAtHost = [];
+      h.sync.on('refused', (event) => refusedAtHost.push(event));
+      await c.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const x = await h.insert({ board: 'Other', title: 'shared' });
+      await waitUntil(() => c.hasRecord(x) && b.hasRecord(x));
+      // C goes offline; the host moves X out of C's scope while C edits it, then C writes a record in its scope.
+      await c.sync.enableNode('mem://H', false);
+      await h.update(x, { board: 'Doc' });
+      await c.update(x, { title: 'edited offline' });
+      const y = await c.insert({ board: 'Other', title: 'new, plainly in scope' });
+      await c.sync.enableNode('mem://H', true);
+      const key = `${c.nodeId}@Other`;
+      // C's scope alone reaches C, so the three vectors never match whole: the stream is what is compared.
+      await waitUntil(() => h.vector[key] === c.vector[key] && b.vector[key] === c.vector[key]);
+      assert.deepStrictEqual(await h.get(x), { board: 'Doc', title: 'shared' }, 'the refused edit never landed');
+      assert.deepStrictEqual(await h.get(y), { board: 'Other', title: 'new, plainly in scope' });
+      assert.deepStrictEqual(await b.get(x), { board: 'Doc', title: 'shared' }, 'B took a no-op');
+      assert.deepStrictEqual(await b.get(y), { board: 'Other', title: 'new, plainly in scope' });
+      assert.strictEqual(h.vector[key], 2, 'no gap: the stream read to its end at the host, past the refusal');
+      const [held] = h.log.entriesOf(x).filter((entry) => entry.op.origin === c.nodeId);
+      assert.strictEqual(held.skipped, true);
+      assert.strictEqual(held.op.withheld, true);
+      assert.strictEqual(held.op.data, undefined, 'the payload went nowhere');
+      assert.deepStrictEqual(refusedAtHost, [{ node: c.nodeId, reason: 'scope', count: 1 }]);
+      // The pusher is told, with no record: what the host holds of it is outside the grant, so nothing is reverted.
+      const [refusal] = errors.filter((error) => error.code === 'WRITE_REFUSED');
+      assert.strictEqual(refusal.reason, 'scope');
+      assert.strictEqual(refusal.id, x);
+      assert.strictEqual(refusal.own, true);
+      assert.strictEqual(refusal.current, null);
+      assert.deepStrictEqual(
+        await c.get(x),
+        { board: 'Other', title: 'edited offline' },
+        'not reverted, not forgotten',
+      );
+      await c.sync.awaitInSync();
+      assert.strictEqual(c.sync.peers()[0].caughtUp, true);
+    },
+  );
+
+  await t.test(
+    'a purge refused by authorizeWrite, or withheld by beforeSend, purges nothing behind the dialer: a withheld scrub applies nowhere, a purge included',
+    async (t2) => {
+      const authorizeWrite = ({ op }) => op.type !== 'purge';
+      const mesh = await createMesh(
+        t2,
+        ['H', 'A', 'B'],
+        [
+          ['A', 'H'],
+          ['B', 'H'],
+        ],
+        createStorage,
+        { unit: { access: 'public', authorizeWrite } },
+      );
+      const [h, a, b] = ['H', 'A', 'B'].map((name) => mesh.get(name));
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const id = await h.insert({ title: 'keep me' });
+      await settle([h, a, b]);
+      await a.purge(id);
+      await waitUntil(() => errors.some((error) => error.code === 'WRITE_REFUSED'));
+      await settle([h, a, b]);
+      assert.deepStrictEqual(await h.get(id), { title: 'keep me' }, 'the host refused it');
+      assert.deepStrictEqual(await b.get(id), { title: 'keep me' }, 'B, behind the host, keeps the record');
+      const [held] = h.log.entriesOf(id).filter((entry) => entry.op.type === 'purge');
+      assert.strictEqual(held.skipped, true);
+      assert.strictEqual(held.op.withheld, true);
+      const [relayed] = b.log.entriesOf(id).filter((entry) => entry.op.type === 'purge');
+      assert.strictEqual(relayed.skipped, true, 'B logged it as the no-op it is');
+      assert.strictEqual(relayed.op.withheld, true);
+      assert.deepStrictEqual(b.vector, h.vector, 'no gap');
+      // A purge the dialer's beforeSend says no to: the host and the nodes behind it keep the record too.
+      const keeper = await createMesh(
+        t2,
+        ['H2', 'A2', 'B2'],
+        [
+          ['A2', 'H2'],
+          ['B2', 'H2'],
+        ],
+        createStorage,
+        { nodes: { A2: { sync: { hooks: { beforeSend: ({ op }) => op.type !== 'purge' } } } } },
+      );
+      const [h2, a2, b2] = ['H2', 'A2', 'B2'].map((name) => keeper.get(name));
+      await a2.sync.awaitInitialReplication();
+      await b2.sync.awaitInitialReplication();
+      const kept = await h2.insert({ title: 'mine to purge, here only' });
+      await settle([h2, a2, b2]);
+      await a2.purge(kept);
+      await settle([h2, a2, b2]);
+      assert.strictEqual(await a2.get(kept), null, 'purged on the dialer');
+      assert.deepStrictEqual(await h2.get(kept), { title: 'mine to purge, here only' });
+      assert.deepStrictEqual(await b2.get(kept), { title: 'mine to purge, here only' });
+      assert.deepStrictEqual(h2.vector, a2.vector, 'no gap');
     },
   );
 

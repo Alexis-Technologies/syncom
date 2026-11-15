@@ -33,7 +33,7 @@ const { NodeRegistry } = require('./registry.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT, isPlainObject } = require('../shape.js');
-const { scrubOp } = require('../header.js');
+const { withholdOp } = require('../header.js');
 const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
@@ -1104,7 +1104,7 @@ class SyncManager extends Emitter {
   }
 
   // A page as it goes out: every op `beforeSend` says no to goes as a scrub leaves it — a copy, the log's op
-  // untouched — the header alone, a no-op where it lands and no gap in its stream.
+  // untouched — the header alone, withheld: a no-op where it lands (a purge too) and no gap in its stream.
   #outgoing(peer, page) {
     return this.sendable(page, peer.ref);
   }
@@ -1124,23 +1124,25 @@ class SyncManager extends Emitter {
         continue;
       }
       const copy = { ...op };
-      scrubOp(copy);
+      withholdOp(copy);
       out.push(copy);
     }
     return out;
   }
 
-  // Ops the host's `authorizeWrite` refused: each reported (WRITE_REFUSED), and one of this node's own reverted
-  // — the fields the op touched brought to what the host holds of them (new ops stamped above the refused one,
-  // `actor: 'revert'`, through the kinds' patches, so every node comes to the host's state and what the host
-  // accepted since stands), or the record forgotten here where the host holds nothing (no op: there is nothing to
-  // bring the others to). A revert the host refuses too is reported, never reverted again — the answer names the
-  // op's actor, so a log that compacted the op tells it the same. A purge refused is reported alone: nothing can be
-  // written over a purge here.
+  // Ops the host refused — its `authorizeWrite` (`reason: 'rule'`), or a record outside this node's scopes there
+  // (`'scope'`): each reported (WRITE_REFUSED), and one of this node's own the rule refused reverted — the fields
+  // the op touched brought to what the host holds of them (new ops stamped above the refused one, `actor:
+  // 'revert'`, through the kinds' patches, so every node comes to the host's state and what the host accepted since
+  // stands), or the record forgotten here where the host holds nothing (no op: there is nothing to bring the others
+  // to). A revert the host refuses too is reported, never reverted again — the answer names the op's actor, so a log
+  // that compacted the op tells it the same. A purge refused is reported alone: nothing can be written over a purge
+  // here; so is a refusal of scope, which comes without the record (one this node may not read there).
   async #refused(peer, refused) {
     const storage = this.#storage;
     for (let i = 0; i < refused.length; i++) {
       const { origin, seq, scope, id, current, actor } = refused[i];
+      const reason = refused[i].reason === 'scope' ? 'scope' : 'rule';
       const own = origin === storage.nodeId && typeof id === 'string';
       const held = own
         ? storage.log.entryOf(typeof scope === 'string' ? `${origin}@${scope}` : origin, seq)
@@ -1148,14 +1150,16 @@ class SyncManager extends Emitter {
       // What the op touched: the fields of a set or an unset, the field of a kind's op, the whole record for a
       // write, a delete or a merge; the whole record where the log no longer holds the op.
       const touched = held === undefined ? null : touchedBy(held.op);
-      const revert = own && actor !== 'revert' && held?.op.type !== 'purge';
+      const revert = own && reason === 'rule' && actor !== 'revert' && held?.op.type !== 'purge';
       const what = revert
         ? current === null || current === undefined
           ? '; forgotten here'
           : '; reverted to what it holds'
-        : '';
+        : reason === 'scope'
+          ? ': the record is outside this node’s scopes there'
+          : '';
       const message = `${peer.node.url} refused ${origin}:${seq} on ${id}${what}`;
-      const fields = { origin, seq, id, current: current ?? null, own, touched };
+      const fields = { origin, seq, id, current: reason === 'scope' ? null : (current ?? null), own, touched, reason };
       this.#fail(peer, new SyncomError('WRITE_REFUSED', message, fields));
       if (!revert) continue;
       try {

@@ -403,14 +403,23 @@ test('A writer and a follower hub over one MongoDB database', async (t) => {
       const refused = [];
       writer.sync.on('refused', (event) => refused.push(event));
       const { link } = await probe('probe', { scopes: ['A'] });
-      // Declared in scope A, the record scopes to B: the writer refuses it as out of scope — not logged, a gap.
+      // Declared in scope A, the record scopes to B: the writer refuses it as out of scope and logs it withheld, so
+      // it reaches the topic and the follower's shadow moves past it — nothing to drop.
       const first = await link.call('syncom/push', { ops: packOps([op(1, 'out', { $type: 'B' }, { scope: 'A' })]) });
       assert.strictEqual(first.applied, 1, 'forwarded: the follower cannot read the record');
       await waitUntil(() => refused.some((event) => event.via === 'inbox' && event.reason === 'scope'), {
         timeout: 5000,
       });
       assert.strictEqual(writer.hasRecord('out'), false);
-      // The writer told the topic, the follower let go: its shadow never moved past the op.
+      assert.strictEqual(writer.log.entriesOf('out')[0].op.withheld, true);
+      await waitUntil(async () => (await probe('seen', { scopes: ['A'] })).answer.vector['probe@A'] === 1, {
+        timeout: 5000,
+      });
+      // An op that follows another op than the one the writer holds before it (a broken chain) is not taken at
+      // all: the writer tells the topic, the follower lets go — its shadow never moves past the op.
+      const STRANGER = `${'a'.repeat(42)}A`;
+      const broken = op(2, 'forked', { $type: 'A' }, { scope: 'A', prev: STRANGER });
+      assert.strictEqual((await link.call('syncom/push', { ops: packOps([broken]) })).applied, 1);
       const entries = client.db('syncom').collection('shared');
       const droppedEntries = async () =>
         (await entries.find({ topic: 'syncom' }).toArray()).filter(
@@ -419,14 +428,15 @@ test('A writer and a follower hub over one MongoDB database', async (t) => {
       await waitUntil(async () => (await droppedEntries()).length >= 1, { timeout: 5000 });
       const [told] = await droppedEntries();
       const parsed = JSON.parse(told.v);
-      assert.deepStrictEqual(parsed.dropped, [['probe@A', 1]]);
+      assert.deepStrictEqual(parsed.dropped, [['probe@A', 2]]);
       assert.match(parsed.inbox, /^[a-z0-9]+\.\d+$/);
       assert.strictEqual(writer.sync.shared().dropped, 1);
-      await waitUntil(async () => follower.sync.shared().entries >= 1);
+      assert.ok(refused.some((event) => event.via === 'inbox' && event.reason === 'equivocation'));
+      await waitUntil(async () => follower.sync.shared().entries >= 2);
       const { answer } = await probe('again', { scopes: ['A'] });
-      assert.strictEqual(answer.vector['probe@A'], undefined, 'the shadow holds nothing of the dropped op');
+      assert.strictEqual(answer.vector['probe@A'], 1, 'the shadow holds nothing of the dropped op');
       // The client's genuine op at that seq is forwarded, and lands.
-      const second = await link.call('syncom/push', { ops: packOps([op(1, 'in', { $type: 'A' }, { scope: 'A' })]) });
+      const second = await link.call('syncom/push', { ops: packOps([op(2, 'in', { $type: 'A' }, { scope: 'A' })]) });
       assert.strictEqual(second.applied, 1, 'not a duplicate: the hold was let go');
       await waitUntil(() => writer.hasRecord('in'), { timeout: 5000 });
       assert.deepStrictEqual(await writer.get('in'), { $type: 'A' });

@@ -472,6 +472,12 @@ export interface SyncOp {
   /** The payload was scrubbed — by a purge, a `beforeSend` that said no, an `authorizeWrite` that refused: the op is a no-op wherever it lands. */
   scrubbed?: true;
   /**
+   * The scrub was a rule's — a `beforeSend` that said no, a host's `authorizeWrite` that refused, a record outside the
+   * pusher's scopes (slot 20 `2` on the wire, beside `scrubbed`): applied nowhere, a purge included, where a purge's
+   * own scrub still purges.
+   */
+  withheld?: true;
+  /**
    * The fingerprint (SHA-256 of the header, hex) of the op before it in its
    * stream — `origin@scope`, or the `@~` stream of `merge`/`advance`; absent
    * on a stream's first op and where the writer holds no op before it. In

@@ -154,7 +154,7 @@ through the same gate before anything is written. In order:
 5. **Order**: an op this node already has is a duplicate, one that skips ahead is a gap.
 6. **Chain**: an op that forks its writer's stream is refused (`EQUIVOCATION`).
 7. **The record's scope** (on a host): an op that would write a record outside the peer's scopes,
-   before or after the op, is refused.
+   before or after the op, is refused, and logged as a withheld scrub.
 8. **Rules**: the host's `authorizeWrite`, then your `beforeApply` hook.
 9. **Apply**: the op merges into the record by the field's kind, and the validator checks the result.
 10. **Persist, then relay**: the batch is appended to the log, the records are written, and the ops go
@@ -162,12 +162,13 @@ through the same gate before anything is written. In order:
 
 <FigAdmission />
 
-The difference between the two ways an op can stop matters. An op refused at steps 1 to 7 is neither
+The difference between the two ways an op can stop matters. An op refused at steps 1 to 6 is neither
 logged nor relayed, and the vector does not move: it is a gap in its stream, and the stream waits until
-the op comes again intact. An op that passes them but is declined at step 8 or 9 (a rule refuses it,
-the validator fails, a field's kind holds it) is still logged and relayed as a no-op, so that the nodes
-behind this one do not see a hole in the writer's stream. A host checks, and every node decides by its
-own rules.
+the op comes again intact. An op declined at step 7, 8 or 9 (the record is outside the pusher's scopes, a
+rule refuses it, the validator fails, a field's kind holds it) is still logged and relayed as a no-op, so
+that the nodes behind this one do not see a hole in the writer's stream. A refusal at step 7 or by
+`authorizeWrite` goes on as a withheld scrub, the header alone, which applies nowhere, not even as a
+purge, and the pusher is told (`WRITE_REFUSED`). A host checks, and every node decides by its own rules.
 
 ## Sync without the plugin
 

@@ -143,7 +143,7 @@ repeated per op:
 | 5 | `id` | 11 | `vector` | 17 | `nonce` |
 | 6 | `scope` | 12 | `from` | 18 | `msg` |
 | | | | | 19 | `prev` |
-| | | | | 20 | `scrubbed` (`1`) |
+| | | | | 20 | `scrubbed` (`1`, or `2` withheld) |
 
 The ops above, packed (`packOps` in `src/sync/wire.js`; `unpackOps` is the way
 back, and takes a row of fewer than five slots as nothing):
@@ -161,11 +161,17 @@ Slots were appended in this order — `v` was the thirteenth, `actor` the
 fourteenth, the signature's three the fifteenth to seventeenth, `msg` the
 eighteenth, `prev` the nineteenth, `scrubbed` the twentieth — and are never
 reordered: a reader of fewer slots ignores the rest, a reader of more takes
-an absent slot as `null`. `scrubbed` is `1` on an op whose payload was taken
-— by a purge, by its sender's `beforeSend`, by a host's `authorizeWrite` —
-and `null` otherwise: a scrubbed op is a header alone, applied nowhere,
-logged and relayed as one (a `purge` carries nothing a scrub could take and
-applies as it is). The log itself keeps the keyed form; packing is for the wire.
+an absent slot as `null`. `scrubbed` is `1` on an op whose payload a purge
+took (its id's entries, or an op that landed on a purged record), `2` on one
+a rule withheld — its sender's `beforeSend`, a host's `authorizeWrite`, a host
+that read the record as outside the pusher's scopes — and `null` otherwise: a
+scrubbed op is a header alone, applied nowhere, logged and relayed as one. A
+`purge` carries nothing a scrub could take, so under `1` it applies as it is
+(a purge's own entry is scrubbed with the rest of its id and still purges
+every node it reaches); under `2` it purges nothing either, so a purge a host
+refused never reaches the nodes behind it. Read back, `2` is `scrubbed: true`
+and `withheld: true` on the op (both in the log line's rest). The log itself
+keeps the keyed form; packing is for the wire.
 
 ## What a signature covers
 
@@ -241,7 +247,8 @@ enters a node — from a host it chose, and `beforeBootstrap` let through.
 Under `'verify'` a relay can strip a signature and the op is taken as an
 unsigned one; only `'require'` on every node resists that. A peer can
 withhold an op (a gap, which shows) or strip its payload and nonce and
-present it as scrubbed, which applies as a no-op: suppression, not forgery.
+present it as scrubbed or withheld, which applies as a no-op (withheld, a
+purge too): suppression, not forgery.
 A hub that runs `signatures: false` to spare itself the check still relays
 the signatures intact, since the fields are opaque to it. Node.js verifies
 on libuv's thread pool (`UV_THREADPOOL_SIZE`, four threads by default,
@@ -608,19 +615,25 @@ that answers 428 to five fresh hellos in a row is reported once as
 ← { vector, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations, refused }
 ```
 
-`refused` names the ops the host's `authorizeWrite` said no to — `{ origin,
-seq, scope, id, current, actor }`, `current` the record as the host holds it
-(null for none), `actor` the op's own (null for none): each is logged there
-as a scrub leaves it (skipped, scrubbed) and relayed as a no-op, so the
-stream has no gap, and the pusher sets itself straight (`WRITE_REFUSED`: the
-fields its own op touched brought back to `current` through the kinds' own
-ops, or the record forgotten where the host holds nothing; an op whose
-`actor` is `revert` is reported and reverted no further).
+`refused` names the ops the host refused and took — `{ origin, seq, scope,
+id, actor, reason, current? }`, `actor` the op's own (null for none) and
+`reason` why: `'rule'` for its `authorizeWrite`, with `current` the record as
+the host holds it (null for none); `'scope'` for a record the host reads as
+outside the pusher's scopes, without `current` (handing the record over would
+be a read outside the grant). Each is logged there as a withheld scrub
+(skipped, scrubbed, slot 20 `2`) and relayed as a no-op, so the stream has no
+gap. The pusher reports each (`WRITE_REFUSED`, with the `reason`) and sets
+itself straight after a rule's refusal of its own op: the fields the op
+touched brought back to `current` through the kinds' own ops, or the record
+forgotten where the host holds nothing; an op whose `actor` is `revert` is
+reported and reverted no further. A refusal of scope is reported alone.
 
 `vector` carries the keys the page touched, not the host's whole vector.
-An op outside the scopes hello granted is refused before anything reads it
-(`outOfScope`), and so is one whose record the host reads as outside them;
-one that [equivocates](#the-per-stream-chain) is refused too
+An op that declares a scope hello did not grant is refused before anything
+reads it (`outOfScope`, not logged: a stream the peer may not write here);
+one whose record the host reads as outside the grant is counted in
+`outOfScope` too and taken as a withheld scrub (`refused`, `reason:
+'scope'`); one that [equivocates](#the-per-stream-chain) is refused
 (`equivocations`, the host's `refused` event with `reason: 'equivocation'`).
 A hub that cannot write and has a [shared log](#the-shared-log) with an
 inbox verifies the page as a writer would (`forged`, `unsigned` counted and
@@ -842,9 +855,11 @@ the host also scopes the record it writes, with its own `sync.scope`, before
 the op and after it: a peer may write only records it may read. An op that
 would touch a record outside its scopes — a `set` declared global on a scoped
 record, a `write` that would move one into the peer's own scope, a new record
-whose data puts it in another — is refused the same way, and so is one the
-host's scope function throws on; that refusal is a gap in the op's stream at
-this host. `snapshot` and `changes` serve the intersection of what is asked
+whose data puts it in another — is refused too, and so is one the host's
+scope function throws on. Such an op rides a stream the peer may write, so it
+is taken as a withheld scrub: logged skipped without its payload, relayed as
+a header that applies nowhere, and named in the push's answer (`refused`,
+`reason: 'scope'`, without the record), so the stream goes on past it. `snapshot` and `changes` serve the intersection of what is asked
 and what was granted: asking for `'*'` or for nothing (no list, or an empty
 one) is asking for the granted list, asking only for other scopes is 403
 `SCOPES`. The granted list may be empty — a peer that asked for no scope, or
@@ -986,10 +1001,10 @@ hub granted the client, what the landing hub bounds the ops to. A `mark`
 positions a snapshot: the id its append answered is the first page's
 `eventId`. `{ v: 1, node, revoke: { node, scopes } }` is a revocation for
 every hub to fold (`sync.revoke`). `{ v: 1, node, dropped: [[key, seq]…], inbox }` names what a
-writer did not take of the inbox entry `inbox` — a record out of scope, a
-gap — by stream key and seq: a follower lets go of the hold it kept on the
-client's stream for it (a refused op is logged as a scrub and travels as an
-op). `by` lets a hub pass its own entries without parsing them. A log
+writer did not take of the inbox entry `inbox` — a gap, an equivocation —
+by stream key and seq: a follower lets go of the hold it kept on the
+client's stream for it (an op refused by the rule or as out of scope is
+logged as a withheld scrub and travels as an op). `by` lets a hub pass its own entries without parsing them. A log
 may yield a **hole** — `{ id, value: null, headers: { hole: '1' } }`, an id
 whose entry never came (`mongoSharedLog`: a crashed appender's number) —
 which a hub tells (`SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The
@@ -1056,9 +1071,10 @@ What a hub does with the log (`src/sync/shared.js`):
   (403 `READ_ONLY`): its shadow runs ahead of its engine. Without an inbox
   (`inbox: false`) a push is 503 `READ_ONLY`.
 - **The writer over the inbox** rules each entry as it rules a push — its
-  `authorizeWrite`, a refusal logged as a scrub and relayed — tells each
-  refusal through the `refused` event (`via: 'inbox'`), names what it did not
-  take at all (out of scope, a gap, forged) in a `dropped` entry, and trims
+  `authorizeWrite` and the client's scopes, a refusal logged as a withheld
+  scrub and relayed — tells each refusal through the `refused` event (`via:
+  'inbox'`), names what it did not take at all (a gap, an equivocation,
+  forged) in a `dropped` entry, and trims
   the inbox past its cursor every 64 entries passed (`trimBefore`, where the
   log has it). Several writers over one inbox each land every entry —
   correct, wasteful: a mesh of writers needs no inbox, one writer and its
@@ -1183,10 +1199,11 @@ ops alone.
   is unreadable here (`OP_UNREADABLE`) — or refuses it for a field
   (`OP_REFUSED`) still logs and relays it: a withheld op would be a gap in
   its origin's stream for every node behind the host. What stops at the host
-  is an op outside the peer's scopes, a malformed or skewed one, a signature
-  refused, an equivocation, and a `beforeApply` that throws (the whole page
-  is refused, and offered again). An op `authorizeWrite` refuses travels on
-  as a scrub (`scrubbed`, slot 20), a no-op everywhere.
+  is an op declaring a scope the peer was not granted, a malformed or skewed
+  one, a signature refused, an equivocation, and a `beforeApply` that throws
+  (the whole page is refused, and offered again). An op `authorizeWrite`
+  refuses, or whose record is outside the pusher's scopes, travels on as a
+  withheld scrub (`scrubbed` `2`, slot 20), a no-op everywhere, a purge too.
 - **fsync is opt-in.** Files are written with the platform's default
   durability; `createDatabase({ durable: true })` adds an fsync after every
   write on a backend that has one (`node:fs`). The files the log does not

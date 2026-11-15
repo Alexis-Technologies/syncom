@@ -1125,7 +1125,7 @@
         "veto": {
           "mark": "✅",
           "text": "`beforeApply` returning `false`, or a failing validator, skips it here",
-          "note": "A skipped op is still logged and relayed. A host refuses outright what is out of scope, malformed, skewed, forged, or unsigned under `'require'`.",
+          "note": "A skipped op is still logged and relayed; one a host's rule refuses, or that writes a record outside the pusher's scopes, travels on as a header that applies nowhere. A host refuses outright an op of a scope the pusher was not granted, and what is malformed, skewed, forged, or unsigned under `'require'`.",
           "source": "index.d.ts:1082-1088; docs/guide/schema.md:136-142; src/apply.js:297-318; docs/guide/replication.md:619-625"
         },
         "events": {

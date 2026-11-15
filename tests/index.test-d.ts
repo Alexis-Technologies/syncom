@@ -224,6 +224,8 @@ expectType<Promise<number>>(log.scrub('id'));
 expectType<Promise<number>>(log.scrub(['id', 'other']));
 expectType<true | undefined>(log.held()[0].scrubbed);
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'purge', id: 'r' });
+expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 2, ts: 2, type: 'purge', id: 'r', scrubbed: true, withheld: true });
+expectError<syncom.SyncOp>({ origin: 'a', seq: 2, ts: 2, type: 'purge', id: 'r', withheld: false });
 expectType<syncom.ClockStamp | null | undefined>(entry.meta.purged);
 expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 1, ts: 1, type: 'add', id: 'r', key: 't', value: ['x', 1] });
 expectAssignable<syncom.SyncOp>({

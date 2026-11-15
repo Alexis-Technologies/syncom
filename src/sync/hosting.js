@@ -257,7 +257,8 @@ const push = (host) => async (context, args) => {
   // stream is harmed — seqs run per scope, and a dialer that honours its
   // registry never sends one. (An op in a granted scope that writes a
   // record outside them is refused inside applyRemote, which reads the
-  // record: that one is a gap in its stream.)
+  // record: logged withheld there, so its stream goes on, and named in
+  // `refused` with `reason: 'scope'` and no record.)
   const granted = [];
   let outOfScope = 0;
   for (const op of ops) {
@@ -302,7 +303,9 @@ const push = (host) => async (context, args) => {
   const options = { via, scopes, peer: via, bound: scopes };
   if (host.authorizeWrite !== null) options.authorize = host.authorizeWrite;
   const result = await storage.applyRemote(granted, options);
-  if (result.refused !== undefined) refuseOps(host, node, 'rule', result.refused.length);
+  // `refused` names the scope's refusals too, each counted in `outOfScope`.
+  const rules = result.refused === undefined ? 0 : result.refused.length - result.outOfScope;
+  if (rules > 0) refuseOps(host, node, 'rule', rules);
   if (result.outOfScope > 0) refuseOps(host, node, 'scope', result.outOfScope);
   if (result.forged > 0) announceRefused(host, node, 'forged', result.forged);
   if (result.unsigned > 0) announceRefused(host, node, 'unsigned', result.unsigned);

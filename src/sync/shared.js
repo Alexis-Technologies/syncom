@@ -759,8 +759,8 @@ class SharedHub {
     }
   }
 
-  // What the writer would not take of an inbox entry — a rule's refusal (logged as a scrub, so it reaches the
-  // topic), a forged, an unsigned, an out-of-scope op, a gap (not logged: the stream's hold at the follower would
+  // What the writer would not take of an inbox entry — a rule's refusal or a record out of scope (logged withheld,
+  // so it reaches the topic), a forged, an unsigned op, a gap (not logged: the stream's hold at the follower would
   // stand until FORWARD_TTL) — told as a push tells it (`refused`, `via: 'inbox'`), and what is not in this hub's
   // vector after the apply named in the topic (`dropped`), for the followers to let go of.
   async #judged(topic, entry, parsed, result) {
@@ -768,7 +768,8 @@ class SharedHub {
     const tell = (reason, count) => {
       if (count > 0) notify(this.#manager, this.#logger, 'refused', { node, reason, count, via: 'inbox' });
     };
-    tell('rule', result.refused === undefined ? 0 : result.refused.length);
+    // `refused` names the scope's refusals too, each counted in `outOfScope`.
+    tell('rule', result.refused === undefined ? 0 : result.refused.length - result.outOfScope);
     tell('scope', result.outOfScope);
     tell('forged', result.forged);
     tell('unsigned', result.unsigned);

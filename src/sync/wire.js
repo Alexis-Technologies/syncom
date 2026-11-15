@@ -16,6 +16,10 @@ const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefin
 // a reader of a newer one takes an absent slot as null. The codes are the
 // protocol's, not a plugin's: a node without the plugin for a type still
 // reads, logs and relays the op.
+// The 20th slot: SCRUBBED (1) a scrub — a purge's own still purges where it lands — and WITHHELD (2) a scrub a
+// rule made (`beforeSend`, `authorizeWrite`, a record outside the pusher's scopes): applied nowhere, a purge included.
+const SCRUBBED = 1;
+const WITHHELD = 2;
 const TYPE_CODES = {
   write: 'w',
   set: 's',
@@ -75,7 +79,7 @@ const packOps = (ops) => {
       op.nonce === undefined ? null : op.nonce,
       op.msg === undefined ? null : op.msg,
       op.prev === undefined ? null : op.prev,
-      op.scrubbed === true ? 1 : null,
+      op.scrubbed === true ? (op.withheld === true ? WITHHELD : SCRUBBED) : null,
     ]);
   }
   return packed;
@@ -109,7 +113,8 @@ const unpackOps = (packed) => {
       scrubbed,
     ] = row;
     const op = { origin, seq, ts, type: own(CODE_TYPES, code) ?? code };
-    if (scrubbed === 1) op.scrubbed = true;
+    if (scrubbed === SCRUBBED || scrubbed === WITHHELD) op.scrubbed = true;
+    if (scrubbed === WITHHELD) op.withheld = true;
     if (id !== null && id !== undefined) op.id = id;
     if (v !== null && v !== undefined) op.v = v;
     if (actor !== null && actor !== undefined) op.actor = actor;

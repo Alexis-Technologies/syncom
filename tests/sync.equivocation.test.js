@@ -340,5 +340,12 @@ test('The per-stream hash chain', async (t) => {
     const unmarked = { ...scrubbed };
     delete unmarked.scrubbed;
     assert.deepStrictEqual(unpackOps([bare.slice(0, 19)]), [unmarked]);
+    // A withheld op — refused at a host, or sent scrubbed by beforeSend — is the slot's second value, 2.
+    const withheld = { ...scrubbed, type: 'purge', withheld: true };
+    const [held] = packOps([withheld]);
+    assert.strictEqual(held[19], 2);
+    assert.deepStrictEqual(unpackOps([held]), [withheld]);
+    // The mark alone, without the scrub, does not travel.
+    assert.strictEqual(packOps([{ ...op, withheld: true }])[0][19], null);
   });
 });

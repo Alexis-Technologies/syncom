@@ -123,8 +123,11 @@ gaps, malformed, unsigned, forged, outOfScope, equivocations }`:
   newer schema version.
 - `malformed`, `unsigned` and `forged` were refused before anything read them, neither logged nor relayed;
   `equivocations` because they fork their writer's stream (`EQUIVOCATION` in
-  [`SyncomError`](./api#syncomerror)); `outOfScope` (a host's push) because the record they write is
-  outside the pushing peer's scopes.
+  [`SyncomError`](./api#syncomerror)).
+- `outOfScope` (a host's push): the record they write is outside the pushing peer's scopes. Each is
+  accepted as a withheld scrub — logged skipped without its payload, relayed as a header that applies
+  nowhere, so its stream goes on — and counted in `skipped` too; `refused` names it (`reason: 'scope'`, no
+  record), beside what `authorizeWrite` refused (`reason: 'rule'`, with the record as the host holds it).
 
 ### Hooks and the queue
 

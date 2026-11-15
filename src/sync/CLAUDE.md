@@ -34,8 +34,8 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
 
 ## Rules
 
-- **Scopes are enforced by the host.** `unit().push` drops out-of-scope ops
-  before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`);
+- **Scopes are enforced by the host.** `unit().push` drops an op that declares a scope not granted
+  before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`: a stream the peer may not write here);
   `snapshot`/`changes` serve `grant(asked, granted)` — an empty ask is no ask: the grant, which may be empty (a
   peer that asked for no scope, or whose last scope a revoke took, reads the global records alone and stays
   subscribed; 403 `SCOPES` only where named scopes none of which is granted) — a page for every scope reads no record's
@@ -43,9 +43,11 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   (`snapshot.skipped`, `reason: 'scope'`), never the page. The scope an op declares
   is the peer's word: `push` also passes the grant as `bound`, and
   `applyRemote` refuses an op whose RECORD — before the op and after it, as
-  this node's `sync.scope` reads it — is outside it (`outOfScope`, not logged,
-  not relayed: a gap, like a forged op; relaying it as skipped would hand the
-  write to every peer of the declared scope). A local op takes the scope of
+  this node's `sync.scope` reads it — is outside it (`outOfScope`): logged and relayed as a withheld scrub
+  (`refuse` in src/apply.js, as a rule's refusal is — the header alone, applied nowhere, a purge included), so its
+  stream goes on, and named in the answer's `refused` with `reason: 'scope'` and NO `current` — the record is one
+  the pusher may not read; the dialer reports it (`WRITE_REFUSED`) and reverts nothing. Relaying it with its payload
+  would hand the write to every peer of the declared scope. A local op takes the scope of
   the record as it leaves it (`scopeData` in `src/commit.js`, re-read after
   validation), never of a `set`'s delta alone. `applyRemote`'s `scopes`
   option only gates `advance` adoption, and adoption needs
@@ -98,9 +100,9 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   `READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
   bootstraps from a hub that writes) and stops reading the inbox (the next writer takes it from the saved cursor,
   which only a writer saves). The writer rules the inbox as it rules a push — `#apply` passes the manager's
-  `authorizeWrite` (`sync.authorizeWrite`, every unit's default) as `authorize`, a refusal logged as a scrub and
-  relayed — tells each kind of refusal (`refused`, `via: 'inbox'`), and names what it did not take at all (not in
-  its vector after the apply: out of scope, a gap, forged) in a `dropped` topic entry (`#judged`), which a follower
+  `authorizeWrite` (`sync.authorizeWrite`, every unit's default) as `authorize`, a refusal — the rule's, or a record out of the client's scopes — logged as a withheld
+  scrub and relayed — tells each kind of refusal (`refused`, `via: 'inbox'`), and names what it did not take at all (not in
+  its vector after the apply: a gap, an equivocation, forged) in a `dropped` topic entry (`#judged`), which a follower
   reads to let its holds go (`#release`). The relay's WATERMARK (`#appendedSeq`, saved as `appended`) is the last log position every
   op at or below which is in the topic: every op is offered with its position (the `change` event's `seq`), a batch
   that landed covers its positions (`#cover`), an op read from the topic covers its own, and the watermark moves
@@ -121,9 +123,11 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   log's — the codes wrpc's brokers and `mongoSharedLog` answer; a log of another shape must answer them too.
 - **A rule never withholds an op; it scrubs it.** `beforeSend` on the dialer (`#outgoing`, a copy of the op) and
   `authorizeWrite` on the host (`refused` in src/apply.js, before `beforeApply`; the manager's rule — `sync.authorizeWrite`
-  — is every unit's unless it names its own, and the writer's over the inbox) both end in `scrubOp`: the header
-  with `scrubbed: true` (slot 20) goes on — logged skipped and scrubbed, relayed, applied nowhere — so no stream has
-  a gap. The host names what it refused in the push's answer (`refused`, with the record as it holds it) and the
+  — is every unit's unless it names its own, and the writer's over the inbox) both end in `withholdOp` (src/header.js):
+  the header with `scrubbed: true` and `withheld: true` (slot 20 `2`) goes on — logged skipped and scrubbed,
+  relayed, applied nowhere, a PURGE INCLUDED, where a purge's own scrub (slot 20 `1`) still purges where it lands —
+  so no stream has a gap and a refused purge purges nothing behind the host. The host names what it refused in the
+  push's answer (`refused`, `reason: 'rule'` with the record as it holds it; `'scope'` without it) and the
   dialer sets itself straight (`#refused`: the fields the op touched — `touchedBy`: a set's keys, an unset's names,
   a kind's op's `key`, the whole record for a write, a delete, a merge or an op the log compacted — brought to the
   host's through the seam's `revert(id, current, fields, { actor: 'revert' })`, which diffs the reading by kind

@@ -50,7 +50,8 @@ Once a node is accepted, the scopes it asked for are a boundary, not a hint. The
 [ops](./glossary#op) and [snapshots](./glossary#snapshot) of those scopes alone, and refuses any op it
 pushes for a record outside them. The host checks the record itself, before and after the op, with its
 own `sync.scope`, so a node cannot write a record into or out of a scope by claiming another one in the
-op.
+op. A refused op goes on as a header that applies nowhere, so the node's later writes still land, and the
+node reports `WRITE_REFUSED` with `reason: 'scope'`; the host hands it nothing of a record it may not see.
 
 ## Register a host with scopes
 

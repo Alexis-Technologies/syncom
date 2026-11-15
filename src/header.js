@@ -117,6 +117,14 @@ const scrubOp = (op) => {
   op.scrubbed = true;
 };
 
+// A scrub a rule made — `beforeSend` that said no, a host's `authorizeWrite` that refused, a record outside the
+// pusher's scopes — marked `withheld` (the 20th slot's second value, 2): applied nowhere, a purge included, where a
+// purge's own scrub (src/log.js #scrub) still purges every node it reaches.
+const withholdOp = (op) => {
+  scrubOp(op);
+  op.withheld = true;
+};
+
 // The op's payload digested under a fresh nonce, once: an op that has its
 // digest keeps it.
 const digest = async (op) => {
@@ -139,4 +147,5 @@ module.exports = {
   fingerprintOf,
   digest,
   scrubOp,
+  withholdOp,
 };

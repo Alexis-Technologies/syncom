@@ -12,7 +12,7 @@
 const { assignData } = require('./lazy.js');
 const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
-const { headerText, scrubOp } = require('./header.js');
+const { headerText, scrubOp, withholdOp } = require('./header.js');
 const { hashText } = require('./crypto/digest.js');
 const { ENTRIES } = require('./symbols.js');
 const { inScope } = require('./scope.js');
@@ -48,7 +48,7 @@ const VERIFY_CHUNK = 64;
 // of the peer that pushed the page, on a host: the records it may write.
 // `authorize`, on a host: `({ op, peer, current, after }) => boolean`, asked
 // of every op before it is applied — false refuses it (logged skipped and
-// scrubbed, relayed as a no-op, named in `refused` for the pusher).
+// withheld, relayed as a no-op, named in `refused` for the pusher).
 const openBatch = (
   core,
   { via = null, scopes = null, peer = null, adoptFrom = null, bound = null, authorize = null } = {},
@@ -405,9 +405,9 @@ const dataAfter = (op, current) => {
 // op declares is the peer's claim (src/sync/hosting.js holds it to the grant);
 // the record's own, before the op and after it, is what this node's
 // `sync.scope` makes of the data. Outside the grant — or a scope function
-// that throws on it — the op is refused like a forged one: not logged, not
-// relayed, a gap in its stream. Relaying it as skipped would hand the write
-// to every peer of the declared scope.
+// that throws on it — the op is refused as a rule refuses one: logged and
+// relayed withheld (`refuse`), never with its payload, which would hand the
+// write to every peer of the declared scope — and no gap in its stream.
 const outOfBounds = (batch, op, current) => {
   const { core, bound } = batch;
   if (bound === null) return false;
@@ -463,21 +463,29 @@ const reportLost = (batch, op, entry, lost) => {
 // What a record reads as for a hook: its data while alive, else null.
 const visibleOf = (entry) => (entry && isAlive(entry) ? entry.data : null);
 
-// `authorizeWrite` said no: the op scrubbed, skipped, and reported with the record as it is here.
+// Refused on a host — by its rule (`reason: 'rule'`) or as outside the pusher's scopes (`'scope'`): the op logged as
+// a withheld scrub — skipped, its payload gone, applied nowhere it is relayed, a purge included — so its stream goes
+// on, and named in the answer for the pusher. The actor rides along: a revert the rule refuses too is told by it,
+// never reverted again (the pusher's log may have compacted the op by then). `current` — the record as it is here —
+// for a rule's refusal alone: a record outside the grant is one the pusher may not read.
+const refuse = (batch, op, reason, current) => {
+  withholdOp(op);
+  (batch.stripped ??= new Set()).add(op);
+  skip(batch, op);
+  const actor = typeof op.actor === 'string' ? op.actor : null;
+  const refusal = { origin: op.origin, seq: op.seq, scope: op.scope ?? null, id: op.id, actor, reason };
+  if (current !== undefined) refusal.current = visibleOf(current);
+  (batch.refused ??= []).push(refusal);
+};
+
+// `authorizeWrite` said no: refused, reported with the record as it is here.
 const refused = async (batch, op, current) => {
   const { core } = batch;
   const after = applyOp(current, op, core.limits).entry;
   const verdict = await batch.authorize({ op, peer: batch.peer, current: visibleOf(current), after: visibleOf(after) });
   if (verdict !== false) return false;
   core.otel.recordRejected('rule');
-  scrubOp(op);
-  (batch.stripped ??= new Set()).add(op);
-  skip(batch, op);
-  const scope = op.scope ?? null;
-  // The actor rides along: a revert the rule refuses too is told by it, never reverted again (the pusher's log may
-  // have compacted the op by then).
-  const actor = typeof op.actor === 'string' ? op.actor : null;
-  (batch.refused ??= []).push({ origin: op.origin, seq: op.seq, scope, id: op.id, current: visibleOf(current), actor });
+  refuse(batch, op, 'rule', current);
   return true;
 };
 
@@ -494,7 +502,7 @@ const applyOne = async (batch, op) => {
     if (current === undefined) return;
     if (outOfBounds(batch, op, current)) {
       batch.outOfScope++;
-      return;
+      return void refuse(batch, op, 'scope');
     }
   }
   if (ahead && core.ahead === 'hold') {
@@ -503,10 +511,11 @@ const applyOne = async (batch, op) => {
     core.emit('schema', { kind: 'ahead', op, held: true });
     return;
   }
-  // An op scrubbed before it came — withheld by its sender's `beforeSend`, refused by a host's `authorizeWrite`,
-  // landed on a purged record — is a header alone: logged and relayed as one (skipped, scrubbed), applied
-  // nowhere, a gap for no one. A purge carries nothing a scrub could take: it applies as it is.
-  if (op.scrubbed === true && op.type !== 'purge') {
+  // An op scrubbed before it came — withheld by its sender's `beforeSend`, refused by a host (its rule, a record
+  // outside the pusher's scopes), landed on a purged record — is a header alone: logged and relayed as one
+  // (skipped, scrubbed), applied nowhere, a gap for no one. A purge carries nothing a scrub could take: its own
+  // scrub applies as it is; a withheld one (refused, or said no to) purges nothing either.
+  if (op.scrubbed === true && (op.type !== 'purge' || op.withheld === true)) {
     // The flag is the peer's word; the payload goes all the same — never logged or relayed with one.
     scrubOp(op);
     (batch.stripped ??= new Set()).add(op);

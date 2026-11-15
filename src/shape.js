@@ -172,6 +172,7 @@ const wellFormed = (op) =>
   (op.nonce === undefined || (typeof op.nonce === 'string' && NONCE.test(op.nonce))) &&
   (op.msg === undefined || (typeof op.msg === 'string' && op.msg.length <= MAX_MESSAGE)) &&
   (op.scrubbed === undefined || op.scrubbed === true) &&
+  (op.withheld === undefined || (op.withheld === true && op.scrubbed === true)) &&
   (op.type === 'advance' ? isPlainObject(op.vector) : isRecordId(op.id)) &&
   nestsWithin(op, MAX_WIRE_DEPTH + 1);
 
