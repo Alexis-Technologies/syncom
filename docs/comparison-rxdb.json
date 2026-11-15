@@ -2863,7 +2863,7 @@
         },
         "serverAuth": {
           "mark": "✅",
-          "text": "a refused op reaches no node behind the host as a write: it goes on as a scrubbed header (no-op), the pusher is told and reverts; out-of-scope, unsigned and malformed ops stop at the host",
+          "text": "a refused op reaches no node behind the host as a write: it goes on as a scrubbed header (no-op), the pusher is told and reverts; an op on a record outside the pusher's scopes goes on as a header that applies nowhere (no gap); unsigned and malformed ops stop at the host",
           "source": "src/apply.js (refused, scrubbed); src/sync/manager.js (#refused); tests/sync.rules.test.js",
           "note": "A node's `beforeApply` skip is still local (the op is logged and relayed); `authorizeWrite` is the rule that binds everyone behind the host."
         },

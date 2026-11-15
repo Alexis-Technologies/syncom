@@ -374,7 +374,7 @@
         },
         "serverAuth": {
           "mark": "✅",
-          "text": "`unit({ authorizeWrite })`: a refused op reaches no node behind the host as a write — it goes on as a scrubbed header (a no-op, no gap), the pusher is told (`WRITE_REFUSED`) and reverts; `prove` gates a peer until it proves its key; out-of-scope, unsigned and malformed ops stop at the host",
+          "text": "`unit({ authorizeWrite })`: a refused op reaches no node behind the host as a write — it goes on as a scrubbed header (a no-op, no gap), the pusher is told (`WRITE_REFUSED`) and reverts; an op on a record outside the pusher's scopes goes on as a header that applies nowhere (no gap); `prove` gates a peer until it proves its key; unsigned and malformed ops stop at the host",
           "source": "src/sync/hosting.js (authorizeWrite, prove); src/apply.js (refused, scrubbed); tests/sync.rules.test.js; docs/guide/replication.md",
           "note": "A refused op is not withheld — that would leave a gap in its origin's stream — but scrubbed: its header goes on, its payload does not, and every node behind the host applies a no-op; what a validator or `beforeApply` skips is still relayed whole."
         },
