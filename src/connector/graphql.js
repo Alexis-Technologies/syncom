@@ -45,7 +45,11 @@ const graphql = ({ url, fetch = globalThis.fetch, headers = {}, request = null, 
       headers: { 'content-type': 'application/json', accept: 'application/json', ...headers },
       body: JSON.stringify({ query, variables }),
     });
-    if (!response.ok) throw new Error(`GraphQL answered ${response.status}`);
+    if (!response.ok) {
+      const error = new Error(`GraphQL answered ${response.status}`);
+      error.status = response.status;
+      throw error;
+    }
     const body = await response.json();
     if (Array.isArray(body.errors) && body.errors.length > 0) {
       const messages = [];

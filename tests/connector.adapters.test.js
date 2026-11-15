@@ -262,9 +262,16 @@ test('Connector adapters', async (t) => {
             fetch: endpoint.fetch,
             pull: { query: 'query nope { nope }', variables: () => ({}), read: (d) => d },
           });
-          await assert.rejects(() => erring.pull.handler(null, 10), { message: /GraphQL errors: Unknown operation/ });
+          await assert.rejects(
+            () => erring.pull.handler(null, 10),
+            (error) => {
+              assert.match(error.message, /GraphQL errors: Unknown operation/);
+              assert.match(error.errors[0].message, /Unknown operation/);
+              return true;
+            },
+          );
           const failing = graphql({ url: 'x', fetch: async () => ({ ok: false, status: 500 }), pull });
-          await assert.rejects(() => failing.pull.handler(null, 10), { message: /answered 500/ });
+          await assert.rejects(() => failing.pull.handler(null, 10), { message: /answered 500/, status: 500 });
           const own = graphql({
             request: async (query, variables) => ({ q: { documents: [], checkpoint: variables.limit } }),
             pull,
