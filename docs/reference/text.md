@@ -95,7 +95,9 @@ What follows, the same on every node:
   head: concurrent typing survives a concurrent reset, at the start of the field. Text written at the head
   after the reset — the resetting node typing into the field again, a `compact()` or a `restore()` making it
   anew — is a run from the head too, and runs from the head order by their writers' ids like any siblings.
-- A list or a text touched after a `delete()` revives the record, as a set or a counter would.
+- A list or a text touched after a `delete()` does not revive the record (delete wins, as over every field):
+  the op lands in the block, out of sight, and a whole-record write stamped below it brings the record back
+  with the text on it. Locally such an edit is `NOT_FOUND`.
 
 The one case Fugue orders differently from FugueMax: two writers inserting right after the same element
 while each sees a different element following it (right siblings with different right origins) may have

@@ -602,7 +602,7 @@ test('a handle’s applyDelta is checked whole first: a delta refused leaves not
   await storage.close();
 });
 
-test('a handle on a record deleted since reads empty and an edit writes it again; one purged refuses an edit as NOT_FOUND; one repaired from the log reads the record again', async () => {
+test('a handle on a record deleted or purged since reads empty and refuses an edit as NOT_FOUND; one repaired from the log reads the record again', async () => {
   const storage = await openMemory('/gone');
   const id = await storage.insert({ title: 'doc' });
   await storage.push(id, 'body', 'text');
@@ -613,13 +613,21 @@ test('a handle on a record deleted since reads empty and an edit writes it again
   assert.strictEqual(handle.toString(), '');
   assert.deepStrictEqual(handle.spans(), []);
   assert.strictEqual(heard[heard.length - 1], 'reset');
-  // An edit of a deleted record writes it again, as a write through the storage does.
-  handle.insert(0, 'x');
-  assert.strictEqual(handle.toString(), 'x');
+  // Delete wins: an edit of a deleted record is refused, as a field op through the storage is — never a keystroke
+  // that vanishes under the tombstone.
+  assert.throws(() => handle.insert(0, 'x'), { code: 'NOT_FOUND' });
+  assert.strictEqual(handle.toString(), '');
   await handle.flush();
-  assert.strictEqual((await storage.get(id)).body, 'x');
+  assert.strictEqual(await storage.get(id), null);
   await handle.close();
-  // A purged record takes nothing: an edit is refused, never a keystroke that vanishes.
+  // A whole-record write brings the record back, and a handle opened on it edits as before.
+  await storage.set(id, { title: 'again' });
+  const again = await storage.openText(id, 'body', { window: 60_000 });
+  again.insert(0, 'x');
+  await again.flush();
+  assert.strictEqual((await storage.get(id)).body, 'x');
+  await again.close();
+  // A purged record takes nothing either.
   const purged = await storage.insert({ title: 'purged' });
   await storage.push(purged, 'body', 'text');
   const onPurged = await storage.openText(purged, 'body', { window: 60_000 });

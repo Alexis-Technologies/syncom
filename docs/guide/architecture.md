@@ -161,8 +161,9 @@ element and origin, the newest add and the newest add a remove had seen, so conc
 remove that did not see them. Lists and texts (`src/text/`) are Fugue trees of runs held in a
 copy-on-write rope, and a tree (`src/tree/`) is the fold of every node's moves in stamp order, a move
 that would make a cycle skipped. A field two nodes create as different kinds at once ends as one kind
-everywhere, by a precedence that reads the kinds alone. A delete is a tombstone that a newer write
-revives; a purge wins at any stamp and scrubs the record from the log.
+everywhere, by a precedence that reads the kinds alone. A delete is a tombstone that wins over every
+edit of a field, and only a newer whole-record write revives; a purge wins at any stamp and scrubs the record
+from the log.
 
 Any order, any number of times, gives the same record. What a peer can make a node hold is bounded the
 same way on the op path and in a snapshot (run and field lengths, pending work, tree depth), and past a

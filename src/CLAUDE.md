@@ -233,12 +233,12 @@ elem }` while a peer's lands unreachable — not composed, not in a diff
   every plugin reads, never `meta.base` alone), `inc` →
   `inc`, `add`/`remove` → `add`/`remove`, `splice`/`push`/`updateText` →
   `splice`, `setAt` → `assign`, `move` → `move`, `mark`/`unmark`/`unmarkById`
-  → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone. Registers
-  are last-writer-wins by `(ts, origin)`; counters are per-stream sums — a
-  slot per vector key, `origin` or `origin@scope` (`opKey`: seqs run per
-  stream, so a seq is only ever compared within its stream; a bare-origin
-  slot is the global stream's) — each within ±`MAX_COUNT` and added up in
-  slot-key order; a set
+  → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone — DELETE WINS: a field op above it lands in the
+  meta unseen (`isAlive` reads `meta.deleted` alone; no change reported, a peer's validated nowhere), only a `write`
+  revives; locally a field op on a deleted record is `NOT_FOUND` (`prepareOp`), on an absent one makes it. Registers
+  are last-writer-wins by `(ts, origin)`; counters are per-stream sums — a slot per vector key, `origin` or
+  `origin@scope` (`opKey`: seqs run per stream, so a seq is only ever compared within its stream; a bare-origin
+  slot is the global stream's) — each within ±`MAX_COUNT` and added up in slot-key order; a set
   is `meta.sets[field][elementKey][origin] = [added, removed]`, live while
   `added > removed`, read sorted by element text — a field's elements map shared between an entry
   and the one an op derives from it until the op writes it (`writableSet` in src/ops.js: every

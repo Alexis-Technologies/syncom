@@ -24,7 +24,9 @@ const inc = (core, id, key, value = 1, options) => {
 /**
  * Adds `elements` to set field `key` — an observed-remove set: two nodes
  * that add concurrently both keep theirs, and an add a remove did not
- * observe survives it. Creates the field, and the record, when absent.
+ * observe survives it. Creates the field, and the record, when absent; a
+ * deleted record is NOT_FOUND, as for every field op (delete wins: only a
+ * whole-record write brings one back — src/commit.js prepareOp).
  */
 const add = (core, id, key, elements, options) =>
   core.write('add', id, { key, value: setElements('add', key, elements) }, { actor: options?.actor });

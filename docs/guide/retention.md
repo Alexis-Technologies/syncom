@@ -99,8 +99,8 @@ stamp among the ops the log no longer holds.
 
 ## Tombstones and cleanup
 
-A deleted record leaves a small tombstone behind, so that the deletion reaches every node and an older
-write that arrives late does not bring the record back. Tombstones are records, not ops, so retention
+A deleted record leaves a small tombstone behind, so that the deletion reaches every node and an edit
+that arrives late does not bring the record back (only a newer whole-record write does). Tombstones are records, not ops, so retention
 does not touch them. [Cleanup](./cleanup) folds old tombstones out of the way (a delete this node made
 only once every registered node has acknowledged it), and a folded tombstone still wins over a late
 write.

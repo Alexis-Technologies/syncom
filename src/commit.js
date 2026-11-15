@@ -263,7 +263,15 @@ const kindClash = (type, payload, current, plugins) => {
   return rejected ?? NONE;
 };
 
+// The ops that take a record as a whole; every other op is a field's, and a field op needs a record that reads.
+const WHOLE = new Set(['write', 'delete', 'purge', 'merge']);
+
 const prepareOp = (core, type, id, payload, current, who, from) => {
+  // Delete wins: a field op on a deleted (or purged) record would lie in its meta unseen — refused here as
+  // update() refuses it; a whole-record write is what brings a deleted record back. An absent one it makes.
+  if (current && !current.encrypted && !WHOLE.has(type) && !isAlive(current)) {
+    throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+  }
   refuse(core, id, kindClash(type, payload, current, core.plugins));
   core.observe(latestHeld(current?.meta), id);
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type, id };

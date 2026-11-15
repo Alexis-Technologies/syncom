@@ -141,19 +141,24 @@ kind that write is.
 
 ## Delete a record another node is editing
 
-A delete leaves a [tombstone](./glossary#tombstone) stamped like any write, and it races a concurrent edit
-the same way: the later one wins. When Ada deletes a task while Bob, offline, edits it a moment later,
-Bob's edit is the newer write:
+A delete leaves a [tombstone](./glossary#tombstone), and the tombstone wins over every edit of a field,
+whenever that edit was made. When Ada deletes a task while Bob, offline, edits it and votes for it a
+moment later, the task stays deleted on both nodes once they meet:
 
 <<< @/examples/fields-sync.mjs#delete
 
 <<< @/examples/fields-sync.mjs#revived
 
-The record comes back on every node, holding only what was written after the delete. Everything older went
-with the delete, the `$type` that puts it in the `Task` collection included, so `db.Task.get()` does not
-find it while `db.get()` does. Had Bob's edit come before the delete, the delete would win and the record
-would stay deleted on both nodes. When a record should keep all of its fields through such a race, delete
-it softly: a `deleted: true` field is a register like any other, so the edit and the deletion both stay.
+Bob's edits reach every node, but they stay under the tombstone where no read finds them, so the record
+reads as gone everywhere, whichever of the two arrived first. Once Bob's device knows of the delete, a field
+method on the record (`update()`, `inc()`, `add()`, `remove()`, `unset()`, a list, text or tree edit)
+rejects with `NOT_FOUND`. Only a whole-record write (`set()`, `upsert()`, or `insert()` of the same id)
+brings a deleted record back: it holds what that write gives it, and the edits of a field stamped after
+it.
+
+When a record should keep every field through such a race, delete it softly: a `deleted: true` field is a
+register like any other, so the edit and the deletion both stay, and the later of the two decides whether
+the record reads as deleted.
 
 ## Lists, text and trees
 
@@ -184,8 +189,9 @@ order the two arrive in. Change part of a record with `update()`.
 - **Two kinds on one field lose one side.** When nodes create one field as two kinds at once, the rule
   [above](#a-field-is-one-kind) keeps one kind on every node, and the other side's edits to that field are
   gone.
-- **A concurrent edit can revive a deleted record in part.** See
-  [Delete a record another node is editing](#delete-a-record-another-node-is-editing).
+- **A delete wins over every concurrent edit.** An edit made on another node after the delete is kept out of
+  sight rather than merged, until a whole-record write brings the record back. Delete softly where edits
+  must survive; see [Delete a record another node is editing](#delete-a-record-another-node-is-editing).
 
 The full rules, including what happens to each kind on a peer's snapshot, are in the
 [sync protocol](./sync-protocol) and the [wire reference](../reference/wire).

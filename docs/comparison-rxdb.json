@@ -2072,8 +2072,8 @@
         },
         "delete": {
           "mark": "✅",
-          "text": "tombstone with empty data; a newer write revives the record",
-          "source": "src/ops.js:475-480; docs/guide/replication.md",
+          "text": "tombstone with empty data; it wins over every edit of a field, and only a newer whole-record write revives the record",
+          "source": "src/ops.js isAlive; docs/guide/fields.md#delete-a-record-another-node-is-editing",
           "detail": "The op log keeps earlier payloads until retention drops them or `purge()` scrubs them (checked by running)."
         },
         "documentObjects": {
@@ -2698,7 +2698,7 @@
           "mark": "✅",
           "text": "a `delete` op leaves a tombstone on every node; a `purge` op erases",
           "source": "docs/guide/replication.md; src/ops.js",
-          "detail": "Tombstones are never cleaned up, so a long-offline peer cannot resurrect a record by absence; a newer write revives it by stamp."
+          "detail": "Tombstones are never cleaned up, so a long-offline peer cannot resurrect a record by absence; a newer whole-record write revives it by stamp; an edit of a field never does (delete wins)."
         },
         "replAttachments": {
           "mark": "⚠️",

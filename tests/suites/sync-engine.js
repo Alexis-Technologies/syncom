@@ -156,18 +156,33 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
     const second = await a.insert({ n: 2 });
     await settle([a, b]);
     const link = mesh.links.get('mem://B');
+    const third = await a.insert({ n: 3 });
+    await settle([a, b]);
     link.disconnect();
     await a.delete(first);
     await tick();
-    await b.update(first, { n: 10 }); // newer than the delete: revives
+    await b.update(first, { n: 10 }); // newer than the delete, a field op: delete wins
+    await b.inc(first, 'hits', 1); // the same
     await b.delete(second);
     await tick();
-    await a.update(second, { n: 20 }); // newer than B's delete: revives
+    await a.set(second, { n: 20 }); // newer than B's delete, a whole-record write: revives
+    await a.delete(third);
+    await tick();
+    await b.add(third, 'tags', ['t']); // newer, a field op: delete wins
     await link.reconnect();
     await settle([a, b]);
     const state = await assertConverged([a, b]);
-    assert.deepStrictEqual(state[first], { n: 10 });
+    assert.strictEqual(state[first], undefined, 'listed nowhere: dead on both');
+    assert.strictEqual(await a.get(first), null);
+    assert.strictEqual(await b.get(first), null);
     assert.deepStrictEqual(state[second], { n: 20 });
+    assert.strictEqual(await b.get(third), null);
+    // Locally, a field op on a record deleted here is NOT_FOUND, as update() is.
+    await assert.rejects(a.inc(first, 'hits', 1), { code: 'NOT_FOUND' });
+    // A whole-record write newer than all of them brings the record back as it writes it.
+    await b.set(first, { n: 11 });
+    await settle([a, b]);
+    assert.deepStrictEqual(await a.get(first), { n: 11 });
     // Now a delete that is genuinely last stays a delete everywhere.
     await b.delete(first);
     await settle([a, b]);

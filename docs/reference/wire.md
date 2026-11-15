@@ -72,7 +72,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `move` | `^` | `key`, `value` | `{ elem, cut, at, value }` |
 | `mark` | `*` | `key`, `value` | `{ start, end, key, value, many? }` or `{ off }` |
 | `tree` | `~` | `key`, `value` | `{ node, parent, fi }` — `parent` `null` at the root, `$trash` removed; `fi` a fractional index |
-| `delete` | `d` | `data?` | A tombstone; a newer write revives the record. `data`, when given, is a plain object whose fields lie on the tombstone at its stamp — below what keeps a record alive, so the record is as dead as without them; a reader of the tombstone (a `change`, a snapshot page) reads them |
+| `delete` | `d` | `data?` | A tombstone. Delete wins: an op of a field stamped above it lands in the meta and keeps nothing alive; only a newer `write` revives the record. `data`, when given, is a plain object whose fields lie on the tombstone at its stamp, the record as dead as without them; a reader of the tombstone (a `change`, a snapshot page) reads them |
 | `purge` | `p` | — | Wins at any stamp; every entry of the id is scrubbed |
 | `merge` | `m` | `data`, `meta`, `from` | A snapshot record joined |
 | `advance` | `a` | `vector`, `from` | Which ops the joined state covers |
@@ -432,7 +432,7 @@ merge:
 | --- | --- |
 | `clock` | Per register field, its stamp `[ts, origin]` |
 | `base` | The record's reset watermark: the stamp of its last whole-record write, delete or purge |
-| `deleted` | The tombstone's stamp, or `null` |
+| `deleted` | The tombstone's stamp while the newest reset is a delete, else `null`: the record reads as gone while it is set, whatever the other maps hold above it (delete wins) |
 | `purged` | The purge's stamp, once purged — nothing but another purge or a merge lands after it |
 | `counters` | Per field, per stream — the op's vector key, `origin` or `origin@scope`, since seqs run per stream — `[seq, sum, ts]`: the stream's running sum, within ±2⁵³; a slot keyed by the bare origin is the global stream's |
 | `sets` | Per field, per element (its canonical JSON as the key), per origin, `[added, removed]` stamps; live while `added > removed` |
@@ -1170,7 +1170,9 @@ ops alone.
 - **Whole-record writes and deletes reset.** `set()` and `delete()` reset
   the record: a concurrent `update()` older than the reset loses the fields
   it wrote, a newer one keeps them, whichever order the two arrive in. A
-  `delete()` leaves a tombstone that a newer write revives. One case does
+  `delete()` leaves a tombstone that wins over every op of a field, older
+  or newer — such an op lands in the meta and keeps nothing alive — and
+  only a newer whole-record write revives. One case does
   not converge, on purpose: a counter incremented by one origin both before
   and after a concurrent reset by another (resettable counters need causal
   metadata syncom does not carry). A set has no such case — a remove names

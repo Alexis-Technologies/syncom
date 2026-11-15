@@ -850,9 +850,22 @@ test('Storage replication model', async (t) => {
     await storage.set(gone, { n: 3 });
     assert.deepStrictEqual(await storage.get(gone), { n: 3 });
     assert.strictEqual((await storage.list()).length, 2);
-    // update() on a dead record is "not found".
+    // update() on a dead record is "not found" — and so is every field op (delete wins: only a whole-record
+    // write brings a deleted record back), a plugin's kind included.
     await storage.delete(gone);
     await assert.rejects(() => storage.update(gone, { n: 4 }), { code: 'NOT_FOUND', message: /not found/ });
+    await assert.rejects(() => storage.inc(gone, 'hits', 1), { code: 'NOT_FOUND', id: gone });
+    await assert.rejects(() => storage.add(gone, 'tags', ['a']), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.remove(gone, 'tags', ['a']), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.unset(gone, 'n'), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.push(gone, 'items', [1]), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.updateText(gone, 'body', 'hi'), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.treeMove(gone, 'outline', 'n1'), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.transact((tx) => tx.inc(gone, 'hits', 1)), { code: 'NOT_FOUND' });
+    assert.strictEqual(await storage.get(gone), null);
+    // An absent record is still made by its first field op.
+    await storage.inc('fresh', 'hits', 1);
+    assert.deepStrictEqual(await storage.get('fresh'), { hits: 1 });
   });
 
   await t.test('applyRemote: in order per origin, duplicates and gaps skipped', async (t2) => {
@@ -1150,8 +1163,8 @@ test('Storage replication model', async (t) => {
     assert.ok(ops.at(-1).ts > ahead, 'stamped above the joined clock');
     await storage.delete('reset');
     assert.strictEqual(await storage.get('reset'), null, 'a delete lands above a joined reset');
-    await storage.inc('gone', 'hits', 1);
-    assert.deepStrictEqual(await storage.get('gone'), { hits: 1 }, 'a counter lands above a joined tombstone');
+    await storage.set('gone', { hits: 1 });
+    assert.deepStrictEqual(await storage.get('gone'), { hits: 1 }, 'a write lands above a joined tombstone');
     // Joining the same, now older, snapshot again is still a no-op.
     const before = ops.length;
     await storage.mergeSnapshot([{ id: 'reg', data: { title: 'remote' }, meta: meta({ title: [ahead, 'peer'] }) }]);

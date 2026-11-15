@@ -548,11 +548,16 @@ const runCollectionTests = async (t, assert, createStorage) => {
     const row = page.records.find((record) => record.id === id);
     assert.deepStrictEqual(row.data, { by: 'admin', why: 'spam' });
     assert.ok(row.meta.deleted !== null);
-    // A field written above the tombstone revives the record, which then reads what the tombstone
-    // carried too (a whole write would reset it, as any reset does).
-    await b.add(id, 'tags', ['t']);
+    // Delete wins: a field op on the deleted record is NOT_FOUND here, as update() is; a whole-record write
+    // revives it as it writes it — the tombstone's data below it goes, as under any reset.
+    await assert.rejects(b.add(id, 'tags', ['t']), { code: 'NOT_FOUND' });
+    await assert.rejects(b.inc(id, 'n', 1), { code: 'NOT_FOUND' });
+    await assert.rejects(b.remove(id, 'tags', ['t']), { code: 'NOT_FOUND' });
+    await assert.rejects(b.unset(id, 'by'), { code: 'NOT_FOUND' });
+    await assert.rejects(b.update(id, { n: 2 }), { code: 'NOT_FOUND' });
+    await b.set(id, { title: 'back' });
     await settle([a, b]);
-    assert.deepStrictEqual(await a.get(id), { by: 'admin', why: 'spam', tags: ['t'] });
+    assert.deepStrictEqual(await a.get(id), { title: 'back' });
     assert.deepStrictEqual(await b.get(id), await a.get(id));
     await assert.rejects(a.delete(id, { data: 5 }), TypeError);
     // Without data: as before.
@@ -728,6 +733,11 @@ const runCollectionTests = async (t, assert, createStorage) => {
         ['remove', again],
       ]);
       assert.deepStrictEqual(tags, ['insert']);
+      // A peer's field op stamped above the tombstone leaves the record dead (delete wins): no event.
+      const late = { origin: 'peer', seq: 1, ts: Date.now() + 1000, type: 'set', id, data: { late: true } };
+      await db.applyRemote([late]);
+      assert.strictEqual(seen.length, 14);
+      assert.strictEqual(await db.Post.get(id), null);
       // A revival is an insert again; a record of no collection is nobody's.
       await db.set(id, { back: true, $type: 'Post' });
       assert.deepStrictEqual(seen.at(-1), ['insert', id]);

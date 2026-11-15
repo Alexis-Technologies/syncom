@@ -93,17 +93,25 @@ links.phone.disconnect();
 await laptop.Task.delete(task.id); // Ada deletes the task
 await new Promise((resolve) => setTimeout(resolve, 5)); // a moment later, on the other device
 await phone.Task.update(task.id, { done: false }); // Bob, offline, reopens it
+await phone.inc(task.id, 'votes', 1); // and votes for it
 await links.phone.reconnect();
 // #endregion delete
 await settle([server, laptop, phone]);
+assert.equal(await laptop.get(task.id), null);
+assert.equal(await phone.get(task.id), null);
+await assert.rejects(phone.inc(task.id, 'votes', 1), { code: 'NOT_FOUND' });
 
 // #region revived
-console.log(await laptop.get(task.id)); // { done: false }: back, with only what was written after the delete
-console.log(await laptop.Task.get(task.id)); // null: its `$type` went with the delete, so Task no longer lists it
+console.log(await laptop.Task.get(task.id)); // null: the delete wins over Bob's later edits
+console.log(await phone.Task.get(task.id)); // null on Bob's device too
+await phone.Task.update(task.id, { done: true }).catch((error) => console.log(error.code)); // NOT_FOUND
+
+await phone.Task.set(task.id, { title: 'Write the docs', done: false }); // a whole-record write brings it back
 // #endregion revived
-assert.deepEqual(await laptop.get(task.id), { done: false });
-assert.deepEqual(await phone.get(task.id), { done: false });
-assert.equal(await laptop.Task.get(task.id), null);
+await settle([server, laptop, phone]);
+const back = { title: 'Write the docs', done: false, $type: 'Task' };
+assert.deepEqual(await laptop.Task.get(task.id), back);
+assert.deepEqual(await phone.Task.get(task.id), back);
 
 // The other order: an edit made before the delete loses to it, and the record stays deleted.
 const older = await laptop.Task.insert({ title: 'Book the room', done: false });

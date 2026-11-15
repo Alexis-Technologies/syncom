@@ -33,8 +33,8 @@ Folding moves the whole tombstone (its collection, the data the delete carried, 
 store beside the records, and removes the record's file in the same atomic write. Everything a tombstone did, a
 folded one still does:
 
-- an edit from a peer older than the deletion is still ignored;
-- a newer write brings the record back, as it would have before;
+- an edit of a field from a peer is still kept out of sight, whether it is older or newer than the deletion;
+- a newer whole-record write brings the record back, as it would have before;
 - a node that joins later receives the deletion in its snapshot;
 - the catalog finds the deletion when it is rebuilt.
 

@@ -427,6 +427,51 @@ const runSchemaTests = async (t, assert, createStorage) => {
     assert.strictEqual(errors.length, 1);
   });
 
+  await t.test(
+    'a delete wins over a later edit under a validator: dead on every node, whatever the order',
+    async (t2) => {
+      // The validator needs `title`; a tombstone that carries data keeps `$type` (`delete(id, { data })`), so a field
+      // op above it would leave `{ $type, done }` — invalid — wherever the delete came first. A dead record is not
+      // validated (nothing reads it), so no node skips the op another applied, and every node holds the same meta.
+      const needsTitle = standard((value) =>
+        typeof value.title === 'string' ? { value } : { issues: [issue('is required', ['title'], 'required')] },
+      );
+      const schema = { entities: { Task: { schema: needsTitle } } };
+      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
+        nodes: { A: { schema }, B: { schema } },
+      });
+      const [a, b] = ['A', 'B'].map((name) => mesh.get(name));
+      const errors = [];
+      a.on('error', (error) => errors.push(error));
+      b.on('error', (error) => errors.push(error));
+      const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
+      const ids = [];
+      for (const carry of [true, false]) {
+        const task = await a.Task.insert({ title: 'x', done: false });
+        ids.push(task.id);
+        await settle([a, b]);
+        const link = mesh.links.get('mem://B');
+        link.disconnect();
+        await a.Task.delete(task.id, carry ? { data: {} } : {});
+        await tick();
+        await b.Task.update(task.id, { done: true });
+        await b.inc(task.id, 'votes', 1);
+        await link.reconnect();
+        await settle([a, b]);
+        assert.strictEqual(await a.get(task.id), null, `A, carry ${carry}`);
+        assert.strictEqual(await b.get(task.id), null, `B, carry ${carry}`);
+        const metaOn = async (storage) => (await storage.snapshot()).records.find((r) => r.id === task.id).meta;
+        assert.deepStrictEqual(await metaOn(a), await metaOn(b), 'the same meta: neither node skipped an op');
+      }
+      assert.deepStrictEqual(errors, [], 'no op refused as invalid');
+      // A whole-record write that the validator takes brings the record back on both.
+      await b.Task.set(ids[0], { title: 'back' });
+      await settle([a, b]);
+      assert.deepStrictEqual(await a.get(ids[0]), { title: 'back', $type: 'Task' });
+      assert.deepStrictEqual(await b.get(ids[0]), await a.get(ids[0]));
+    },
+  );
+
   await t.test('a validator that misbehaves is a ValidationError or a TypeError, never a silent write', async (t2) => {
     const Bad = standard(() => {
       throw new TypeError('kaput');

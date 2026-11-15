@@ -227,7 +227,7 @@ write, and the write resolves after its listeners ran.
 | Event | Payload | When |
 | --- | --- | --- |
 | `change` | `({ id, action })` | Any of the three below; `action` is `'insert'`, `'update'` or `'remove'` |
-| `insert` | `({ id })` | A record joined the collection: written, or revived |
+| `insert` | `({ id })` | A record joined the collection: written, or revived by a whole-record write (an edit of a field on a deleted record tells nothing: delete wins) |
 | `update` | `({ id })` | A record of the collection changed and stayed in it |
 | `remove` | `({ id })` | A record left it: deleted, purged, encrypted, or of another collection now |
 

@@ -191,8 +191,9 @@ plugin. See [Text and rich text](./text).
 
 ### Tombstone
 
-What a deleted record leaves behind, so the deletion reaches every node and an older write cannot bring
-it back. See [Cleanup](./cleanup).
+What a deleted record leaves behind, so the deletion reaches every node and an edit of a field, older or
+newer, cannot bring it back; only a newer whole-record write does. See
+[Delete a record another node is editing](./fields#delete-a-record-another-node-is-editing) and [Cleanup](./cleanup).
 
 ### Tree
 

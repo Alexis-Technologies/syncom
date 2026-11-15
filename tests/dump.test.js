@@ -34,20 +34,23 @@ test('dumps', async (t) => {
       await source.Tag.insert({ name: 't' });
       await source.delete(ids[4], { data: { why: 'gone' } });
       await source.purge(ids[5]);
-      // Revived above its tombstone: alive, with a `deleted` stamp in its meta.
+      // Revived above its tombstone by a peer's whole-record write: alive. Another holds a peer's field op above
+      // its tombstone: dead all the same (delete wins), the field in its meta.
       await source.delete(ids[6]);
-      const dead = await source[SOURCE].entry(ids[6]);
-      await source.applyRemote([
-        {
-          origin: 'peer',
-          seq: 1,
-          ts: dead.meta.deleted[0] + 1,
-          type: 'set',
-          id: ids[6],
-          data: { back: true, $type: 'Post' },
-        },
-      ]);
+      await source.delete(ids[7]);
+      const dead = await source[SOURCE].entry(ids[7]);
+      const above = (seq, type, id) => ({
+        origin: 'peer',
+        seq,
+        ts: dead.meta.deleted[0] + seq,
+        type,
+        id,
+        data: { back: true, $type: 'Post' },
+      });
+      await source.applyRemote([above(1, 'write', ids[6]), above(2, 'set', ids[7])]);
       assert.strictEqual((await source.get(ids[6])).back, true);
+      assert.strictEqual(await source.get(ids[7]), null);
+      assert.strictEqual((await source[SOURCE].entry(ids[7])).data.back, true, 'held in the tombstone, unseen');
       const dump = await exportJSON(source);
       assert.strictEqual(dump.format, 1);
       assert.strictEqual(dump.node, source.nodeId);
@@ -60,6 +63,7 @@ test('dumps', async (t) => {
       assert.strictEqual(byId.get(ids[4]).deleted, true, 'a tombstone');
       assert.strictEqual(byId.get(ids[5]).deleted, true, 'a purge');
       assert.strictEqual(byId.get(ids[6]).deleted, false, 'revived: alive');
+      assert.strictEqual(byId.get(ids[7]).deleted, true, 'a field op above the tombstone: dead');
       assert.strictEqual(byId.get(ids[0]).deleted, false);
       // JSON through and through.
       const text = JSON.stringify(dump);
@@ -115,6 +119,7 @@ test('dumps', async (t) => {
       assert.strictEqual(await other.get(ids[4]), null, 'a tombstone deletes');
       assert.deepStrictEqual(await other.get(ids[0]), await source.get(ids[0]));
       assert.deepStrictEqual(await other.get(ids[6]), await source.get(ids[6]), 'a revived record stays alive');
+      assert.strictEqual(await other.get(ids[7]), null, 'a tombstone with a field op above it deletes');
       assert.strictEqual(await other.get(ids[5]), null, 'a purge deletes');
       // A foreign record flagged dead deletes; a dump of another format is refused.
       await importJSON(other, { records: [{ id: 'x2', data: {}, deleted: true }] }, { mode: 'insert' });

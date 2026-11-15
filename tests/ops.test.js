@@ -19,6 +19,7 @@ const {
 // The folds under the shipped plugins' registry: the lean core alone refuses a splice or a tree op as a kind it lacks.
 const { applyOp, mergeEntry, PLUGINS } = require('../src/all/all.js');
 const { createPlugins } = require('../src/plugin.js');
+const { applyChanges } = require('./utils/changes.js');
 const SHIPPED = createPlugins(PLUGINS);
 
 const op = (type, ts, origin, extra = {}) => ({ type, ts, origin, seq: extra.seq ?? ts, id: 'r', ...extra });
@@ -51,11 +52,13 @@ const orderedPerOrigin = (sequence) => {
   return true;
 };
 
-const assertCommutes = (ops, expectedData) => {
+// `alive`, when given, is what every order must leave the record: a tombstone holds data in meta that no reader sees.
+const assertCommutes = (ops, expectedData, alive = undefined) => {
   const results = permutations(ops).filter(orderedPerOrigin).map(replay);
   for (const result of results) {
     assert.deepStrictEqual(result.data, expectedData);
     assert.deepStrictEqual(result.meta, results[0].meta);
+    if (alive !== undefined) assert.strictEqual(isAlive(result), alive);
   }
 };
 
@@ -108,7 +111,14 @@ test('ops module', async (t) => {
     const stale = applyOp(dead, op('set', 1, 'C', { data: { x: 9 } }));
     assert.strictEqual(isAlive(stale.entry), false);
     assert.strictEqual(stale.changed, false);
-    const revived = applyOp(dead, op('set', 3, 'C', { data: { y: 2 } }));
+    // A newer set does not either: delete wins over a field op, which lies in meta unseen — the reading
+    // shows nothing of it (no change) — until a whole-record write stamped below it brings the record back.
+    const unseen = applyOp(dead, op('set', 3, 'C', { data: { y: 2 } }));
+    assert.strictEqual(isAlive(unseen.entry), false);
+    assert.strictEqual(unseen.changed, true, 'news to persist: a peer that took the set first holds it too');
+    assert.deepStrictEqual(unseen.changes, []);
+    assert.deepStrictEqual(unseen.entry.meta.clock.y, [3, 'C']);
+    const revived = applyOp(dead, op('write', 3, 'C', { data: { y: 2 } }));
     assert.strictEqual(isAlive(revived.entry), true);
     assert.deepStrictEqual(revived.entry.data, { y: 2 });
     assertCommutes(
@@ -132,10 +142,13 @@ test('ops module', async (t) => {
     const entry = replay(ops);
     assert.strictEqual(isCounter(entry.meta, 'n'), true);
     assert.deepStrictEqual(entry.meta.counters.n, { A: [2, 1, 3], B: [1, 3, 2] });
-    // A counter revives a tombstone like any newer write.
+    // A counter above a tombstone does not revive it (delete wins); a write between the two brings the record
+    // back with the counter on it.
     const dead = applyOp(entry, op('delete', 5, 'D')).entry;
     assert.strictEqual(isAlive(dead), false);
-    const back = applyOp(dead, op('inc', 6, 'A', { seq: 3, key: 'n', value: 1 })).entry;
+    const unseen = applyOp(dead, op('inc', 7, 'A', { seq: 3, key: 'n', value: 1 })).entry;
+    assert.strictEqual(isAlive(unseen), false);
+    const back = applyOp(unseen, op('write', 6, 'W', { data: {} })).entry;
     assert.strictEqual(isAlive(back), true);
     assert.deepStrictEqual(back.data, { n: 1 });
   });
@@ -311,20 +324,23 @@ test('ops module', async (t) => {
     assert.deepStrictEqual(over.rejected, []);
     assert.deepStrictEqual(over.entry.data, { t: 'w' });
     assert.deepStrictEqual(over.entry.meta.sets, {});
-    // A tombstone: an add newer than it revives, an older one does not.
+    // A tombstone: an add older than it is pruned, a newer one lies in meta unseen — delete wins — whatever the
+    // order; a write between the two brings the record back with the add on it.
     const dead = replay([add(1, 'A', 1, ['x']), op('delete', 2, 'D')]);
     assert.strictEqual(isAlive(dead), false);
     assert.deepStrictEqual(dead.data, {});
-    const back = applyOp(dead, add(3, 'A', 2, ['y'])).entry;
-    assert.strictEqual(isAlive(back), true);
-    assert.deepStrictEqual(back.data, { t: ['y'] });
-    assertCommutes([op('delete', 2, 'D'), add(1, 'A', 1, ['x'])], {});
-    assertCommutes([op('delete', 2, 'D'), add(3, 'A', 1, ['x'])], { t: ['x'] });
-    // An add newer than the tombstone revives even once removed — like a
-    // counter back at zero — and a remove alone never does.
+    const unseen = applyOp(dead, add(3, 'A', 2, ['y'])).entry;
+    assert.strictEqual(isAlive(unseen), false);
+    assertCommutes([op('delete', 2, 'D'), add(1, 'A', 1, ['x'])], {}, false);
+    assertCommutes([op('delete', 2, 'D'), add(3, 'A', 1, ['x'])], { t: ['x'] }, false);
+    assertCommutes(
+      [op('delete', 2, 'D'), add(4, 'A', 1, ['x']), op('write', 3, 'W', { data: { y: 1 } })],
+      { y: 1, t: ['x'] },
+      true,
+    );
+    // An add and its remove above the tombstone: dead too, either way.
     const gone = replay([op('delete', 2, 'D'), add(3, 'A', 1, ['x']), remove(4, 'B', 1, [['x', { A: 3 }]])]);
-    assert.strictEqual(isAlive(gone), true);
-    assert.deepStrictEqual(gone.data, { t: [] });
+    assert.strictEqual(isAlive(gone), false);
     assert.strictEqual(isAlive(replay([op('delete', 2, 'D'), remove(4, 'B', 1, [['x', { A: 3 }]])])), false);
   });
 
@@ -931,11 +947,15 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assert.strictEqual(gone.entry.meta.blocks.body, undefined);
     assert.deepStrictEqual(gone.delta, { body: undefined });
     assert.strictEqual(isAlive(gone.entry), false);
-    // Typing after the tombstone revives the record.
-    const revived = applyOp(gone.entry, splice(60, 'A', 3, 'body', { at: '^', content: 'z' }));
+    // Typing after the tombstone does not revive the record (delete wins): the run lies in meta unseen, and
+    // a write below it brings the record back with the text on it.
+    const typed = applyOp(gone.entry, splice(60, 'A', 3, 'body', { at: '^', content: 'z' }));
+    assert.strictEqual(isAlive(typed.entry), false);
+    assert.deepStrictEqual(typed.changes, []);
+    assert.deepStrictEqual(latestClock(typed.entry.meta, true), [60, '']);
+    const revived = applyOp(typed.entry, op('write', 55, 'W', { data: {} }));
     assert.strictEqual(isAlive(revived.entry), true);
     assert.deepStrictEqual(revived.entry.data, { body: 'z' });
-    assert.deepStrictEqual(latestClock(revived.entry.meta, true), [60, '']);
   });
 
   await t.test('a list moves and assigns through applyOp; concurrent moves leave the element once', () => {
@@ -1180,10 +1200,10 @@ test('ops: a peer-shaped meta reaches nothing it should not', async (t) => {
     assertCommutes([r, x, write, z], { t: 1, outline: [] });
     const back = applyOp(replay([r, x, write, z]), tree(160, 'A', 3, 'r', null));
     assert.deepStrictEqual(back.entry.data.outline, [{ id: 'r', children: [{ id: 'z', children: [] }] }]);
-    // A tree touched after a tombstone revives the record.
+    // A tree touched after a tombstone does not revive the record: delete wins.
     const dead = applyOp(replay([r]), op('delete', 100, 'D'));
     assert.strictEqual(isAlive(dead.entry), false);
-    assert.strictEqual(isAlive(applyOp(dead.entry, tree(150, 'A', 2, 'r', null)).entry), true);
+    assert.strictEqual(isAlive(applyOp(dead.entry, tree(150, 'A', 2, 'r', null)).entry), false);
     // Every other kind outranks a tree: a tree op on any of them is refused,
     // and any of them landing on a tree takes the field.
     const reg = applyOp(null, op('set', 1, 'A', { data: { outline: 1 } })).entry;
@@ -1925,7 +1945,8 @@ test('ops: unset is a field’s own reset', async (t) => {
     assert.strictEqual(isAlive(entry), false);
     const unset = applyOp(entry, at(3, 'B', 'unset', { value: ['a'] })).entry;
     assert.strictEqual(isAlive(unset), false, 'a watermark is not a write');
-    const revived = applyOp(unset, at(4, 'B', 'set', { data: { a: 4 } })).entry;
+    assert.strictEqual(isAlive(applyOp(unset, at(4, 'B', 'set', { data: { a: 4 } })).entry), false, 'nor is a set');
+    const revived = applyOp(unset, at(4, 'B', 'write', { data: { a: 4 } })).entry;
     assert.strictEqual(isAlive(revived), true);
   });
 
@@ -2161,48 +2182,66 @@ test('a set reads after every add and remove as its live elements read whole, in
   }
 });
 
-test('a delete that a field survives reports the fields that went, not a record gone: the reading shows the survivor', () => {
-  // A writes v, then types into body at a later stamp; B's delete, stamped between the two, lands after both:
-  // body is above the tombstone and keeps the record alive, v below it goes.
-  let entry = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
-  entry = applyOp(entry, op('splice', 5, 'A', { seq: 2, key: 'body', value: { at: '^', content: 'kept' } })).entry;
-  const survived = applyOp(entry, op('delete', 3, 'B', { seq: 1 }));
-  assert.strictEqual(isAlive(survived.entry), true, 'alive by the field above the tombstone');
-  assert.deepStrictEqual(survived.entry.data, { body: 'kept' });
-  assert.deepStrictEqual(
-    survived.changes,
-    [{ action: 'unset', field: 'v' }],
-    'what the reading shows: v gone, body kept',
-  );
-  // Nothing above the tombstone: the record is gone, and the report says so.
-  const plain = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
-  const gone = applyOp(plain, op('delete', 3, 'B', { seq: 1 }));
-  assert.strictEqual(isAlive(gone.entry), false);
-  assert.deepStrictEqual(gone.changes, [{ action: 'delete' }]);
+test('delete wins: a field op above the tombstone lies in meta unseen in any order; only a whole-record write revives', () => {
+  const ops = [
+    op('write', 1, 'A', { data: { $type: 'Task', title: 'x' } }),
+    op('delete', 3, 'B'),
+    op('set', 5, 'C', { data: { done: true } }),
+    op('inc', 6, 'C', { seq: 6, key: 'votes', value: 1 }),
+    op('add', 7, 'C', { seq: 7, key: 'tags', value: ['a'] }),
+    op('splice', 8, 'C', { seq: 8, key: 'body', value: { at: '^', content: 'hi' } }),
+  ];
+  // Every order: the record dead, the same meta — and the fields above the tombstone held, for a write to come.
+  const fields = { done: true, votes: 1, tags: ['a'], body: 'hi' };
+  assertCommutes(ops, fields, false);
+  // A whole-record write between the tombstone and the field ops brings the record back with them on it: it
+  // carries its `$type` (a collection's write names it), so the record is of its collection again.
+  const between = op('write', 4, 'D', { data: { $type: 'Task', title: 'back' } });
+  assertCommutes([...ops, between], { $type: 'Task', title: 'back', ...fields }, true);
+  // One above them all takes the record as it writes it, the field ops below it pruned.
+  const above = op('write', 9, 'D', { data: { $type: 'Task', title: 'fresh' } });
+  assertCommutes([...ops, above], { $type: 'Task', title: 'fresh' }, true);
+  // The reading shows nothing of a field op on a dead record: no change, but news to persist.
+  const dead = replay(ops.slice(0, 2));
+  const set = applyOp(dead, ops[2]);
+  assert.deepStrictEqual([set.changed, set.changes, isAlive(set.entry)], [true, [], false]);
+  // A revival reports what the reading shows: the write's fields, and the ones above it kept.
+  const back = applyOp(replay(ops), between);
+  assert.deepStrictEqual(applyChanges(null, back.changes), { $type: 'Task', title: 'back', ...fields });
 });
 
-test('a block stamped in the tombstone’s very ms by an origin above it survives the prune and keeps the record alive, either order', () => {
-  // The tie between a block's stamp and a tombstone's is decided by the origin, as the prune decides it: `C` above
-  // `B` stands, `A` below it goes — and `isAlive` must say the same, or a delete reports the record gone while the
-  // block stays, and the next op revives what the changes said was gone.
+test('a delete that lands after a field op stamped above it still reports the record gone: the field lies in meta', () => {
+  // A writes v, then types into body at a later stamp; B's delete, stamped between the two, lands after both:
+  // body stays in meta, above the tombstone, and the record is gone all the same.
+  const written = applyOp(null, op('write', 1, 'A', { data: { v: 1 } })).entry;
+  const keystroke = op('splice', 5, 'A', { seq: 2, key: 'body', value: { at: '^', content: 'kept' } });
+  const gone = applyOp(applyOp(written, keystroke).entry, op('delete', 3, 'B', { seq: 1 }));
+  assert.strictEqual(isAlive(gone.entry), false, 'delete wins');
+  assert.deepStrictEqual(gone.changes, [{ action: 'delete' }]);
+  assert.deepStrictEqual(Object.keys(gone.entry.meta.blocks), ['body'], 'the run, held for a write to come');
+  // The other order: the delete, then the keystroke — the same entry, and a keystroke that shows nothing.
+  const typed = applyOp(applyOp(written, op('delete', 3, 'B', { seq: 1 })).entry, keystroke);
+  assert.deepStrictEqual(typed.changes, []);
+  assert.deepStrictEqual(typed.entry.meta, gone.entry.meta);
+  assert.deepStrictEqual(typed.entry.data, gone.entry.data);
+});
+
+test('a block stamped in the tombstone’s very ms leaves the record dead either order, with the same meta', () => {
+  // The tie between a block's stamp and a tombstone's is decided by the origin, as the prune decides it: `C`
+  // above `B` stands in meta, `A` below it goes — and the record is dead both ways: a block keeps nothing alive.
   const move = (origin) => op('tree', 5, origin, { key: 'outline', value: { node: 'n4', parent: null, fi: 'V' } });
   const gone = op('delete', 5, 'B');
   const read = (entry) =>
     JSON.parse(JSON.stringify({ data: entry.data, blocks: entry.meta.blocks, deleted: entry.meta.deleted }));
-  // The move, then the tombstone — the block stands, the record is alive, and the delete is reported as what went.
   const moveFirst = applyOp(applyOp(null, move('C')).entry, gone);
-  assert.strictEqual(isAlive(moveFirst.entry), true, 'the block stands above the tombstone');
-  assert.strictEqual(Object.hasOwn(moveFirst.entry.meta.blocks, 'outline'), true);
-  assert.ok(
-    !moveFirst.changes.some((change) => change.action === 'delete'),
-    `not a record gone: ${JSON.stringify(moveFirst.changes)}`,
-  );
-  // The tombstone, then the move: the same entry, alive.
+  assert.strictEqual(isAlive(moveFirst.entry), false, 'delete wins');
+  assert.strictEqual(Object.hasOwn(moveFirst.entry.meta.blocks, 'outline'), true, 'the block stands in meta');
+  assert.deepStrictEqual(moveFirst.changes, [{ action: 'delete' }]);
   const goneFirst = applyOp(applyOp(null, gone).entry, move('C'));
-  assert.strictEqual(isAlive(goneFirst.entry), true);
+  assert.strictEqual(isAlive(goneFirst.entry), false);
+  assert.deepStrictEqual(goneFirst.changes, []);
   assert.deepStrictEqual(read(goneFirst.entry), read(moveFirst.entry), 'the same whichever came first');
-  assert.deepStrictEqual(goneFirst.entry.data.outline, [{ id: 'n4', children: [] }]);
-  // An origin below the tombstone's: pruned when it came first, moot when it came after — dead both ways.
+  // An origin below the tombstone's: pruned when it came first, moot when it came after.
   const olderFirst = applyOp(applyOp(null, move('A')).entry, gone);
   assert.strictEqual(isAlive(olderFirst.entry), false);
   assert.deepStrictEqual(olderFirst.changes, [{ action: 'delete' }]);

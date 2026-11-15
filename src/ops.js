@@ -18,8 +18,14 @@
 //                 clock is not below base. A `write` (whole-record write) and
 //                 a `delete` both raise it, which is what stops an older
 //                 concurrent `set` from resurrecting a field they removed.
-//   deleted     — the tombstone stamp; the record is alive again as soon as
-//                 something newer than it lands (see isAlive)
+//   deleted     — the tombstone stamp, set while the newest reset is a
+//                 delete: DELETE WINS over every field op. A `set`, an `inc`,
+//                 an `add`, a plugin's op stamped above it lands in the meta
+//                 (and in `data`, which stays a function of the meta) but the
+//                 record reads as gone (see isAlive), the same whatever the
+//                 order; only a whole-record `write` stamped above it lifts
+//                 it, and brings back with it what the field ops above the
+//                 write hold — what is below the write it prunes
 //   counters[f] — { [stream]: [seq, sum, ts] }: a PN-counter, one running sum
 //                 per STREAM — the op's vector key, `origin` or `origin@scope`
 //                 (src/vector.js opKey), since seqs run per stream: re-applying
@@ -85,6 +91,13 @@
 // stamp is below `base` and clamps a surviving component below `base` to 0,
 // and the same predicate guards each tag as it is applied — so meta, not only
 // data, agrees whatever the order of adds, removes and resets.
+//
+// Why delete wins converges: whether a record is alive reads `deleted` alone,
+// and `deleted` is set exactly while the newest of the resets (`base`) is a
+// delete — a join of the two watermarks, order-free (mergeEntry does the
+// same). A field op never moves either, so it lands the same on a live entry
+// and on a dead one, and two nodes that took it before and after the delete
+// hold one meta.
 
 const { compareClock, maxClock, floorOf, opKey } = require('./vector.js');
 const { deepEqual, OP_TYPES, asJson, isPlainObject, own } = require('./shape.js');
@@ -992,7 +1005,12 @@ const applyOp = (previous, op, limits = null, lost = null) => {
   changes.covered = new Set();
   const outcome = (changed, whole = false) => {
     if (whole) delete changes.covered;
-    else {
+    else if (!isAlive(entry)) {
+      // A record that stays gone shows nothing of the op (delete wins): what it changed lies in the meta, news to
+      // persist, and the reading — none — is what it was.
+      changes.length = 0;
+      delete changes.covered;
+    } else {
       if (changed) revived(previous, entry, delta, changes.covered);
       changesOf(entry, delta, changes, plugins);
     }
@@ -1050,18 +1068,21 @@ const applyOp = (previous, op, limits = null, lost = null) => {
       meta.base = stamp;
       meta.deleted = stamp;
       applyBase(entry, delta, plugins);
-      // The data a delete carries lies on the tombstone, at its stamp: below
-      // what keeps a record alive, so the record is as dead as without it,
-      // and there for whoever reads the tombstone (`delete(id, { data })`) —
-      // reported with the delete, never as puts of a record that is gone.
-      if (isPlainObject(op.data)) applyFields(entry, op.data, stamp, delta, rejected, plugins, null);
-      // A field stamped above the tombstone survives it and keeps the record alive (a concurrent
-      // write landed first): the reading shows the survivor and the fields that went — reported so
-      // (`unset` each, from the delta), never as a record gone (EVT-5).
-      if (isAlive(entry)) return outcome(true);
-      // What the tombstone carries: the fields the delete's data applied — never the payload as sent.
-      const carried = Object.keys(entry.data).length > 0 ? asJson(entry.data) : null;
-      changes.push(carried === null ? { action: 'delete' } : { action: 'delete', data: carried });
+      // The data a delete carries lies on the tombstone, at its stamp: the
+      // record is as dead as without it, and the data there for whoever
+      // reads the tombstone (`delete(id, { data })`) — reported with the
+      // delete, never as puts of a record that is gone.
+      let carried = null;
+      if (isPlainObject(op.data)) {
+        applyFields(entry, op.data, stamp, delta, rejected, plugins, null);
+        // What the tombstone carries: the fields the delete's data applied — never the payload as sent, nor a
+        // field op stamped above the tombstone that the meta holds unseen.
+        for (const field of Object.keys(op.data)) {
+          if (compareClock(own(meta.clock, field), stamp) === 0) (carried ??= {})[field] = entry.data[field];
+        }
+      }
+      // Delete wins: whatever a field op stamped above the tombstone left in the meta, the record is gone (EVT-5).
+      changes.push(carried === null ? { action: 'delete' } : { action: 'delete', data: asJson(carried) });
       return outcome(true, true);
     }
   } else if (op.type === 'merge') {
@@ -1139,12 +1160,12 @@ const applyOp = (previous, op, limits = null, lost = null) => {
   return outcome(changed);
 };
 
-// A record alive again — an op above its tombstone, a joined state — reads
-// what the tombstone carried too (`delete(id, { data })`, below what keeps
-// a record alive): reported with the op that revived it, as the resets of
-// the fields its own path did not report, so the changes say what the
-// reading shows (EVT-1). Nothing to add for a record that was alive, or is
-// not, or whose tombstone carried nothing.
+// A record alive again — a whole-record write above its tombstone, a joined
+// state — reads what the field ops stamped above the write left in the meta
+// while the record was gone: reported with the op that revived it, as the
+// resets of the fields its own path did not report, so the changes say what
+// the reading shows (EVT-1). Nothing to add for a record that was alive, or
+// is not, or that holds nothing but what the write laid.
 const revived = (previous, entry, delta, covered) => {
   if (!previous || previous.meta.deleted === null || isAlive(previous) || !isAlive(entry)) return;
   const { data } = entry;
@@ -1168,44 +1189,14 @@ const changesOf = (entry, delta, changes, plugins) => {
   return changes;
 };
 
-// Alive unless purged, or a tombstone stands and nothing newer has landed.
+// Alive unless purged or deleted. Delete wins: a tombstone stands until a
+// whole-record write stamped above it lifts it (the `write` path) — a field
+// op above it lands in the meta and keeps nothing alive, so whether a record
+// reads as gone never depends on the order its ops arrived in.
 const isAlive = (entry) => {
   if (!entry) return false;
   const { meta } = entry;
-  if (meta.purged) return false;
-  if (!meta.deleted) return true;
-  for (const field of Object.keys(meta.clock)) {
-    if (compareClock(meta.clock[field], meta.deleted) > 0) return true;
-  }
-  for (const field of Object.keys(meta.counters)) {
-    const perStream = meta.counters[field];
-    for (const stream of Object.keys(perStream)) {
-      if (compareClock(slotStamp(stream, perStream[stream]), meta.deleted) > 0) return true;
-    }
-  }
-  // An add newer than the tombstone revives, live or since removed — like a
-  // counter whose sum is back to zero; a remove alone never does.
-  const sets = setsOf(meta);
-  for (const field of Object.keys(sets)) {
-    const elements = sets[field];
-    for (const key of Object.keys(elements)) {
-      const slots = elements[key];
-      for (const origin of Object.keys(slots)) {
-        if (slots[origin][0] > 0 && compareClock([slots[origin][0], origin], meta.deleted) > 0) return true;
-      }
-    }
-  }
-  // A block touched after the tombstone revives the record too. A block's `ts`
-  // carries no origin, so the tie is decided here as the prune decided it: a
-  // block that stands with the tombstone's very stamp holds an op stamped
-  // above it (the same ms, an origin above the tombstone's — what
-  // `pruneField` kept and what a later arrival of that op is admitted by).
-  // Told older, the tombstone would be reported as the record gone while
-  // the block stayed, and the next op would revive what the changes said
-  // was gone (the seeded mesh's shadow of a tree field).
-  const blocks = blocksOf(meta);
-  for (const field of Object.keys(blocks)) if (blocks[field].ts >= meta.deleted[0]) return true;
-  return false;
+  return !meta.purged && !meta.deleted;
 };
 
 /**

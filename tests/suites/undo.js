@@ -346,35 +346,29 @@ const runUndoTests = async (t, assert, createStorage) => {
     await b.inc(id, 'hits', 1);
     await link.reconnect();
     await settle([a, b]);
-    assert.deepStrictEqual(await a.get(id), { hits: 1 }, 'B’s increment revived the record');
+    assert.strictEqual(await a.get(id), null, 'the delete wins over B’s increment');
     const before = undo.size.undo;
     assert.deepStrictEqual(
       await undo.undo(),
       { applied: 0, skipped: 2 },
       'the write and the counter it would make again',
     );
-    assert.deepStrictEqual(await a.get(id), { hits: 1 }, 'left alone');
+    assert.strictEqual(await a.get(id), null, 'left alone');
     assert.strictEqual(undo.size.undo, before - 1, 'the step is spent either way');
     assert.strictEqual(undo.size.redo, 0, 'nothing was done, nothing to redo');
-    await a.delete(id);
+    await a.set(id, { title: 'again' });
     await settle([a, b]);
     link.disconnect();
+    await a.delete(id);
+    await tick();
     await b.inc(id, 'hits', 1);
     await link.reconnect();
     await settle([a, b]);
-    assert.deepStrictEqual(await a.get(id), { hits: 1 });
-    assert.deepStrictEqual(
-      await undo.undo({ force: true }),
-      { applied: 2, skipped: 0 },
-      'the write and the counter made again',
-    );
-    assert.deepStrictEqual(
-      await a.get(id),
-      { hits: 1 },
-      'B’s increment went with the reset; the counter made again as it read',
-    );
+    assert.strictEqual(await a.get(id), null);
+    assert.deepStrictEqual(await undo.undo({ force: true }), { applied: 1, skipped: 0 }, 'the write made again');
+    assert.deepStrictEqual(await a.get(id), { title: 'again' }, 'B’s increment, below the write, went with it');
     await settle([a, b]);
-    assert.deepStrictEqual(await b.get(id), { hits: 1 });
+    assert.deepStrictEqual(await b.get(id), { title: 'again' });
     undo.stop();
   });
 

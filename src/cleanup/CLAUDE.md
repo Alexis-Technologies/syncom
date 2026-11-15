@@ -19,10 +19,11 @@ src/cleanup/cleanup.js    @alexify/syncom/cleanup — cleanup(db, { minimumDelet
   the entry). The catalog row does not change: the catalog is derived from the records AND the namespace
   (`EntryStore.open` lists it before the catalog loads; `#loadCatalog` rebuilds from both). `load`/`loadMany` fall back
   to the namespace for a gone row with no file, so a late op below the stamps is moot exactly as before — watermarks
-  and set slots above the delete included — a revival above them writes a file again and takes the kv entry away in
-  the same write set (`writeMany`), and a snapshot page hands the tombstone on whole. Nothing is read to decide a
-  sweep: the horizon from the row's `deleted` stamp, the ack check from the log's index. Nothing of this node's own is
-  folded before every enabled registered node acknowledged the delete (`awaitSync`); a peer's delete is theirs to
+  and set slots above the delete included — an op above them (a field op lands in the tombstone unseen, a whole-record
+  write revives) writes a file again and takes the kv entry away in the same write set (`writeMany`), and a snapshot
+  page hands the tombstone on whole. Nothing is read to decide a sweep: the horizon from the row's `deleted` stamp,
+  the ack check from the log's index. Nothing of this node's own is folded before every enabled registered node
+  acknowledged the delete (`awaitSync`); a peer's delete is theirs to
   deliver and folds on age; an own delete the log no longer retains folds (lossless) but is never dropped under
   `awaitSync` — a node that only hosts cannot prove it was delivered. `drop: true` takes the kv entry and the row —
   documented danger.

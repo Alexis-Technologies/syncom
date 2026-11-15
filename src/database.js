@@ -1309,6 +1309,8 @@ class Database extends Emitter {
 
   // The unique keys `entry` would collide on, as the catalog knows them.
   async #conflicts(id, entry) {
+    // A record gone holds no key (a field op above its tombstone included).
+    if (!isAlive(entry)) return [];
     const def = this.#definitionOf(entry.data);
     if (!def || def.unique.length === 0) return [];
     const view = await this.#view(id, entry);
@@ -1407,6 +1409,10 @@ class Database extends Emitter {
   // from its validator — the op is the peer's, already in its log, and is
   // never rewritten here; the same schema gives the same verdict everywhere.
   async #invalid(op, entry) {
+    // A record the op leaves gone is read by no one: nothing to validate. Delete wins, so a field op that lands
+    // above a tombstone leaves it gone on every node — validated nowhere, never skipped on one node and applied on
+    // another, whichever of the two it met first.
+    if (!isAlive(entry)) return null;
     const def = this.#definitionOf(entry.data);
     if (!def?.validator || !VALIDATED.has(op.type)) return null;
     try {
