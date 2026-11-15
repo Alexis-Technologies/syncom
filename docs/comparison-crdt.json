@@ -731,7 +731,7 @@
           "mark": "",
           "text": "node.js ≥ 22 (CI on 22 and 24); browsers through OPFS or IndexedDB",
           "note": "Nothing in the repository tests or claims Deno, Bun or React Native. The browser half needs Web Crypto with Ed25519, and OPFS or IndexedDB (`@alexify/syncom/idb`).",
-          "source": "package.json:6-12; package.json:151-152; .github/workflows/ci.yml:34; docs/guide/browser.md:84; src/signing/ed25519.browser.js"
+          "source": "package.json:6-12; package.json:151-152; .github/workflows/ci.yml:34; docs/guide/browser-storage.md:84; src/signing/ed25519.browser.js"
         },
         "types": {
           "mark": "✅",
@@ -748,7 +748,7 @@
           "mark": "",
           "text": "a record: a JSON object with an id, many per storage",
           "note": "Each top-level field of a record is one kind — register, counter, set, list, text or tree. A replica is a storage directory: records, the op log, the chain, the catalog.",
-          "source": "src/ops.js:3-17; src/ops.js:45-53; docs/guide/sync.md:94-118"
+          "source": "src/ops.js:3-17; src/ops.js:45-53; docs/guide/replication.md:94-118"
         },
         "manyDocs": {
           "mark": "✅",
@@ -769,7 +769,7 @@
           "mark": "",
           "text": "by field name: the first op decides the kind (`inc`, `add`, `splice`, `treeMove`)",
           "note": "A record is created by `insert()` (a minted UUID) or `set(id)`. Two nodes that create one field with the same kind at once merge into one field — there are no container ids; two `set(id)` of one id are whole-record writes and the newer wins.",
-          "source": "docs/guide/sync.md:135-137; src/ops.js:570-588; index.d.ts:1529"
+          "source": "docs/guide/replication.md:135-137; src/ops.js:570-588; index.d.ts:1529"
         },
         "values": {
           "mark": "",
@@ -781,13 +781,13 @@
           "mark": "",
           "text": "one register: replaced whole, the newer writer wins",
           "note": "Two nodes changing different keys of one nested object at once keep one side (probe confirmed); `update({ 'a.b': 1 })` writes a field named `a.b`.",
-          "source": "docs/guide/sync.md:614-618; docs/guide/database.md:72-77; src/ops.js:458-480"
+          "source": "docs/guide/replication.md:614-618; docs/guide/database.md:72-77; src/ops.js:458-480"
         },
         "kindClash": {
           "mark": "",
           "text": "fixed precedence, not stamps: register > counter > set > list > text > tree",
           "note": "Where the winner arrives the loser's state is dropped; where the winner is held the loser's op is refused (`OP_REFUSED` error event). The loser's ops stay in the log, so `history()` on a node that applied them still shows them.",
-          "source": "src/ops.js:418-454; src/ops.js:889-946; docs/guide/sync.md:163-174"
+          "source": "src/ops.js:418-454; src/ops.js:889-946; docs/guide/replication.md:163-174"
         },
         "schema": {
           "mark": "✅",
@@ -798,7 +798,7 @@
         "replicaId": {
           "mark": "",
           "text": "`nodeId`: with `/signing`, the Ed25519 public key (43 base64url characters); without it, what `getId` mints",
-          "source": "src/signing/signing.js; src/database.js (#loadIdentity); docs/guide/sync.md#signatures"
+          "source": "src/signing/signing.js; src/database.js (#loadIdentity); docs/guide/replication.md"
         },
         "idReuse": {
           "mark": "⚠️",
@@ -810,7 +810,7 @@
           "mark": "✅",
           "text": "`actor` on every op (`createDatabase({ actor })` or per write), signed and replicated",
           "note": "A claim the origin signs, not a proof of who the user is.",
-          "source": "src/signing/signing.d.ts; src/signing/sign.js; docs/guide/sync.md#signatures"
+          "source": "src/signing/signing.d.ts; src/signing/sign.js; docs/guide/replication.md"
         },
         "opId": {
           "mark": "",
@@ -822,7 +822,7 @@
           "mark": "",
           "text": "hybrid wall clock `max(Date.now(), last + 1)` that observes peers; vectors for delivery",
           "note": "Registers order by `(ts, origin)`. The clock never runs backwards nor behind a stamp it has seen, so convergence does not depend on clocks agreeing — only who wins does.",
-          "source": "src/vector.js:78-95; src/vector.js:14-20; docs/guide/sync.md:68-92"
+          "source": "src/vector.js:78-95; src/vector.js:14-20; docs/guide/replication.md:68-92"
         },
         "wallTime": {
           "mark": "✅",
@@ -865,7 +865,7 @@
           "mark": "✅",
           "text": "`set(id, {})` or `delete(id)`: a reset; newer concurrent ops survive",
           "note": "The reset drops what is stamped below it in every kind: registers, counters, set tags, list and text runs, tree moves.",
-          "source": "src/ops.js:337-416; src/ops.js:713-731; docs/guide/sync.md:147-153"
+          "source": "src/ops.js:337-416; src/ops.js:713-731; docs/guide/replication.md:147-153"
         },
         "keyOrder": {
           "mark": "",
@@ -882,19 +882,19 @@
           "mark": "",
           "text": "finite floats; a negative `inc` decrements; each origin's sum within ±2^53−1",
           "note": "An `inc` that would take its origin's sum past `Number.MAX_SAFE_INTEGER` is refused as a bound (`detail: 'counter'`), the same on every node; the sums add up in origin order, so fractions read alike everywhere.",
-          "source": "src/ops.js (MAX_COUNT, counterValue, the inc branch); docs/guide/sync.md#guarantees-and-limits"
+          "source": "src/ops.js (MAX_COUNT, counterValue, the inc branch); docs/guide/replication.md"
         },
         "counterReset": {
           "mark": "",
           "text": "a reset drops increments stamped below it; a register outranks the counter",
           "note": "A peer's register write takes the field whatever its stamp (locally `update()` of a counter throws `FIELD_KIND`). A counter one origin incremented both before and after a concurrent reset does not converge — documented and left so.",
-          "source": "docs/guide/sync.md:155-157; src/ops.js:337-360; src/ops.js:448-454; src/versions/history.js"
+          "source": "docs/guide/replication.md:155-157; src/ops.js:337-360; src/ops.js:448-454; src/versions/history.js"
         },
         "set": {
           "mark": "✅",
           "text": "oR-set field: `add()` / `remove()`; a concurrent add survives a remove",
           "note": "A remove names the add stamps its node observed; elements are told apart by their JSON text and read sorted.",
-          "source": "src/ops.js:23-27; src/ops.js:482-552; docs/guide/sync.md:104-108"
+          "source": "src/ops.js:23-27; src/ops.js:482-552; docs/guide/replication.md:104-108"
         },
         "list": {
           "mark": "✅",
@@ -1098,7 +1098,7 @@
           "mark": "",
           "text": "every call: durable once its op is appended to the log",
           "note": "`createDatabase({ defer })` lets record files lag; the log is written at once.",
-          "source": "src/commit.js:1-10; index.d.ts:1100-1106; docs/guide/sync.md:602-610"
+          "source": "src/commit.js:1-10; index.d.ts:1100-1106; docs/guide/replication.md:602-610"
         },
         "commitMeta": {
           "mark": "✅",
@@ -1126,7 +1126,7 @@
           "mark": "✅",
           "text": "`beforeApply` returning `false`, or a failing validator, skips it here",
           "note": "A skipped op is still logged and relayed. A host refuses outright what is out of scope, malformed, skewed, forged, or unsigned under `'require'`.",
-          "source": "index.d.ts:1082-1088; docs/guide/schema.md:136-142; src/apply.js:297-318; docs/guide/sync.md:619-625"
+          "source": "index.d.ts:1082-1088; docs/guide/schema.md:136-142; src/apply.js:297-318; docs/guide/replication.md:619-625"
         },
         "events": {
           "mark": "✅",
@@ -1168,7 +1168,7 @@
         "historyKept": {
           "mark": "⚠️",
           "text": "the op log, bounded by retention (10,000 ops by default; `retention: 'all'` keeps everything)",
-          "source": "src/log.js:122 (retention 'all'); docs/guide/sync.md"
+          "source": "src/log.js:122 (retention 'all'); docs/guide/replication.md"
         },
         "historyList": {
           "mark": "✅",
@@ -1214,7 +1214,7 @@
           "mark": "✅",
           "text": "log retention drops old segments; `compact(id)` rewrites a record's metadata",
           "note": "Before what compaction dropped a version is `HISTORY_GONE`, and a peer behind the floor bootstraps from a snapshot. `compact()` lays a text's marks again; it names the elements anew, so old cursors read `null` and a stacking mark has a new id.",
-          "source": "docs/guide/sync.md#the-log; src/versions/api.js (compact, marksOf, inRuns); docs/guide/versions.md#costs"
+          "source": "docs/guide/replication.md; src/versions/api.js (compact, marksOf, inRuns); docs/guide/versions.md#costs"
         },
         "purge": {
           "mark": "✅",
@@ -1294,13 +1294,13 @@
           "mark": "✅",
           "text": "`snapshot()` pages records with their merge meta; `mergeSnapshot()` joins them",
           "note": "State without history, tombstones included; `at(tag).snapshot()` pages a past state.",
-          "source": "src/bootstrap.js:64-78; index.d.ts:1740-1741; docs/guide/sync.md:368-390"
+          "source": "src/bootstrap.js:64-78; index.d.ts:1740-1741; docs/guide/replication.md:368-390"
         },
         "incremental": {
           "mark": "✅",
           "text": "a push sends ops past the host's vector; `changes` resumes from an event id",
           "note": "`log.since(eventId)` is the public reader; the selection by vector (`src/sync/outbound.js`) is internal.",
-          "source": "src/sync/outbound.js:1-35; docs/reference/api.md:308-309; docs/guide/sync.md:312-344"
+          "source": "src/sync/outbound.js:1-35; docs/reference/api.md:308-309; docs/guide/replication.md:312-344"
         },
         "mergeUpdates": {
           "mark": "✅",
@@ -1328,19 +1328,19 @@
         "syncProto": {
           "mark": "✅",
           "text": "built in: `hello`, `push`, `changes`, `snapshot` over an injected link",
-          "source": "src/sync/hosting.js; docs/guide/sync.md:306-344"
+          "source": "src/sync/hosting.js; docs/guide/replication.md:306-344"
         },
         "reconnect": {
           "mark": "",
           "text": "vectors and log epochs at hello, then ops past the vector; the feed resumes",
           "note": "The subscription resumes from the saved last event id; a node below the host's log floor bootstraps from a snapshot. Duplicates are dropped by vector.",
-          "source": "docs/guide/sync.md:306-354; docs/guide/sync.md:368-377; src/sync/hosting.js"
+          "source": "docs/guide/replication.md:306-354; docs/guide/replication.md:368-377; src/sync/hosting.js"
         },
         "outOfOrder": {
           "mark": "✅",
           "text": "a gap in one origin's stream is dropped and fetched again",
           "note": "Across origins, a list or text op whose anchor has not arrived is held as pending work, 4 096 per field.",
-          "source": "src/apply.js:185-193; docs/guide/sync.md:205-210; src/text/sequence.js"
+          "source": "src/apply.js:185-193; docs/guide/replication.md:205-210; src/text/sequence.js"
         },
         "duplicate": {
           "mark": "✅",
@@ -1351,18 +1351,18 @@
           "mark": "✅",
           "text": "an injected `SyncLink`; `@alexify/syncom/wrpc` for WebSocket and WebRTC",
           "note": "Messages are JSON values over call and subscribe, not raw bytes; WebRTC goes through wrpc's peer links. No BroadcastChannel adapter.",
-          "source": "src/sync/link.js; src/wrpc/wrpc.js; docs/guide/sync.md:569-585; docs/guide/webrtc.md"
+          "source": "src/sync/link.js; src/wrpc/wrpc.js; docs/guide/replication.md:569-585; docs/guide/replication-webrtc.md"
         },
         "server": {
           "mark": "✅",
           "text": "no separate server: any storage hosts with `sync.unit()` on wrpc",
           "note": "The host checks `authorize`, scopes, push limits, op shape, skew and signatures, and runs its own validators and hooks.",
-          "source": "src/sync/hosting.js; docs/guide/sync.md:522-567"
+          "source": "src/sync/hosting.js; docs/guide/replication.md:522-567"
         },
         "storage": {
           "mark": "✅",
           "text": "built in: `node:fs`, OPFS, IndexedDB (`/idb`), `/memory`, `/layered`, encrypted at rest (`/encryption`), or an injected `fsi`",
-          "source": "src/backend.js; src/memory/memory.js; src/layered/layered.js; src/encryption/encryption.js; docs/guide/backends.md"
+          "source": "src/backend.js; src/memory/memory.js; src/layered/layered.js; src/encryption/encryption.js; docs/reference/engines.md"
         },
         "awareness": {
           "mark": "✅",
@@ -1373,7 +1373,7 @@
           "mark": "✅",
           "text": "scopes: a `scope()` per record, peers granted scopes, the host enforcing",
           "note": "A subset of records, never part of one.",
-          "source": "docs/guide/sync.md:392-445; src/scope.js; src/apply.js:226-246"
+          "source": "docs/guide/replication.md:392-445; src/scope.js; src/apply.js:226-246"
         },
         "hashes": {
           "mark": "⚠️",
@@ -1383,7 +1383,7 @@
         "signatures": {
           "mark": "✅",
           "text": "with `/signing` (in `/all`): Ed25519 per op, the node id is the key, verified on receipt",
-          "source": "src/signing/signing.js; src/signing/sign.js; docs/guide/sync.md#signatures"
+          "source": "src/signing/signing.js; src/signing/sign.js; docs/guide/replication.md"
         },
         "checksums": {
           "mark": "✅",
@@ -1394,7 +1394,7 @@
           "mark": "✅",
           "text": "dropped and counted, never thrown: not logged, not relayed (a gap)",
           "note": "A payload `applyOp` cannot admit — of any op type — is `OP_REFUSED` (malformed) and logged as a no-op; a page that throws is retried from its cursor.",
-          "source": "src/apply.js:169-183; src/ops.js:561-564; docs/guide/sync.md:346-354"
+          "source": "src/apply.js:169-183; src/ops.js:561-564; docs/guide/replication.md:346-354"
         },
         "bounds": {
           "mark": "✅",

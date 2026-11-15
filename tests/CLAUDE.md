@@ -32,8 +32,8 @@ subscription from its last event id against a fresh server-side client; `src/tes
 adjacency list, `settle()`), which `tests/utils/memory-link.js` re-exports and `tests/utils/mesh.js` wraps with the
 test context (`createMesh(t, names, edges, createStorage, options)`).
 `tests/wrpc.integration.test.js` runs two real wrpc `Server`s and a dialer,
-the `onRequest` rate-limit recipe of `docs/guide/scaling.md` (keep the two in
-step), the recipes of `docs/guide/wrpc.md` — a dialer over wrpc's SSE transport
+the `onRequest` rate-limit recipe of `docs/guide/server.md` (keep the two in
+step), the recipes of `docs/guide/replication-websocket.md` and `docs/guide/replication-nats.md` — a dialer over wrpc's SSE transport
 (`@alexify/wrpc/sse`), a thin client over plain HTTP carrying its hello in
 `syncom/query`, two hubs over a `MemoryBroker`'s log (`@alexify/wrpc/broker`),
 each skipped when its subpath is absent — plus syncom over a fake WebRTC data channel

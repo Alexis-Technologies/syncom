@@ -139,8 +139,8 @@ Scan for staleness:
 1. **README.md usage examples**: do they match the current API? Run them if in doubt; the documented outputs must be true
 2. **README.md bundle-size table**: refresh it from `pnpm size`
 3. **Badges**: do the URLs point to `@alexify/syncom` and the `Alexis-Technologies` repository?
-4. **docs/**: guide and reference pages for anything the release changed; `docs/guide/sync.md` and `docs/guide/wrpc.md` must agree with `src/sync/manager.js` and `src/sync/hosting.js`, and `docs/guide/hooks.md` with the hook and event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/database.js` and `src/sync/manager.js`. `pnpm docs:build` must pass (dead links fail it)
-5. **docs/public/llms.txt**: key facts (exports, Node.js version, size)
+4. **docs/**: guide and reference pages for anything the release changed; `docs/guide/replication.md`, `docs/guide/sync-protocol.md`, `docs/guide/replication-websocket.md` and `docs/reference/wire.md` must agree with `src/sync/manager.js` and `src/sync/hosting.js`, and `docs/guide/hooks.md` and `docs/reference/events.md` with the hook and event surface of `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/database.js` and `src/sync/manager.js`. `pnpm docs:build` must pass (dead links fail it)
+5. **docs/public/llms.txt**: generated from package.json, the sidebar and the pages' frontmatter — run `pnpm docs:llms` (tests/package/docs-map.test.js fails when it is stale); key facts (exports, Node.js version, size)
 6. **docs keywords**: the `const keywords = [...]` block in `docs/.vitepress/config.mts` mirrors `package.json#keywords` (the consistency test checks it)
 7. **SECURITY.md**: the supported-versions table, on a major release (or the first one)
 

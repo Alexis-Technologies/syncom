@@ -153,11 +153,11 @@
 <path class="bar primary" d="M372,581H529.7064997127081A4,4 0 0 1 533.7064997127081,585V591A4,4 0 0 1 529.7064997127081,595H372Z"/>
 <text class="value" x="539.7064997127081" y="594">52.9k</text>
 </g>
-<g><title>record · cached Record instance
+<g><title>document · cached Document instance
 8,302,835 ops/s
 120 ns per operation</title>
-<text class="label primary" x="20" y="625">record</text>
-<text class="sublabel" x="20" y="640">cached Record instance</text>
+<text class="label primary" x="20" y="625">document</text>
+<text class="sublabel" x="20" y="640">cached Document instance</text>
 <path class="bar primary" d="M372,621H625.0635468353069A4,4 0 0 1 629.0635468353069,625V631A4,4 0 0 1 625.0635468353069,635H372Z"/>
 <text class="value" x="635.0635468353069" y="634">8.3M</text>
 </g>

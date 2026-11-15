@@ -102,7 +102,7 @@ row together, and give a new guarantee an id, a test and a row. The seeded
 hazard walk in `tests/suites/sync-engine.js` — dropped and duplicated pages, a
 reopen mid-walk — is the one that must stay green whatever else moves.
 `tests/package/telemetry-events.test.js` keeps every logged `event:`, span and
-metric in the table of `docs/guide/telemetry.md`.
+metric in the table of `docs/reference/telemetry.md`.
 
 `tests/package/consistency.test.js` is the machine-checked half of the release
 checklist: it fails if `exports`, `files`, the `browser` map, the `.d.ts`

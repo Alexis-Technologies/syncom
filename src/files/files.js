@@ -224,8 +224,8 @@ const openDb = (fsi, path, capabilities, logger) => {
   };
 
   // One write set, in the order a crash is safest in: the kv puts first (a
-  // chain block before the records it names), then each record — the pieces
-  // it makes, its file, the pieces it drops — then the copies and the kv
+  // chain block before the records it names), then a tag's copies, then each
+  // record — the pieces it makes, its file, the pieces it drops — then the kv
   // removals. Not atomic: a file system has no transactions.
   const write = async (batch) => {
     checkWriteSet(batch, isRecordId, 'filesEngine');

@@ -49,7 +49,7 @@ if two ever seem to disagree; fix the one that is wrong.
 | [src/cleanup/CLAUDE.md](./src/cleanup/CLAUDE.md) | Tombstone cleanup: a folded tombstone still wins |
 | [tests/CLAUDE.md](./tests/CLAUDE.md) | Tests: the suites run twice, the mesh, coverage, INVARIANTS.md |
 | [bench/CLAUDE.md](./bench/CLAUDE.md) | Benchmarks: the comparison's own package, the generated charts |
-| [docs/CLAUDE.md](./docs/CLAUDE.md) | Documentation: examples run before they are written, the pages kept in step with the code, the matrices as data |
+| [docs/CLAUDE.md](./docs/CLAUDE.md) | Documentation: the guide teaches and the reference records, the page templates, every example a file the suite runs, the RxDB page map, figures and live demos, the matrices as data |
 
 ## What this package is
 

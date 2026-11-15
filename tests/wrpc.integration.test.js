@@ -427,7 +427,7 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
   );
 
   await t.test('a wrpc onRequest hook reads unit({ meta }): the per-procedure rate-limit recipe', async (t2) => {
-    // wrpc ships no limiter. The recipe in docs/guide/scaling.md is one
+    // wrpc ships no limiter. The recipe in docs/guide/server.md is one
     // router-level `onRequest` hook that reads `context.procedure.meta.rateLimit`
     // — what `unit({ meta })` put on every syncom procedure — and answers 429;
     // a bucket per client and per procedure, so hello and changes keep their own.

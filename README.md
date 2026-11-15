@@ -45,7 +45,7 @@ main();
 ```
 
 📚 **[Documentation](https://syncomjs.vercel.app/)** ·
-[Getting started](https://syncomjs.vercel.app/guide/getting-started) ·
+[Getting started](https://syncomjs.vercel.app/guide/quickstart) ·
 [API reference](https://syncomjs.vercel.app/reference/api)
 
 ## Table of Contents
@@ -83,7 +83,7 @@ signatures, the chain and the sealing of records the `signing`, `chain` and
 `encryption` plugins (`/signing`, `/chain`, `/encryption`), the sync
 manager the `sync` plugin (`/sync`), and `@alexify/syncom/all` is the core
 with every plugin registered (see
-[Entry points](https://syncomjs.vercel.app/guide/entry-points)).
+[Entry points](https://syncomjs.vercel.app/reference/entry-points)).
 
 | Entry | raw | min | min+gzip | budget |
 | ----- | ---:| ---:| --------:| ------:|
@@ -206,20 +206,20 @@ nodes converges.
 | **Editors** | `@alexify/syncom/codemirror` binds CodeMirror 6 (a ChangeSet as exact splices, undo through the storage, cursors as decorations); `@alexify/syncom/prosemirror` binds ProseMirror (its modules injected): the document as one text with block markers, a peer's edit as one replace step, undo through the storage, a presence room's cursors as decorations. `@alexify/syncom/editor` binds any editor to a text field through three functions of an adapter: edits leave as one transaction each, a peer's land as deltas rebased over what the editor holds, a delta the field moved under is refused (`STALE`) and sent again rebased; `diffBlocks()` for an editor that hands over a whole document; selections as cursor tokens, a presence room's cursors resolved. See [Editors](https://syncomjs.vercel.app/guide/editors) |
 | **Frameworks** | `@alexify/syncom/store`: a query, a live record, a record through `get()`, a presence room or any emitter as one store object — Svelte's store contract and React's `useSyncExternalStore` read it as it is, Vue and Solid wrap it in a line; no framework imported. See [Frameworks](https://syncomjs.vercel.app/guide/frameworks) |
 | **Queries** | `select({ orgId, status: { $in } }).order('name').limit(20).fetch()` over an in-memory record catalog: indexed queries with no I/O, unique keys, `watch()` for live views. See [Queries](https://syncomjs.vercel.app/guide/query) |
-| **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `createDatabase({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/query#full-text-search) |
-| **Backends and engines** | node:fs, OPFS, IndexedDB or memory as files — five functions injected at `createDatabase({ fsi })` — or an engine over the medium's own structures: IndexedDB object stores (`@alexify/syncom/idb`), SQLite (`@alexify/syncom/sqlite`), MongoDB (`@alexify/syncom/mongodb`), memory; one transaction per write set; `atRest(engine)` for ciphertext at rest, bound to its place and its database; an engine served over a port and a database copied between engines (`@alexify/syncom/engines`). `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/backends) |
+| **Full-text search** | `select({ $text: 'quick fox' })`: fuzzy, typo-tolerant, TF-IDF ranked trigram search over an entity's `search` fields, best first, narrowed by any equality — the index is `@alexify/syncom/search` (under 1 KB), injected at `createDatabase({ search })`. See [Full-text search](https://syncomjs.vercel.app/guide/fulltext-search) |
+| **Backends and engines** | node:fs, OPFS, IndexedDB or memory as files — five functions injected at `createDatabase({ fsi })` — or an engine over the medium's own structures: IndexedDB object stores (`@alexify/syncom/idb`), SQLite (`@alexify/syncom/sqlite`), MongoDB (`@alexify/syncom/mongodb`), memory; one transaction per write set; `atRest(engine)` for ciphertext at rest, bound to its place and its database; an engine served over a port and a database copied between engines (`@alexify/syncom/engines`). `durable: true` for fsync, one instance per directory. See [Backends](https://syncomjs.vercel.app/guide/storage) |
 | **Replication** | Every write is an op in a persisted log; peers exchange ops over an injected link, resume from where they stopped, and bootstrap from a streamed snapshot when they cannot; scopes for partial replication; presence (`@alexify/syncom/presence`: who is here and what they edit, relayed by a host's rooms, signed, never logged) |
 | **Versions** | `history(id)` and `get(id, { at })` by event id, stamp or vector, folded from the log; tags of the whole storage (`tag()`, `at(name)`); `diff()`, `restore()`, `applyPatches()` and `compact(id)`, every way back new ops that merge; an undo stack (`@alexify/syncom/undo`) and branches that merge back (`@alexify/syncom/branch`). See [Versions and history](https://syncomjs.vercel.app/guide/versions) |
-| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. A field two nodes make as different kinds at once ends as the same kind everywhere, by a fixed precedence; what a peer can make a node hold is bounded. See [Sync](https://syncomjs.vercel.app/guide/sync#registers-counters-sets-lists-and-text) |
-| **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/webrtc) |
+| **Convergence** | Last-writer-wins registers, per-origin counters, observed-remove sets, lists and text that merge by position (Fugue — each writer's run whole), trees whose concurrent moves never form a cycle, tombstones with revival — any order, any number of times, same result. A field two nodes make as different kinds at once ends as the same kind everywhere, by a fixed precedence; what a peer can make a node hold is bounded. See [Sync](https://syncomjs.vercel.app/guide/fields) |
+| **Transport** | `@alexify/syncom/wrpc` adapts a `WrpcClient` — over a WebSocket, or a WebRTC `PeerLink`'s `remote` from `@alexify/wrpc/webrtc`; `storage.sync.unit()` is the router unit a wrpc server, or a browser's `PeerHost`, mounts. Reconnects, resumable subscriptions, binary streams and rooms come from wrpc. See [WebRTC](https://syncomjs.vercel.app/guide/replication-webrtc) |
 | **Integrity** | Every write appends a hash-linked block (`chain: false` turns it off for a hub); reads re-verify the record against the block that committed it and throw on a mismatch; `repair(id)` rebuilds a record from the log |
-| **Signed ops** | Every op is signed with the node's Ed25519 key, and the node id *is* that key: a peer verifies an op against its origin through any relay, a purge leaves a header that still verifies, `sync.signatures: 'require'` refuses unsigned ops. See [Signatures](https://syncomjs.vercel.app/guide/sync#signatures) |
+| **Signed ops** | Every op is signed with the node's Ed25519 key, and the node id *is* that key: a peer verifies an op against its origin through any relay, a purge leaves a header that still verifies, `sync.signatures: 'require'` refuses unsigned ops. See [Signatures](https://syncomjs.vercel.app/guide/signing) |
 | **CRDT** | `diff` / `merge` / `apply` over plain objects — nested maps merge recursively, arrays are grow-only sets, numbers add so counters converge |
 | **Contracts** | `@alexify/syncom/contracts`: store a procedure in the chain by hash, load it anywhere, run it against a read-only view of storage; failures are recorded as blocks. A subpath, so the package root never runs a block's code |
 | **Portability** | One API over `node:fs` + `node:crypto` on the server and OPFS + Web Crypto in the browser, chosen by the `browser` export condition |
 | **Hooks and events** | `createDatabase({ hooks })` runs your code inside a write, a read or a peer's batch — validate, stamp, redact, skip — and rejects with a typed `HookError` when it throws; `on()` events (`change`, `commit`, `apply`, `peer`, `sync`, …) observe everything and can never break it. See [Hooks and events](https://syncomjs.vercel.app/guide/hooks) |
 | **Observability** | Injected OpenTelemetry (`createDatabase({ telemetry })`): spans for local writes, applied batches, pushes, bootstraps, log rolls, tags, history reads and patches, plus outcome and lag metrics — nested under wrpc's spans, which carry the trace across the wire. `stats()` reports the queue, the cache, the log, the tags and the files that lag the log. See [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry); `@alexify/syncom/inspect` lays a record out raw and anonymizes a dump for a bug report |
-| **Scaling** | Hubs that dial each other, scopes as buckets, per-peer push limits, a reserved shared-log contract for the broker-backed hub. See [Scaling](https://syncomjs.vercel.app/guide/scaling) |
+| **Scaling** | Hubs that dial each other, scopes as buckets, per-peer push limits, a reserved shared-log contract for the broker-backed hub. See [Scaling](https://syncomjs.vercel.app/guide/server-scaling) |
 | **Dependencies** | None. wrpc, metaschema and fake-indexeddb are devDependencies for the integration tests; everything is injected at runtime |
 
 ## Compared with alternatives
@@ -405,7 +405,7 @@ Crypto is asynchronous there (`calculateHash`, `encrypt`, `decrypt`, `sign` and
 IndexedDB through `createDatabase({ fsi: createIdbFsi() })` from `@alexify/syncom/idb`. `browser.d.ts`
 declares those signatures separately. A browser node dials the mesh through
 `@alexify/syncom/wrpc` like any other, and hosts for its peers over WebRTC.
-See [Browser](https://syncomjs.vercel.app/guide/browser).
+See [Browser](https://syncomjs.vercel.app/guide/browser-storage).
 
 ## Status
 
@@ -413,7 +413,7 @@ See [Browser](https://syncomjs.vercel.app/guide/browser).
 to; the API may still change. Everything on this page works today and is covered by the test suite, including
 replication over real wrpc WebSockets. Known limits — a counter straddling a concurrent reset, encrypted records
 staying local, no proof of key possession at `hello` — are on the
-[Sync](https://syncomjs.vercel.app/guide/sync#guarantees-and-limits) page.
+[Sync](https://syncomjs.vercel.app/reference/wire#guarantees-and-limits) page.
 
 ## Documentation
 
@@ -423,22 +423,37 @@ staying local, no proof of key possession at `hello` — are on the
   [Compared with CRDT libraries](https://syncomjs.vercel.app/guide/vs-crdt) ·
   [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks) ·
   [Architecture](https://syncomjs.vercel.app/guide/architecture)
-- [Getting started](https://syncomjs.vercel.app/guide/getting-started)
+- [Overview](https://syncomjs.vercel.app/guide/) ·
+  [Quickstart](https://syncomjs.vercel.app/guide/quickstart) ·
+  [Installation](https://syncomjs.vercel.app/guide/install) ·
+  [TypeScript](https://syncomjs.vercel.app/guide/typescript)
 - [Database](https://syncomjs.vercel.app/guide/database) ·
-  [Schema and validation](https://syncomjs.vercel.app/guide/schema) ·
-  [Queries](https://syncomjs.vercel.app/guide/query) ·
-  [Lists, text and trees](https://syncomjs.vercel.app/guide/lists) ·
+  [Schema](https://syncomjs.vercel.app/guide/schema) ·
+  [Collection](https://syncomjs.vercel.app/guide/collection) ·
+  [Document](https://syncomjs.vercel.app/guide/document) ·
+  [Query](https://syncomjs.vercel.app/guide/query) ·
+  [Fields that merge](https://syncomjs.vercel.app/guide/fields)
+- [Storage overview](https://syncomjs.vercel.app/guide/storage) ·
+  [Encryption](https://syncomjs.vercel.app/guide/encryption) ·
+  [Several tabs](https://syncomjs.vercel.app/guide/leader-election)
+- [Sync engine](https://syncomjs.vercel.app/guide/replication) ·
+  [Partial sync](https://syncomjs.vercel.app/guide/partial-sync) ·
+  [WebSocket](https://syncomjs.vercel.app/guide/replication-websocket) ·
+  [WebRTC](https://syncomjs.vercel.app/guide/replication-webrtc) ·
+  [Connectors](https://syncomjs.vercel.app/guide/connectors) ·
+  [Hosting a node](https://syncomjs.vercel.app/guide/server) ·
+  [Scaling](https://syncomjs.vercel.app/guide/server-scaling)
+- [Transactions and conflicts](https://syncomjs.vercel.app/guide/transactions-conflicts) ·
+  [The operation log](https://syncomjs.vercel.app/guide/operation-log) ·
+  [The sync protocol](https://syncomjs.vercel.app/guide/sync-protocol)
+- [Lists](https://syncomjs.vercel.app/guide/lists) ·
+  [Text](https://syncomjs.vercel.app/guide/text) ·
+  [Trees](https://syncomjs.vercel.app/guide/trees) ·
+  [Editors](https://syncomjs.vercel.app/guide/editors) ·
   [Versions and history](https://syncomjs.vercel.app/guide/versions) ·
   [Hooks and events](https://syncomjs.vercel.app/guide/hooks) ·
-  [CRDT deltas](https://syncomjs.vercel.app/guide/crdt) ·
-  [Blockchain log](https://syncomjs.vercel.app/guide/chain) ·
-  [Smart contracts](https://syncomjs.vercel.app/guide/contracts)
-- [Sync](https://syncomjs.vercel.app/guide/sync) ·
-  [wrpc transport](https://syncomjs.vercel.app/guide/wrpc) ·
-  [WebRTC](https://syncomjs.vercel.app/guide/webrtc) ·
-  [Scaling](https://syncomjs.vercel.app/guide/scaling)
-- [Browser](https://syncomjs.vercel.app/guide/browser) ·
-  [Backends](https://syncomjs.vercel.app/guide/backends) ·
+  [Signing](https://syncomjs.vercel.app/guide/signing) ·
+  [Audit chain](https://syncomjs.vercel.app/guide/chain) ·
   [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry)
 - [API reference](https://syncomjs.vercel.app/reference/api) ·
   [Wire format](https://syncomjs.vercel.app/reference/wire)

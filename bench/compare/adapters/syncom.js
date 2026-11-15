@@ -18,7 +18,7 @@
  *
  * `insert` mints the id, `update` is a `set` op of the changed fields, `inc`
  * a counter op. A field is a register or a counter, and a counter is born
- * with its first `inc()` (docs/guide/database.md), so the record goes in
+ * with its first `inc()` (docs/guide/fields.md), so the record goes in
  * without `hits` and reads back with `hits: 0` until the counter exists.
  * There is no batch write, so a batch is the inserts issued at once (the
  * mutation queue runs them in order). A text is a field of a record, typed

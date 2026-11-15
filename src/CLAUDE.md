@@ -8,8 +8,8 @@ Every top-level module of `src/` and the rules that span the core: plugins and t
 src/<name>/<name>.js      every subpath is a folder under src/ with its entry and its .d.ts beside it; package.json#exports points there.
                           A folder is a zone: a module of its zone lives in it even where the core requires it (src/telemetry/writer.js,
                           src/sync/wire.js, src/schema/entity.js), and the root holds the core alone; src/crypto/ is a zone with no subpath
-src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption): the
-                          API as it was before the blocks
+src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption,
+                          sync, schema, telemetry, query, versions, local): the API as it was before the blocks
 src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/crypto/digest.js
 src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel

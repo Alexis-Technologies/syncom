@@ -227,7 +227,7 @@ const ENTRIES = [
   },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
-  // 2 was the file store alone. The engine over object stores (src/idb/engine.js: six stores, key ranges, one transaction per
+  // 2 was the file store alone. The engine over object stores (src/idb/engine.js: seven stores, key ranges, one transaction per
   // write set, the log's rows, a BroadcastChannel; engines plan, E3). 6, raised by name.
   { label: 'idb backend — browser (@alexify/syncom/idb)', entry: 'src/idb/idb.js', platform: 'browser', budget: 6 },
   // The engine over SQLite (src/sqlite/sqlite.js): node:sqlite required inside the factory, so a node-only row with no

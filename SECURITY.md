@@ -31,7 +31,9 @@ Three parties, three levels of trust:
   what `getId` mints. What is still a claim: that
   `actor` names a user (hold it to what `authorize` established, in
   `beforeApply`); that the node greeting is the holder of the key it names
-  (there is no hello challenge yet — its pushes fail as `forged` otherwise);
+  (unless the host asks for proof with `sync.unit({ prove: true })`, on by default under
+  `signatures: 'require'`: the hello then carries a challenge the node signs before anything is handed
+  to it; without it a node that is not the key's holder sees its pushes fail as `forged`);
   and, under the default `sync.signatures: 'verify'`, that an unsigned op
   came from a node that does not sign — only `'require'` refuses unsigned
   ops, and so resists a relay stripping signatures: `'require'` with the

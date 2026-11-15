@@ -271,12 +271,12 @@
         "mobile": {
           "mark": "❌",
           "text": "not a target; `fsi` is injectable",
-          "source": "docs/guide/backends.md"
+          "source": "docs/reference/engines.md"
         },
         "server": {
           "mark": "✅",
           "text": "none — any node can host",
-          "source": "src/sync/hosting.js; docs/guide/sync.md"
+          "source": "src/sync/hosting.js; docs/guide/replication.md"
         },
         "model": {
           "mark": "",
@@ -329,12 +329,12 @@
           "mark": "✅",
           "text": "`inc()`: per-origin sums",
           "note": "A counter that one node resets while another increments it does not converge to the intuitive value; see Guarantees and limits in the Sync guide.",
-          "source": "docs/guide/sync.md#guarantees-and-limits"
+          "source": "docs/guide/replication.md"
         },
         "topology": {
           "mark": "",
           "text": "mesh; hubs that dial each other",
-          "source": "docs/guide/scaling.md"
+          "source": "docs/guide/server-scaling.md"
         },
         "transport": {
           "mark": "✅",
@@ -344,7 +344,7 @@
         "webrtc": {
           "mark": "✅",
           "text": "wrpc `PeerLink` + `PeerHost`",
-          "source": "docs/guide/webrtc.md"
+          "source": "docs/guide/replication-webrtc.md"
         },
         "partial": {
           "mark": "✅",
@@ -354,12 +354,12 @@
         "resume": {
           "mark": "✅",
           "text": "from the last event id",
-          "source": "src/sync/manager.js; docs/guide/sync.md"
+          "source": "src/sync/manager.js; docs/guide/replication.md"
         },
         "bootstrap": {
           "mark": "✅",
           "text": "streamed snapshot past the log's retention",
-          "source": "src/bootstrap.js; docs/guide/sync.md#bootstrap"
+          "source": "src/bootstrap.js; docs/guide/replication.md"
         },
         "conflicts": {
           "mark": "",
@@ -375,7 +375,7 @@
         "serverAuth": {
           "mark": "✅",
           "text": "`unit({ authorizeWrite })`: a refused op reaches no node behind the host as a write — it goes on as a scrubbed header (a no-op, no gap), the pusher is told (`WRITE_REFUSED`) and reverts; `prove` gates a peer until it proves its key; out-of-scope, unsigned and malformed ops stop at the host",
-          "source": "src/sync/hosting.js (authorizeWrite, prove); src/apply.js (refused, scrubbed); tests/sync.rules.test.js; docs/guide/sync.md#hosting",
+          "source": "src/sync/hosting.js (authorizeWrite, prove); src/apply.js (refused, scrubbed); tests/sync.rules.test.js; docs/guide/replication.md",
           "note": "A refused op is not withheld — that would leave a gap in its origin's stream — but scrubbed: its header goes on, its payload does not, and every node behind the host applies a no-op; what a validator or `beforeApply` skips is still relayed whole."
         },
         "tamper": {
@@ -387,24 +387,24 @@
         "signing": {
           "mark": "✅",
           "text": "Ed25519 per op; the node id is the key; `'require'` to enforce",
-          "source": "src/signing/signing.js, src/signing/sign.js, src/apply.js (checkPage); docs/guide/sync.md#signatures",
+          "source": "src/signing/signing.js, src/signing/sign.js, src/apply.js (checkPage); docs/guide/replication.md",
           "note": "The default `'verify'` takes an unsigned op; `sync.signatures: 'require'` refuses it. A bootstrap re-signs the host's state under the joiner's key, and `hello` does not yet prove possession of the key."
         },
         "atRest": {
           "mark": "✅",
           "text": "`atRest(fsi, { key | password })`: every file AES-256-GCM under one key; per record `encrypted: true`",
-          "source": "src/encryption/encryption.js (atRest, PBKDF2-SHA-256, DECRYPT_FAILED); docs/guide/backends.md#encrypted-at-rest",
+          "source": "src/encryption/encryption.js (atRest, PBKDF2-SHA-256, DECRYPT_FAILED); docs/reference/engines.md",
           "note": "A backend wrapper from `@alexify/syncom/encryption`: the key is given or derived from a password and a salt, never written; the sealed-record form (one record for this node's RSA pair, outside the log) is the other block of the same subpath."
         },
         "e2ee": {
           "mark": "⚠️",
           "text": "recipe: wrpc's HPKE sealer in hooks, per field",
-          "source": "docs/guide/scaling.md#end-to-end-encryption"
+          "source": "docs/guide/server-scaling.md"
         },
         "access": {
           "mark": "✅",
           "text": "host scopes for reads and writes, `authorize`",
-          "source": "src/sync/hosting.js; docs/guide/wrpc.md"
+          "source": "src/sync/hosting.js; docs/guide/replication-websocket.md"
         },
         "purge": {
           "mark": "✅",
