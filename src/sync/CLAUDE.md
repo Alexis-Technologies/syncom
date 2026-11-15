@@ -36,9 +36,10 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
 
 - **Scopes are enforced by the host.** `unit().push` drops an op that declares a scope not granted
   before `applyRemote` (`refused` event, `syncom.ops.rejected{scope}`: a stream the peer may not write here);
-  `snapshot`/`changes` serve `grant(asked, granted)` — an empty ask is no ask: the grant, which may be empty (a
-  peer that asked for no scope, or whose last scope a revoke took, reads the global records alone and stays
-  subscribed; 403 `SCOPES` only where named scopes none of which is granted) — a page for every scope reads no record's
+  `snapshot`/`changes` serve `grant(asked, granted)` — no list asked is the grant; an empty list asks for no scope,
+  whatever the grant: the global records alone (a peer that asked for no scope, or whose last scope a revoke took,
+  asks with an empty list and stays subscribed; 403 `SCOPES` only where named scopes none of which is granted, and
+  an empty list was once refused so, which left such a peer terminal) — a page for every scope reads no record's
   scope, and a scope function that throws on a record leaves that record out of the page
   (`snapshot.skipped`, `reason: 'scope'`), never the page. The scope an op declares
   is the peer's word: `push` also passes the grant as `bound`, and

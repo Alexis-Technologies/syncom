@@ -669,6 +669,15 @@ test('Rules on the host and on the dialer', async (t) => {
       assert.deepStrictEqual(ids(asked), ids(omitted));
       assert.deepStrictEqual(ids(asked), [g1, g2].sort());
       await assert.rejects(probe.call('syncom/snapshot', { scopes: ['A'] }), { code: 403, reason: 'SCOPES' });
+      // An empty list asks for no scope whatever the grant: the global records alone, never the grant's scopes.
+      const scoped = new MemoryLink(mesh.units.get('H'));
+      await scoped.call('syncom/hello', { node: 'scoped', version: 1, scopes: ['A'] });
+      assert.deepStrictEqual(ids(await scoped.call('syncom/snapshot', { scopes: [] })), [g1, g2].sort());
+      assert.deepStrictEqual(ids(await scoped.call('syncom/snapshot', {})), [a1, a2, g1, g2].sort());
+      const all = new MemoryLink(mesh.units.get('H'));
+      await all.call('syncom/hello', { node: 'all', version: 1, scopes: ['*'] });
+      assert.deepStrictEqual(ids(await all.call('syncom/snapshot', { scopes: [] })), [g1, g2].sort());
+      assert.deepStrictEqual(ids(await all.call('syncom/snapshot', {})), [a1, a2, g1, g2].sort());
     },
   );
 

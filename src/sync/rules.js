@@ -84,11 +84,12 @@ const normalizeLimits = (limits) => {
 };
 
 // The scopes a read may cover: what hello granted, narrowed to what the
-// call asks for. A peer granted `'*'` reads what it asks (nothing asked:
-// everything); one granted a list reads the intersection — asking for `'*'`
-// or for nothing (no list, an empty one) is asking for its list, which may be
-// empty: the global records alone, what a peer whose last scope was revoked
-// still reads. Naming scopes none of which is granted is 403.
+// call asks for. No list asked is the grant (`'*'`: everything); an empty
+// list asks for no scope, whatever the grant — the global records alone,
+// what a peer whose last scope was revoked still reads (its list is empty,
+// never a reason to refuse it). A peer granted `'*'` reads what it names;
+// one granted a list reads the intersection — naming `'*'` is naming its
+// list, naming only scopes none of which is granted is 403.
 const grant = (asked, granted) => {
   const everything = granted.includes(GLOBAL_SCOPE);
   const held = everything ? null : new Set(granted);
@@ -103,7 +104,7 @@ const grant = (asked, granted) => {
     else if (scope === GLOBAL_SCOPE) return granted;
     else if (held.has(scope)) scopes.push(scope);
   }
-  if (named === 0) return everything ? null : granted;
+  if (named === 0) return Array.isArray(asked) ? [] : everything ? null : granted;
   if (held === null) return scopes;
   if (scopes.length === 0) throw coded('Scopes not granted', 403, 'SCOPES');
   return scopes;

@@ -770,8 +770,8 @@ or `stopped`. On a binary-capable transport a page under
 `pageBytes` (4 MiB) goes as a wrpc stream of NDJSON — one record per line
 — and the answer is `{ id, size, cursor, eventId, vector? }`, `id` the
 stream to read. `scopes` narrows what hello granted (403 `SCOPES` when it
-names scopes none of which was granted; an empty list asks for the whole
-grant, as no list does).
+names scopes none of which was granted; an empty list asks for no scope —
+the global records alone, whatever the grant — and no list for the whole grant).
 
 The dialer side of a bootstrap, entered when the feed answers `{ bootstrap:
 true }`: `beforeBootstrap` may refuse it (nothing is received from that host
@@ -890,11 +890,12 @@ scope function throws on. Such an op rides a stream the peer may write, so it
 is taken as a withheld scrub: logged skipped without its payload, relayed as
 a header that applies nowhere, and named in the push's answer (`refused`,
 `reason: 'scope'`, without the record), so the stream goes on past it. `snapshot` and `changes` serve the intersection of what is asked
-and what was granted: asking for `'*'` or for nothing (no list, or an empty
-one) is asking for the granted list, asking only for other scopes is 403
-`SCOPES`. The granted list may be empty — a peer that asked for no scope, or
-whose last scope a revoke took — and is then the global records alone: the
-feed stays open on them. A peer granted
+and what was granted: asking for `'*'` or giving no list is asking for the
+granted list, asking only for other scopes is 403 `SCOPES`, and an empty list
+asks for no scope — the global records alone, whatever the grant. The granted
+list may be empty too — a peer that asked for no scope, or whose last scope a
+revoke took (its registry entry, the list it asks with, is then empty) — and
+the feed stays open on the global records. A peer granted
 `'*'` is bound by nothing. A scoped feed moves its cursor past the other
 scopes' ops without sending a page, so an op is looked at once however many
 feeds it does not concern; a scope function that throws on a record leaves
