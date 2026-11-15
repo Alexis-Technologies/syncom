@@ -82,6 +82,19 @@ its own host once they arrive, so a chain of hubs carries them as well. An uploa
 `limits.bytesPerBlob`, say) is reported on the manager's `error` event as `BLOB_UPLOAD_FAILED` and never fails the
 push; one that failed on the way is tried again at the next push.
 
+## How the bytes travel
+
+Over a connection that carries binary streams, the bytes cross as bytes. That is every
+[wrpc](./replication-websocket) transport except Server-Sent Events: a WebSocket, WebTransport, a
+[WebRTC](./replication-webrtc) data channel, a worker port. An upload and a download are each a stream of 64 KiB
+chunks, and a chunk is written only when the connection has taken the one before, so a slow peer slows the sender
+instead of filling its memory. Nothing is base64-encoded, and no single message holds the file: a server that
+refuses messages past 16 MiB still takes a 64 MiB attachment.
+
+Over a text-only link the bytes travel as base64 inside one call, a third larger, and the transport's message
+limit bounds the attachment. See [Limits](#limits). You choose neither form: the node and the host settle it per
+connection.
+
 ## Remove an attachment and free the space
 
 `remove(id, name)` takes the name off the record, and that removal syncs. The bytes stay in the blob store,
@@ -118,6 +131,11 @@ encryption at rest, which seals blobs as it seals records.
 
 The bytes never come down ahead of a read. A node that must work offline with every file has to read each
 attachment once while it is online.
+
+Over a text-only transport an attachment has to fit in one message as base64. With wrpc's Server-Sent Events
+transport that is the HTTP body limit, 10 MiB by default, so about 7 MiB of bytes; dial over a WebSocket when
+attachments may be larger. A host still holds one attachment in memory while it checks the digest, and
+`limits.bytesPerBlob` on the [unit](./replication-server) lowers what it accepts.
 
 They go up only with the push of the entry that names them, from a node that holds them, and only to a host that
 writes: a follower of a [shared log](./replication-nats) takes no bytes. What a node still has to upload is kept in

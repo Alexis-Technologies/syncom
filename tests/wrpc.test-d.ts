@@ -1,6 +1,6 @@
 import { expectAssignable, expectError, expectType } from 'tsd';
 import { createWrpcLink, isSyncLink, SYNC_INTROSPECTION } from '../src/wrpc/wrpc.js';
-import type { SyncLink, WrpcClientLike, WrpcLink } from '../src/wrpc/wrpc.js';
+import type { SyncLink, SyncLinkWritable, WrpcClientLike, WrpcLink } from '../src/wrpc/wrpc.js';
 
 declare const client: WrpcClientLike;
 const link = createWrpcLink(client);
@@ -12,6 +12,11 @@ expectType<WrpcClientLike>(link.client);
 expectType<'subscription'>(SYNC_INTROSPECTION.syncom.changes.kind);
 expectType<{}>(SYNC_INTROSPECTION.syncom.blob);
 expectType<void>(link.send('syncom/presence', { node: 'a' }));
+expectType<SyncLinkWritable>(link.createStream('syncom/blobPut', 3));
+expectAssignable<WrpcClientLike>({
+  ...client,
+  createStream: (name: string, size: number) => link.createStream(name, size),
+});
 expectAssignable<WrpcClientLike>({ ...client, sendEvent: (event: string, data: unknown) => void [event, data] });
 expectType<{}>(SYNC_INTROSPECTION.syncom.blobPut);
 createWrpcLink(client, { unit: 'replication' });

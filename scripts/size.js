@@ -488,7 +488,9 @@ const ENTRIES = [
   // 181.9 with the attachments' bytes uploaded on push (syncom/blobPut: the host's door, the dialer's uploads in
   // waiting and the bytes sent on as they land; 2026-11-15); 182.2 with delete wins and a write to a record of an
   // older schema version migrated first (2026-11-15). 182.4, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 182.4 },
+  // 182.7 with a blob's bytes crossing as a stream in pieces (src/sync/chunks.js, blobPut's stream; 2026-11-15).
+  // 182.9, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 182.9 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -630,7 +632,9 @@ const ENTRIES = [
   // 31.75, raised by name.
   // 32.6 with the attachments' bytes uploaded on push (hosting.js blobPut, manager.js #noteUploads/#upload/#blobLanded;
   // 2026-11-15). 32.7, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 32.7 },
+  // 33.2 with a blob's bytes crossing as a stream of the transport's in pieces, both ways (chunks.js pump/collect,
+  // blobPut reading a stream to its size, #streamUp; 2026-11-15). 33.3, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 33.3 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {
@@ -793,7 +797,9 @@ const ENTRIES = [
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
   // 7.003 with `drop` taking the link down with the page lost (docs found-bugs, infra; 2026-11-15). 7.1, raised by name.
-  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7.1 },
+  // 7.5 with the link a binary transport under `streams` (wrpc's streams in process: pipe) and `maxMessage`
+  // (2026-11-15). 7.6, raised by name.
+  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7.6 },
   // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
   // 2.7 with `$regex` refused at the door, the `tools` allowlist, `annotations` on every tool and `changes` paged by
   // `limit` through `log.read` (review №7, E5.4; 2026-11-07). 2.75, raised by name — the plan's cap.

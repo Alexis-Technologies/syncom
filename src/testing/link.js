@@ -6,7 +6,10 @@
 // connection aborts the generator, and a reconnect re-opens every subscription from the last event id it delivered —
 // exactly wrpc's restore — before announcing `reconnect`. Its options are the hazards a transport has: `latency` (ms
 // on every call and event), `drop(page)` (a page lost, and the link down with it: a socket never loses one message
-// and carries on), `duplicate(page)` (a page delivered twice); its hooks `disconnect()` and `reconnect()`.
+// and carries on), `duplicate(page)` (a page delivered twice), `maxMessage` (a call or a chunk past it takes the link
+// down, as a socket closed for a message too big); its hooks `disconnect()` and `reconnect()`. With `streams` it is
+// a binary transport too — wrpc's streams in process (`pipe`): the host's client and the link each announce one
+// (`createStream`) the other end reads (`getStream`, `stream`), so a snapshot page and a blob cross as bytes.
 
 const { Emitter } = require('../utils.js');
 
@@ -16,11 +19,93 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let nextClientId = 1;
 
+// What a writable holds unread before `write` answers false, in chunks: small, so every pump of a few chunks waits
+// for a `drain` at least once.
+const HIGH = 4;
+const closedError = () => Object.assign(new Error('Connection closed'), { code: 503 });
+
+// wrpc's pair of one binary stream, in process: what `write` takes — a copy — the readable's iteration hands on. A
+// writable is an emitter (`drain`, `close`) with `closed`, `end()` and `terminate()`; a readable is async-iterable
+// with `terminate()`, after which the writer's chunks are still taken, and dropped — nothing tells a wrpc writer
+// that its reader let go. `tooBig(length)` is the link's `maxMessage`: true once it took the link down.
+const pipe = (id, tooBig) => {
+  const queue = [];
+  let wake = null;
+  let ended = false;
+  let cut = false;
+  let full = false;
+  const wakeUp = () => {
+    const resolve = wake;
+    wake = null;
+    resolve?.();
+  };
+  const drained = () => {
+    full = false;
+    void writable.emit('drain');
+  };
+  const writable = Object.assign(new Emitter(), {
+    id,
+    closed: false,
+    write(chunk) {
+      if (writable.closed || ended || tooBig(chunk.length)) return false;
+      if (cut) return true;
+      queue.push(new Uint8Array(chunk));
+      wakeUp();
+      full = queue.length >= HIGH;
+      return !full;
+    },
+    end() {
+      ended = true;
+      wakeUp();
+    },
+    terminate() {
+      ended = true;
+      queue.length = 0;
+      wakeUp();
+    },
+    // The connection went: nothing more is taken, and a writer waiting for `drain` is let go.
+    close() {
+      if (writable.closed) return;
+      writable.closed = true;
+      queue.length = 0;
+      wakeUp();
+      drained();
+      void writable.emit('close');
+    },
+  });
+  const readable = {
+    id,
+    terminate() {
+      cut = true;
+      queue.length = 0;
+      wakeUp();
+      if (full) drained();
+    },
+    async *[Symbol.asyncIterator]() {
+      for (;;) {
+        if (cut) return;
+        if (queue.length > 0) {
+          const chunk = queue.shift();
+          if (full && queue.length < HIGH) drained();
+          yield chunk;
+        } else if (ended || writable.closed) return;
+        else await new Promise((resolve) => void (wake = resolve));
+      }
+    },
+  };
+  return { writable, readable };
+};
+
 class MemoryLink extends Emitter {
   #unit;
   #subscriptions = new Set();
   #down = false;
   #options;
+  // The streams announced and not read yet, by id: the link's (read by the host) and the host's (read by the link).
+  #up = new Map();
+  #streams = new Map();
+  #pipes = new Set();
+  #nextStream = 1;
   /** The methods called, in order. */
   calls = [];
   /** The events sent, in order. */
@@ -43,6 +128,45 @@ class MemoryLink extends Emitter {
     // other links.
     this.context = { client: this.client, server: options.server ?? null };
     options.server?.links.add(this);
+    if (options.streams !== true) return;
+    // A binary transport: what wrpc's `client.createStream`/`getStream` are on either end.
+    this.client.binary = true;
+    this.client.createStream = () => this.#announce(this.#streams);
+    this.client.getStream = (id) => this.#take(this.#up, id);
+    this.stream = (id) => this.#take(this.#streams, id);
+    this.createStream = () => this.#announce(this.#up);
+  }
+
+  // A stream announced on one end: its writable handed back, its readable kept for the other end by id.
+  #announce(readers) {
+    if (this.#down) throw closedError();
+    const { writable, readable } = pipe(`s${this.#nextStream++}`, (length) => this.#tooBig(length));
+    this.#pipes.add(writable);
+    readers.set(writable.id, readable);
+    return writable;
+  }
+
+  #take(readers, id) {
+    const readable = readers.get(id);
+    if (readable === undefined) throw new Error(`Stream ${id} is not initialized`);
+    readers.delete(id);
+    return readable;
+  }
+
+  // `maxMessage`: what a socket does with a message past its limit — it closes.
+  #tooBig(length) {
+    const { maxMessage } = this.#options;
+    if (maxMessage === undefined || length <= maxMessage) return false;
+    this.disconnect();
+    return true;
+  }
+
+  // The streams go with the socket: every writer told (`close`), every reader's iteration ended.
+  #cut() {
+    for (const writable of this.#pipes) writable.close();
+    this.#pipes.clear();
+    this.#up.clear();
+    this.#streams.clear();
   }
 
   /** Whether the socket is down. */
@@ -52,7 +176,7 @@ class MemoryLink extends Emitter {
 
   /** A fire-and-forget event to the host: the unit's `on` handler, as wrpc would call it. */
   send(event, data) {
-    if (this.#down) throw Object.assign(new Error('Connection closed'), { code: 503 });
+    if (this.#down) throw closedError();
     const name = event.split('/')[1];
     const handler = this.#unit.on?.[name]?.handler;
     if (!handler) throw Object.assign(new Error(`Unknown event ${event}`), { code: 404 });
@@ -70,13 +194,23 @@ class MemoryLink extends Emitter {
   }
 
   async call(method, args) {
-    if (this.#down) throw Object.assign(new Error('Connection closed'), { code: 503 });
+    if (this.#down) throw closedError();
     const name = method.split('/')[1];
     const procedure = this.#unit[name];
     if (!procedure) throw Object.assign(new Error(`Unknown method ${method}`), { code: 404 });
     this.calls.push(method);
+    const { maxMessage } = this.#options;
+    if (maxMessage !== undefined && this.#tooBig(JSON.stringify(args ?? null).length)) throw closedError();
     if (this.#options.latency) await sleep(this.#options.latency);
-    return clone(await procedure.handler(this.context, clone(args)));
+    let answer;
+    try {
+      answer = clone(await procedure.handler(this.context, clone(args)));
+    } catch (error) {
+      // The socket went while the host worked: its refusal has nowhere to go, as its answer has not.
+      throw this.#down ? closedError() : error;
+    }
+    if (this.#down) throw closedError();
+    return answer;
   }
 
   subscribe(method, args, handlers) {
@@ -135,6 +269,7 @@ class MemoryLink extends Emitter {
   /** The socket died: live feeds stop, calls fail, `close` is announced — the host's client hears it too. */
   disconnect() {
     this.#down = true;
+    this.#cut();
     for (const record of this.#subscriptions) record.controller?.abort();
     void this.client.emit('close');
     void this.emit('close');
@@ -156,6 +291,7 @@ class MemoryLink extends Emitter {
 
   close() {
     this.#down = true;
+    this.#cut();
     for (const record of this.#subscriptions) record.controller?.abort();
     this.#subscriptions.clear();
     void this.client.emit('close');

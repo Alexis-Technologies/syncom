@@ -2040,8 +2040,13 @@ export interface SyncLink {
       onEnd?: () => void;
     },
   ): { unsubscribe(): void; readonly lastEventId?: string };
-  /** Binary-capable transports: the chunks of a streamed snapshot page. */
+  /** Binary-capable transports: the chunks of a stream the host announced — a snapshot page, a blob's bytes. */
   stream?(id: string): AsyncIterable<Uint8Array | string>;
+  /**
+   * Binary-capable transports: a stream of `size` bytes to the host — what an attachment's bytes go up as, in pieces,
+   * bytes as bytes. A link without it sends them as base64 in a call.
+   */
+  createStream?(name: string, size: number): SyncLinkWritable;
   /** A fire-and-forget event to the host — what presence travels as; a link without it carries the ops alone. */
   send?(event: 'syncom/presence', data: unknown): void;
   /** The link's own events, and the host's: `syncom/presence` (a presence update), `syncom/revoke` (`{ scopes }` taken back). */
@@ -2051,6 +2056,19 @@ export interface SyncLink {
 }
 
 export type SyncLinkEvent = 'open' | 'close' | 'reconnect' | 'syncom/presence' | 'syncom/revoke';
+
+/**
+ * The writing end of a link's stream — a wrpc writable's shape. `write` answers false while the transport is full:
+ * `drain` follows, or `closed` is true and none will. `end()` closes it, `terminate()` cuts it short.
+ */
+export interface SyncLinkWritable {
+  readonly id: string;
+  readonly closed: boolean;
+  write(chunk: Uint8Array): boolean;
+  once(event: 'drain' | 'close', listener: () => void): unknown;
+  end(): void;
+  terminate(): void;
+}
 
 export interface SnapshotPage {
   records: Array<Entry & { id: string }>;

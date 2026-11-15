@@ -25,6 +25,7 @@ const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js')
 const { DB, SIGNER, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
+const { streams, collect } = require('./chunks.js');
 const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 const {
   refuse,
@@ -106,8 +107,7 @@ const waitFor = (wakers, signal) =>
 // too. The page itself when the client cannot read streams or the page is
 // over `pageBytes`.
 const streamed = (client, page, pageBytes) => {
-  const canStream = client && client.binary !== false && typeof client.createStream === 'function';
-  if (!canStream || page.records.length === 0) return page;
+  if (!streams(client) || page.records.length === 0) return page;
   let text = '';
   for (const record of page.records) text += `${JSON.stringify(record)}\n`;
   const bytes = encoder.encode(text);
@@ -325,14 +325,18 @@ const push = (host) => async (context, args) => {
   return { vector, ...result, outOfScope: outOfScope + result.outOfScope };
 };
 
-// `syncom/blobPut { digest, id, name, base64? }`: the bytes of an attachment whose register the peer pushed — the
-// dialer uploads them after a push this host took (src/sync/manager.js #upload), so a node behind this host reads
-// them here. Taken only where a live record in the peer's scopes names the digest under that name (`blobNamed`: one
-// 404 `NOT_NAMED` for every miss, so nothing is told), within `limits.bytesPerBlob` and MAX_BLOB_BYTES (413), and
-// when their SHA-256 is the digest (400 `BLOB_MISMATCH`). Without `base64` it is a probe: `have` says whether this
-// host holds them, so the bytes cross once. A unit that takes no pushes takes no bytes (403 `READ_ONLY`), nor a hub
-// that cannot write (503), nor a host without a blobs store (403 `NOT_SERVED`). Kept, the bytes go on to the hosts
-// this node pushed the register to (`landed`).
+// `syncom/blobPut { digest, id, name }` and the bytes of an attachment whose register the peer pushed — the dialer
+// uploads them after a push this host took (src/sync/manager.js #upload), so a node behind this host reads them
+// here. The bytes come as a stream of the transport's, announced before the call (`stream` its id, `size` its
+// bytes; read in the pieces the dialer pumps, src/sync/chunks.js, no further than `size`, and let go of whatever
+// the answer — its end is never waited for), or as `base64` in the call where the link carries no stream. Taken
+// only where a live record in the peer's scopes names the digest under that name (`blobNamed`: one 404 `NOT_NAMED`
+// for every miss, so nothing is told), within `limits.bytesPerBlob` and MAX_BLOB_BYTES (413, told by the size
+// announced before a byte is read), and when their SHA-256 is the digest (400 `BLOB_MISMATCH`); a stream that is
+// not there, or not the size it announced, is 400 `BAD_BLOB`. Without bytes it is a probe: `have` says whether this
+// host holds them, so the bytes cross once, and `stream` whether this connection carries one. A unit that takes no
+// pushes takes no bytes (403 `READ_ONLY`), nor a hub that cannot write (503), nor a host without a blobs store (403
+// `NOT_SERVED`). Kept, the bytes go on to the hosts this node pushed the register to (`landed`).
 const blobPut = (host) => async (context, args) => {
   const { storage, limits } = host;
   const state = peerOf(host, context, 'blobPut');
@@ -341,26 +345,46 @@ const blobPut = (host) => async (context, args) => {
   if (storage.readOnly) throw no('This hub is read-only', 503, 'READ_ONLY');
   const store = storage[DB]?.blobs;
   if (store === undefined) throw no('This host keeps no blobs', 403, 'NOT_SERVED');
-  const { digest, id, name, base64 } = args ?? {};
+  const { digest, id, name, base64, stream, size } = args ?? {};
   if (!isDigest(digest)) throw no('blobPut needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST');
-  const text = base64 === undefined || typeof base64 === 'string';
-  if (!text) throw no('blobPut takes the bytes as base64', 400, 'BAD_BLOB');
-  // `bytesPerBlob` where it is under the cap; told by the text's length before a byte is decoded (four characters
-  // carry three bytes), then by the bytes.
-  const own = limits.bytesPerBlob < MAX_BLOB_BYTES;
-  const max = own ? limits.bytesPerBlob : MAX_BLOB_BYTES;
-  const past = () => no(`A blob past ${max} bytes`, 413, own ? 'BYTES_PER_BLOB' : 'BLOB_TOO_LARGE');
-  if (base64 !== undefined && base64.length > Math.ceil(max / 3) * 4) throw past();
-  if (!(await blobNamed(host, state, digest, id, name))) throw no('No record of yours names it', 404, 'NOT_NAMED');
-  if (await store.has(digest)) return { digest, have: true };
-  if (base64 === undefined) return { digest, have: false };
-  const bytes = fromBase64(base64);
-  if (bytes.length > max) throw past();
-  if ((await hashBytes(bytes)) !== digest) throw no('The bytes are not the digest', 400, 'BLOB_MISMATCH');
-  await store.put(digest, bytes);
-  host.otel.recordBlob('received', 'ok', bytes.length);
-  host.landed(digest);
-  return { digest, have: true };
+  const client = context?.client;
+  const streamed = stream !== undefined;
+  const shaped = streamed
+    ? base64 === undefined && typeof stream === 'string' && Number.isSafeInteger(size) && size > 0 && streams(client)
+    : base64 === undefined || typeof base64 === 'string';
+  if (!shaped) throw no('blobPut takes the bytes as a stream of its size, or as base64', 400, 'BAD_BLOB');
+  let readable = null;
+  if (streamed) {
+    try {
+      readable = client.getStream(stream);
+    } catch {
+      throw no('No such stream on this connection', 400, 'BAD_BLOB');
+    }
+  }
+  try {
+    // `bytesPerBlob` where it is under the cap; told by the size announced, or by the text's length before a byte
+    // is decoded (four characters carry three bytes), then by the bytes.
+    const own = limits.bytesPerBlob < MAX_BLOB_BYTES;
+    const max = own ? limits.bytesPerBlob : MAX_BLOB_BYTES;
+    const past = () => no(`A blob past ${max} bytes`, 413, own ? 'BYTES_PER_BLOB' : 'BLOB_TOO_LARGE');
+    if (streamed ? size > max : base64 !== undefined && base64.length > Math.ceil(max / 3) * 4) throw past();
+    if (!(await blobNamed(host, state, digest, id, name))) throw no('No record of yours names it', 404, 'NOT_NAMED');
+    if (await store.has(digest)) return { digest, have: true };
+    if (!streamed && base64 === undefined) return { digest, have: false, stream: streams(client) };
+    const bytes = streamed ? await collect(readable, size) : fromBase64(base64);
+    if (bytes === null || (streamed && bytes.length !== size)) {
+      throw no('The stream is not the size it announced', 400, 'BAD_BLOB');
+    }
+    if (bytes.length > max) throw past();
+    if ((await hashBytes(bytes)) !== digest) throw no('The bytes are not the digest', 400, 'BLOB_MISMATCH');
+    await store.put(digest, bytes);
+    host.otel.recordBlob('received', 'ok', bytes.length);
+    host.landed(digest);
+    return { digest, have: true };
+  } finally {
+    // Read or not, the stream is let go of: what is still on its way is dropped, its end is not waited for.
+    if (readable !== null) await readable.terminate();
+  }
 };
 
 // Over a shared log a snapshot is positioned in the log, not in this hub's

@@ -9,7 +9,8 @@ import {
   memoryEngine,
   MemoryLink,
 } from '../src/testing/testing.js';
-import type { Mesh, MemoryEngine, SyncedDatabase } from '../src/testing/testing.js';
+import type { Mesh, MemoryEngine, MemoryReadable, SyncedDatabase } from '../src/testing/testing.js';
+import type { SyncLinkWritable } from '../index.js';
 import { createDatabase } from '../src/all/all.js';
 
 const engine = memoryEngine();
@@ -19,13 +20,20 @@ const mesh = await createMesh(['A', 'B'], [['A', 'B']], {
   // type is said here, as an application's factory would.
   createStorage: (name, options): Promise<SyncedDatabase> =>
     createDatabase({ ...options, path: name, engine, lock: false, logger: false }),
-  link: { latency: 1, drop: () => false, duplicate: (page) => page === null },
+  link: { latency: 1, drop: () => false, duplicate: (page) => page === null, streams: true, maxMessage: 65_536 },
   unit: { access: 'public' },
   scopes: { A: ['*'] },
 });
 const a = mesh.get('A');
 expectType<string>(a.nodeId);
 expectType<Map<string, MemoryLink>>(mesh.links);
+// Under `streams` the link and the host's client each announce a stream the other reads.
+const wired = mesh.links.get('mem://B')!;
+expectType<boolean>(wired.client.binary);
+expectType<SyncLinkWritable | undefined>(wired.createStream?.('upload', 3));
+expectType<MemoryReadable | undefined>(wired.client.getStream?.('s1'));
+expectType<MemoryReadable | undefined>(wired.stream?.('s2'));
+expectType<SyncLinkWritable | undefined>(wired.client.createStream?.('download', 3));
 await settle(mesh.storages);
 await settle([a, mesh.get('B')], { timeout: 1000, step: 5 });
 expectType<boolean>(sameVectors(mesh.storages));

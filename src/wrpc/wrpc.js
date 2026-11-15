@@ -18,7 +18,9 @@
 // — is what a WrpcClient already does; the adapter only translates names. An
 // event the engine sends (`send('syncom/presence', update)`) is the client's
 // `sendEvent`; one it listens for (`on('syncom/presence', fn)`) is the unit's
-// — `client.api.syncom.on('presence', fn)`, the emitter `use()` scaffolds.
+// — `client.api.syncom.on('presence', fn)`, the emitter `use()` scaffolds; a
+// stream it reads or writes (`stream(id)`, `createStream(name, size)`) is the
+// client's own `getStream`/`createStream` — wrpc's binary streams.
 
 const { isSyncLink } = require('../sync/link.js');
 
@@ -85,8 +87,10 @@ const createWrpcLink = (client, { unit = UNIT } = {}) => {
       return handle;
     },
 
-    // A WrpcReadable is async-iterable; the engine reads the NDJSON page from it.
+    // A WrpcReadable is async-iterable; the engine reads the NDJSON page, or a blob's bytes, from it.
     stream: (id) => client.getStream(id),
+    // A WrpcWritable: the engine pumps a blob's bytes into it in pieces (write / 'drain' / end), bytes as bytes.
+    createStream: (name, size) => client.createStream(name, size),
 
     // A fire-and-forget event to the host: presence.
     send: (event, data) => client.sendEvent(target(event), data),

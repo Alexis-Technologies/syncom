@@ -3,7 +3,7 @@
 // `settle()` for when it has gone quiet, `waitUntil()`, `withDatabase()`. No framework, no runner: node:test, vitest
 // or a browser's harness call these alike.
 
-import type { Database, Node, StorageOptions, SyncLink, SyncOptions } from '../../index.js';
+import type { Database, Node, StorageOptions, SyncLink, SyncLinkWritable, SyncOptions } from '../../index.js';
 import type { SyncApi, SyncUnit, SyncUnitOptions } from '../sync/sync.js';
 import type { MemoryEngine } from '../memory/memory.js';
 
@@ -18,9 +18,20 @@ export type SyncedDatabase = Database & SyncApi;
 export interface MemoryClient {
   readonly id: string;
   data: Record<string, unknown>;
+  /** Whether the link carries binary streams (`streams: true`). */
   readonly binary: boolean;
   readonly rooms: Set<string>;
   join(room: string): void;
+  /** Under `streams`: a stream the host announces for the link to read — wrpc's `client.createStream`. */
+  createStream?(name: string, size: number): SyncLinkWritable;
+  /** Under `streams`: the stream the link announced under `id` — wrpc's `client.getStream`; read once. */
+  getStream?(id: string): MemoryReadable;
+}
+
+/** The reading end of a link's stream: its chunks in order; `terminate()` lets go of it, what still comes is dropped. */
+export interface MemoryReadable extends AsyncIterable<Uint8Array> {
+  readonly id: string;
+  terminate(): void;
 }
 
 /** A room-addressed emit: `server.to(room).except(client).emit(name, data)`. */
@@ -49,6 +60,17 @@ export interface MemoryLinkOptions {
   drop?: (page: unknown) => boolean;
   /** A page delivered twice, as a flaky transport might: answer true to duplicate it. */
   duplicate?: (page: unknown) => boolean;
+  /**
+   * A binary transport: each end announces streams the other reads (`createStream`, `stream`/`getStream`), as over
+   * wrpc on a WebSocket — a snapshot page and an attachment's bytes then cross as bytes, in chunks, with a writer
+   * paced by `drain`. Off (the default), the link is text-only: pages inline, bytes as base64.
+   */
+  streams?: boolean;
+  /**
+   * The largest message the socket takes, in bytes: a call whose arguments are longer as JSON, or a stream's chunk
+   * past it, takes the link down (`disconnect()`), as an engine closes a socket for a message too big.
+   */
+  maxMessage?: number;
   /** The host's server over the links of one host; the mesh sets it. */
   server?: MeshServer | null;
 }
@@ -82,6 +104,10 @@ export declare class MemoryLink implements SyncLink {
     args: unknown,
     handlers: SubscriptionHandlers,
   ): { unsubscribe(): void; readonly lastEventId?: string };
+  /** Under `streams`: the chunks of a stream the host announced. */
+  stream?(id: string): MemoryReadable;
+  /** Under `streams`: a stream to the host, read there through `client.getStream(id)`. */
+  createStream?(name: string, size: number): SyncLinkWritable;
   /** A fire-and-forget event to the host (the unit's `on` block), as wrpc would call it. */
   send(event: string, data: unknown): void;
   /** The host's event to this client — what wrpc's `client.api.syncom.on` hears. */

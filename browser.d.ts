@@ -99,6 +99,7 @@ export type {
   SyncomHistogram,
   SyncLink,
   SyncLinkEvent,
+  SyncLinkWritable,
   OutboundOptions,
   DatabaseConstructor,
   ClockStamp,

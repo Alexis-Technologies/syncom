@@ -170,8 +170,10 @@ export interface SyncUnit {
   /** An attachment's bytes by digest (`syncom/blob { digest, id, name }`), as `allow.blob` serves them. */
   blob: SyncProcedure;
   /**
-   * The bytes of an attachment whose register the peer pushed — `{ digest, id, name, base64? }`, taken where a live
-   * record in its scopes names the digest under that name; without `base64` a probe answering `{ digest, have }`.
+   * The bytes of an attachment whose register the peer pushed — `{ digest, id, name }` with `stream` and `size` (a
+   * stream of the transport's the peer announced, read in pieces) or `base64` (where the link carries no stream) —
+   * taken where a live record in its scopes names the digest under that name; without bytes a probe answering
+   * `{ digest, have, stream }`: whether the host holds them, and whether this connection carries a stream.
    */
   blobPut: SyncProcedure;
   /** `unit({ query: true })`: a query over an entity, its rows in the peer's scopes; a count. */

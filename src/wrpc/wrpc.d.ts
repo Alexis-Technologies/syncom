@@ -1,10 +1,10 @@
 // The `@alexify/syncom/wrpc` subpath: a WrpcClient adapted to the SyncLink
 // contract. wrpc itself is injected by the caller and never imported here.
 
-import type { SyncLink } from '../../index.js';
+import type { SyncLink, SyncLinkWritable } from '../../index.js';
 import type { SharedCall } from '../shared/shared.js';
 
-export type { SyncLink } from '../../index.js';
+export type { SyncLink, SyncLinkWritable } from '../../index.js';
 export { isSyncLink } from '../../index.js';
 
 /** The part of a WrpcClient the adapter relies on — checked structurally. */
@@ -15,6 +15,8 @@ export interface WrpcClientLike {
   off(event: string, listener: (...args: unknown[]) => void): void;
   close(): void;
   getStream?(id: string): AsyncIterable<Uint8Array>;
+  /** A stream to the server — what `createStream` (an attachment's bytes) goes through. */
+  createStream?(name: string, size: number): SyncLinkWritable;
   /** A fire-and-forget event to the server — what `send` (presence) goes through. */
   sendEvent?(event: string, data: unknown): void;
   readonly api?: Record<string, unknown>;
@@ -27,6 +29,8 @@ export interface WrpcLinkOptions {
 
 export interface WrpcLink extends SyncLink {
   stream(id: string): AsyncIterable<Uint8Array>;
+  /** The client's `createStream`: a wrpc binary stream to the host. */
+  createStream(name: string, size: number): SyncLinkWritable;
   /** The client's `sendEvent` under the unit's name. */
   send(event: 'syncom/presence', data: unknown): void;
   readonly client: WrpcClientLike;

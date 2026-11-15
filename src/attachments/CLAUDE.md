@@ -31,8 +31,9 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   host serves a digest only where a live record in the peer's scopes names it, src/sync/reads.js `blobNamed`; a digest
   alone only under `allow.blob: 'any'`), hashes what it got and keeps it only when the
   hash is the digest (`sync.blob.mismatch` otherwise, the next peer asked); the host answers a wrpc stream where
-  `client.binary` is not false, base64 on a text transport (`toBase64` of crypto/pem.js — the one base64), and 404
-  `BLOB_NOT_FOUND` for what it lacks; a peer's answer past MAX_BLOB_BYTES (64 MiB, `src/blobs.js` — the one cap, every
+  the connection carries one — the bytes as bytes, in pieces of 64 KiB each written as the transport takes it
+  (src/sync/chunks.js; the rule is src/sync/CLAUDE.md's) — base64 on a text transport and for an empty blob
+  (`toBase64` of crypto/pem.js — the one base64), and 404 `BLOB_NOT_FOUND` for what it lacks; a peer's answer past MAX_BLOB_BYTES (64 MiB, `src/blobs.js` — the one cap, every
   store's `put` and `attachments.put` refuse past it as `BLOB_TOO_LARGE`) is refused. A register is a peer's word:
   `#entry` takes it only where `validEntry` holds (`isDigest` — 64 lowercase hex, never a path: a digest is the files
   engine's file name — a `type`, a safe `length` within the cap, a known `encoding`), `ATTACHMENT_INVALID` from
@@ -44,7 +45,8 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   plugin never puts what it fetched. `get(id, name, { fetch: false })` asks nobody. The bytes never come DOWN ahead of
   a read — an attachment reaches a dialer when it reads it — and go UP with a push: the dialer uploads the bytes of
   the registers a page the host took names (`syncom/blobPut`, src/sync/manager.js `#noteUploads`/`#upload`, a probe
-  first so they cross once; the host's door is `blobNamed` again, the digest checked over the bytes, `bytesPerBlob`
+  first so they cross once, then a stream of the link's in the same pieces — `#streamUp` — or base64 in the call
+  where no stream goes; the host's door is `blobNamed` again, the digest checked over the bytes, `bytesPerBlob`
   and the cap); bytes a relay lacks wait in `peer.uploads` until they land (`#blobLanded`: an upload taken, a fetch
   kept), so a chain of hubs carries them. A refused upload is final, a failed one retried at the next push, both
   `BLOB_UPLOAD_FAILED`, never the push's failure; a follower takes no bytes, and what waits is in memory alone.

@@ -101,6 +101,30 @@ test('a page lost on the way takes the link down until it reconnects', async () 
 });
 // #endregion drop
 
+// #region streams
+import { attachments } from '@alexify/syncom/attachments';
+
+test('a large attachment crosses a link whose messages are small', async () => {
+  const engine = memoryEngine();
+  const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
+    createStorage: (name, options) =>
+      createDatabase({ ...options, engine, path: name, logger: false, plugins: [attachments()] }),
+    // A binary transport that takes no message past 256 KiB, as a WebSocket with a low limit would
+    link: { streams: true, maxMessage: 256 * 1024 },
+  });
+  await settle(mesh.storages);
+  const laptop = mesh.get('laptop');
+
+  const id = await laptop.insert({ title: 'Trip photos' });
+  await laptop.attachments.put(id, 'photos.zip', new Uint8Array(1024 * 1024).fill(7), { type: 'application/zip' });
+  await settle(mesh.storages);
+
+  assert.equal(await mesh.get('server').attachments.has(id, 'photos.zip'), true); // 1 MiB went up in chunks
+  assert.equal(mesh.links.get('mem://server').down, false); // and no message was too big
+  await mesh.close();
+});
+// #endregion streams
+
 // #region offline
 test('writes made offline sync after the reconnect', async () => {
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {

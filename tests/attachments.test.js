@@ -560,7 +560,8 @@ test('Attachments', async (t) => {
         return (args) => link.call('syncom/blobPut', args);
       };
       const put = await open(['A']);
-      assert.deepStrictEqual(await put({ digest, id, name: 'f' }), { digest, have: false }, 'a probe');
+      // A probe: not held — and this link carries no stream, so the bytes would come as base64.
+      assert.deepStrictEqual(await put({ digest, id, name: 'f' }), { digest, have: false, stream: false });
       await assert.rejects(put({ digest: 'xyz', id, name: 'f' }), { code: 400, reason: 'BAD_DIGEST' });
       await assert.rejects(put({ digest, id, name: 'f', base64: 7 }), { code: 400, reason: 'BAD_BLOB' });
       // The digest under another name, another digest, no record: one answer, nothing told.
@@ -606,6 +607,176 @@ test('Attachments', async (t) => {
       // Before hello there is no peer to take bytes from.
       const stranger = new MemoryLink(host.sync.unit({ access: 'public' }));
       await assert.rejects(stranger.call('syncom/blobPut', { digest, id, name: 'f' }), { code: 428 });
+    },
+  );
+
+  await t.test(
+    'the bytes cross as a stream where the link carries one: a blob larger than one message goes up and comes down in pieces through two hubs; a link down mid-way is tried again',
+    async (t2) => {
+      // Every link a binary transport that takes no message past 256 KiB: the blob as base64 in a call, or as one
+      // chunk of a stream, would take the link down.
+      const link = { streams: true, maxMessage: 256 * 1024 };
+      const mesh = await createMesh(
+        t2,
+        ['H1', 'H2', 'A', 'B'],
+        [
+          ['A', 'H1'],
+          ['H1', 'H2'],
+          ['B', 'H2'],
+        ],
+        createStorage,
+        { link },
+      );
+      const [h1, h2, a, b] = ['H1', 'H2', 'A', 'B'].map((name) => mesh.get(name));
+      const errors = [];
+      for (const node of [a, h1, b]) node.sync.on('error', (error) => errors.push(error));
+      await a.sync.awaitInitialReplication();
+      await h1.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      // 17 pieces of 64 KiB, the last a short one: a pump waits for the link's drain on the way.
+      const bytes = new Uint8Array(1024 * 1024 + 7);
+      for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31) % 251;
+      const id = await a.insert({ title: 'a film' });
+      const entry = await a.attachments.put(id, 'film.bin', bytes, { type: 'video/mp4' });
+      await a.attachments.put(id, 'empty.bin', new Uint8Array(0), { type: 'application/octet-stream' });
+      await settle([h1, h2, a, b]);
+      await waitUntil(() => h2.attachments.has(id, 'film.bin'));
+      await waitUntil(() => h2.attachments.has(id, 'empty.bin'));
+      const got = await b.attachments.get(id, 'film.bin');
+      assert.strictEqual(got.bytes.length, bytes.length);
+      assert.strictEqual(await hashBytes(got.bytes), entry.digest);
+      assert.strictEqual((await b.attachments.get(id, 'empty.bin')).bytes.length, 0, 'an empty blob is no stream');
+      assert.deepStrictEqual(errors, []);
+      for (const dialed of mesh.links.values()) assert.strictEqual(dialed.down, false, 'no message was too big');
+
+      // A link that goes down with the bytes on their way (not one piece fits its messages): the upload is reported
+      // as a transport's failure, and tried again once the link is back.
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const hazards = { streams: true, maxMessage: 8 * 1024 };
+      const s = await createStorage(t2, 'S');
+      const unit = s.sync.unit({ access: 'public' });
+      let dial = null;
+      const c = await createStorage(t2, 'C', {
+        sync: { connect: () => (dial = new MemoryLink(unit, hazards)), autoStart: false },
+      });
+      const failures = [];
+      c.sync.on('error', (error) => failures.push(error));
+      await c.sync.addNode({ url: 'mem://S' });
+      await c.sync.start();
+      await c.sync.awaitInitialReplication();
+      const big = await c.insert({ title: 'cut off' });
+      const cut = await c.attachments.put(big, 'cut.bin', bytes.subarray(0, 100_000), { type: 'x/y' });
+      await waitUntil(() => failures.some((error) => error.code === 'BLOB_UPLOAD_FAILED'));
+      const [failed] = failures.filter((error) => error.code === 'BLOB_UPLOAD_FAILED');
+      assert.strictEqual(failed.digest, cut.digest);
+      assert.strictEqual(failed.cause.code, 503);
+      assert.strictEqual(failed.retry, true, 'a transport that failed is tried again');
+      assert.strictEqual(dial.down, true);
+      assert.strictEqual(await s.attachments.has(big, 'cut.bin'), false);
+      hazards.maxMessage = undefined;
+      await dial.reconnect();
+      await waitUntil(() => s.attachments.has(big, 'cut.bin'));
+      assert.strictEqual(await hashBytes((await s.attachments.get(big, 'cut.bin')).bytes), cut.digest);
+
+      // What a host answers for a streamed blob is held to the size it says: more, less or none is no blob.
+      const t1 = await createStorage(t2, 'T');
+      const served = t1.sync.unit({ access: 'public' });
+      let answer = (page) => page;
+      const tampering = () => {
+        const tampered = new MemoryLink(served, { streams: true });
+        const call = tampered.call.bind(tampered);
+        tampered.call = async (method, args) => {
+          const page = await call(method, args);
+          return method === 'syncom/blob' ? answer(page) : page;
+        };
+        return tampered;
+      };
+      const reader = await createStorage(t2, 'R', { sync: { connect: tampering, autoStart: false } });
+      await reader.sync.addNode({ url: 'mem://T' });
+      await reader.sync.start();
+      await reader.sync.awaitInitialReplication();
+      const held = await t1.insert({ title: 'held' });
+      const kept = await t1.attachments.put(held, 'kept.bin', bytes.subarray(0, 70_000), { type: 'x/y' });
+      await settle([t1, reader]);
+      const named = { id: held, name: 'kept.bin' };
+      for (const size of [kept.length + 1, kept.length - 1, 'many', -1]) {
+        answer = (page) => ({ ...page, size });
+        await assert.rejects(reader.sync.fetchBlob(kept.digest, named), (error) => {
+          assert.strictEqual(error.code, 'BLOB_NOT_FOUND');
+          assert.strictEqual(error.cause.code, 'BAD_PAGE', String(size));
+          return true;
+        });
+      }
+      answer = (page) => page;
+      assert.strictEqual((await reader.sync.fetchBlob(kept.digest, named)).length, 70_000);
+    },
+  );
+
+  await t.test(
+    'syncom/blobPut over a stream: the pieces are read to the size announced and no further; a stream missing, short, long, forged, unnamed or past the limit is refused and let go',
+    async (t2) => {
+      const scope = (id, data) => data.$type ?? '*';
+      const host = await createStorage(t2, 'H', { sync: { scope } });
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const bytes = bytesOf('the bytes');
+      const digest = await hashBytes(bytes);
+      const register = { digest, type: 'text/plain', length: bytes.length };
+      const id = await host.insert({ $type: 'A', [`${FIELD}/f`]: register });
+      const open = async (scopes, options = {}, hazards = { streams: true }) => {
+        const link = new MemoryLink(host.sync.unit({ access: 'public', ...options }), hazards);
+        await link.call('syncom/hello', { node: `peer-${scopes.join('-')}`, version: 1, scopes });
+        return link;
+      };
+      // A stream announced, the call that names it, then the chunks — as the dialer does it.
+      const send = (link, args, chunks, { end = true } = {}) => {
+        const stream = link.createStream('syncom/blobPut', args.size);
+        const taking = link.call('syncom/blobPut', { ...args, stream: stream.id });
+        for (const chunk of chunks) stream.write(chunk);
+        if (end) stream.end();
+        return Object.assign(taking, { stream });
+      };
+      const peer = await open(['A']);
+      const size = bytes.length;
+      const named = { digest, id, name: 'f' };
+      assert.deepStrictEqual(
+        await peer.call('syncom/blobPut', named),
+        { digest, have: false, stream: true },
+        'a probe',
+      );
+      const bad = { code: 400, reason: 'BAD_BLOB' };
+      // No such stream; a size that is none; the bytes both ways at once.
+      await assert.rejects(peer.call('syncom/blobPut', { ...named, stream: 'nope', size }), bad);
+      await assert.rejects(send(peer, { ...named, size: 0 }, []), bad);
+      await assert.rejects(send(peer, { ...named, size: 1.5 }, [bytes]), bad);
+      await assert.rejects(send(peer, { ...named, size, base64: 'AA==' }, [bytes]), bad);
+      // Fewer bytes than announced, then more: never waited for, never read past.
+      await assert.rejects(send(peer, { ...named, size: size + 1 }, [bytes]), bad);
+      await assert.rejects(send(peer, { ...named, size: size - 1 }, [bytes]), bad);
+      // The size right, the bytes not the digest.
+      await assert.rejects(send(peer, { ...named, size }, [bytesOf('forged!!!')]), {
+        code: 400,
+        reason: 'BLOB_MISMATCH',
+      });
+      // No record of the peer's names it: refused before a byte is read, and what the writer still sends is dropped.
+      const unnamed = send(peer, { ...named, name: 'g', size }, [], { end: false });
+      await assert.rejects(unnamed, { code: 404, reason: 'NOT_NAMED' });
+      assert.strictEqual(unnamed.stream.write(bytes), true, 'taken by the transport, read by no one');
+      unnamed.stream.terminate();
+      const outsider = await open(['B']);
+      await assert.rejects(send(outsider, { ...named, size }, [bytes]), { code: 404, reason: 'NOT_NAMED' });
+      // Past the unit's limit by the size announced.
+      const small = await open(['A'], { limits: { bytesPerBlob: 4 } });
+      await assert.rejects(send(small, { ...named, size }, [bytes]), { code: 413, reason: 'BYTES_PER_BLOB' });
+      // A link that carries no stream cannot name one.
+      const text = await open(['A'], {}, {});
+      await assert.rejects(text.call('syncom/blobPut', { ...named, stream: 's1', size }), bad);
+      assert.strictEqual(await host[DB].blobs.has(digest), false, 'nothing refused was kept');
+      // Taken, in two pieces.
+      const pieces = [bytes.subarray(0, 4), bytes.subarray(4)];
+      assert.deepStrictEqual(await send(peer, { ...named, size }, pieces), { digest, have: true });
+      same(await host[DB].blobs.get(digest), bytes);
+      // Held already: answered before a byte is read.
+      assert.deepStrictEqual(await send(peer, { ...named, size }, [], { end: false }), { digest, have: true });
     },
   );
 

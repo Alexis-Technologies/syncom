@@ -86,6 +86,14 @@ converge:
 
 <<< @/examples/testing.mjs#drop
 
+By default a link is a text transport: a snapshot page comes inline and an [attachment](./attachments)'s bytes as
+base64 in one call, as over Server-Sent Events. `streams: true` makes it a binary transport like a WebSocket, so
+bytes cross as chunks of a stream in both directions. `maxMessage` is the size limit of one message: a call or a
+chunk past it takes the link down, as a server closes a socket for a message that is too big. Together they let a
+test prove that a large attachment never travels as one message:
+
+<<< @/examples/testing.mjs#streams
+
 ## Take a node offline and bring it back
 
 `link.disconnect()` cuts a link as a dead socket would: calls fail with code 503 and the change feed stops. Writes

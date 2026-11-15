@@ -673,7 +673,9 @@ new challenge.
 
 ```
 → { digest, id, name }                 (a probe)
-→ { digest, id, name, base64 }         (the bytes)
+← { digest, have, stream }
+→ { digest, id, name, stream, size }   (the bytes, as a stream of the transport's)
+→ { digest, id, name, base64 }         (the bytes, where the link carries no stream)
 ← { digest, have }
 ```
 
@@ -681,22 +683,37 @@ The bytes of an attachment whose entry the caller pushed, uploaded to the host a
 behind the host reads them there ([Attachments](../guide/attachments#attach-on-a-node-that-dials-a-server)). The
 host takes them only where a live record in the caller's scopes names the digest under that name — the same door
 as `blob`'s: a record forgotten, purged, sealed, out of scope, or naming another digest is one answer, 404
-`NOT_NAMED`, so nothing is told — and only when their SHA-256 is the digest (400 `BLOB_MISMATCH`). Without `base64`
-the call is a probe: `have` says whether the host holds the bytes, so they cross once; with it the host keeps them
-and answers `have: true` (also when it held them already). Kept, the bytes go on to the hosts this host pushed the
-entry to, the same way. Past `limits.bytesPerBlob` it is 413 `BYTES_PER_BLOB`, past 64 MiB (`MAX_BLOB_BYTES`, the one
-cap, told by the text's length before a byte is decoded) 413 `BLOB_TOO_LARGE`; 400 `BAD_DIGEST` for what is no
-digest, 400 `BAD_BLOB` for bytes that are no base64 text; 403 `READ_ONLY` where the unit takes no pushes
-(`allow.push` false), 503 `READ_ONLY` on a hub that cannot write (a follower takes no bytes: upload to a hub that
-writes), 403 `NOT_SERVED` on a host without a blobs store; 428 `HELLO_FIRST` before a hello, 403 `UNPROVEN` under
-`prove`.
+`NOT_NAMED`, so nothing is told — and only when their SHA-256 is the digest (400 `BLOB_MISMATCH`). Without bytes
+the call is a probe: `have` says whether the host holds them, so they cross once, and `stream` whether this
+connection carries a binary stream (a persistent, binary transport); with them the host keeps them and answers
+`have: true` (also when it held them already — before a byte is read). Kept, the bytes go on to the hosts this host
+pushed the entry to, the same way.
+
+**The bytes cross as bytes.** Where the probe said `stream: true` and the link has `createStream`, the caller
+announces a stream of the transport's (a wrpc binary stream — the link's [`createStream`](#the-link-contract)) of `size` bytes, sends the call naming it
+(`stream` its id) at once, and writes the bytes into it in chunks of 64 KiB, each as the transport takes it (a
+`write` that answers false is waited for by its `drain`). The host reads the chunks as they land, `size` bytes and
+no further, and answers when it has them; it lets go of the stream whatever it answers, so a refusal before a byte
+was read leaves nothing waiting, and the caller stops sending once the call has settled. No message holds the
+whole blob, so a transport's message limit (16 MiB on most of wrpc's engines) does not bound an attachment, and
+nothing is encoded. `base64` in the call is the form for a link without streams (a text-only transport such as
+SSE, an in-process link) and for an empty blob; there the transport's message limit bounds the attachment (10 MiB
+of body over wrpc's HTTP, a third of it lost to the encoding).
+
+Past `limits.bytesPerBlob` it is 413 `BYTES_PER_BLOB`, past 64 MiB (`MAX_BLOB_BYTES`, the one cap) 413
+`BLOB_TOO_LARGE` — told by the `size` announced, or by the text's length, before a byte is read or decoded; 400
+`BAD_DIGEST` for what is no digest; 400 `BAD_BLOB` for bytes that are no base64 text, for `stream` and `base64`
+together, a `size` that is no positive integer, a stream this connection did not announce (or cannot carry), and a
+stream that ended short of its `size` or ran past it; 403 `READ_ONLY` where the unit takes no pushes (`allow.push`
+false), 503 `READ_ONLY` on a hub that cannot write (a follower takes no bytes: upload to a hub that writes), 403
+`NOT_SERVED` on a host without a blobs store; 428 `HELLO_FIRST` before a hello, 403 `UNPROVEN` under `prove`.
 
 The dialer keeps, per host, the attachments a page the host took names (every `_attachments/<name>` entry a
 pushed op sets, by digest, 1 024 at most; none of an op the host refused, none on a page a follower forwarded) and
 uploads the bytes it holds after the page, on the push chain: a probe, then the bytes. Bytes it lacks — a relay
 that never read them — wait until they land here (an upload from a node behind it, a `fetchBlob`), then go up. A
-refusal (400, 403, 404, 413) is final; a failure on the way is tried again at the next push, a reconnect's
-included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
+refusal (400, 403, 404, 413) is final; a failure on the way — a link that went down with chunks still to send
+fails the call (503) — is tried again at the next push, a reconnect's included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
 `retry`); neither fails the push. What waits is kept in memory: a restart forgets it.
 
 ### `blob`
@@ -704,7 +721,7 @@ included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, 
 ```
 → { digest, id, name }
 ← { id, size, digest }                 (a wrpc stream of the bytes, where the transport carries one)
-← { digest, size, base64 }             (the bytes themselves otherwise)
+← { digest, size, base64 }             (the bytes themselves otherwise, and for an empty blob)
 ```
 
 An attachment's bytes by their SHA-256 (hex, 64 characters), named by the record `id` and the attachment `name`
@@ -713,8 +730,10 @@ that hold them: what a node that holds a record naming bytes it lacks asks of th
 where a live record in the caller's scopes names it under that name — a record forgotten, purged, sealed, out of
 scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing of what the host holds is told, and
 a revoke, a purge, a forget follow the record; under `'any'` the digest alone serves (a capability: a trusted
-mesh's). The host answers a stream on a binary-capable transport and base64 on a text one (SSE); the dialer checks
-the bytes against the digest before it keeps them. 404 `BLOB_NOT_FOUND` where the host holds none (or has no blobs
+mesh's). The host answers a stream on a binary-capable transport — `size` bytes written in chunks of 64 KiB, each
+as the transport takes it, never one message of the whole — and base64 on a text one (SSE) and for an empty blob;
+the dialer reads `size` bytes and no further (an answer with no `size`, one past 64 MiB, or a stream that is not
+the size it said is no blob: the next peer is asked) and checks the bytes against the digest before it keeps them. 404 `BLOB_NOT_FOUND` where the host holds none (or has no blobs
 store), 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for what is no digest, 428 `HELLO_FIRST` before
 a hello, 403 `UNPROVEN` under `prove`.
 
@@ -1131,7 +1150,8 @@ unit:
 interface SyncLink {
   call(method: string, args: unknown): Promise<unknown>;
   subscribe(method, args, { lastEventId, onData(value, eventId), onError, onEnd }): { unsubscribe() };
-  stream?(id: string): AsyncIterable<Uint8Array>; // binary-capable transports
+  stream?(id: string): AsyncIterable<Uint8Array>; // binary-capable transports: a stream the host announced
+  createStream?(name: string, size: number): SyncLinkWritable; // binary-capable transports: a stream to the host
   send?(event: 'syncom/presence', data: unknown): void; // a fire-and-forget event to the host
   on(event: 'open' | 'close' | 'reconnect' | 'syncom/presence' | 'syncom/revoke', listener): void;
   off(event, listener): void;
@@ -1143,6 +1163,16 @@ Reconnecting, backing off and resuming the subscription from its last event
 id are the link's job. `send` and the `syncom/presence` event are what
 [presence](#the-presence-event) travels as; a link without them carries the
 ops alone.
+
+`stream` and `createStream` are the transport's binary streams, wrpc's as they
+are (`client.getStream`, `client.createStream`): what a host announced — a
+[snapshot page](#snapshot), a [blob](#blob) — is read as its chunks, and an
+attachment's bytes go up through a writable (`SyncLinkWritable`: `id`,
+`write(chunk)` answering false while the transport is full, a `drain` event
+after, `closed` once the connection went, `end()`, `terminate()`) in chunks
+of 64 KiB ([`blobPut`](#blobput)). A link without them is a text link: pages
+come inline and bytes as base64, within what one message of the transport
+may hold.
 
 ## Guarantees and limits
 

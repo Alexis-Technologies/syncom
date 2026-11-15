@@ -441,6 +441,18 @@ expectType<void | undefined>(someLink.send?.('syncom/presence', { node: 'a' }));
 someLink.on('syncom/revoke', () => {});
 someLink.off('syncom/presence', () => {});
 expectError(someLink.on('message', () => {}));
+// A binary link's streams: one read (`stream`), one written in pieces (`createStream`) — both optional.
+expectType<AsyncIterable<Uint8Array | string> | undefined>(someLink.stream?.('s1'));
+const upload = someLink.createStream?.('syncom/blobPut', 3);
+expectType<syncom.SyncLinkWritable | undefined>(upload);
+if (upload !== undefined) {
+  expectType<boolean>(upload.write(new Uint8Array(3)));
+  expectType<boolean>(upload.closed);
+  expectType<string>(upload.id);
+  upload.once('drain', () => {});
+  upload.end();
+  upload.terminate();
+}
 expectAssignable<syncom.SyncLink>({
   call: async () => null,
   subscribe: () => ({ unsubscribe() {} }),

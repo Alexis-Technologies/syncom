@@ -13,6 +13,8 @@ const { createWrpcLink } = require('../src/wrpc/wrpc.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { settle, waitUntil } = require('./utils/mesh.js');
 const { createPresence } = require('../src/presence/presence.js');
+const { attachments } = require('../src/attachments/attachments.js');
+const { hashBytes } = require('../src/crypto/digest.js');
 
 // Skip only when the module is not there; a broken one is a failure to see.
 const optional = (name) => {
@@ -46,9 +48,16 @@ const openTemp = async (t, options = {}) => {
 };
 
 // wrpc's own boot pattern: port 0, quiet logger, teardown registered at once.
-const host = async (t, storage, unitOptions = { access: 'public' }, port = 0) => {
+const host = async (t, storage, unitOptions = { access: 'public' }, port = 0, serverOptions = {}) => {
   const router = wrpc.defineRouter({ syncom: storage.sync.unit(unitOptions) });
-  const server = new wrpc.Server({ router, host: '127.0.0.1', port, protocol: 'http', logger: false });
+  const server = new wrpc.Server({
+    router,
+    host: '127.0.0.1',
+    port,
+    protocol: 'http',
+    logger: false,
+    ...serverOptions,
+  });
   await server.listen();
   t.after(() => server.close().catch(() => {}));
   const address = server.address();
@@ -179,6 +188,62 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     await settle([a, c], { timeout: 10_000 });
     assert.strictEqual((await c.get(id)).hits, 11);
   });
+
+  await t.test(
+    'an attachment larger than one wrpc message crosses a hub as bytes: uploaded and downloaded as a stream in chunks; an empty one inline',
+    async (t2) => {
+      const plugins = [attachments()];
+      const h = await openTemp(t2, { plugins });
+      // A host whose engine takes no message past 2 MiB — what a uWebSockets.js engine, permessage-deflate or a
+      // WebTransport session do at 16 MiB: the bytes must cross in pieces, whichever way they are encoded.
+      const limit = 2 * 1024 * 1024;
+      const hostH = await host(t2, h, { access: 'public' }, 0, { ws: { maxBuffer: limit } });
+      // What the dialers read of the host's streams, chunk by chunk.
+      const chunks = [];
+      const spying = async (node) => {
+        const link = await connect()(node);
+        const read = link.stream;
+        link.stream = (id) =>
+          (async function* spy() {
+            for await (const chunk of read(id)) {
+              chunks.push(chunk.length);
+              yield chunk;
+            }
+          })();
+        return link;
+      };
+      const a = await openTemp(t2, { plugins, sync: { connect: spying, autoStart: false } });
+      const b = await openTemp(t2, { plugins, sync: { connect: spying, autoStart: false } });
+      const errors = [];
+      for (const node of [a, b]) {
+        node.sync.on('error', (error) => errors.push(error));
+        await node.sync.addNode({ url: hostH.url });
+        await node.sync.start();
+      }
+      await settle([h, a, b], { timeout: 10_000 });
+      // 6 MiB: three of the host's messages as bytes, four as base64.
+      const bytes = new Uint8Array(6 * 1024 * 1024);
+      for (let i = 0; i < bytes.length; i += 4093) bytes[i] = i % 251;
+      const id = await a.insert({ title: 'a film' });
+      const entry = await a.attachments.put(id, 'film.bin', bytes, { type: 'application/octet-stream' });
+      await a.attachments.put(id, 'empty.bin', new Uint8Array(0), { type: 'application/octet-stream' });
+      await waitUntil(() => h.attachments.has(id, 'film.bin'), { timeout: 10_000 });
+      await waitUntil(() => h.attachments.has(id, 'empty.bin'), { timeout: 10_000 });
+      assert.strictEqual(await hashBytes((await h.attachments.get(id, 'film.bin')).bytes), entry.digest);
+      await waitUntil(async () => (await b.get(id)) !== null, { timeout: 10_000 });
+      chunks.length = 0;
+      const got = await b.attachments.get(id, 'film.bin');
+      assert.strictEqual(got.bytes.length, bytes.length);
+      assert.strictEqual(await hashBytes(got.bytes), entry.digest);
+      let largest = 0;
+      for (const size of chunks) if (size > largest) largest = size;
+      assert.ok(chunks.length >= 96, `the bytes come down in pieces (${chunks.length})`);
+      assert.ok(largest <= 64 * 1024, `no piece past 64 KiB (${largest})`);
+      assert.strictEqual((await b.attachments.get(id, 'empty.bin')).bytes.length, 0);
+      assert.deepStrictEqual(errors, [], 'no upload failed, no link dropped');
+      assert.ok(a.sync.peers()[0].connected && b.sync.peers()[0].connected);
+    },
+  );
 
   await t.test('authorize gates the handshake by the token the node carries', async (t2) => {
     const a = await openTemp(t2);
