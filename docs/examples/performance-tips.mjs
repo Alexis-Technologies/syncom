@@ -140,15 +140,20 @@ const server = await createDatabase({
   sync: { retention: { ops: 2000 } }, // 10 000 by default
 });
 // #endregion retention
-for (let i = 0; i < 300; i++) {
+// A roll (every 64 transactions) seals only the batches that have landed, so the oldest segment goes at the first
+// roll after the log passes the window with them landed: on a busy machine that is a roll or two later. Write on
+// until it has, as a server that keeps taking writes would.
+let written = 0;
+for (let i = 0; i < 300 || (server.stats().log.floor <= 1 && i < 1200); i++) {
   await server.transact(async (tx) => {
     for (let k = 0; k < 10; k++) await tx.insert({ n: i * 10 + k });
   });
+  written += 10;
 }
 await server.flush();
 const { log } = server.stats();
 assert.ok(log.floor > 1, 'the oldest segments were dropped');
-assert.ok(log.length < 3000, `the log keeps about retention.ops entries, not all 3000 (${log.length})`);
+assert.ok(log.length < written, `the log keeps about retention.ops entries, not all ${written} (${log.length})`);
 await server.close();
 
 // #region measure
