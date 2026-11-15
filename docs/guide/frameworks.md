@@ -1,160 +1,70 @@
-# Frameworks
+---
+title: Other frameworks
+description: Read live syncom queries and records from Vue, Svelte, Solid, Angular and Preact signals, each through the same store in a line or two of code.
+---
 
-`@alexify/syncom/store` turns a source of syncom's into one store object
-that a UI framework reads: a query, a live record, a record as `get()`
-reads it, a presence room, or anything that emits. It imports no
-framework. The object keeps two contracts at once, so React and Svelte
-take it as it is, and Vue and Solid wrap it in a line.
+# Other frameworks
 
-```js
-const { createDatabase } = require('@alexify/syncom/all');
-const { toStore } = require('@alexify/syncom/store');
+A syncom [store](./reactivity) keeps two contracts at once: Svelte's store contract and the
+`subscribe`/`getSnapshot` pair [React](./react) reads. Svelte takes a store as it is, and every other
+framework wraps it in a line or two. The recipes below all read one store, the open tasks of the board:
 
-const storage = await createDatabase({ path: 'data', schema: { entities: { Task: { index: ['done'] } } } });
-const tasks = toStore(storage.Task.select({ done: false }).order('title'));
-```
+<<< @/examples/react.mjs#board
 
-## The store
-
-| Member | What it is |
-| --- | --- |
-| `subscribe(run)` | Calls `run(value)` at once and on every change; returns the function that stops it — Svelte's store contract |
-| `getSnapshot()` | The value now; the same object until the source changes — what React's `useSyncExternalStore` compares |
-| `value` | The same as `getSnapshot()` |
-| `error` | The source's last failure, cleared by its next value |
-| `ready` | Resolves with the first value the source gives |
-
-The source is watched from the first subscriber to the last: a query
-re-runs, a record is observed, a room is listened to only while something
-shows it. A store with no subscriber answers the last value it saw.
-`toStore(source, { initial, onError })` sets what the store holds before
-the source gave anything (`undefined` by default) and hears a failure — a
-filter that threw, a read that rejected; the value stays as it was.
-
-## Sources
-
-| Source | The value |
-| --- | --- |
-| `toStore(cursor)` | The query's rows, as `watch()` gives them — the query runs again after every change to its collection, coalesced |
-| `toStore(record)` | A live `Document`'s data, a new copy per change; `null` once deleted |
-| `toStore(storage, id)` | The record as `get()` reads it — the lens and the read hooks applied — read again after every turn that changed it |
-| `toStore(storage, id, { path: 'profile/city' })` | One field of it; a write to the field, under it or above it reads it again |
-| `toStore(presence)` | A [presence](./presence) room's states, a `Map` by node |
-| `fromEvents(emitter, events, read)` | `read()` — a value or a promise of one — at the start and after each of `events` |
-
-`toObservable(store)` turns any of these into an interop Observable for what reads RxJS's shape
-([Angular](#angular)). `fromEvents` covers what has no source of its own. The sync manager's
-peers, say:
-
-```js
-const { fromEvents } = require('@alexify/syncom/store');
-
-const peers = fromEvents(storage.sync, ['peer', 'sync'], () => storage.sync.peers());
-```
-
-When two reads race, the newest wins, and a read that resolves after the
-last subscriber left is dropped.
-
-## React
-
-```jsx
-import { useSyncExternalStore } from 'react';
-
-function Tasks() {
-  const rows = useSyncExternalStore(tasks.subscribe, tasks.getSnapshot) ?? [];
-  return rows.map((row) => <li key={row.id}>{row.title}</li>);
-}
-```
-
-Make the store once — at module level, or with `useMemo` over the query's
-arguments — so `subscribe` keeps its identity across renders. The snapshot
-is a new array only when the rows changed, which is what
-`useSyncExternalStore` needs to skip a render.
-
-## Svelte
-
-A store is a Svelte store; `$tasks` subscribes and unsubscribes with the
-component:
-
-```svelte
-<script>
-  export let tasks;
-</script>
-
-{#each $tasks ?? [] as row (row.id)}
-  <li>{row.title}</li>
-{/each}
-```
+Make stores once, at module level or memoized per set of arguments, so a framework never subscribes to a
+new store on every render. Each recipe below lets go of the store when the component goes away, and the
+store stops its query when its last subscriber has left.
 
 ## Vue
 
-```js
-import { shallowRef, onScopeDispose } from 'vue';
+<<< @/examples/frameworks.mjs#vue
 
-const useStore = (store) => {
-  const value = shallowRef(store.getSnapshot());
-  onScopeDispose(store.subscribe((next) => (value.value = next)));
-  return value;
-};
+`useStore()` returns a ref that follows the store while the component lives: `onScopeDispose` stops the
+subscription when the component unmounts (or when the effect scope that called it stops). The ref is a
+`shallowRef` because the store replaces its value whole on every change and never edits it in place, so
+Vue has no reason to make the rows deeply reactive.
 
-// in setup():
-const rows = useStore(tasks);
-```
+## Svelte
 
-`shallowRef` because the value is replaced whole on every change, never
-edited in place.
+A store is a Svelte store, so `$openTasks` in a component subscribes when the component mounts and
+unsubscribes when it is destroyed:
+
+<<< @/examples/frameworks-svelte.svelte
+
+`derived()` and `get()` of `svelte/store` take it as well, since they accept any object with a
+`subscribe` that returns a stop function.
 
 ## Solid
 
-```js
-import { from } from 'solid-js';
+<<< @/examples/frameworks.mjs#solid
 
-const rows = from(tasks);
-```
-
-`from` takes anything with a `subscribe` that returns the stop function.
+Solid's `from()` takes anything with a `subscribe` method that returns the stop function, and turns it
+into a signal. Call it inside a component or a root so its cleanup runs.
 
 ## Angular
 
-```ts
-import { Component } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
-import { toObservable } from '@alexify/syncom/store';
+Angular reads Observables, so hand it one with `toObservable()`:
 
-@Component({ /* … */ })
-export class TasksComponent {
-  readonly tasks$ = toObservable(tasks); // `tasks$ | async` in the template
-  readonly rows = toSignal(toObservable(tasks)); // or a signal
-}
-```
+<<< @/examples/frameworks-angular.ts
 
-`toObservable(store)` is an interop Observable — `subscribe({ next })` returning `{ closed, unsubscribe() }`, and
-itself at `Symbol.observable` — so the `async` pipe, `toSignal()` and RxJS's `from()` take it as they take an RxJS
-Observable. It never errors or completes (a live source; a failure stays on `store.error`), and `unsubscribe()`
-lets the store go — its source with it, once the last subscriber left.
+`toSignal()` subscribes once and unsubscribes when the component is destroyed. `requireSync: true` is
+safe because the observable emits the store's value at once on subscribe. In a template you can also
+write `toObservable(openTasks)` into a field and read it with the `async` pipe. The observable never
+errors or completes; a failure of the query stays on `openTasks.error`.
 
 ## Preact signals
 
-```js
-import { signal } from '@preact/signals-core';
+<<< @/examples/frameworks.mjs#preact
 
-const rows = signal(tasks.value);
-const stop = tasks.subscribe((value) => (rows.value = value));
-```
+A signal set from the store follows it until you call the function `subscribe()` returned. The same
+three steps fit any signal library (MobX, Vue's `ref` outside a component, a state manager of your own):
+create the reactive value from `store.value`, set it in `subscribe()`, and keep the stop function for
+when the value is no longer needed.
 
-Any signal library wraps `subscribe` the same way: a signal set from the store, stopped with the function
-`subscribe` returned.
+## What these recipes rely on
 
-## Checked how
-
-The two contracts are checked by `tests/store.test.js`: a subscriber is
-called at once and on every change, a snapshot keeps its identity between
-changes, the source is watched only while subscribed, as React and Svelte
-read them; the same file checks the interop Observable — a function or an
-observer object (its `next` called as a method, as RxJS's subscribers need),
-`unsubscribe()`, the `Symbol.observable` key. The Vue recipe above was run
-against Vue 3.5's reactivity (`effectScope`, `watchEffect`). React, Svelte,
-Solid, Angular and Preact are not dependencies of this repository, so their
-recipes follow each framework's documented contract (`Subscribable` for
-Angular's `async` pipe and `toSignal()`, `signal` for Preact) and were not
-run here.
+Each recipe uses only the store contract: `subscribe(run)` calls `run` at once and on every change and
+returns the stop function, `getSnapshot()` and `value` return the same object until the value changes,
+and the source runs from the first subscriber to the last. syncom does not install or import any of these
+frameworks, so check the recipe against the version you use; the contract itself is described on
+[Reactivity](./reactivity#the-store-contract).

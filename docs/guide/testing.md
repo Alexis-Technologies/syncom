@@ -1,102 +1,123 @@
+---
+title: Testing
+description: Test code that uses syncom with a database in memory, a mesh of nodes in one process, a link that misbehaves on purpose, and settle().
+---
+
 # Testing
 
-`@alexify/syncom/testing` is what a test over syncom stands on, and what this repository's own suite runs on: the
-memory engine, an in-process link that behaves as wrpc does at the boundary — with the hazards a real transport
-has — a mesh of nodes from an adjacency list, and `settle()` for the moment it has gone quiet. It imports no test
-runner: node:test, vitest or a browser's harness call it alike.
+A test of an app built on syncom needs three things: a database that starts empty and leaves nothing on disk,
+several nodes that sync without a network, and a way to know when they are done syncing.
+`@alexify/syncom/testing` gives you all three. It is the same code this repository's own test suite runs on, and
+it imports no test runner, so it works under `node:test`, Vitest, Jest or a browser harness alike. The examples on
+this page use `node:test`.
 
-```js
-const { createDatabase } = require('@alexify/syncom/all');
-const { createMesh, settle, memoryEngine } = require('@alexify/syncom/testing');
+## Open a database in memory
 
-const engine = memoryEngine();
-const mesh = await createMesh(['A', 'B', 'C'], [['A', 'B'], ['C', 'B']], {
-  createStorage: (name, options) => createDatabase({ ...options, path: name, engine, lock: false, logger: false }),
-});
-const id = await mesh.get('A').insert({ title: 'from A' });
-await settle(mesh.storages);
-await mesh.get('C').get(id); // { title: 'from A' } — A dialed B, C dialed B, B relayed
-await mesh.close();
-```
+`memoryEngine()` keeps every database in the process, each under its `path`. Make one engine per test file (or
+per test) and open as many databases on it as you like.
 
-## A database in memory
+<<< @/examples/testing.mjs#memory
 
-`memoryEngine()` is the engine of [`@alexify/syncom/memory`](./backends#engines): one engine holds any number of
-databases, each by its `path`, nothing on disk. In one process there is no other instance to lock against, so
-`lock: false`; `logger: false` keeps a test's output to its own. `withDatabase(open, fn)` opens, runs `fn(db)` and
-closes whatever `fn` does:
+`logger: false` keeps syncom's log lines out of your test output. Everything else is an ordinary database: the
+same collections, queries, plugins and errors as on disk, which is why a test on the memory engine tells you how
+the app behaves in production. The [Memory](./storage-memory) page covers the engine itself.
 
-```js
-const { withDatabase } = require('@alexify/syncom/testing');
+A database reopened on the same engine and `path` finds its records again, so a test can close and reopen a
+database to check what survives a restart. A new engine is a clean slate.
 
-const count = await withDatabase(
-  () => createDatabase({ engine, path: 'solo', lock: false }),
-  async (db) => {
-    await db.insert({ n: 1 });
-    return (await db.list()).length;
-  },
-);
-```
+## Close the database whatever happens
 
-## The mesh
+A test that fails halfway leaves its database open, and the next test that opens the same path is refused with
+`LOCKED`. `withDatabase(open, fn)` opens the database, hands it to `fn`, and closes it when `fn` returns or throws:
 
-`createMesh(names, edges, options)` makes a database per name and wires them: an edge `['A', 'B']` means A dials B
-(`addNode({ url: 'mem://B' })`); every node hosts a unit and every manager is started before the mesh is answered.
+<<< @/examples/testing.mjs#with-database
 
-| Option | What it is |
-| --- | --- |
-| `createStorage(name, options)` | Yours: `options` carries `sync.connect` (the mesh's links) and `autoStart: false` — spread it into `createDatabase()` with the engine, plugins and schema under test |
-| `link` | Every link's hazards (below) |
-| `sync` | Sync options for every node, under `connect` and `autoStart` — `retention`, `pageSize`, `scope` |
-| `nodes` | Options for one node by name: `{ B: { schema } }` |
-| `unit` | What every node hosts, `sync.unit(unit)`; `{ access: 'public' }` by default |
-| `scopes` | The scopes a node dials for, by its name: `{ A: ['team:1'] }` |
+It resolves to what `fn` returned. Pass it a function that opens the database (as here), a promise of one, or an
+open database.
 
-The mesh answers `storages` (by name; `get(name)` is the same), `links` by the url dialed — `mesh.links.get('mem://B')`
-is the link of the last node that dialed B; a host's `servers.get('B').links` holds every one — `units`, `connect`
-(the function the nodes dial with) and `close()`, which closes every database.
+## Sync several nodes in one process
 
-## The link's hazards
+`createMesh(names, edges, options)` builds a small network: one database per name, each one hosting the sync
+protocol, and a link for every edge. The edge `['phone', 'server']` means the phone dials the server, exactly as
+`sync.addNode()` would over [WebSocket](./replication-websocket).
 
-`MemoryLink` is wrpc at the boundary: arguments and results cross as JSON, the `changes` feed runs as an async
-generator, and a reconnect re-opens every subscription from the last event id it delivered — against a fresh
-server-side client, so the host greets it again. Its options are what a real transport does to a protocol:
+<<< @/examples/testing.mjs#mesh
 
-```js
-const mesh = await createMesh(['A', 'B'], [['A', 'B']], {
-  createStorage,
-  link: {
-    latency: 5, // ms on every call and event
-    drop: (page) => page.ops?.length > 0 && Math.random() < 0.1, // a page lost on the way
-    duplicate: (page) => page.ops?.length > 0, // a page delivered twice
-  },
-});
-const link = mesh.links.get('mem://B');
-link.disconnect(); // calls fail with code 503, feeds stop, `close` is announced
-await link.reconnect(); // every subscription re-opened from its last event id, `reconnect` announced
-link.calls; // ['syncom/hello', 'syncom/push', …] — what crossed
-```
+You write `createStorage(name, options)` and the mesh calls it once per node. The `options` it hands you carry
+the mesh's links (`sync.connect`) and must be spread into your own `createDatabase()` call; the engine, the
+plugins and the schema are yours. Other options of `createMesh()`:
 
-The hazard walk of this repository (`tests/suites/sync-engine.js`: drops, duplicates, a reconnect, a reopen) runs
-over these options; an application's test over its own schema and plugins runs over the same boundary.
+- `nodes` gives one node options of its own, such as an older schema: `nodes: { phone: { schema } }`.
+- `sync` gives every node the same [sync options](./replication), such as `retention`.
+- `scopes` names the [scopes](./partial-sync) a node dials for: `scopes: { phone: ['team:1'] }`.
+- `unit` is what every node hosts, `{ access: 'public' }` by default.
 
-## Waiting
+The mesh answers `get(name)` (and `storages`, the databases by name), `links` by the url dialed
+(`mesh.links.get('mem://server')` is the link of the last node that dialed the server), and `close()`, which
+closes every database.
 
-`settle(storages, { timeout, step })` resolves once every node's vector is the same and nothing is in flight — no
-queue holds a turn, no peer has a page pending — three polls in a row (every 10 ms, 5 s at most). Vectors alone are
-not enough: a peer's page moves the vector at the log append and lands its records after, so a read right then
-could still find nothing. `sameVectors(storages)` is the first half on its own; `waitUntil(predicate, { timeout,
-step })` polls anything else; `prng(seed)` gives the same numbers for the same seed, for a fuzz a failure can be
-run again. A timeout is a plain `Error` — a test's failure, not a condition a program handles.
+## Wait until the nodes agree
 
-## Other runtimes
+Sync is asynchronous: an insert returns before the other nodes have it. `settle(storages)` resolves once every
+node holds the same ops and nothing is still in flight, so a read right after it sees the result. Never use a
+fixed `setTimeout` instead; it is either too long or, on a slow CI machine, too short.
 
-The suite is node:test's and runs under Node. A smoke of the package — a database in memory written and queried,
-two nodes over the in-process link converging — runs under Deno and Bun in CI (`tests/smoke/smoke.js`, plain
-`node:assert`); it is what their Node compatibility has to carry for `require('@alexify/syncom')` to work there.
+`settle()` polls every 10 ms and gives up after 5 seconds with an `Error` that lists each node's vector, which
+tells you which node is behind. Change the limits with `settle(storages, { timeout, step })`. For anything else
+worth waiting for, `waitUntil(predicate, { timeout, step })` polls your own condition until it is true.
 
-## Checked how
+## Simulate a slow or unreliable network
 
-`tests/testing.test.js` runs the examples above: the three-node mesh converges and `settle()` takes the Map, a dial
-to a host that is not there is a `TypeError`, `settle()` rejects past its timeout where a link drops every page,
-`withDatabase()` closes after a `fn` that threw. Every suite of the repository runs over the same link and mesh.
+The link between two nodes of a mesh behaves as wrpc does at the boundary: arguments and results cross as JSON,
+and the change feed runs as an async generator. The `link` option adds the hazards of a real network to every link:
+
+<<< @/examples/testing.mjs#hazards
+
+`latency` delays every call and every event by that many milliseconds, which exposes code that assumes a write
+arrives at once. `duplicate` delivers a page of the change feed twice; syncom recognizes the second copy and
+applies nothing from it. `prng(seed)` returns the same sequence of numbers for the same seed, so a randomized
+test that fails can be run again with the same choices.
+
+`drop` loses a page of the change feed on the way. A real WebSocket does not lose a message without closing, and
+syncom does not fetch a lost page again, so a dropped page leaves the receiving node behind for good and
+`settle()` times out. Use it to test what your code does when nodes never converge:
+
+<<< @/examples/testing.mjs#drop
+
+## Take a node offline and bring it back
+
+`link.disconnect()` cuts a link as a dead socket would: calls fail with code 503 and the change feed stops. Writes
+made meanwhile wait in the node's log. `link.reconnect()` restores it the way wrpc reconnects, re-opening every
+subscription from the last event it delivered, and the nodes exchange what each is missing.
+
+<<< @/examples/testing.mjs#offline
+
+A link is made when its node first dials, so call `settle()` once before you reach for `mesh.links`. The link
+also records what crossed it, in order, which helps when a test needs to check that a node did or did not talk
+to another:
+
+<<< @/examples/testing.mjs#calls
+
+## Run on Deno and Bun
+
+The repository's suite runs under Node.js. A smaller smoke test (a database in memory written and queried, two
+nodes over the in-process link converging) also runs under Deno and Bun in CI, so the testing helpers work on
+those runtimes as far as their Node.js compatibility carries `@alexify/syncom`.
+
+## Coming from RxDB
+
+RxDB tests run on its memory storage, the same idea as the memory engine here. What syncom adds is the network:
+a mesh of nodes in one process with a link you can slow down, cut and restore, plus `settle()` to wait for
+convergence, where an RxDB test of replication needs a server or a hand-made replication handler.
+
+::: code-group
+
+<<< @/examples/testing.mjs#memory [syncom]
+
+<<< @/examples/rxdb/testing.mjs#memory [RxDB]
+
+:::
+
+<FromRxdb page="testing" :rows="['testing', 'memoryBackend', 'ci']" />
+
+Every helper and option is listed in the [reference](../reference/api#testing-subpath).

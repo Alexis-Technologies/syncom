@@ -1,3 +1,8 @@
+---
+title: Compared with alternatives
+description: syncom next to eighteen other sync engines, CRDT libraries and local-first databases, in one matrix decided from source code.
+---
+
 # Compared with alternatives
 
 syncom is a data engine that keeps records on the device and replicates them between nodes. That

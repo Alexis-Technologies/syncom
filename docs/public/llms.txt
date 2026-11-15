@@ -1,69 +1,181 @@
 # @alexify/syncom
 
-> Fast, zero-dependency distributed data sync engine for JavaScript. Records
-> are stored locally (node:fs, OPFS, IndexedDB, memory), every write is an op in
-> a persisted log that peers replicate over an injected transport (wrpc over
-> WebSocket or WebRTC) and that converges without a coordinator; schema
-> validation, Mango queries, an optional hash-linked chain — one API across
-> Node.js and the browser.
+> Fast, zero-dependency distributed data sync engine
+
+syncom is a local-first data engine: records live on the device, every write is an op in a log that other
+nodes (servers, browsers, peers) replicate over an injected transport, and every node converges on the same
+records without a coordinator. Fields merge by kind (registers, counters, sets, lists, text, trees), so there
+is no conflict handler. One API in Node.js and the browser.
 
 ## Key facts
 
-- Package: `@alexify/syncom` (npm), MIT, source at https://github.com/Alexis-Technologies/syncom
-- Requires Node.js >= 22, or a browser with OPFS and Web Crypto (secure context)
-- **Zero runtime dependencies.** Browser bundle is about 60 KB min+gzip (a CI budget); the wrpc adapter and the
-  search index under 1 KB each
-- CommonJS, no build step; `src/` ships as published; version 0.0.1 — a pre-release, not on npm, API may still change
-- Entry points: `.` (Node `index.js` / browser `browser.js` via the `browser` export condition), `./wrpc`,
-  `./contracts`, `./idb`, `./search`
-- Exports: `open`, `Storage`, `SyncManager`, `isSyncLink`, `OpLog`, `applyOp`, `mergeEntry`, `isAlive`,
-  `Blockchain`, `diff`, `merge`, `apply`, `calculateHash`, `generateKeys`, `encrypt`, `decrypt`, `loadKeys`,
-  `generateSigningKeys`, `loadSigningKeys`, `sign`, `verify`,
-  `read`, `write`, `exists`, `remove`, `list`, `isFsi`, `createMemoryFsi`, `HookError`, `ValidationError`,
-  `SyncomError`, `isSharedLog`
-- `@alexify/syncom/search` exports `createSearch`, `normalize`, `trigrams` — the trigram index for
-  `open({ search })`; an entity's `search: [...]` fields are queried with `select({ $text: 'words' })`, best first
-- `@alexify/syncom/wrpc` exports `createWrpcLink`, `isSyncLink`, `SYNC_INTROSPECTION`;
-  `@alexify/syncom/contracts` exports `SmartContract`, `DataReader`; `@alexify/syncom/idb` exports `createIdbFsi`
+- Package: `@alexify/syncom` 0.0.1, MIT, source at https://github.com/Alexis-Technologies/syncom
+- Not published to npm yet: depend on the repository until the first release
+- Runtimes: Node.js >=24, and browsers with OPFS or IndexedDB and Web Crypto
+- Zero runtime dependencies; CommonJS with named ESM imports; no build step
+- Entry points: `@alexify/syncom`, `@alexify/syncom/wrpc`, `@alexify/syncom/contracts`, `@alexify/syncom/idb`, `@alexify/syncom/sqlite`, `@alexify/syncom/mongodb`, `@alexify/syncom/engines`, `@alexify/syncom/search`, `@alexify/syncom/order`, `@alexify/syncom/undo`, `@alexify/syncom/branch`, `@alexify/syncom/presence`, `@alexify/syncom/inspect`, `@alexify/syncom/editor`, `@alexify/syncom/store`, `@alexify/syncom/prosemirror`, `@alexify/syncom/codemirror`, `@alexify/syncom/all`, `@alexify/syncom/text`, `@alexify/syncom/tree`, `@alexify/syncom/signing`, `@alexify/syncom/chain`, `@alexify/syncom/encryption`, `@alexify/syncom/memory`, `@alexify/syncom/layered`, `@alexify/syncom/sync`, `@alexify/syncom/schema`, `@alexify/syncom/telemetry`, `@alexify/syncom/query`, `@alexify/syncom/versions`, `@alexify/syncom/local`, `@alexify/syncom/state`, `@alexify/syncom/dump`, `@alexify/syncom/pipeline`, `@alexify/syncom/cleanup`, `@alexify/syncom/connector`, `@alexify/syncom/connector/couchdb`, `@alexify/syncom/connector/graphql`, `@alexify/syncom/connector/mongodb`, `@alexify/syncom/connector/supabase`, `@alexify/syncom/connector/firestore`, `@alexify/syncom/connector/appwrite`, `@alexify/syncom/connector/gdrive`, `@alexify/syncom/connector/onedrive`, `@alexify/syncom/shared`, `@alexify/syncom/attachments`, `@alexify/syncom/testing`, `@alexify/syncom/mcp`
+- `createDatabase(options)` resolves once the database is open; `@alexify/syncom/all` registers every plugin
 - Every operational error is a `SyncomError` with a `code`
-- `Storage`, `Blockchain`, `SyncManager` and `OpLog` initialise asynchronously: `await new Blockchain(path)`
-- In the browser `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` return promises; in Node.js they are synchronous
-- Every op is signed (Ed25519) by its origin, and the node id IS the origin's public key (base64url), so any
-  peer verifies through any relay; `open({ sync: { signatures: 'verify' | 'require' | false } })` — only
-  'require' refuses unsigned ops
-- Every write is an op: `write` (insert/set), `set` (update/swap/record.save), `inc` (counters), `add`/`remove`
-  (observed-remove sets, read sorted by element text), `delete` (tombstone). A field is a last-writer-wins
-  register, a per-origin counter OR a set — one kind only; mixing throws
-- Replication: every node dials the nodes in its registry through `sync.connect(node)` and hosts
-  `storage.sync.unit()`; ops relay hop by hop, de-duplicated by version vector; a peer that cannot be
-  resumed bootstraps from a snapshot. wrpc is injected, never a dependency
-- `merge` ADDS numbers rather than replacing them — this is the counter CRDT and is deliberate; storage
-  does not replicate through `merge`
-- Encrypted records (`encrypted: true`) are sealed for this node's key and never leave it
-- Scopes: a host drops the ops a peer may not write and serves only the scopes it was granted;
-  `purge(id)` scrubs a payload out of the op log; `open({ chain: false })` keeps no chain
 
-## Documentation
+## Getting Started
 
-- [Why syncom?](https://syncomjs.vercel.app/guide/why): what it is for, what sets it apart, when something else fits better.
-- [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison): a 48-feature matrix against Yjs, Automerge, Loro, Jazz, RxDB, PouchDB, TinyBase, Dexie Cloud, Fireproof, GUN, OrbitDB, Evolu, LiveStore, ElectricSQL, PowerSync, Zero, Triplit and InstantDB.
-- [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): insert, update, read, counters, batches, replication, typing into a text, cold start and bundle size against nine libraries, plus syncom's own benchmarks.
-- [Architecture](https://syncomjs.vercel.app/guide/architecture): the facade, the three write paths, replication between nodes, the files on disk.
-- [Getting Started](https://syncomjs.vercel.app/guide/getting-started): install, open a storage, records, validation, a first sync.
-- [Database](https://syncomjs.vercel.app/guide/database): explicit API, registers, counters and sets, compare-and-swap, records, references, schema collections, encryption at rest, on-disk layout.
-- [Sync](https://syncomjs.vercel.app/guide/sync): the operation model, the log and its two cursors, signatures, the protocol, bootstrap, scopes, the registry, the link contract, guarantees and limits.
-- [wrpc transport](https://syncomjs.vercel.app/guide/wrpc): hosting `storage.sync.unit()` on a wrpc server, dialing with `createWrpcLink`, the browser, rooms and presence.
-- [CRDT deltas](https://syncomjs.vercel.app/guide/crdt): diff/merge/apply semantics, grow-only sets, the numeric-addition rule.
-- [Schema and validation](https://syncomjs.vercel.app/guide/schema): entity definitions, validators, versions and lenses, `migrate()`.
-- [Queries](https://syncomjs.vercel.app/guide/query): Mango `select()`, the catalog, indexes, unique keys, `watch()`, full-text `$text`.
-- [Lists, text and trees](https://syncomjs.vercel.app/guide/lists): list and text fields that merge by position (Fugue), the movable list, rich text marks, cursors, `updateText()`, trees whose moves never form a cycle.
-- [Versions and history](https://syncomjs.vercel.app/guide/versions): `history(id)` and `get(id, { at })` — by event id, stamp or version vector; tags, diff and restore, the commit event, undo and redo (`@alexify/syncom/undo`), branches (`@alexify/syncom/branch`); what the log can vouch for after compaction.
-- [Hooks and events](https://syncomjs.vercel.app/guide/hooks): hooks inside writes, reads and peer batches; events.
-- [Backends](https://syncomjs.vercel.app/guide/backends): the `fsi` contract, node:fs, OPFS, IndexedDB, memory, the lock.
-- [Scaling](https://syncomjs.vercel.app/guide/scaling): hubs, scopes as buckets, limits, presence.
-- [WebRTC](https://syncomjs.vercel.app/guide/webrtc): browser peers through wrpc's PeerLink and PeerHost.
-- [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry): injected spans and metrics.
-- [Blockchain log](https://syncomjs.vercel.app/guide/chain): block structure, hash linking, validate cost, per-record verification.
-- [Smart contracts](https://syncomjs.vercel.app/guide/contracts): storing procedures in the chain, DataReader, the `new Function` risk, serialisation limits.
-- [Browser](https://syncomjs.vercel.app/guide/browser): OPFS and Web Crypto, the async signature differences, bundle size.
-- [API reference](https://syncomjs.vercel.app/reference/api): every export with signatures and return types.
+- [Overview](https://syncomjs.vercel.app/guide/): Every page of the syncom guide, grouped from the first steps to the internals.
+- [Quickstart](https://syncomjs.vercel.app/guide/quickstart): Build a task board with syncom in a few minutes, from the first record to two nodes that stay in sync.
+- [Installation](https://syncomjs.vercel.app/guide/install): Install syncom, check the Node.js and browser requirements, import only the plugins you use, and load it from ESM, CommonJS or a bundler.
+- [Development checks](https://syncomjs.vercel.app/guide/dev-mode): Why syncom has no separate dev mode like RxDB's, which checks always run, and the tools that help you look inside while developing.
+- [TypeScript](https://syncomjs.vercel.app/guide/typescript): How syncom types a database from its options, records from a Standard Schema or a Schema annotation, and plugin methods from the plugins you pass.
+- [Why syncom?](https://syncomjs.vercel.app/guide/why): What syncom is for, what sets it apart from other local-first databases and CRDT libraries, how fast it is, and when another tool fits better.
+
+## Core Entities
+
+- [Database](https://syncomjs.vercel.app/guide/database): Open a syncom database, choose where it stores data, read and write records by id, make writes atomic, and close it safely.
+- [Schema](https://syncomjs.vercel.app/guide/schema): Define collections, validate every write with metaschema, zod or your own validator, index and constrain fields, and choose how records get their ids.
+- [Collection](https://syncomjs.vercel.app/guide/collection): Add collections to a database, insert, upsert and bulk-write records, read them by id, listen to changes, and add or remove collections at runtime.
+- [Document](https://syncomjs.vercel.app/guide/document): Work with a record as one live object, assign fields and save them, use counters and sets through it, and react when it changes here or on another node.
+- [Query](https://syncomjs.vercel.app/guide/query): Find records with Mango queries, sort and page the results, keep a live query up to date, and change or delete everything a query matches.
+- [Query examples](https://syncomjs.vercel.app/guide/query-examples): A cookbook of Mango query operators on the task board, from equality and ranges to arrays, regular expressions, nested fields and logical combinations.
+- [Query builder](https://syncomjs.vercel.app/guide/query-builder): Build queries by chaining cursor methods, reuse a base query, compose conditions in plain JavaScript, and filter, project and populate the rows.
+- [Fields that merge](https://syncomjs.vercel.app/guide/fields): How each kind of field merges when two nodes edit one record at once - registers, counters, sets and paths - and how to choose the kind per field.
+
+## Storages
+
+- [Storage overview](https://syncomjs.vercel.app/guide/storage): Where syncom keeps your data, which storage to pick in the browser, in Node.js, on servers and in tests, and how to switch storages or write one.
+- [IndexedDB](https://syncomjs.vercel.app/guide/storage-indexeddb): Store a browser database in IndexedDB with idbEngine(), let other tabs follow it, test it in Node with fake-indexeddb, and when to pick it over OPFS.
+- [OPFS](https://syncomjs.vercel.app/guide/storage-opfs): The default browser storage, files in the Origin Private File System, from the main thread or a worker; persistence, quota and the one-tab lock.
+- [Memory](https://syncomjs.vercel.app/guide/storage-memory): Keep a database in memory with memoryEngine() for tests, server-side rendering and benchmarks, and see a database's files with the memory() backend.
+- [Filesystem (Node.js)](https://syncomjs.vercel.app/guide/storage-filesystem): Store a database as plain JSON files with Node's file system, the default in Node.js, and learn what is on disk, how fsync works and how the lock behaves.
+- [SQLite](https://syncomjs.vercel.app/guide/storage-sqlite): Keep databases in one SQLite file with sqliteEngine(), over node:sqlite or a driver such as better-sqlite3, with one transaction per write.
+- [MongoDB](https://syncomjs.vercel.app/guide/storage-mongodb): Store databases in MongoDB with mongoEngine(), the driver yours; a lease keeps one writer per database and other instances follow it by change streams.
+- [localStorage](https://syncomjs.vercel.app/guide/storage-localstorage): Why syncom ships no localStorage storage, what to use in the browser instead, and a backend of five functions over Web Storage if you need one.
+- [Expo](https://syncomjs.vercel.app/guide/storage-expo): Reach Expo through the SQLite engine with a small expo-sqlite driver, and what an Expo or React Native app should know before it relies on it.
+- [Dexie.js](https://syncomjs.vercel.app/guide/storage-dexie): Why syncom has no Dexie.js storage, and how its own IndexedDB engine gives you the same browser storage with no dependency.
+- [DenoKV](https://syncomjs.vercel.app/guide/storage-denokv): Why syncom ships no Deno KV storage, what runs under Deno today, and how an engine of your own over Deno KV would plug in.
+- [FoundationDB](https://syncomjs.vercel.app/guide/storage-foundationdb): Why syncom ships no FoundationDB storage, which engine covers a server today, and what an engine of your own over FoundationDB would implement.
+
+## Storage Wrappers
+
+- [Schema validation](https://syncomjs.vercel.app/guide/schema-validation): Check every write with the validator you already use (metaschema, a Standard Schema such as zod, Ajv or a function) and re-check every op a peer sends.
+- [Encryption](https://syncomjs.vercel.app/guide/encryption): Seal single records for this node with encrypted true, encrypt a whole database at rest with atRest(), rotate its key, and decide where keys live.
+- [Logger](https://syncomjs.vercel.app/guide/logger): Send syncom's log lines to the console, pino or nowhere, filter them by level, and react to the named events every line carries.
+- [Remote engine](https://syncomjs.vercel.app/guide/storage-remote): Serve a storage engine over a MessagePort and open a database through it from another thread, worker or process with serveEngine and connectEngine.
+- [Worker](https://syncomjs.vercel.app/guide/storage-worker): Run a database's storage engine in a Web Worker or a Node.js worker thread and open the database from the main thread over the worker's port.
+- [SharedWorker](https://syncomjs.vercel.app/guide/storage-shared-worker): Run one database for every tab of your app in a SharedWorker, with each tab reading the same IndexedDB and writing through the worker.
+- [Memory over disk](https://syncomjs.vercel.app/guide/storage-layered): Stack a memory layer over the disk with layered(), so reads come from memory and writes reach the disk either before or after they resolve.
+- [Electron](https://syncomjs.vercel.app/guide/electron): Keep the storage of an Electron app in the main process and open the database in a window over MessageChannelMain, with the remote engine.
+- [Faster open](https://syncomjs.vercel.app/guide/open-cost): Why syncom has no meta optimizer like RxDB's, what opening a database loads, which options make it faster, and how to measure an open.
+- [Key compression](https://syncomjs.vercel.app/guide/key-compression): Why syncom does not shorten field names on disk like RxDB's key compression, and how to make data smaller instead.
+- [Sharding](https://syncomjs.vercel.app/guide/sharding): Why syncom has no sharding wrapper like RxDB's, and how to split data instead, with several databases by path or scopes served by hubs.
+
+## Replication
+
+- [Sync engine](https://syncomjs.vercel.app/guide/replication): How syncom keeps nodes in sync, offline included. Every write is an op in a log, nodes host or dial, and fields merge without a conflict handler.
+- [Partial sync](https://syncomjs.vercel.app/guide/partial-sync): Give each node only the records it may see with scopes, let the host decide what a node may claim, sync one way, and take access back with revoke.
+- [Server replication](https://syncomjs.vercel.app/guide/replication-server): Replicate with another syncom node acting as the server. Mount its sync unit on a wrpc router, dial it with a token, set write rules, and let any node host.
+- [WebSocket](https://syncomjs.vercel.app/guide/replication-websocket): Replicate over wrpc on a WebSocket. Dial with createWrpcLink, let wrpc reconnect and resume, fall back to Server-Sent Events, and read from scripts over HTTP.
+- [WebRTC P2P](https://syncomjs.vercel.app/guide/replication-webrtc): Sync browsers directly over wrpc's WebRTC links, with signaling on your hub, a browser node that hosts, and a mesh of everyone in a room.
+- [NATS and brokers](https://syncomjs.vercel.app/guide/replication-nats): Share one log between syncom hubs over NATS JetStream, Redis Streams, Kafka or AMQP, so a client resumes on any hub behind a load balancer.
+- [Presence](https://syncomjs.vercel.app/guide/presence): Show who is online, which task each person has open and where their caret is, with state that is never logged and that hosts relay to the right peers.
+- [Connectors](https://syncomjs.vercel.app/guide/connectors): Keep a collection in step with a backend that does not run syncom, through a pull handler, a push handler and a checkpoint.
+- [HTTP](https://syncomjs.vercel.app/guide/replication-http): Replicate a collection with your own HTTP server through a connector, with pull, push and Server-Sent Events endpoints you write.
+- [GraphQL](https://syncomjs.vercel.app/guide/replication-graphql): Replicate a collection with your GraphQL API through a connector, with the queries, the readers and the subscription client your schema needs.
+- [CouchDB](https://syncomjs.vercel.app/guide/replication-couchdb): Keep a syncom collection in step with a CouchDB database through _changes, _bulk_docs and its revisions.
+- [Firestore](https://syncomjs.vercel.app/guide/replication-firestore): Keep a syncom collection in step with a Firestore collection through the modular SDK you inject, its server timestamps and transactions.
+- [MongoDB](https://syncomjs.vercel.app/guide/replication-mongodb): Keep a syncom collection in step with a MongoDB collection of your app's documents, through the driver you inject.
+- [Supabase](https://syncomjs.vercel.app/guide/replication-supabase): Keep a syncom collection in step with a Supabase table through the client you inject, PostgREST's conditional update and Realtime.
+- [Appwrite](https://syncomjs.vercel.app/guide/replication-appwrite): Keep a syncom collection in step with an Appwrite collection through the SDK you inject, its $updatedAt order and Realtime.
+- [Google Drive](https://syncomjs.vercel.app/guide/replication-google-drive): Sync a collection between a user's devices through one JSON file in their Google Drive, with the file's ETag as the compare-and-set.
+- [OneDrive](https://syncomjs.vercel.app/guide/replication-onedrive): Sync a collection between a user's devices through one JSON file in their OneDrive, over Microsoft Graph with the file's eTag as the compare-and-set.
+
+## Server
+
+- [Hosting a node](https://syncomjs.vercel.app/guide/server): Turn any syncom database into the node other nodes dial, then decide who may connect, what they may write, how fast, and what thin clients may read.
+- [Scaling](https://syncomjs.vercel.app/guide/server-scaling): Grow from one hub to hubs that dial each other, hubs that share a broker's log, and read-only hubs over one MongoDB, and what each step costs.
+
+## How syncom works
+
+- [Transactions and conflicts](https://syncomjs.vercel.app/guide/transactions-conflicts): Write several records in one transaction, write only if a record holds what you expect, and see how edits from two nodes merge without revisions.
+- [The operation log](https://syncomjs.vercel.app/guide/operation-log): What an op is, how streams, version vectors and event ids track what each node has seen, how stamps order writes, and how the hash chain catches a fork.
+- [The sync protocol](https://syncomjs.vercel.app/guide/sync-protocol): What two nodes say to each other: hello, the push by vector, the feed and its cursor, failed pages, reconnects, snapshots, and how a host admits a batch.
+- [Retention and acknowledgements](https://syncomjs.vercel.app/guide/retention): How long the operation log keeps ops, why a node keeps its own until its hosts have them, what UNDELIVERABLE and REWOUND mean, and how cleanup and purge fit in.
+- [Query cache](https://syncomjs.vercel.app/guide/query-cache): How every watch() of one query shares a single live run, how fetch() reuses its rows, and how long unobserved results stay valid in syncom's query cache.
+- [Plugins](https://syncomjs.vercel.app/guide/plugins): How syncom splits into a core and plugins, how to pick the plugins a database runs, and how to add methods of your own with a plugin.
+- [Errors](https://syncomjs.vercel.app/guide/errors): How syncom reports failures, how to handle a SyncomError by its code, and which errors arrive as events instead of rejections.
+- [Architecture](https://syncomjs.vercel.app/guide/architecture): How syncom is put together, for contributors: the database and its queue, the three write paths, replication, versions, engines, plugins and the files.
+- [Glossary](https://syncomjs.vercel.app/guide/glossary): The words the syncom docs use for nodes, ops, streams, vectors, scopes, hosts and hubs, field kinds, engines and backends, each with the page that teaches it.
+
+## Advanced Features
+
+- [Testing](https://syncomjs.vercel.app/guide/testing): Test code that uses syncom with a database in memory, a mesh of nodes in one process, a link that misbehaves on purpose, and settle().
+- [Schema migration](https://syncomjs.vercel.app/guide/migration-schema): Change the shape of your records without a migration step at startup, read old records through the lens, and keep nodes on different versions in sync.
+- [Storage migration](https://syncomjs.vercel.app/guide/migration-storage): Move a database from one storage engine to another with migrateStorage(), keeping the node's identity, its log and its place in sync.
+- [Attachments](https://syncomjs.vercel.app/guide/attachments): Store files next to a record, keep them by their SHA-256, sync their names with the record and fetch the bytes from a peer only when a node reads them.
+- [Pipelines](https://syncomjs.vercel.app/guide/pipeline): Derive one collection from another with createPipeline(), in order, at least once per change, and resumed from a checkpoint after a restart.
+- [Reactivity](https://syncomjs.vercel.app/guide/reactivity): Turn queries, records and events into stores that UI frameworks and signal libraries read, through one small contract with no framework inside.
+- [App state](https://syncomjs.vercel.app/guide/state): Keep app settings and UI state by name and path with createState(), synced across a user's devices or kept on one device only.
+- [Local documents](https://syncomjs.vercel.app/guide/local): Keep values on one device beside the records with db.local and collection.local, never logged, never synced, never seen by a peer.
+- [Cleanup](https://syncomjs.vercel.app/guide/cleanup): Why a deleted record leaves a tombstone, when syncom can safely fold it away, and how cleanup() keeps years of deletions small.
+- [JSON import and export](https://syncomjs.vercel.app/guide/import-export): Export a database or some collections as JSON with exportJSON() and exportPages(), and import it back with importJSON() as a merge or as new writes.
+- [Backup](https://syncomjs.vercel.app/guide/backup): Back up a syncom database to a file and restore it, copy a whole node while it is closed, and what syncom does not do for you.
+- [Leader election](https://syncomjs.vercel.app/guide/leader-election): Pick one tab or process to lead among several over one database, hand leadership on when it goes away, and run work only where it leads.
+- [Hooks and events](https://syncomjs.vercel.app/guide/hooks): Run your code inside a write, a read or a peer's batch with hooks, watch what happened with events, and know which of the two to reach for.
+- [CRDT](https://syncomjs.vercel.app/guide/crdt): Every syncom field merges as a CRDT of its kind, always on, from registers and counters to text and trees, plus the plain-object delta helpers.
+- [Population](https://syncomjs.vercel.app/guide/population): Declare which fields of a record point at other records, follow them from a document with Reference, and resolve them in a query with populate().
+- [ORM](https://syncomjs.vercel.app/guide/orm): Give every document of a collection its own methods and the collection its own functions, with methods and statics in the entity definition.
+- [Full-text search](https://syncomjs.vercel.app/guide/fulltext-search): Search the text of a collection with $text inside an ordinary query, typo-tolerant and ranked best first, from createSearch() of @alexify/syncom/search.
+- [Vector search](https://syncomjs.vercel.app/guide/vector-search): Find the records nearest to an embedding with cursor.nearest(), by cosine, euclidean, manhattan or dot distance, and know where a scan stops scaling.
+- [Query optimizer](https://syncomjs.vercel.app/guide/query-optimizer): How syncom picks an index for each query, how to read the plan with explain(), and how indexAdvisor() names the indexes your queries are missing.
+- [Agent tools (MCP)](https://syncomjs.vercel.app/guide/mcp): Give an AI agent tools to query, follow and change a syncom database, in the shape of the Model Context Protocol, from a server or a browser page.
+
+## Collaborative data
+
+- [Lists](https://syncomjs.vercel.app/guide/lists): Keep an array that several nodes edit by position, insert, remove, move and assign elements, and see how concurrent inserts come out.
+- [Text and rich text](https://syncomjs.vercel.app/guide/text): Type into a text field from several nodes at once, style it with marks, add embeds and blocks, and keep carets in place across edits.
+- [Trees](https://syncomjs.vercel.app/guide/trees): Keep a movable tree in one field, move nodes and their subtrees from several nodes at once, and see why concurrent moves never make a cycle.
+- [Editors](https://syncomjs.vercel.app/guide/editors): Bind ProseMirror, CodeMirror, Quill or your own editor to a text field, so several people edit one document with carets, selections and undo.
+- [Versions and history](https://syncomjs.vercel.app/guide/versions): Read a record as it was, list its history, compare and restore versions, name the whole database with a tag, and find who wrote what.
+- [Branches](https://syncomjs.vercel.app/guide/branches): Fork a database into a draft, edit it apart from the main one, merge either way as ops, and fork from a tag or from any past version.
+- [Undo and redo](https://syncomjs.vercel.app/guide/undo): Give users undo and redo over their own writes that never overwrite what another node changed meanwhile, with steps, groups and editor selections.
+
+## Integrity
+
+- [Signing and identity](https://syncomjs.vercel.app/guide/signing): Make every op verifiable by its author's key, refuse what a relay forged or stripped, and ask peers to prove their key before they sync.
+- [Audit chain](https://syncomjs.vercel.app/guide/chain): Detect a record changed behind syncom's back with the hash-linked audit chain, validate it, run without it on relays, and use a chain on its own.
+- [Purge](https://syncomjs.vercel.app/guide/purge): Erase a record for good on every replica, see why a purge wins over any write, what stays in the log, and where a purge cannot reach.
+- [Smart contracts](https://syncomjs.vercel.app/guide/contracts): Store a procedure in a hash-linked chain, run it against a read-only view of the database, and keep an audit trail of what it did and what failed.
+
+## Integrations
+
+- [React](https://syncomjs.vercel.app/guide/react): Show live syncom queries and records in React components with useSyncExternalStore over a store, with no adapter package and no provider to set up.
+- [Other frameworks](https://syncomjs.vercel.app/guide/frameworks): Read live syncom queries and records from Vue, Svelte, Solid, Angular and Preact signals, each through the same store in a line or two of code.
+- [TanStack DB](https://syncomjs.vercel.app/guide/tanstack-db): Why syncom has no TanStack DB collection adapter, and how to get live queries and instant local writes in your components without one.
+
+## Operations
+
+- [OpenTelemetry](https://syncomjs.vercel.app/guide/telemetry): Inject OpenTelemetry into syncom, follow one write as a single trace across nodes, and pick the spans and metrics worth watching first.
+- [Devtools](https://syncomjs.vercel.app/guide/devtools): See what a record is made of with inspect(), field by field and op by op, and hand a case over with anonymize() without giving the data away.
+- [Health and maintenance](https://syncomjs.vercel.app/guide/health): Read a node's health with stats(), check storage room and eviction, land pending writes, repair a damaged record and rewrite one that has grown.
+
+## Performance
+
+- [Engine performance](https://syncomjs.vercel.app/guide/storage-performance): How syncom's storage engines compare on inserts, updates, reads and opening, what each benchmark row measures, and what it means when you pick a storage.
+- [Performance tips](https://syncomjs.vercel.app/guide/performance-tips): Practical ways to make syncom faster, from batching writes and the defer window to indexes, live queries, the cache, the chain, signing and log retention.
+- [IndexedDB performance](https://syncomjs.vercel.app/guide/slow-indexeddb): Why IndexedDB is slow for many small writes, how syncom keeps the number of IndexedDB transactions down, and what to do when it is still too slow.
+- [Browser storage compared](https://syncomjs.vercel.app/guide/browser-storage): Which browser storage to use with syncom (OPFS, IndexedDB or memory), why localStorage, cookies and WebAssembly SQLite are not among them, and how quotas work.
+
+## Comparisons
+
+- [Compared with alternatives](https://syncomjs.vercel.app/guide/comparison): syncom next to eighteen other sync engines, CRDT libraries and local-first databases, in one matrix decided from source code.
+- [Compared with RxDB](https://syncomjs.vercel.app/guide/vs-rxdb): syncom and RxDB side by side, page by page and feature by feature, every cell decided from source code.
+- [Compared with CRDT libraries](https://syncomjs.vercel.app/guide/vs-crdt): syncom next to Yjs, Automerge and Loro as a CRDT library: data types, merging, text, history and speed.
+- [Benchmarks](https://syncomjs.vercel.app/guide/benchmarks): syncom measured against Yjs, Automerge, Loro, RxDB and five more libraries on the same scenarios, in memory and on disk.
+
+## Reference
+
+- [API reference](https://syncomjs.vercel.app/reference/api): Every export of syncom and its subpaths with its signature, options, events and error codes, the specification the guide links into.
+- [Engines and backends](https://syncomjs.vercel.app/reference/engines): The storage contract as a specification, from engines, stores and write sets to capabilities, the five-function fsi, durability and locking.
+- [Entry points](https://syncomjs.vercel.app/reference/entry-points): Every subpath of @alexify/syncom, how each is registered or called, what a missing plugin does, and the size of each entry.
+- [Events and hooks](https://syncomjs.vercel.app/reference/events): Every hook syncom runs and every event it emits — when each runs, what it receives, what its return value and a throw do.
+- [Telemetry reference](https://syncomjs.vercel.app/reference/telemetry): Every span, metric, attribute and log event syncom emits, with its labels and level, as the names a dashboard or an alert can key on.
+- [Lists, text and trees](https://syncomjs.vercel.app/reference/text): The rules of the list, text and tree kinds: how runs merge, moves, marks, embeds, cursors, the movable tree, the text handle, what travels and every bound.
+- [Versions and tags](https://syncomjs.vercel.app/reference/versions): The rules of the past: what a version is, when the log can vouch for it, tags on disk, patches, the commit event, undo, branches and compact.
+- [Wire format](https://syncomjs.vercel.app/reference/wire): The sync protocol byte by byte: the op and its slots, signatures, the per-stream chain, log and record files, procedures, guarantees and bounds.

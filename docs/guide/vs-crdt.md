@@ -1,3 +1,8 @@
+---
+title: Compared with CRDT libraries
+description: "syncom next to Yjs, Automerge and Loro as a CRDT library: data types, merging, text, history and speed."
+---
+
 <script setup>
 import BenchCompare from '../.vitepress/theme/components/BenchCompare.vue';
 import BenchFigure from '../.vitepress/theme/components/BenchFigure.vue';

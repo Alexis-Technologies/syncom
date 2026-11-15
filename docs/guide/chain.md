@@ -1,125 +1,85 @@
-# Blockchain log
+---
+title: Audit chain
+description: Detect a record changed behind syncom's back with the hash-linked audit chain, validate it, run without it on relays, and use a chain on its own.
+---
 
-Every write a storage applies is committed to an append-only, hash-linked log,
-unless it was opened with `chain: false` (see [Through storage](#through-storage)).
-Each block names its predecessor by hash, so changing any block invalidates
-every block after it.
+# Audit chain
 
-```mermaid
-flowchart LR
-  G["genesis<br/>prev: 0"] --> B1["block 1<br/>prev: hash(genesis)"]
-  B1 --> B2["block 2<br/>prev: hash(block 1)"]
-  B2 --> T["tail<br/>.blockchain.json"]
-```
+Every write a database applies is also committed to a hash-linked chain of blocks: each block names the
+hash of each record it touched and the hash of the block before it. Change one byte of a record file, or of
+a block, and the check fails from there on. The chain is an audit trail for one node: it tells you that what
+is on disk is what this node wrote, and lets you prove it later.
 
-## Using it directly
+The chain is the `chain` plugin, which `@alexify/syncom/all` registers; with the lean core, pass
+`plugins: [chain]` from `@alexify/syncom/chain`.
 
-```js
-const { Blockchain } = require('@alexify/syncom');
+## Check the chain
 
-const chain = await new Blockchain('data/blockchain');
-```
+<<< @/examples/chain.mjs#validate
 
-::: tip The constructor returns a promise
-`Blockchain` initialises asynchronously — it reads or writes the genesis block
-before it is usable — so it is always `await new Blockchain(...)`. The same is
-true of `Database` and `SyncManager`. The types model this.
-:::
+`validate()` walks the chain backwards, hashing every block and comparing it with the hash the next block
+names, until it reaches the first block. `validate({ last })` stops after that many blocks, and
+`validate({ from })` starts at a block of your choice. Each block is a read, so a full walk of a long chain
+is slow by construction: bound it with `last` on a hot path. `stats().chain.tail` is the hash of the newest
+block, the one value to write down somewhere else if you want to prove later that nothing was rewritten.
 
-```js
-const hash = await chain.addBlock({ id: 'r1', hash: 'abc' });
-const block = await chain.readBlock(hash);
-// { prev: '<previous hash>', timestamp: 1757000000000, data: { id: 'r1', hash: 'abc' } }
-```
+<FigAuditChain />
 
-A block is `{ prev, timestamp, data }`. Its own hash is the SHA-256 of that
-object, and it is stored as `<hash>.json`. The tail hash lives in
-`.blockchain.json` so the chain can be reopened without scanning the directory.
+## Notice a record changed on disk
 
-`readBlock` rejects on an unknown hash with `code: 'BLOCK_NOT_FOUND'`;
-`validate()` answers `false` for one instead.
+A local write commits a block naming the record, the hash of its data and its position in the
+[operation log](./operation-log); a page of a peer's ops, a snapshot page or a replay at open commits one
+block for every record it touched. A record read from its file for the first time is checked against the
+block that committed it:
 
-## Validating
+<<< @/examples/chain.mjs#tampered
 
-```js
-await chain.validate({ last: 10 });        // the 10 most recent blocks
-await chain.validate({ from: someHash });  // backwards from a given block
-await chain.validate();                    // the whole chain
-```
+A record whose bytes no longer hash to what its block recorded rejects every read with `INTEGRITY`, and
+stays that way. Nothing repairs it behind your back, because a file that changed under the chain is evidence
+first. When you have looked, [`repair(id)`](./health#repair-a-record-that-fails-its-check) rebuilds the
+record from the node's own log.
 
-Validation re-hashes each block and compares it to the hash it is filed under.
-It walks backwards until it reaches the genesis block (`prev === '0'`) or the
-`last` limit.
+The check costs one hash per record on a cold read; a record already in the cache is not checked again.
+`createDatabase({ integrity: 'lazy' })` skips the check on cold reads when you would rather not pay it.
 
-Cost is linear in the number of blocks visited, and each visit is a file read —
-`validate()` over a long chain is slow by construction. Bound it with `last`
-on hot paths. See `bench/chain.js` for the numbers.
+## Run a relay without a chain
 
-## Through storage
+<<< @/examples/chain.mjs#off
 
-The chain is the `chain` plugin — `@alexify/syncom/chain`, registered by
-`@alexify/syncom/all`:
+A node that only relays ops between others, a hub, has nothing of its own to audit. `chain: false` keeps the
+plugin registered and the chain off: no blocks, two file writes fewer per record, no check on reads, and
+`validate()` rejects with `NO_CHAIN`. A database opened without the plugin behaves the same, and asking for
+`chain: true` without it is `PLUGIN_MISSING`.
 
-```js
-const { createDatabase } = require('@alexify/syncom');
-const { chain } = require('@alexify/syncom/chain');
+## Keep a chain of your own
 
-const storage = await createDatabase({ path: 'data', plugins: [chain] });
-```
+<<< @/examples/chain.mjs#blockchain
 
-With it `Database` keeps its own chain, under `<path>/blockchain/`, and adds a
-block for every write it applies. A local write commits `{ id, hash, from }` — the
-record, the hash of its data, and its position in the [log](./sync#the-log);
-an encrypted record's write, which has no op, commits `{ id, hash }`. A batch
-commits one block `{ records: { [id]: hash }, from, to }` for every record it
-touched: a page of ops applied from a peer, a snapshot page, the tail a
-reopen replays, a `repair(id)`, and the local writes `createDatabase({ defer })` held
-back. `validate(id, data, block)` accepts both shapes. A [tag](./versions#tags)'s
-copy of a record file keeps the block it named, and is checked like the file.
+`Blockchain` is the chain without a database, for an audit log of your own or for
+[smart contracts](./contracts). A block is `{ prev, timestamp, data }`, its hash is the SHA-256 of that
+object, and the tail is kept in `.blockchain.json` so the chain reopens without scanning. Like a database,
+the constructor returns a promise: `await new Blockchain(path)`. `readBlock()` of an unknown hash rejects
+with `BLOCK_NOT_FOUND`. Give each chain a directory of its own; two writers of one directory overwrite each
+other's tail.
 
-Each node's chain is its **own** audit log: the order in which *it* applied
-things. Two nodes that hold the same records hold different chains — that is
-expected, and it is not a consensus mechanism.
+## What the chain is not
 
-The chain grows by one block file per local write and one per batch applied
-from a peer, and it is never compacted — the log is, the chain is the audit.
-A node that only replicates, a hub, has nothing to audit: `createDatabase({ chain:
-false })` keeps none, saves two file writes per record, reads records without
-re-verifying them (`integrity` is lazy, there is no block to check against),
-and `validate()` rejects with `code: 'NO_CHAIN'`. A storage opened without
-the plugin is the same, and its `NO_CHAIN` names the subpath; asking for the
-chain in so many words — `createDatabase({ chain: true })` — without the plugin is
-`PLUGIN_MISSING`.
+Each node's chain records the order in which that node applied things. Two nodes that hold the same
+records hold different chains, which is expected: the chain is not a consensus mechanism and does not
+replicate. What makes nodes agree is the [op model](./transactions-conflicts); what proves who wrote an op is
+[signing](./signing). The chain proves that this node's disk holds what this node wrote.
 
-```js
-await storage.validate({ last: 10 }); // delegates to the chain
-```
+## How big the chain grows
 
-The per-record form checks one entry against its committing block:
+The chain grows by one block per local write and one per batch applied from a peer (on the files engine a
+file each, on SQLite or MongoDB a row or a document each), and no block is ever removed: `validate()` walks
+from the newest block to the first, so a removed block would leave everything above it unverifiable. The
+[log](./retention) is compacted; the chain is not. A database written for years holds as many blocks as it
+had landings. Bounding it would take a checkpoint block that vouches for every live record at a point, which
+is a format change not in this version; until then, run relays with `chain: false`.
 
-```js
-const entry = JSON.parse(await fsi.read('data/data', `${id}.json`));
-await storage.validate(id, entry.data, entry.block); // true if intact
-```
+## Coming from RxDB
 
-This is exactly what `loadData` does on every read from the file (a cached
-record is not read again) — a record whose bytes no longer hash to what its
-block recorded rejects with `code: 'INTEGRITY'` and
-`Database record <id> is invalid` rather than returning the modified data;
-`repair(id)` rebuilds it from the log. The block is read, parsed and hashed once for every record of its
-batch (the last eight blocks verified are kept in memory), so reading a batch back costs one hash per
-record, not one of the block. `createDatabase({ integrity: 'lazy' })` skips the check on a cold read.
-
-## Retention
-
-A block is a kv text per landing (the `blockchain` namespace), and none is ever
-pruned: `validate()` walks the chain from its genesis, so a block taken away
-would leave the records above it unverifiable. On the files engine that is a
-file per landing; on SQLite and MongoDB a row or a document each — a database
-written for years holds as many blocks as landings. What would bound it is a
-checkpoint block — a block that carries the hashes of every live record at a
-point and lets the blocks below it go, `validate()` starting from the newest
-checkpoint — tied to the log's retention, which already decides how far back a
-peer may resume. That is a format change (a block kind, a `validate()` that
-knows it) and is not in this version: until then, a hub that only replicates
-runs with `chain: false`, as the guide above says.
+RxDB has no audit chain. Its `_rev` field numbers a document's revisions for conflict detection, but nothing
+links them by hash, so a changed document file goes unnoticed. In syncom the chain detects it on the next
+cold read, and `repair()` rebuilds the record from the log.

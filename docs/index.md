@@ -14,10 +14,13 @@ hero:
   actions:
     - theme: brand
       text: Get started
-      link: /guide/getting-started
+      link: /guide/quickstart
     - theme: alt
       text: Why syncom?
       link: /guide/why
+    - theme: alt
+      text: Coming from RxDB
+      link: /guide/vs-rxdb
     - theme: alt
       text: Compare with alternatives
       link: /guide/comparison
@@ -26,28 +29,28 @@ features:
   - icon: 🔄
     title: Ops that converge
     details: "Every write is an op: last-writer-wins per field, counters whose increments add up across nodes, sets that keep every concurrent add, lists and text that merge by position with marks and cursors, trees whose moves never form a cycle, tombstones that a newer write revives. Applied in any order, any number of times, every node ends up with the same records."
-    link: /guide/sync#registers-counters-sets-lists-and-text
-    linkText: Registers, counters, sets, lists and text
+    link: /guide/fields
+    linkText: Fields that merge
   - icon: ⏯️
     title: Resume and bootstrap
     details: "A peer that reconnects picks up from the last event id it saw. One that was away longer than the host keeps its log, or a new one, joins from a streamed snapshot, a page at a time."
-    link: /guide/sync#bootstrap
-    linkText: Bootstrap
+    link: /guide/replication
+    linkText: Sync engine
   - icon: 🕸️
     title: Mesh, hubs, WebRTC
     details: "Every node can dial and host: a hub on a server, a tab that dials it, browsers that reach each other over WebRTC, hubs in several regions that dial each other. There is no coordinator and no service to run."
-    link: /guide/scaling
+    link: /guide/server-scaling
     linkText: Scaling
   - icon: 🎯
     title: Scopes the host enforces
     details: "Partial replication: a record belongs to a scope and a peer is granted scopes. The host drops the ops a peer may not write, and its feed and snapshots serve only what that peer may read."
-    link: /guide/sync#scopes
-    linkText: Scopes
+    link: /guide/partial-sync
+    linkText: Partial sync
   - icon: 🔌
     title: wrpc as the transport
     details: "Mount storage.sync.unit() on a wrpc server and dial it with a WrpcClient, over WebSocket or a WebRTC peer link. Reconnects, resumable subscriptions, binary snapshot streams and rate limits come from wrpc."
-    link: /guide/wrpc
-    linkText: wrpc transport
+    link: /guide/replication-websocket
+    linkText: WebSocket transport
   - icon: 💾
     title: Database with schema and queries
     details: "Records on node:fs, OPFS, IndexedDB or memory. A metaschema, Standard Schema or ajv validator runs on every write and on every hub, versions ride on ops, and Mango queries come with indexes, unique keys, watch() and fuzzy full-text search."
@@ -65,9 +68,9 @@ features:
     linkText: OpenTelemetry
   - icon: 📦
     title: Zero dependencies, a core and blocks
-    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition. The core is about 54 KB min+gzip — records, log, queries, versions, sync — and the rest are blocks you import: lists and text, trees, undo, branches, search; all of it together about 68 KB, each held to a budget in CI."
-    link: /guide/browser
-    linkText: Browser
+    details: "Nothing is installed with it. The same API on Node.js and in the browser, picked by the browser export condition. The core is about 78 KB min+gzip and the rest are blocks you import: lists and text, trees, signing, the audit chain, sync, versions, undo, branches, search. Every entry point is held to a budget in CI (`node scripts/size.js`)."
+    link: /guide/install
+    linkText: Installation
 ---
 
 <script setup>

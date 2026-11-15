@@ -1,120 +1,133 @@
+---
+title: Attachments
+description: Store files next to a record, keep them by their SHA-256, sync their names with the record and fetch the bytes from a peer only when a node reads them.
+---
+
 # Attachments
 
-A record is JSON. The bytes beside it — a photo, a PDF, an export — are an
-**attachment**: kept in the engine's `blobs` store under their SHA-256, and
-named on the record as a field that replicates like any other:
+A record is JSON. A screenshot on a bug report, a PDF on an invoice or a recording on a note is bytes, and bytes
+do not belong in JSON. The `attachments` plugin keeps them beside the record: the bytes go into the engine's blob
+store under their SHA-256 digest, and the record gets a field that names them. The field syncs like any other
+field. The bytes do not travel with it; a node fetches them from a peer the first time it reads the attachment.
 
-```js
-import { createDatabase } from '@alexify/syncom';
-import { attachments } from '@alexify/syncom/attachments';
+## Add the plugin
 
-const db = await createDatabase({ path: 'data', plugins: [attachments()] });
-const id = await db.insert({ $type: 'Task', title: 'with a photo' });
+The plugin is not part of `@alexify/syncom/all`, so add it yourself:
 
-const entry = await db.attachments.put(id, 'photo.jpg', bytes, { type: 'image/jpeg' });
-// → { digest: '9f86d0…', type: 'image/jpeg', length: 48213 }
-const photo = await db.attachments.get(id, 'photo.jpg'); // { bytes, type, length, digest }
-await db.attachments.list(id); // [{ name: 'photo.jpg', digest, type, length }]
-await db.attachments.remove(id, 'photo.jpg');
-```
+<<< @/examples/attachments.mjs#open
 
-`put` writes the bytes to the blobs store by their digest — the same bytes
-under two names, or on two records, are one blob — and sets the register
-`_attachments/<name>` on the record to `{ digest, type, length }`: an ordinary
-`update`, logged, replicated, undone and tagged like any field. The record
-reads with `_attachments: { 'photo.jpg': { … } }`; a schema that validates the
-record allows the field. `remove` is an `unset` of that register; the bytes
-stay in the store (another name may share them). `has(id, name)` says whether
-this node holds the bytes. A sealed record (`{ encrypted: true }`) takes no
-attachment: `put` is `ENCRYPTED` — the blobs store holds bytes in the clear
-(the [at-rest](./backends#encrypted-at-rest) wrapper apart), which the record's
-key does not cover.
+Every engine that ships with syncom has a blob store: memory, files, IndexedDB, SQLite and MongoDB. An engine
+without one is refused when the database opens.
 
-A register is believed only as far as it is one. A peer writes registers too
-(the field replicates like any other), so `get` and `has` read the register
-before anything else touches the store: a `digest` that is not SHA-256 as hex
-(64 lowercase hex characters — a digest is a file name in the files engine
-and a key everywhere else), a `type` that is no text, a `length` that is no
-integer within 64 MiB, an `encoding` the plugin does not know, is
-`ATTACHMENT_INVALID` (`id`, `attachment`), and `list` leaves such a register out
-with one `attachments.register.invalid` warning. Every engine's blobs store
-checks the digest at its own door too (a `TypeError` before the medium sees
-it), and every store takes a blob of at most `MAX_BLOB_BYTES` (64 MiB —
-`BLOB_TOO_LARGE`, the one cap `syncom/blob` answers within as well) — the cap is on the plain bytes; a store under the at-rest wrapper holds 28 bytes more, the seal's iv and tag, so a blob at the cap is stored sealed: `put`
-refuses a larger one before hashing it.
+## Attach bytes to a record
 
-The engine must keep blobs (`capabilities.blobs`): the memory, IndexedDB
-(a seventh object store),
-files (`blobs/<digest>`, as base64 text — an fsi carries text), SQLite (a
-`blobs` table) and MongoDB (a `blobs` collection) engines do, and the
-[at-rest](./backends#encrypted-at-rest) wrapper seals the bytes as it seals a record.
-`copyEngine()` carries them. An engine without the store refuses the plugin at
-`createDatabase()`.
+`put(id, name, bytes, { type })` stores the bytes and names them on the record:
 
-## Over the wire
+<<< @/examples/attachments.mjs#put
 
-The name travels with the record; the bytes do not. A node that reads a record
-naming bytes it lacks asks the peers it dials — `syncom/blob { digest, id, name }`,
-answered as a stream where the transport carries one, as base64 otherwise —
-checks the answer against the digest (a peer answering other bytes is not
-believed: `sync.blob.mismatch`, the next peer asked), keeps the bytes in its
-own store — once, by `fetchBlob`; a store that refuses them is a
-`sync.blob.keep.failed` warning and the bytes are answered all the same — and
-answers them. No peer has them: `BLOB_NOT_FOUND` (`id`, `attachment`,
-`digest`). `get(id, name, { fetch: false })` asks nobody.
+The bytes can be a `Uint8Array`, an `ArrayBuffer` or a string (stored as UTF-8). The name is up to 128 letters,
+digits, `.`, `_`, `@` and `-`, and putting under a name that exists replaces what it names. The record must
+exist; `put()` on an id that is not there rejects with `NOT_FOUND`.
 
-The bytes are what the register says, or `BLOB_MISMATCH` (`id`, `attachment`,
-`digest`, `reason`): a plain blob whose length is not the register's `length`
-(`reason: 'length'`), a compressed one that inflates past it (`'inflated'`) or
-to another length. The inflating stops the moment it passes `length` — a
-register is a peer's word, and a few KiB of gzip could name a few GiB
-otherwise — so nothing is ever inflated whole on a register's say-so. A host serves a blob
-to a peer that names a live record in its scopes holding the digest under
-that name (`allow.blob: 'named'`, the default — so a scope taken back, a
-record purged or forgotten, a sealed record hand out no bytes, and a digest
-alone is 404); `unit({ allow: { blob: 'any' } })` serves by digest alone, a
-trusted mesh's; `{ blob: false }` refuses the call (403 `NOT_SERVED`).
-`db.sync.fetchBlob(digest, { id, name })` is the same fetch by hand.
+## Read them back
 
-So an attachment reaches a node when that node reads it, not before: a phone
-syncing a thousand records does not download a thousand photos. Pushing bytes
-ahead of a read is not here — see the [comparison](./vs-rxdb).
+<<< @/examples/attachments.mjs#read
 
-## Collecting the bytes
+The attachment is a field of the record, `_attachments`, holding a small entry per name: the digest, the media
+type and the length. That entry is an ordinary [field](./fields): it is in the record you read, it syncs to
+other nodes, it shows up in [history and versions](./versions), and [undo](./undo) takes it back. A schema that
+validates the record lets `_attachments` through.
 
-`remove`, `delete`, `purge` and `forget` leave an attachment's bytes in the
-store — another name, another record may share them, and nothing counts
-references. `db.attachments.sweep()` collects them: a mark-and-sweep over the
-store, where every digest a live record's register names, a tag's copy names
-(`tags: true` by default — a record as it was at a tag keeps its file) or a put
-in flight holds is kept, and every other blob is removed. It answers
-`{ blobs, marked, removed, pending }`; `sweep({ dryRun: true })` counts and
-removes nothing. The log is not marked: a `restore()` or `applyPatches()` that
-brings a swept register back names bytes a peer may still hold — fetched on the
-read — else `BLOB_NOT_FOUND`. A sweep is the writer's: `READ_ONLY` on a
-follower, and a follower's put in flight (`@alexify/syncom/shared`) is not the
-leader's to see — sweep when the tabs are quiet, or put again.
+A string goes in as UTF-8 and comes back as bytes; decode it yourself:
 
-```js
-const { blobs, marked, removed } = await db.attachments.sweep({ dryRun: true });
-await db.attachments.sweep(); // removes what nothing names
-```
+<<< @/examples/attachments.mjs#text
 
-`db.attachments.stats()` counts the puts, the gets (the bytes read whole), the
-gets that fetched from a peer, the mismatches, the misses, the sweeps and the
-puts in flight. With the telemetry plugin a sweep is a span
-(`syncom.attachments.sweep`) and every blob put, read, served to a peer or
-fetched from one is counted with its bytes (`syncom.blobs`, `syncom.blob.bytes`)
-— see [Telemetry](./telemetry.md).
+`get()` resolves to `null` for a name the record does not have. `list(id)` returns every attachment of the
+record, and `has(id, name)` tells you whether this node holds the bytes right now (more on that below).
 
-## Compression
+## Fetch the bytes from a peer on demand
 
-```js
-plugins: [attachments({ compression: 'gzip' })]; // or 'deflate'
-```
+Here the server attaches a file and the phone syncs:
 
-The bytes are stored compressed through `CompressionStream` (Node 18+, every
-browser): the digest is the stored bytes', `encoding: 'gzip'` rides on the
-register, `length` stays the bytes' length before compression, and `get()`
-inflates — as far as `length` and no further (`BLOB_MISMATCH` past it). A node
-without compression reads what a node with it wrote: the register says how.
+<FigAttachments />
+
+<<< @/examples/attachments.mjs#peers
+
+The name arrives with the record; the bytes stay on the server until the phone reads them. Then `get()` asks the
+peers the phone is connected to, checks that what comes back hashes to the digest (a peer that answers other bytes
+is not believed, and the next peer is asked), stores the bytes and returns them. The next read is local. A phone
+that syncs a thousand records with photos downloads the photos it opens, not a thousand.
+
+A host hands out bytes only to a peer that may read a record naming them: the record must be live and in the
+peer's [scopes](./partial-sync). A peer that knows a digest but cannot read a record holding it gets nothing.
+
+When no peer can be reached, or none has the bytes, `get()` rejects with `BLOB_NOT_FOUND`. Pass `{ fetch: false }`
+to read only what this node holds:
+
+<<< @/examples/attachments.mjs#offline
+
+## Remove an attachment and free the space
+
+`remove(id, name)` takes the name off the record, and that removal syncs. The bytes stay in the blob store,
+because another name or another record may hold the same digest: the same file attached twice is stored once.
+`sweep()` frees what nothing names any more:
+
+<<< @/examples/attachments.mjs#remove
+
+A sweep keeps every blob that a live record names, that a [version tag](./versions) still names (pass
+`{ tags: false }` to ignore tags), or that a `put()` in progress is writing; it removes the rest. `{ dryRun: true }`
+counts without removing. Deleting or purging a record leaves its bytes for the next sweep as well. Run a sweep
+from time to time, for example next to [cleanup](./cleanup).
+
+The log is not part of the sweep. If you restore an old version of a record whose bytes were swept, a read fetches
+them from a peer that still holds them, or rejects with `BLOB_NOT_FOUND`. In a browser with several tabs open
+(the [leader election](./leader-election) setup), sweep from the tab that leads while the others are not attaching
+files: a sweep on a follower is refused with `READ_ONLY`, and a put in progress on another tab is not visible to it.
+
+## Compress the stored bytes
+
+<<< @/examples/attachments.mjs#compression
+
+With `compression: 'gzip'` or `'deflate'`, bytes are compressed with `CompressionStream` before they are stored.
+The digest is the digest of the stored bytes, the entry says `encoding: 'gzip'`, and `length` stays the length
+before compression. A node without the option reads what a node with it wrote, because the entry says how to
+inflate it. Compression pays off for text, CSV and JSON; images and video are compressed already.
+
+## Limits
+
+An attachment is at most 64 MiB; a larger `put()` is refused with `BLOB_TOO_LARGE` before anything is stored. An
+[encrypted](./encryption) record takes no attachments (`put()` rejects with `ENCRYPTED`): the blob store holds
+bytes in the clear, which the record's key does not cover. To encrypt the bytes on disk, wrap the engine in
+encryption at rest, which seals blobs as it seals records.
+
+The bytes are never pushed ahead of a read. A node that must work offline with every file has to read each
+attachment once while it is online.
+
+Bytes travel only from a node to the nodes that dial it: `get()` asks the peers this node dials, and a host never
+asks the nodes that dial it. With a laptop and a phone that both dial a server, a file the laptop attached does not
+reach the server on its own, so the phone's read ends in `BLOB_NOT_FOUND`. Attach on the node the others dial (the
+server in this setup). A [JSON export](./import-export) carries the `_attachments` entries but not
+the bytes.
+
+A peer's entry is believed only as far as it is a valid entry. A digest that is not 64 lowercase hex characters, or
+a length past the limit, makes `get()` and `has()` reject with `ATTACHMENT_INVALID`, and bytes that do not match
+the entry's length reject with `BLOB_MISMATCH`.
+
+## Coming from RxDB
+
+RxDB stores attachments per document and needs `attachments: {}` in the collection's schema. In syncom any record
+can carry attachments, the same bytes are stored once whoever names them, and replication moves the names at once
+and the bytes on demand. RxDB's replication carries attachment data with the document on the protocols that
+support it.
+
+::: code-group
+
+<<< @/examples/attachments.mjs#put [syncom]
+
+<<< @/examples/rxdb/attachments.mjs#put [RxDB]
+
+:::
+
+<FromRxdb page="rx-attachment" :rows="['attachments', 'replAttachments', 'compression', 'encAttachments']" />
+
+Every method and its options are in the [reference](../reference/api#attachments-subpath).

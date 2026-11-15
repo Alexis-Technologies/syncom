@@ -15,3 +15,12 @@ nodes stay in step. If you know RxDB, every page ends with a "Coming from RxDB" 
 [Compared with RxDB](./vs-rxdb) has the whole comparison.
 
 <DocsOverview />
+
+## Coming from RxDB
+
+The sidebar follows the order of RxDB's documentation, and [Compared with RxDB](./vs-rxdb#page-by-page) lists
+every RxDB page with the syncom page that answers it. The biggest difference shows up early: syncom replicates
+operations that merge field by field, so the pages about conflicts, revisions and conflict handlers become one
+page about [transactions and conflicts](./transactions-conflicts).
+
+<FromRxdb page="overview" :rows="['replModel', 'conflictResolve', 'docs']" />

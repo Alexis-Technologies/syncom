@@ -1,3 +1,8 @@
+---
+title: Benchmarks
+description: syncom measured against Yjs, Automerge, Loro, RxDB and five more libraries on the same scenarios, in memory and on disk.
+---
+
 <script setup>
 import BenchCompare from '../.vitepress/theme/components/BenchCompare.vue';
 import BenchEngine from '../.vitepress/theme/components/BenchEngine.vue';

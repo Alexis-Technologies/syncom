@@ -1,6 +1,7 @@
 'use strict';
 
-// Every example a page of docs/ shows is a file of docs/examples/, included by the page through
+// Every example a page of docs/ shows is a file of docs/examples/ (`.mjs`, `.js`, or `.mts`, which Node runs by
+// stripping its types; the types themselves are tsd's, in tests/*.test-d.ts), included by the page through
 // `<<< @/examples/<file>#<region>`: what the reader sees is what this test runs. Each file runs in a
 // process of its own from an empty temporary directory, so a `path` it opens lands there and is gone
 // after. A file whose first line is `// docs-examples: browser-only (<reason>)` needs what Node does not
@@ -23,7 +24,7 @@ const files = (dir, out = []) => {
     const full = path.join(dir, name);
     if (statSync(full).isDirectory()) {
       if (name !== 'rxdb') files(full, out);
-    } else if (name.endsWith('.mjs') || name.endsWith('.js')) out.push(full);
+    } else if (/\.(?:mjs|js|mts)$/.test(name)) out.push(full);
   }
   return out;
 };

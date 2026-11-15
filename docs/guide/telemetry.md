@@ -1,341 +1,113 @@
+---
+title: OpenTelemetry
+description: Inject OpenTelemetry into syncom, follow one write as a single trace across nodes, and pick the spans and metrics worth watching first.
+---
+
 # OpenTelemetry
 
-syncom emits OpenTelemetry spans and metrics **without depending on
-OpenTelemetry**: you inject the API (or a tracer and a meter), and everything
-is duck-typed. With nothing injected, every recording path is a no-op and the
-write path does not even read the clock.
+syncom emits OpenTelemetry spans and metrics without depending on OpenTelemetry. You inject the API module
+(or a tracer and a meter), syncom duck-types it, and with nothing injected every recording path is a no-op:
+the write path does not even read the clock. The option has the same shape as wrpc's, so one object serves
+both packages, and their spans meet in one trace.
 
-The option has the same shape as wrpc's, so one object serves both packages —
-and that is the point of the design, see
-[What wrpc already gives you](#what-wrpc-already-gives-you).
+The adapter is the `telemetry` plugin, which `@alexify/syncom/all` registers; with the lean core, pass
+`plugins: [telemetry]` from `@alexify/syncom/telemetry`. Without it, `telemetry: { api }` is refused with
+`PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
 
-## Two injection modes
+## Turn it on
 
-The adapter that turns an OpenTelemetry api or tracer into what the engine
-records through is the `telemetry` plugin — `@alexify/syncom/telemetry`,
-registered by `@alexify/syncom/all`; without it `createDatabase({ telemetry: { api } })`
-is `PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
+Set up OpenTelemetry in your app as you would anyway. This example keeps the spans in memory so it can look
+at them:
 
-```js
-const otelApi = require('@opentelemetry/api');
-const { createDatabase } = require('@alexify/syncom');
-const { telemetry } = require('@alexify/syncom/telemetry');
+<<< @/examples/telemetry.mjs#sdk
 
-// The api module: syncom derives its own tracer and meter, so spans carry
-// the `@alexify/syncom` instrumentation scope.
-const storage = await createDatabase({ path: 'data', plugins: [telemetry], telemetry: { api: otelApi } });
+Then hand the API module to `createDatabase()`:
 
-// Or pre-built instances — either alone is fine.
-const traced = await createDatabase({ path: 'data', plugins: [telemetry], telemetry: { tracer, meter } });
-```
+<<< @/examples/telemetry.mjs#inject
 
-The core itself records through a **writer** — `enabled` and `withSpan`,
-duck-typed — and takes one given to `createDatabase({ telemetry })`, plugin or not,
-contained: a recording method it lacks records nothing, one that throws is
-swallowed, and `withSpan` runs the work exactly once whatever the writer does
-around it — a writer never breaks or holds up a write. `createTelemetry({ api })`
-from the same subpath builds one by hand, to share with an `OpLog` opened on
-its own (`new OpLog(path, { telemetry: writer })`) or with a second storage.
+With `{ api }`, syncom gets its own tracer and meter from the global providers, so its spans carry the
+`@alexify/syncom` instrumentation scope. With `{ tracer, meter }` you pass instances you built; either one
+alone is fine.
 
-`includeIdentity: false` keeps record ids, peer urls/node ids and scopes off
-spans, and records a failure's `code` (or class) as the span status instead
-of the exception, whose message names the record. None of them is ever a
-metric label at any setting.
+## What wrpc records and what syncom adds
 
-The writer is `storage.telemetry` (opaque, `@experimental`), and `OpLog`
-takes the same option directly. The signals will keep improving in minor
-releases; the option and the injection modes are stable.
+When syncom replicates over [wrpc](./replication-websocket) and you give wrpc the same `telemetry`, the two
+split the work without overlap:
 
-## What wrpc already gives you
-
-When syncom replicates over wrpc and the host passes `telemetry` to its
-`Server` and `WrpcClient`, wrpc emits — with no help from syncom:
-
-| Signal | Where it comes from |
+| wrpc records | syncom records |
 | --- | --- |
-| A span and a duration sample for every `syncom/hello`, `push`, `snapshot`, `changes` call, on both ends | wrpc's `rpc.server.duration`, `rpc.client.duration`, `wrpc.server.calls` |
-| W3C trace context across the socket (`tp`/`ts` on each packet) | wrpc's propagation |
-| Connections, reconnects, subscriptions, stream bytes, backpressure | wrpc's server and client instruments |
+| A span and a duration for every `syncom/hello`, `push`, `snapshot` and `changes` call, on both ends | The local write path: commit, log append, chain block, record file, none of which crosses a socket |
+| W3C trace context on every packet | What a push came to: applied, duplicate, gap, malformed, refused (wrpc only sees a call that returned) |
+| Connections, reconnects, subscriptions, stream bytes, backpressure | Replication lag, the log rolling and compacting, a bootstrap as one unit, a push as one batch and why it happened |
 
-syncom does not repeat any of it. What it adds is what only the engine can
-see:
+syncom carries no trace context in its ops: ops are durable, traces are not, and one push carries ops of
+many origins. Over a link that is not wrpc, syncom's own signals are all you get.
 
-| Signal | Why wrpc cannot see it |
-| --- | --- |
-| The local write path — commit, log append, chain block, record file | never crosses a socket |
-| What a push came to: applied, duplicate, gap, malformed, refused | wrpc sees a call that returned 200 |
-| Replication lag, origin stamp to applied here | needs the op |
-| The log rolling and compacting, the tail replayed at open | local I/O |
-| A bootstrap as one unit, with its pages and records | many calls, one operation |
-| A push as one batch, however many pages, and why it happened | the coalescing is syncom's |
-| Any link that is not wrpc | there is no wrpc |
+## Follow one write across nodes
 
-## Spans
+<<< @/examples/telemetry.mjs#trace
 
-All syncom spans are `INTERNAL`; the `CLIENT` and `SERVER` kinds belong to
-wrpc's spans around the actual calls.
+Every syncom span is opened as the active span, so it nests under whatever the context manager says is
+active. On the laptop, `syncom.push` wraps the call and wrpc's client span becomes its child, which wrpc
+injects into the packet. On the server, wrpc runs the push handler inside its server span, so
+`syncom.apply` becomes that span's child. A relay of a freshly landed op is scheduled from inside the
+apply that produced it, so a write and everything it caused across a mesh reads as one trace.
 
-| Span | When | Attributes |
-| --- | --- | --- |
-| `syncom.commit` | one local write through the queue (a write made at once has no span: counted, see below) — of any op type, a list, text or tree op as much as a `set` — from the moment it runs to after the `change` listeners; inside a transaction, the op built, applied and validated (the append and the landing are the transaction's) | `syncom.op.type`, `syncom.record.id`†, `syncom.result` (`applied` / `noop` / `encrypted`), `syncom.scope` |
-| `syncom.apply` | one batch of a peer's ops | `syncom.ops.count`, `syncom.ops.applied`, `syncom.ops.skipped`, `syncom.ops.duplicates`, `syncom.ops.gaps`, `syncom.ops.malformed`, `syncom.ops.unsigned`, `syncom.ops.forged`, `syncom.ops.out_of_scope`, `syncom.ops.equivocations` |
-| `syncom.replay` | the unsealed log tail replayed at open | `syncom.ops.count`, `syncom.records` |
-| `syncom.push` | one push to a peer, all its pages | `syncom.push.reason` (`handshake` / `manual` / `relay` / `recover` — a peer that fell behind, caught up from the vector), `syncom.ops.count`, `syncom.pages`, `syncom.peer.url`†, `syncom.peer.node`† |
-| `syncom.bootstrap` | the whole snapshot walk from a peer | `syncom.peer.url`†, `syncom.peer.node`†, `syncom.pages`, `syncom.records` |
-| `syncom.snapshot` | one page served to a peer (the host side) | `syncom.limit`, `syncom.records`, `syncom.done` |
-| `syncom.log.roll` | sealing open files into a segment and compacting | `syncom.log.sealed`, `syncom.log.dropped`, `syncom.log.floor` |
-| `syncom.log.scrub` | a purge stripping an id's entries from the log files | `syncom.log.scrubbed` |
-| `syncom.catalog.rebuild` | the catalog rebuilt from a scan of `data/` at open | `syncom.records` |
-| `syncom.tag` | a tag taken: the catalog copied under the log position | `syncom.records` (the catalog's rows, tombstones included) |
-| `syncom.untag` | a tag dropped: the copies the older tag needs moved, the rest removed | — |
-| `syncom.history` | `history()`: the record's retained entries folded, the versions handed out | `syncom.ops.count` (every retained entry, whatever the `limit`), `syncom.versions`, `syncom.exact` |
-| `syncom.version` | `get(id, { at })`, and each version `diff()` and `restore()` name: one version folded out of the log (a tag's copy is a file read, not a fold, and has no span) | `syncom.ops.count` (the entries inside the cut) |
-| `syncom.patches` | `applyPatches()`, and so `restore()` and `compact()`: the batch rehearsed, then every op made (each a `syncom.commit` child) and appended as one transaction | `syncom.ops.count`, `syncom.ops.applied` |
-| `syncom.transact` | `transact()`: `fn` run, every op made (each a `syncom.commit` child), the group appended | `syncom.ops.count` |
-| `syncom.cleanup.sweep` | one sweep of the tombstone cleanup (`run()`, or the timer's): what it folded, dropped and skipped | `syncom.cleanup.folded`, `syncom.cleanup.dropped`, `syncom.cleanup.skipped` |
-| `syncom.attachments.sweep` | one `db.attachments.sweep()`: the store listed, the live registers and the tags' copies marked, the rest removed (`dryRun` removes none) | `syncom.attachments.blobs`, `syncom.attachments.marked`, `syncom.attachments.removed` |
+Two things to know when reading such a trace. Ops that land in one tick travel as one push, and that push
+is parented to the first commit that scheduled it; the others ride along. And a push outlives the commit
+that scheduled it: the commit ends when its caller's `await` resolves, the push runs a tick later, which
+viewers draw correctly. In a browser without a context manager (`ZoneContextManager` or
+`StackContextManager` from the web SDK), every syncom span is a root.
 
-† off the span when `includeIdentity` is false (so is `syncom.scope`).
+## What to watch first
 
-A span is marked failed (status `ERROR`, the exception recorded, `error.type`
-set) when the work it brackets throws: a write refused by the field-kind
-rule or out of range, a push whose call rejected, a bootstrap that could not
-read a snapshot, a version the log can no longer give (`HISTORY_GONE`), a
-batch of patches its rehearsal refused. A peer's op refused inside
-`applyRemote` is a protocol outcome, not a failure of the batch: it is
-counted (below), the batch's span stays green.
+The [telemetry reference](../reference/telemetry) lists every span, metric and attribute. These answer the
+first questions an operator asks:
 
-A `merge` — one per snapshot record during a bootstrap — is counted but not
-spanned, or a bootstrap of ten thousand records would open ten thousand
-spans under one `syncom.bootstrap`. A write made at once (the fast path:
-an idle queue, nothing asynchronous configured) opens no span either — a
-span costs the promises that path exists to spare — and is counted in
-`syncom.commits` with `syncom.path: 'fast'`, its duration to the landing
-in `syncom.write.duration`; telemetry does not turn the fast path off.
+- **Is replication healthy?** `syncom.ops.received` by `syncom.outcome` (gaps and refusals should be rare),
+  `syncom.ops.rejected` by `syncom.reason`, and the `syncom.outbox.size` gauge, which grows when a peer is
+  unreachable.
+- **How far behind are peers?** `syncom.replication.lag`, the receiving node's clock minus the op's stamp.
+  It includes the clock skew between the two nodes, so read it as a trend, not as an absolute.
+- **Is the disk keeping up?** `syncom.write.duration`, `syncom.log.append.duration`,
+  `syncom.log.append.failures`, and the `syncom.held` gauge: records kept in memory because their file could
+  not be written.
+- **Is someone being refused?** `syncom.hello.refused` by code and reason on a host.
 
-## Metrics
+`syncom.commit` and `syncom.apply` start when the write runs, not when it was queued, and end after the
+`change` listeners ran: a slow listener shows in the write's duration, as it should. A write made at once on
+an idle queue opens no span (a span costs the promises that path exists to spare) and is counted in
+`syncom.commits` with `syncom.path: 'fast'`.
 
-Labels are closed sets. A record id, an origin, a peer url or a scope never
-appears on one.
+## Keep identities off spans, share a writer
 
-| Metric | Instrument | Unit | Labels |
-| --- | --- | --- | --- |
-| `syncom.commits` | Counter | `{op}` | `syncom.op.type`, `syncom.result` (`applied` / `noop` / `encrypted` / `error` / `coalesced` — folded into the write before it), `syncom.path` (`queue` / `fast` — made at once, outside the queue: counted, with its duration in `syncom.write.duration`, never spanned) |
-| `syncom.write.duration` | Histogram | `ms` | `syncom.path` (`commit` / `apply` / `replay`) |
-| `syncom.ops.received` | Counter | `{op}` | `syncom.outcome` (`applied` / `skipped` — accepted but not applied here: a hook, the schema, an unreadable record / `duplicate` / `gap` / `malformed` — the last includes a stamp beyond `maxSkew` / `refused` — a signature that does not check, or none under `'require'`, or on a host a record outside the pushing peer's scopes) |
-| `syncom.ops.rejected` | Counter | `{op}` | `syncom.reason` (`rule` — a host's `authorizeWrite` said no / `register` / `counter` / `set` / `list` / `text` / `tree` — the kind that holds the field and outranks the op's / `kind` — a field of a kind this node runs no plugin for, counted per op, reported once per page / `bound` — past a list's or a text's limit / `malformed` — a payload the engine does not admit / `validation` / `scope` / `unreadable` / `forged` / `unsigned` / `equivocation` — another op than the one held at its seq / `chain` — a `prev` that is not the fingerprint held at the seq before it) |
-| `syncom.conflicts` | Counter | `{conflict}` | `syncom.kind` (`unique`, `register`) |
-| `syncom.ops.limited` | Counter | `{push}` | `syncom.reason` (`ops` / `bytes` / `rate`) |
-| `syncom.replication.lag` | Histogram | `ms` | — |
-| `syncom.push.ops` | Histogram | `{op}` | `syncom.push.reason` (as on the span), `syncom.result` (`ok` / `error`) |
-| `syncom.bootstraps` | Counter | `{bootstrap}` | `syncom.result` (`ok` / `error` / `refused` — a host that cannot hold one of this node's kinds, `KINDS_MISMATCH`) |
-| `syncom.log.segments` | Counter | `{segment}` | `syncom.log.event` (`sealed` / `dropped`) |
-| `syncom.log.append.duration` | Histogram | `ms` | — |
-| `syncom.log.group.ops` | Histogram | `{op}` | — (ops in one group the log wrote: every append that came while the group before it was being written) |
-| `syncom.log.append.failures` | Counter | `{group}` | — (groups the log could not write — their seqs taken back, their writes rejected; also `log.append.failed`) |
-| `syncom.defer.flush.duration` | Histogram | `ms` | — (landing the deferred window: the records' files and one chain block; the next window is at least as long) |
-| `syncom.hook.duration` | Histogram | `ms` | `syncom.hook` (`beforeWrite` / `afterWrite` / `beforeApply` / `afterApply` — the hooks that run in the mutation queue; read and sync hooks are not timed) |
-| `syncom.lock.wait` | Histogram | `ms` | — (what `createDatabase()` spent taking the directory lock) |
-| `syncom.engine.write` | Histogram | `ms` | `syncom.engine` (the engine's name), `syncom.ok` — a write set of the engine, from the call to its return |
-| `syncom.hello.refused` | Counter | `{call}` | `syncom.code` (`400` / `403` / `404` / `409` / `428` / `503`), `syncom.reason` (the wire's: `HELLO_FIRST`, `SCOPES`, `UNPROVEN`, `BAD_PROOF`, `READ_ONLY`, `NOT_SERVED`, `QUERY_DISABLED`, `BAD_QUERY`, `REGEX`, `BAD_DIGEST`, `BLOB_NOT_FOUND`, `SHARED_LOG`… — the reasons of [the wire reference](../reference/wire.md)) — calls a hosted unit refused before the handler, by code and by why |
-| `syncom.presence.refused` | Counter | `{entry}` | `syncom.reason` — on a host (`hello` / `rate` / `malformed` / `scope` / `forged` / `unsigned`: an update refused whole, never relayed) and on a receiver (`forged` / `unsigned` / `invalid` — malformed, past the bounds, not the sender's own, the room full: entries refused) |
-| `syncom.handle.flushes` | Counter | `{flush}` | `syncom.result` (`ok` / `unlogged` — nothing appended, the edits dropped / `error` — appended, a step after failed) — a text handle's flush (`openText()`) |
-| `syncom.query.cache` | Counter | `{query}` | `syncom.result` (`hit` — the result read from the cache, nothing read / `miss` — a run) — every `fetch()` of a cursor with a key |
-| `syncom.query.live` | Counter | `{change}` | `syncom.result` (`reduce` — a changed record read once and placed / `rerun` — the cursor run again: a full window lost a row, a `$text` query) |
-| `syncom.query.plans` | Counter | `{plan}` | `syncom.scan` (`index` / `postings` / `collection` / `text`) — a cursor planned (once per cursor, again under other definitions) |
-| `syncom.bulk.rows` | Counter | `{row}` | `syncom.result` (`success` / `error`) — the rows of `bulkInsert()`, `bulkUpsert()`, `bulkRemove()` by verdict |
-| `syncom.pipeline.turns` | Counter | `{turn}` | `syncom.result` (`handled` / `failed`) — the batches a pipeline handed its handler |
-| `syncom.pipeline.lag` | Histogram | `ms` | — (a live turn's last op's stamp to its handler done: skew plus the handler's wait, a trend; a replay has no stamp) |
-| `syncom.cleanup.tombstones` | Counter | `{tombstone}` | `syncom.result` (`folded` / `dropped`) — what a cleanup sweep took |
-| `syncom.dump.pages` | Counter | `{page}` | `syncom.kind` (`export` / `import`) — the pages of `exportPages()`/`exportJSON()` and `importJSON()` |
-| `syncom.insert.named` | Counter | `{insert}` | `syncom.result` (`ok` / `exists` — a live record held the id) — an insert under an id the data named, through the database or a transaction |
-| `syncom.shared.ops` | Counter | `{op}` | `syncom.result` (`relayed` — appended to the topic by this hub / `applied` — from the topic or the inbox / `forwarded` — a read-only hub's push to the inbox / `dropped` — an inbox op the writer did not take, named in a `dropped` entry) — the shared log's ops (`sync.sharedLog`) |
-| `syncom.shared.entries` | Counter | `{entry}` | `syncom.result` (`passed` — read and passed / `malformed` — did not read / `hole` — a number whose entry never came / `failed` — an append failed, the relay fell behind / `retried` — an apply tried again / `stuck` — a rule's refusal three times) |
-| `syncom.shared.lag` | Histogram | `ms` | — (the newest op of a topic entry, its stamp, to its apply here: the origin's clock skew and the bus's transit — a trend) |
-| `syncom.revoke` | Counter | `{revoke}` | `syncom.via` (`local` — `sync.revoke()` here / `shared` — folded from the shared log's topic, another hub's) |
-| `syncom.reads` | Counter | `{call}` | `syncom.procedure` (`query` / `count`), `syncom.result` (`ok` / `capped` — a scoped peer's walk ended by `limits.rowsPerQuery` before its window was full) — a thin client's reads served |
-| `syncom.reads.rows` | Histogram | `{row}` | `syncom.procedure` (`query` — the rows answered / `count` — the count) |
-| `syncom.blobs` | Counter | `{blob}` | `syncom.direction` (`put` — `db.attachments.put` / `get` — `db.attachments.get`, the bytes read whole / `served` — `syncom/blob` answered to a peer / `fetched` — asked of a peer by `fetchBlob`), `syncom.result` (`ok` / `mismatch` — the bytes are not what the register or the digest says / `missing` — none here, no peer has them) |
-| `syncom.blob.bytes` | Counter | `By` | `syncom.direction` (as above) — the bytes stored, read, served and fetched |
-| `syncom.tabs.calls` | Counter | `{call}` | `syncom.result` (`ok` — a follower's call the leader answered, a value or a refusal / `retried` — tried again, the leader gone / `lost` — `LEADER_LOST` / `answered` — on the leader: a retry answered from what it kept) — `@alexify/syncom/shared` |
-| `syncom.tabs.failovers` | Counter | `{change}` | `syncom.kind` (`promoted` — a follower became the leader / `demoted` — a leader lost the election / `yielded` — elected, could not open, `PROMOTE_FAILED`) |
-| `syncom.connector.rows` | Counter | `{row}` | `syncom.direction` (`pull` / `push`), `syncom.result` (`pulled` — documents a pull handed over / `applied` — landed as writes / `pushed` — rows the push handler took / `probed` — rows asked of the backend as a probe (`assumed: undefined`), nothing written / `refused` — documents and rows refused by name / `parked` — rows the backend refused, set aside / `conflict` — the backend's state over an edit here, decided / `failed` — a handler or a landing failed, tried again) — `@alexify/syncom/connector` |
-| `syncom.mcp.calls` | Counter | `{call}` | `syncom.procedure` (the verb: `query` / `count` / `get` / `changes` / `wait_changes` / `insert` / `upsert` / `delete`), `syncom.result` (`ok` / `refused` — an argument the schema refuses, a `TypeError` / `error` — the collection's own refusal) — `@alexify/syncom/mcp` |
-| `syncom.outbox.size` | Observable gauge | `{op}` | — (ops queued for peers, over every dialed peer) |
-| `syncom.queue.depth` | Observable gauge | `{op}` | — (writes waiting on, or in, the mutation queue) |
-| `syncom.cache.size` | Observable gauge | `{entry}` | — |
-| `syncom.catalog.size` | Observable gauge | `{entry}` | — (rows, tombstones included) |
-| `syncom.log.length` | Observable gauge | `{entry}` | — (entries retained) |
-| `syncom.inflight` | Observable gauge | `{op}` | — (local ops appended and not landed yet) |
-| `syncom.deferred` | Observable gauge | `{record}` | — (records whose files wait for the deferred window) |
-| `syncom.held` | Observable gauge | `{record}` | — (records held in memory after a file write failed, replayed at the next open) |
+<<< @/examples/telemetry.mjs#writer
 
-The gauges are observable: the SDK reads them when it collects, through a
-callback the storage registers at open. **One storage per meter** for those —
-two storages on one meter would observe over each other (the counters and
-histograms are fine to share; the SDK merges identical instruments).
+`includeIdentity: false` keeps record ids, peer urls, node ids and scopes off spans, and records a
+failure's `code` instead of the exception, whose message names the record. None of those is ever a metric
+label at any setting. `createTelemetry()` builds the writer the core records through, which you can hand to
+`createDatabase({ telemetry })` as it is (the core takes a writer without the plugin) or to an `OpLog` opened
+on its own.
 
-`syncom.push.ops` answers three questions with one instrument: its count is
-the number of pushes, its sum the ops pushed, and its distribution how many
-ops coalesce into one push.
+The gauges (`syncom.outbox.size`, `syncom.queue.depth`, `syncom.log.length` and the rest) are observed
+through a callback each database registers at open: give each database its own meter. Counters and
+histograms are fine to share.
 
-`syncom.replication.lag` is the receiving node's clock minus the op's stamp,
-which is the origin's wall clock at commit time — so it includes clock skew
-between the two nodes along with transit and queueing. Read it as a trend,
-not as an absolute.
+## Telemetry never breaks a write
 
-Two storages sharing one meter create the same instruments twice; the SDK
-returns the same instrument for an identical descriptor, so this is fine.
-
-## One trace across nodes
-
-syncom carries **no trace context** in its ops — ops are durable, traces are
-not, and one push carries ops of many origins. Instead, every syncom span is
-opened with `startActiveSpan`, so it nests under whatever the host's context
-manager says is active:
-
-- On the host, wrpc runs the `syncom/push` handler inside its `SERVER` span,
-  so `syncom.apply` becomes its child.
-- On the dialing node, `syncom.push` wraps the `syncom/push` call, so wrpc's
-  `CLIENT` span becomes *its* child — and wrpc injects that context into the
-  packet.
-- The relay of an op that just landed is scheduled from inside the commit (or
-  apply) that produced it, and inherits that context.
-
-With telemetry on wrpc and syncom at both ends, a write and everything it
-caused is one trace:
-
-```
-syncom.commit            (node A)
-└─ syncom.push {relay}   (node A)
-   └─ syncom/push        CLIENT, wrpc (node A)
-      └─ syncom/push     SERVER, wrpc (node B)
-         └─ syncom.apply (node B)
-            └─ syncom.push {relay}   (node B, on to C)
-               └─ …
-```
-
-```js
-const otelApi = require('@opentelemetry/api');
-const { Server, WrpcClient, defineRouter } = require('@alexify/wrpc');
-const { createDatabase } = require('@alexify/syncom');
-const { sync } = require('@alexify/syncom/sync');
-const { createWrpcLink } = require('@alexify/syncom/wrpc');
-
-const { telemetry: otel } = require('@alexify/syncom/telemetry');
-const telemetry = { api: otelApi };
-
-// the host
-const hub = await createDatabase({ path: 'hub', plugins: [sync, otel], telemetry });
-const router = defineRouter({ syncom: hub.sync.unit({ access: 'public' }) });
-await new Server({ router, host: '0.0.0.0', port: 8000, protocol: 'http', telemetry }).listen();
-
-// a node
-const node = await createDatabase({
-  path: 'node',
-  plugins: [sync, otel],
-  telemetry,
-  sync: { connect: async (peer) => createWrpcLink(await WrpcClient.connect(peer.url, { telemetry })) },
-});
-```
-
-Two things to know when reading such a trace:
-
-- Ops that land in one tick travel as one push, and that push is parented to
-  the **first** commit or apply that scheduled it; the others in the batch
-  ride along.
-- A push outlives the commit that scheduled it — the commit ends when its
-  caller's `await` resolves, the push runs on a later tick. A child ending
-  after its parent is legal in OpenTelemetry, and viewers draw it correctly.
-
-In a browser without a context manager (`ZoneContextManager` or
-`StackContextManager` from the OTel web SDK), `startActiveSpan` still opens a
-span but nothing sees it as active: every syncom span is a root, as wrpc's
-client spans are there.
-
-## Timing
-
-`syncom.commit` and `syncom.apply` start when the write **runs**, not when it
-was queued: `Database` serialises writes, and time spent waiting on an earlier
-write is the caller's contention, not this write's cost. They end after the
-`change` listeners have run, because that is what the caller awaits — a slow
-listener shows up in `syncom.write.duration`, and it should.
+A tracer that throws, a tracer that never calls back, a span whose `end` throws, a meter whose instruments
+throw: each is contained, and the write runs exactly once. The one error that is not swallowed is the one
+the bracketed work throws, which is the write's own failure.
 
 ## Log events
 
-What the injected `logger` receives is structured — one object per line with
-an `event` field — and the names are a stable surface for a dashboard or an
-alert to key on:
+Separately from OpenTelemetry, the `logger` option receives structured events, one object per line with an
+`event` field (`log.append.failed`, `sync.op.forged`, `storage.unpersisted`…), and the names are as stable
+as the metric names. The [log events table](../reference/telemetry#log-events) lists every one with its
+level; [Logging](./logger) shows how to route them.
 
-| Level | `event` | When |
-| --- | --- | --- |
-| error | `log.append.failed` | a group could not be written (`from`, `ops`): its seqs are taken back and its writes, with the group gathered behind it, reject; counted in `stats().log.appendFailures` |
-| error | `log.roll.failed` | sealing the log failed (a segment or the index not written — the disk full); nothing was lost: the groups stay open and durable, the next append rolls again, and `stats().log.rollFailures` counts it |
-| error | `log.flush.failed`, `internal.error` | a bug: the log's write lane or its bookkeeping after an append threw, or a write made at once could not be announced as its group landed (`name: 'log'`); the writes it held are answered all the same |
-| warn | `sync.op.malformed`, `sync.op.skew` | a peer's op refused before it was read; the latter also an `error` event (`SKEW`) — its own stamp, or one its merge meta holds, beyond `sync.maxSkew` |
-| error | `tabs.promote.failed` | an instance of `@alexify/syncom/shared` was elected but could not open the database as the leader (`path`, `attempt`, `err`): the facade's `error` event carries `PROMOTE_FAILED`, the election is yielded and asked for again after a backoff |
-| warn | `tabs.rebind.failed` | a live thing of the shared facade could not be stopped or made again over the new instance, or a re-read Document could not be read (`path` or `id`, `err`) |
-| warn | `follow.failed` | a read-only database could not read a record another instance landed, or its row (`id`, `err`), or a page of ids while reading every record again (`id` null); the next change of the record is read again |
-| warn | `follow.lost` | a read-only database's change stream ended — an error, a close (`path`, `err`): subscribed again and every record read again; also an `error` event (`FOLLOW_LOST`). Twice when no stream is to be had: the follower reads as of that catch-up |
-| warn | `shared.append.failed`, `shared.recover.lost` | the shared log (`sync.sharedLog`) refused an append (`topic`, `err`; once per run of failures, also an `error` event `SHARED_LOG_FAILED` `append`): nothing more goes out until the recovery appends what the log holds since the watermark; the watermark is below what the log retains (`appended`; `SHARED_LOG_FAILED` `lost`): what fell below reaches the other hubs through a snapshot of this one |
-| warn | `shared.read.failed`, `shared.cursor.lost`, `shared.entry.failed`, `shared.entry.malformed` | a read of the shared log failed (`topic`, `err`; once per run, read again backed off); the cursor names a position the log no longer has (`cursor`; also `SHARED_LOG_FAILED` `gone`): read from the oldest entry; an entry failed to apply (`id`, `attempt`; a rule's third refusal is `SHARED_LOG_FAILED` `stuck`, nothing past it taken until `sync.stop()` and `start()`; the engine's is `SHARED_LOG_FAILED` `apply` once per run and tried again, backed off); an entry that is no entry of ours (`id`), passed |
-| warn | `shared.cursor.unreadable`, `shared.cursor.failed` | the shared log's cursor text does not read (read as none: the topic from its oldest entry) or could not be saved (`err`) |
-| warn | `shared.feed.failed`, `shared.stream.failed` | a `changes` feed's read of the shared log failed (`node`, `err`; read again from its cursor, backed off); `mongoSharedLog`'s change stream on a topic failed (`topic`, `err`): its tails poll |
-| warn | `sync.revoked.unreadable`, `sync.revoked.failed`, `shared.revoke.failed` | the scopes taken back from the nodes (`revoked.json` of the root kv) did not read (read as none) or could not be saved (`err`); a revocation could not be appended to the shared log's topic (`topic`, `node`, `err`): the other hubs grant what this one took back until one of them revokes too |
-| warn | `shared.dropped.failed` | the writer could not tell the topic what it did not take of an inbox entry (`inbox`, `err`): the followers' holds lapse by FORWARD_TTL instead |
-| warn | `shared.hole`, `shared.tombstone.failed`, `shared.inbox.trim.failed` | a number the shared log handed out whose entry never came — `mongoSharedLog`'s reader (`topic`, `n`) and the hub that passed it (`topic`, `id`; also `SHARED_LOG_FAILED` `hole`); `mongoSharedLog` could not mark a failed or moved append's number a tombstone (`topic`, `n`, `err`: readers wait the gap out for it); the writer could not trim the inbox past its cursor (`topic`, `cursor`, `err`) |
-| warn | `sync.prove.refused`, `sync.query.refused`, `sync.count.refused`, `sync.blob.refused`, `sync.query.scope` | hosting side: a proof of key refused (400 `BAD_PROOF` without a challenge or a signature, 403 `BAD_PROOF` for one that does not check); a query or a count refused (403 `QUERY_DISABLED` where the unit serves none, 403 `UNPROVEN`, 400 `BAD_QUERY` for an entity, a query or an order the cursor refuses); a blob refused (403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST`, 404 `BLOB_NOT_FOUND`); the scope function threw on a row (`id`, `err`), left out |
-| warn | `sync.blob.mismatch` | dialing side: a peer answered `syncom/blob` with bytes whose SHA-256 is not the digest asked (`url`, `node`, `digest`) — dropped, the next peer asked |
-| info | `tabs.promoted`, `tabs.demoted` | an instance of `@alexify/syncom/shared` became the leader (`path`, `generation`, `first`: the first lead or a failover) or lost the election and follows again (`path`, `generation`) |
-| info | `sync.revoke` | scopes taken back from a node (`node`, `scopes`, `via`: `local` for `sync.revoke()` here, `shared` for one folded from the shared log) |
-| info | `attachments.sweep` | `db.attachments.sweep()` ran: the blobs the store held (`blobs`), the digests marked (`marked`), the blobs removed (`removed`; none under `dryRun`), the puts in flight kept (`pending`), `ms` |
-| warn | `attachments.register.invalid` | `db.attachments.list()` found a register that is no register on the record (`id`, `name`: a digest that is none, a length out of bounds, an encoding unknown — a peer wrote it), left out; once per register |
-| warn | `sync.blob.keep.failed` | dialing side: the bytes of a blob fetched from a peer (`syncom/blob`), checked by digest, could not be kept in this node's blobs store (`digest`, `err`); answered all the same, fetched again next time |
-| warn | `sync.revoke.unread`, `sync.revert.failed` | dialing side: a record could not be read while the records of a revoked scope were forgotten (`id`, `err`), skipped; the revert of an op a host refused failed (`url`, `id`, `err`) |
-| warn | `sync.push.refused`, `sync.snapshot.refused`, `sync.changes.refused`, `sync.snapshot.failed` | hosting side: a call refused by code (`code`, `reason`, `node`) — a push the unit does not take (403 `READ_ONLY`: `allow.push` false) or that a hub which cannot write forwards nowhere (503 `READ_ONLY`), a snapshot or a feed the unit does not serve (403 `NOT_SERVED`), a snapshot the shared log did not answer for (503 `SHARED_LOG`: the marker not appended or not reached in time, `sync.snapshot.failed` with the `err`) |
-| warn | `clock.skew.ignored` | a record holds a stamp beyond `sync.maxSkew` (taken under `maxSkew: Infinity`, or before merge metas were checked): not observed into the clock, so a write to the record stamps below it and loses the fields it holds; once per record (`id`, `ts`, `ahead`) |
-| warn | `sync.op.forged`, `sync.op.unsigned` | a page with ops refused for their signature, once per page with the count; also an `error` event (`BAD_SIGNATURE`, `UNSIGNED`) |
-| warn | `sync.op.equivocation` | a page with ops refused as equivocation — another op than the one held at its seq (`reason: 'seq'`), or one whose `prev` is not the fingerprint held at the seq before it (`'chain'`) — once per page with `origin`, `scope`, `seq`, `held`, `received` and the count; also an `error` event (`EQUIVOCATION`) |
-| warn | `sync.op.rejected`, `sync.op.invalid`, `sync.op.unreadable`, `sync.op.encrypted`, `sync.op.lens` | a peer's op not applied here, by reason |
-| warn | `sync.op.refused`, `sync.op.scope`, `sync.hello.refused` | hosting side: ops of a peer refused — outside its scopes (`sync.op.scope`: the scope function threw on a pushed record, and the op was refused), forged, unsigned, equivocating — a call refused by code |
-| warn | `sync.gaps`, `sync.push.gaps`, `sync.error`, `sync.outbox.dropped`, `sync.record.malformed`, `sync.record.skew`, `sync.record.encrypted`, `sync.record.kind` | a page with gaps (received, or answered by the host to a push), a failure on the way to a peer (`REWOUND` and `UNDELIVERABLE` among them), a dropped backlog, a snapshot record left out, a field of a kind this node has no plugin for |
-| error | `log.segment.unreadable`, `log.open.unreadable` | the log lost a file, or a line inside a journal: what it held is gone from this node (counted in `droppedTs`); an open group file that failed its checksum is kept under `log/corrupt/` (`kept`) |
-| error | `log.segment.missing` | the sealed segments on disk skip seqs — `from` to `to` — that the floor or the segment before says the log holds: a file gone; what it held is gone from this node (counted in `droppedTs`) |
-| warn | `log.epoch.new` (when a log was there) | the log changed epoch |
-| info | `log.open.torn` | a journal's last line did not read: its append was never acknowledged, so nothing that was answered is lost |
-| warn | `storage.lease.late` | a renewal of the engine's lease on the database (MongoDB) failed (`path`, `err`): tried again every `lock.poll` ms while two thirds of `lock.staleAfter` are left since the last that landed, then `storage.lease.lost`; once per run of failures, also a `lease` event (`late`) |
-| error | `storage.lease.lost` | the engine's lease on the database (MongoDB) went to another instance — not renewed in time, or taken (`path`, `err`): the database is read-only from here on; also an `error` event (`LEASE_LOST`) |
-| error | `storage.unpersisted` | logged ops whose record files could not be written, held in memory until the next open (`ids`, the first 32, and `count`); also an `error` event (`UNPERSISTED`) |
-| warn | `storage.piece.unremoved` | a piece of a large record (`<id>~<n>.json`) its file no longer names could not be removed (`id`, `name`): left on disk, written over when the record's counter reaches it again |
-| warn | `catalog.skipped`, `catalog.lens`, `catalog.save`, `catalog.search`, `snapshot.skipped` (`reason: 'scope'` when the scope function threw on the record), `replay.skipped`, `record.shadowed`, `record.refresh` | derived state could not follow a record (`catalog.search`: the injected text index threw); a field shadowing a method; a live `Document` not refreshed after a change, a read hook having thrown |
-| warn | `listener.error`, `watch.error`, `hook.failed`, `pipeline.failed`, `pipeline.checkpoint.unreadable`, `cleanup.failed`, `schema.drift` | an event listener, an advisor or a watcher threw (a `watch()`'s `onError` too); an `afterWrite` hook failed after a bulk write landed (`hook`, `method`); a pipeline's handler threw (`name`, `eventId`); a pipeline's checkpoint did not parse (`name`; every record handed over again); a cleanup sweep on its timer threw; two builds of one schema version |
-| warn | `handle.unlogged` | a text handle's flush (`openText()`) could not be logged — the append failed, a hook or a validator refused — and its edits were dropped (`id`, `field`, `edits`); written whether or not anything listens to the handle |
-| warn | `edits.unlogged` | `close()` flushed every open text handle and some could not be logged (`handles`, `edits`); the storage closes all the same |
-| warn | `log.journal.unrewritten` | a group's append failed, or a scrub reached its journal, and the journal could not be written again whole (`file`, `first`, `reason`): a group's line is not there to reuse and the log did not answer its whole range (a proxy sends the scrubbed entries alone); the journal stays as it is, and a reopen reads the line only where no later group shadows it |
-| warn | `log.segment.unscrubbed` | a purge reached a sealed segment that does not read whole (`file`, `id`, `reason`), so it was not written again: the payload stays in it until the segment is compacted away |
-| warn | `log.row.unreadable` | a row of the log in a native engine (SQLite) did not parse at open (`seq`): counted in `corrupt`, left out, `lost` — what the log holds is less than it held |
-| warn | `log.meta.unreadable` | the log's index or segments row in a native engine (SQLite) did not parse at open (`key`): read as none — the log replays from what its rows hold |
-| warn | `catalog.row.unreadable` | a row of the catalog table in a native engine (SQLite) did not parse at open (`id`): the catalog is read as none and rebuilt from the records, every row replaced |
-| info | `log.corrupt.scrubbed` | a purge removed an evidence copy under `log/corrupt/` that named the id (`file`, `id`): the copy does not read, so nothing could be stripped from it |
-| warn | `editor.binding` | an editor binding (`@alexify/syncom/editor`) failed to send a delta or to reload, or its editor refused a peer's change, and has no `onError`; it reloads the editor from the field (five in a row stop it: `onStop`) |
-| warn | `editor.cursors`, `editor.undo` | an editor adapter (ProseMirror, CodeMirror) failed to show the room's cursors or publish its selection, or an undo/redo command failed, and has no `onError` |
-| warn | `editor.unfit` | the ProseMirror schema cannot hold what the field does (a mark, a node): the document leaves it out and the next edit sends that to every peer; once per binding, without `onUnfit` |
-| warn | `sync.presence.send` | a presence update could not be sent to a peer (`url`); the next renewal tries again |
-| warn | `sync.presence.refused`, `sync.presence.receive` | a host refused a peer's presence update (`node`, `reason`: `HELLO`, `PRESENCE_RATE`, `PRESENCE_MALFORMED`, `PRESENCE_SCOPE`, `PRESENCE_FORGED`, `PRESENCE_UNSIGNED`, `PRESENCE_UNPROVEN`; also a `refused` event); a host's relay could not be taken (`url`) |
-| warn | `identity.rekeyed` | a directory from before signing: `node.json` held a UUID, the node is now its signing key (once) |
-| error | `tags.unreadable` | `tags.json` unreadable — kept as `tags.corrupt.json`, the storage open without tags until it is repaired |
-| warn | `tags.dropped`, `sync.node.unreadable` | a `tags.json` line dropped (`reason`: `name` — not a record id, at open; `catalog` — the tag's catalog unreadable, found at open for the newest tag and at its first read for an older one); a registry entry that cannot be read, skipped |
-| info | `schema.upgrade`, `schema.changed`, `schema.held`, `record.repaired` | what a reopen found about the schema; a record rebuilt from the log |
-| info | `connector.rebuild`, `connector.stream.ended` | a connector asking the backend about every record of its collection: no checkpoint to resume the push from (`name`, `records`); the backend's stream said END — followed again after the backoff (`name`) |
-| warn | `connector.failed`, `connector.checkpoint.unreadable`, `connector.checkpoint.failed`, `connector.document.malformed`, `connector.document.refused`, `connector.conflict.unexpected`, `connector.resolve.failed`, `connector.stream.malformed`, `connector.stream.stop` | a connector's handler, or the landing of what it answered, threw (`name`, `direction`, `retryIn`, `err`; also its `error` event, `REPLICATION_FAILED`; tried again after the backoff); its checkpoint text does not read (read as none) or could not be saved; a pulled document that is no document (`index`, `id`), left out; a document or a row refused by name (`direction`, `id`, `reason`, `err`; also its `refused` event) — another collection's record, a sealed one, no JSON, a modifier that threw, the engine's refusal, a row the backend refuses by name — the rest of the page landing; a conflict the backend answered for a row the push did not carry (`id`), left alone; the application's `resolve` threw (`id`, `err`): the backend wins; a stream signal that is no page; the stream's stop threw |
-| info | `database.drop`, `collection.remove`, `collection.removed`, `pipeline.rebuild` | the destructive operations said out loud: `drop()` (`path`); `collection.remove()` done (`entity`, `purge`, `removed`); `removeCollection()` (`entity`); a pipeline handing every record of its source over (`name`, `records`) |
-| debug | `catalog.rebuild`, `durable.noop`, `log.epoch.new` (a brand-new log), `schema.lens.issues`, `cleanup.sweep` (`folded`, `dropped`, `skipped`, `ms`) | routine |
+## Coming from RxDB
 
-## Failures
-
-Telemetry never breaks a write. A tracer that throws, a tracer that does not
-call back, a span whose `end` throws, a meter whose factories throw, an
-instrument that throws on use — each is contained, and the write goes through
-exactly once. The one thing that is *not* swallowed is an error thrown by the
-work a span brackets: that is the write's own failure and it propagates as it
-always did. The hostile-implementation cases are in `tests/telemetry.test.js`.
+RxDB's logger plugin, part of RxDB Premium, wraps a storage and logs its operations for APM tools. syncom
+ships OpenTelemetry spans and metrics in the open-source package, records what replication did as well as
+what storage did, and joins wrpc's spans so one trace follows a write from node to node.

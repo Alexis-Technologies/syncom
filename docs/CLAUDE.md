@@ -23,7 +23,8 @@ A guide page teaches one task or one concept to a developer who has not read the
 specification: every option, bound, invariant, error code, event payload and byte. When a guide page needs a
 rule only for completeness, the rule goes to the reference and the page links to its anchor. `reference/api.md`
 and `reference/wire.md` stay specifications; `reference/events.md` (events and hooks), `reference/engines.md`
-(the engine and backend contracts), `reference/entry-points.md` (the subpaths) and `reference/telemetry.md`
+(the engine and backend contracts), `reference/entry-points.md` (the subpaths), `reference/text.md` (the list, text
+and tree rules), `reference/versions.md` (versions, tags, patches, undo and branches) and `reference/telemetry.md`
 (spans, metrics, log events) hold the tables the guide used to carry. The error-code table stays in `api.md`
 (`tests/package/consistency.test.js` reads it there), the telemetry tables in `reference/telemetry.md`
 (`tests/package/telemetry-events.test.js`).
@@ -47,6 +48,8 @@ and `reference/wire.md` stay specifications; `reference/events.md` (events and h
 - **Link densely**: the first mention of a concept that has a page links to it (`[scopes](./partial-sync)`).
 - **Frontmatter**: every page has `title` (the name the sidebar shows, or a longer one) and `description` (one
   sentence, 80 to 160 characters, what the reader learns). `<DocsOverview>` and `scripts/llms.js` read them.
+  A value with `: ` or `#` in it, or that starts with a quote or a backtick, is in double quotes: one bad
+  frontmatter fails the content loader of every page.
 - **Length**: as long as the task needs. A concept page is rarely past 300 lines; split before it is.
 
 ### The running example
@@ -133,7 +136,8 @@ and `docs/guide/hooks.md` with the hook and event surface of `src/commit.js`, `s
 (metaschema is the first-class example there; zod/ajv/JSON Schema are the alternatives), `docs/guide/query.md`
 with `src/query/cursor.js` and `src/catalog.js`, `docs/reference/engines.md` and `docs/guide/storage.md` with
 `src/engine.js`, `src/files/files.js`, `src/backend.js`, `src/lock.js`, the two `fsi` halves and the engines
-(`src/memory/engine.js`, `src/idb/engine.js`, `src/sqlite/sqlite.js`, `src/mongodb/mongodb.js`). The
+(`src/memory/engine.js`, `src/idb/engine.js`, `src/sqlite/sqlite.js`, `src/mongodb/mongodb.js`), `docs/reference/text.md` with `src/text/` and `src/tree/`,
+`docs/reference/versions.md` with `src/versions/`, `src/patch.js`, `src/undo/` and `src/branch/`. The
 browser-only WebRTC recipes in `docs/guide/replication-webrtc.md` follow wrpc's documented API and the
 raw-channel integration tests; they cannot be run here.
 

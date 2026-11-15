@@ -3,5 +3,62 @@
   "buildCommand": "pnpm run docs:build",
   "outputDirectory": "docs/.vitepress/dist",
   "installCommand": "pnpm install",
-  "cleanUrls": true
+  "cleanUrls": true,
+  "redirects": [
+    {
+      "source": "/guide/getting-started",
+      "destination": "/guide/quickstart",
+      "permanent": true
+    },
+    {
+      "source": "/guide/entry-points",
+      "destination": "/reference/entry-points",
+      "permanent": true
+    },
+    {
+      "source": "/guide/sync",
+      "destination": "/guide/replication",
+      "permanent": true
+    },
+    {
+      "source": "/guide/wrpc",
+      "destination": "/guide/replication-websocket",
+      "permanent": true
+    },
+    {
+      "source": "/guide/webrtc",
+      "destination": "/guide/replication-webrtc",
+      "permanent": true
+    },
+    {
+      "source": "/guide/scaling",
+      "destination": "/guide/server-scaling",
+      "permanent": true
+    },
+    {
+      "source": "/guide/browser",
+      "destination": "/guide/browser-storage",
+      "permanent": true
+    },
+    {
+      "source": "/guide/backends",
+      "destination": "/guide/storage",
+      "permanent": true
+    },
+    {
+      "source": "/guide/dump",
+      "destination": "/guide/import-export",
+      "permanent": true
+    },
+    {
+      "source": "/guide/connector",
+      "destination": "/guide/connectors",
+      "permanent": true
+    },
+    {
+      "source": "/guide/shared",
+      "destination": "/guide/leader-election",
+      "permanent": true
+    }
+  ]
 }

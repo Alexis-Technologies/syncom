@@ -145,7 +145,7 @@
       "label": "Expo Filesystem",
       "group": "Storages",
       "page": "/guide/storage-expo",
-      "verdict": "absent",
+      "verdict": "partial",
       "url": "https://rxdb.info/rx-storage-filesystem-expo.html"
     },
     "rx-storage-dexie": {

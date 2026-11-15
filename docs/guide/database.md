@@ -1,1026 +1,179 @@
+---
+title: Database
+description: Open a syncom database, choose where it stores data, read and write records by id, make writes atomic, and close it safely.
+---
+
 # Database
 
-`Database` is the entry point. `createDatabase(options)` returns a promise — key
-generation and chain initialisation happen before it resolves. It takes an
-options object and nothing else: `createDatabase('./data')` is a `TypeError`, as is
-any option of the wrong shape, thrown by `createDatabase()` itself before anything is
-opened.
+A database is one node's copy of your data: its records, the log of every operation it made or received,
+and the collections you define over them. `createDatabase()` opens one (creating it on first use) and
+resolves once it is ready. Everything else, from [collections](./collection) to [replication](./replication),
+hangs off the object it returns.
 
-```js
-const { createDatabase } = require('@alexify/syncom');
+<<< @/examples/database.mjs#open
 
-const storage = await createDatabase({ path: 'data' });
-```
+In Node.js the data lives in the `board` directory under the working directory. In a browser the same call
+stores it in the [Origin Private File System](./storage-opfs). Open the same path again later and the
+records are there.
 
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `path` | `'syncom'` | Directory (or OPFS path) holding keys, chain, data and peers |
-| `name` | — | Alias for `path` |
-| `engine` | the files engine over `fsi` | The storage engine every byte goes through — `isEngine`; `filesEngine(fsi)` is what `fsi` builds; an engine and a backend together are a `TypeError` (see [Engines](./backends#engines)) |
-| `fsi` | `node:fs` / OPFS | The backend of the files engine — any object with `read`, `write`, `exists`, `remove`, `list` (see [Backends](../reference/api#backends)) |
-| `durable` | `false` | fsync after every write, where the backend can (`node:fs`); OPFS and memory are as durable as they are |
-| `defer` | `16` | Record files may lag the log by this many ms (a non-negative integer; `0` lands every write at once) — the writes of one record within the window coalesce into one file and one block, what typing into a text or a list wants; `flush()` lands them now ([see below](#when-a-record-file-lags-the-log)) |
-| `lock` | `'fail'` | One instance per directory: `'fail'` rejects a second `createDatabase()` (`code: 'LOCKED'`), `'wait'` waits, `false` leaves it to you ([see below](#one-instance-per-directory)) |
-| `readOnly` | `false` | A follower: reads what another instance writes through the same engine (`engine`) and writes nothing — no lock, no replay, no catalog save; every write rejects with `code: 'READ_ONLY'`. Only an engine several instances may open at once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB); the files engine and SQLite refuse it with a `TypeError`. Its log and vector are as of its open: it never dials (`sync.connect` is a `TypeError`) and hosts over a [shared log](./scaling#hubs) alone — its hello answers the vector as the log moved it, its feed comes from the log, a push is forwarded to the log's inbox for the writer to land — without one `sync.unit()` rejects with `READ_ONLY`, `reason: 'hosting'`. Over an engine with a change stream (IndexedDB, MongoDB) a record the writer lands is read again, a live `Document` of it refreshed, its watchers woken — subscribed before the load, so nothing landed while it opens is missed; a stream that ends is `error` `FOLLOW_LOST` once, then subscribed again and every record read again |
-| `cache` | `{ max: 5000 }` | How many entries stay in memory; a live `Document` pins its own ([see below](#the-catalog-and-the-cache)) |
-| `integrity` | `'verify'` | `'lazy'` trusts a record file on the cold read instead of re-verifying it against its block |
-| `chain` | `true` | `false` keeps no [chain](./chain#through-storage) — a hub that only replicates has nothing to audit; two file writes less per record, reads lazy, `validate()` rejects with `code: 'NO_CHAIN'` |
-| `catalog` | `{ flushEvery: 64 }` | The fewest changes between two saves of the record catalog; a large catalog is saved every sixteenth of its size, never more than half the log's retention apart, and the log catches up the rest |
-| `actor` | — | Who writes — stamped on every op as `actor`: a string, or a function asked per write ([see Sync](./sync#operations)) |
-| `schema` | — | Entity definitions: collections, their validators and indexes ([see below](#collections)); `version` and `snapshot` ([see below](#schema-versions)) |
-| `validator` | — | Compiles entity schemas that are plain objects without `~standard` ([see below](#validation)) |
-| `search` | — | The text index behind `$text`, asked once per entity with `search` fields — `createSearch()` from `@alexify/syncom/search` ([see Queries](./query#full-text-search)) |
-| `getId` | `crypto.randomUUID()` | Id generator for `insert()`; sync or async ([see below](#custom-identifiers)) |
-| `logger` | `console` | A Console or pino-shaped logger, or `false` for silence |
-| `encrypted` | `false` | Encrypt every record at rest by default ([see below](#encryption-at-rest)) |
-| `sync` | — | Replication: `connect`, `scope`, `retention`, `pendingMax`, … — see [Sync](./sync#options) |
-| `hooks` | — | `beforeWrite`, `afterRead`, `beforeApply`, … — see [Hooks and events](./hooks) |
-| `telemetry` | — | Injected OpenTelemetry: `{ api }` or `{ tracer, meter }` — see [OpenTelemetry](./telemetry) |
-| `maxListeners` | `100` | Listeners per event on the storage and its sync manager; one more throws ([see Events](./hooks#events)) |
+## Choose where the data lives
 
-## The explicit API
+`path` names the database, and by default it is a directory on disk or in OPFS. To keep the data
+somewhere else, pass an engine. The memory engine keeps everything in the process, which suits tests and
+throwaway caches:
 
-Every method addresses a record by its id. `insert()` generates one — a UUID by
-default, or whatever `getId` returns.
+<<< @/examples/database.mjs#memory
 
-```js
-const id = await storage.insert({ title: 'Draft' });
+The [IndexedDB](./storage-indexeddb), [SQLite](./storage-sqlite) and [MongoDB](./storage-mongodb) engines
+work the same way, each from its own subpath. [Storage overview](./storage) helps you choose.
 
-await storage.has(id);                    // true
-await storage.get(id);                    // { title: 'Draft' }
-await storage.update(id, { status: 'review' }); // set some fields
-await storage.update(id, { status: 'done' }, { actor: 'ada' }); // … and say who
-await storage.inc(id, 'views', 1);        // add to a counter field
-await storage.add(id, 'tags', ['bug', 'ui']); // add to a set field
-await storage.remove(id, 'tags', ['ui']);  // tags is ['bug']
-await storage.splice(id, 'body', 0, 0, 'Hello'); // a text field: insert at 0
-await storage.push(id, 'items', [1, 2]);   // a list field: append
-await storage.treeMove(id, 'outline', 'n1'); // a tree field: node n1 at the root
-await storage.set(id, { title: 'Final' }); // replace wholesale — everything but title is gone
-await storage.update(id, { $inc: { views: 1 }, $addToSet: { tags: 'ui' } }); // operators — see below
-await storage.modify(id, (copy) => { copy.status = 'done'; }); // a function over a copy — see below
-await storage.list();                     // every live id
-await storage.compact(id);                // rewrite it as the few ops it reads as — see below
-await storage.delete(id);
-await storage.purge(id);                  // forget it for good — see below
-await storage.close();                    // stop replication, seal the log
-```
+## Set the options you need
 
-Every write among these is an **operation**: applied here, written to the
-[log](./sync#the-log), announced as a `change` event, and replicated to peers
-when a transport is configured. Every one of them — and every op from a peer —
-also emits an `update` event on any live `Document` for that id. The rest of
-the list, text and tree API — `updateText()`, `setAt()`, `move()`, `mark()`,
-`spans()`, `cursor()`, `treeRemove()` — is in [Lists, text and trees](./lists).
+`createDatabase()` takes one options object and checks it before it opens anything: a misspelled value or
+a path passed as a bare string is a `TypeError` right away. Most apps set a handful of options:
 
-::: tip Registers, counters, sets, lists, texts and trees
-A field written with `insert()`, `set()` or `update()` is a *register* — last
-writer wins. A field created with `inc()` is a *counter* — increments add up
-across nodes. A field created with `add()` is a *set* — concurrent adds both
-keep, and an add a remove did not see survives it; it reads sorted by element
-text. A field created with `splice()` or `push()` is a *list* (an array) or a
-*text* (a string), edited by position: concurrent inserts both keep, each
-writer's run whole. A field created with `treeMove()` is a *tree* (an array of
-`{ id, children }`) — see [Lists, text and trees](./lists). A field is one
-kind only: a local write of another kind — `update()` or `set()` naming a
-counter, `inc()` on a set, `splice()` on a register, `treeMove()` on a list —
-throws a `SyncomError` with `code: 'FIELD_KIND'`, `field`, and `kind` the kind
-that holds it, before anything is stamped. A `set()` that leaves such a
-field out drops it, as it drops every field it does not name; `unset(id,
-fields)` removes named fields of any kind — the fields' own reset, which an
-older concurrent write of them loses to and a newer one makes them again, as
-whatever kind that write is. From a peer the
-kinds' precedence decides instead — a register outranks a counter, a counter
-a set, then a list, a text, a tree — see [Sync](./sync#registers-counters-sets-lists-and-text).
-A nested object written as a value is one register, replaced whole by
-whichever write is later; a field named by a *path* — `update(id, { 'profile/city':
-'Kyiv' })` — is a field of its own under the prefix, so two nodes that write
-different children of one prefix both keep theirs (see [Paths](#paths)).
+<<< @/examples/database.mjs#options
+
+`schema` defines your collections ([Schema](./schema)), `plugins` adds what the core does not do on its own
+([Installation](./install#pick-only-the-plugins-you-need)), `sync` configures [replication](./replication),
+and `hooks` runs your code inside writes ([Hooks](./hooks)). syncom logs what it does at `info` level to
+`console` unless you pass a `logger` of your own or `false`. The other options tune caching, durability and
+locking; [`createDatabase()` options](../reference/api#createdatabase-options) lists all of them with
+their defaults.
+
+## Read and write records by id
+
+Every record has an id, and the database itself reads and writes any record by it, in any collection or
+in none. Collections are a layer over these same calls.
+
+<<< @/examples/database.mjs#by-id
+
+`insert()` generates the id; `update()` changes the fields it names and leaves the rest; `set()` replaces
+the record whole; `unset()` removes fields; `delete()` leaves a small tombstone so the deletion reaches
+other nodes. What `get()` returns is a copy: editing it changes nothing until you write it back.
+
+Each write is an operation: it is applied here, appended to the log, and sent to other nodes when sync is
+on. A plain field keeps the last value written, while counters and sets merge their own way;
+[Fields that merge](./fields) shows each kind and the `inc()`, `add()` and update operators that make them.
+
+## Make several writes atomic
+
+`transact()` runs your function and writes everything it did as one group: all of it lands, or none of it
+does. Inside, `tx` has the same write methods as the database, and `tx.get()` reads what the transaction
+has written so far.
+
+<<< @/examples/database.mjs#transact
+
+A throw from the function, or a write the validator refuses, leaves nothing behind:
+
+<<< @/examples/database.mjs#rollback
+
+A transaction is atomic on this node. Other nodes receive its operations together, and each field merges
+with their concurrent writes as usual; [Transactions and conflicts](./transactions-conflicts) explains what
+that means for your data.
+
+## Write only if a value has not changed
+
+`swap()` writes its changes only if the fields you name still hold the values you expect, compared inside
+the database's write queue so that two concurrent swaps cannot both pass. It resolves to whether it wrote.
+
+<<< @/examples/database.mjs#swap
+
+`update(id, delta, { ifMatch: query })` does the same with a [query](./query) as the condition. Both
+protect against writers on this node; a concurrent write on another node is merged, not refused.
+
+## Use your own ids
+
+By default `insert()` mints a UUID. Pass `getId` to mint your own: ULIDs, nanoids, or ids from your server.
+The generator takes no arguments and may be async.
+
+<<< @/examples/database.mjs#get-id
+
+An id is also a file name on every platform, so it may hold letters, digits, `.`, `_`, `-` and `@`, must
+not start with a dot, and is at most 128 characters. UUIDs, ULIDs, CUID2s and nanoids all fit. Anything
+else is refused before it is written:
+
+<<< @/examples/database.mjs#invalid-id
+
+A collection can also take the id from the record's own data, from one field or several;
+[Schema](./schema#choose-how-records-are-identified) shows how.
+
+## Open one instance per path
+
+Two instances writing to one database would number their operations the same way, and peers would drop
+one of them as a duplicate. So `createDatabase()` holds the path while it is open: through the Web Locks
+API in the browser, and through a lock file elsewhere. A second open of the same path rejects with
+`LOCKED`:
+
+<<< @/examples/database.mjs#lock
+
+`lock: 'wait'` waits until the other instance closes instead, and `lock: false` leaves coordination to
+you. A lock file left behind by a crashed process is taken over once that process is gone.
+
+<<< @/examples/database.mjs#lock-wait
+
+Two browser tabs are two instances, so the second tab sees `LOCKED` too. To work with one database from
+several tabs, let one tab lead and the others follow: [Leader election](./leader-election) shows how, and
+[SharedWorker](./storage-shared-worker) covers the alternatives.
+
+## Know when a write is on disk
+
+A write resolves once its operation is in the log on disk, so it survives a crash from that moment. The
+record's own file follows a moment later: writes to one record within a 16 ms window are combined into one
+file write, which is what typing into a text needs. Every read sees the write at once, and a crash in
+between is repaired from the log at the next open. `flush()` writes the waiting files now:
+
+<<< @/examples/database.mjs#flush
+
+`defer: 0` writes every record file at once, at the cost of a file write per operation, and
+`durable: true` asks the file system to sync every write to the device where it can. `close()` flushes for
+you.
+
+## Close or remove a database
+
+`close()` stops replication, writes everything that is waiting, seals the log and releases the lock. After
+it, every write rejects with `CLOSED`:
+
+<<< @/examples/database.mjs#closed
+
+`db.drop()` closes the database and removes everything it stored, and `dropDatabase(path)` does the same
+for one that is closed. Both remove the node's identity too: a database opened at the path again is a new
+node to its peers.
+
+<<< @/examples/database.mjs#drop
+
+## More database tasks
+
+- [Encryption](./encryption): seal records for this node, or encrypt the whole database at rest.
+- [Health and maintenance](./health): `stats()`, the room left in storage, compacting and repairing a record.
+- [Audit chain](./chain): verify every write against a hash-linked chain.
+- [Purge](./purge): remove a record's data from the log for good.
+- [Backup](./backup) and [Import and export](./import-export): copy a database out and back in.
+
+## Limitations
+
+- One writer per path. A follower can read a database another instance writes, over an engine that allows
+  it; it never writes ([Leader election](./leader-election)).
+- The catalog of every record (its id, collection and indexed fields) is kept in memory. That suits the
+  tens of thousands of records a local-first app holds, not millions.
+- The lock is per machine. On a network file system shared by several machines, coordinate yourself and
+  pass `lock: false`.
+
+## Coming from RxDB
+
+`createRxDatabase({ name, storage })` becomes `createDatabase({ path })` or `createDatabase({ engine })`,
+and collections can be part of the open call. There is no `multiInstance` sharing of one store between
+tabs: a database is held by one instance and the others work through it. Ids can be generated for you,
+and `transact()` gives you atomic writes across records, which RxDB does not have.
+
+::: code-group
+
+<<< @/examples/database.mjs#options [syncom]
+
+<<< @/examples/rxdb/database.mjs#open [RxDB]
+
 :::
 
-### Paths
+<FromRxdb page="rx-database" :rows="['exclusiveOpen', 'idGeneration', 'transactions', 'cas', 'deleteDatabase', 'docCache']" />
 
-A field name may be a path of stable segments joined by `/` — `profile/city`,
-`stats/views`, `profile/geo/lat` — at most 16 segments and 512 characters,
-none empty or `__proto__`; `/` is reserved for it (a dot is a plain
-character: `update({ 'a.b': 1 })` writes a field named `a.b`). Every path is
-a field like any other: a register, a counter, a set, a list, a text or a
-tree, with its own clock, merged on its own — two nodes writing different
-children of `profile` both keep theirs. A read composes the paths into
-nested objects, children laid over the register at their prefix:
-
-```js
-const id = await storage.insert({ name: 'ada', profile: { zip: 1 } });
-await storage.update(id, { 'profile/city': 'Kyiv' }); // a field of its own
-await storage.inc(id, 'stats/views', 1);              // a counter under a prefix
-await storage.get(id);
-// { name: 'ada', profile: { zip: 1, city: 'Kyiv' }, stats: { views: 1 } }
-```
-
-The rules, the same on every node whatever the order the writes arrive in:
-
-- A register written at a prefix — `update(id, { profile: { zip: 2 } })` — is
-  a reset of what hangs under it: children stamped below the write go, a
-  child written later survives and is read over the object. `unset(id,
-  'profile')` takes the subtree the same way.
-- A counter, a set, a list, a text or a tree holds its prefix alone: a write
-  under it is refused before anything is stamped (`FIELD_KIND`, with
-  `prefix` naming it), and where one lands from a peer, what hung under the
-  prefix goes.
-- A record holds at most 4 096 fields; a write that would add one past that
-  is refused (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`), and a
-  peer's picture of a record keeps the first 4 096 in sorted order.
-
-The ops, the log, a `snapshot()` and `getCachedData()` keep the paths
-apart; `get()`, a `Document`, a query (`'profile.city'` as a dotted path), a
-hook's `current` and a validator see them composed. A list's element and a
-tree's node can carry fields too — `items/<name>/body`, `outline/<node>/title`
-— see [Children of elements and nodes](./lists#children-of-elements-and-nodes). A `Document`'s properties
-are the composed top-level fields: `record.profile = { … }` writes the
-object whole. A migration (`migrate()`) writes the registers as they read,
-composed.
-
-`FIELD_KIND` also refuses a list or text write past a bound — a single
-insert over 1 048 576 elements, say — and then `kind` is `'bound'` and
-`detail`, `count` and `max` say which ([Costs and
-limits](./lists#costs-and-limits)). An index past a list's or a text's length
-rejects with `OUT_OF_RANGE`, a tree move under the node's own subtree with
-`CYCLE`.
-
-### Compare-and-swap
-
-`swap()` writes only if the fields you name still hold the values you expect,
-which is how two writers avoid clobbering each other:
-
-```js
-const ok = await storage.swap(id, { hits: 2 }, { hits: 1 });
-// ok === false if hits was no longer 1 — nothing was written
-```
-
-The comparison runs inside the mutation queue, against the record as it reads
-(the lens applied, the read hooks not run), so two concurrent swaps on the same
-expectation cannot both pass. An absent record rejects.
-
-### Transactions
-
-Several writes as one: `transact(fn)` runs `fn(tx)` inside the mutation
-queue, every write made through `tx` becomes an op, and once `fn` returns
-the ops are appended together — all durable or none, one chain block, each
-record's file written once, the `commit` events after, in order. A throw
-from `fn`, or a write refused (an index out of range, a validator), leaves
-nothing appended.
-
-```js
-const id = await storage.transact(
-  async (tx) => {
-    const id = await tx.insert({ title: 'Draft', status: 'new' });
-    await tx.inc('stats', 'drafts', 1);
-    await tx.push(id, 'body', 'Once upon a time');
-    (await tx.get(id)).body; // 'Once upon a time' — tx reads what it wrote
-    return id;
-  },
-  { message: 'new draft', source: editor },
-);
-```
-
-- **`tx` is the write API** — `insert`, `set`, `update`, `swap`, `delete`,
-  `unset`, `inc`, `add`, `remove` and the plugins' methods (`splice`,
-  `mark`, `treeMove`, …) — less `purge()`, which scrubs the log and stays on
-  the storage; plus `get(id)` and `has(id)`, reading the records as the
-  transaction left them, through the lens, without the read hooks (a hook
-  that writes would wait for the queue the transaction holds). An encrypted
-  write inside is `ENCRYPTED`: it makes no op.
-- **Hooks and validators** run as each op is made, inside the turn; what they
-  see is the record as the transaction left it. A refusal — theirs, or the
-  engine's — throws out of `fn`, and nothing of the transaction is written.
-- **`message`** (at most 1 024 characters) rides on every op of the
-  transaction — in the signed header, so a peer verifies it with the op —
-  and `history()` lists it per version; **`source`** rides on the `commit`
-  events, for a listener to tell its own (an undo manager's). A transaction
-  with no op makes none and resolves to what `fn` returned.
-- **Keystrokes fold.** Writes of a text field made one after another that
-  continue each other — typed on at the end of the run, or a chain of cuts —
-  are logged as one op, signed once on a signing node (the ops are signed
-  after `fn`); its `commit` event carries the changes of every keystroke.
-  Under an `afterWrite` hook every write is logged as it was made.
-- **Each record once.** A live `Document` the transaction changed emits one
-  `update`, with the delta of all its ops; `commit` and `change` still fire
-  per logged op. The transaction holds each record it touches as its last op left
-  it — not a copy per op — unless something listens for `commit`, whose
-  events carry every op's `before` and `after` (an undo manager over a
-  transaction of thousands of ops on one large record holds them all).
-- `applyPatches()`, `restore()` and `compact()` are transactions: a restore
-  lands whole or not at all.
-
-### Update operators
-
-`update(id, delta)` takes a delta in operators as well — every key one of them, or none
-(a delta that mixes a field and an operator is a `TypeError`):
-
-```js
-await storage.update(id, {
-  $set: { status: 'done' },     // a register: the `set` op
-  $unset: { draft: '' },        // `unset`
-  $inc: { views: 1 },           // a counter: `inc`
-  $addToSet: { tags: 'ui' },    // a set: `add` (`{ $each: [...] }` for several)
-  $pull: { tags: 'old' },       // `remove` (`{ $in: [...] }` for several)
-  $push: { items: 3 },          // a list: `push`
-  $pop: { items: 1 },           // a list: `splice` at the end (-1 at the start)
-  $min: { low: 2 }, $max: { high: 9 }, // a register written only where the value is lower / higher
-  $rename: { old: 'fresh' },    // `unset` + `set`
-});
-```
-
-Each operator is expanded, inside the mutation queue, into the ops the kind of its field means —
-`$inc` on a register, `$addToSet` on a counter or `$push` on a set is `FIELD_KIND`, as the typed
-method would be — and the ops are written as one [transaction](#transactions). A `$push` or
-`$addToSet` on a field that is still a register holding an array rewrites the register; a field
-that is not there yet is made as the kind the operator means.
-
-`{ ifMatch: query }` makes the write conditional: the record is matched against the
-[query](./query) inside the queue, and `update()` resolves to whether it was written — a check
-and a write no concurrent write can come between, this node's; from a peer the op model merges
-as it always does. The `query` plugin's.
-
-```js
-const won = await storage.update(id, { $set: { owner: 'ada' } }, { ifMatch: { owner: null } });
-```
-
-`modify(id, fn)` is the general form: `fn(copy)` runs inside the queue over a copy of the record as it
-reads, and what it leaves — what it returns, or the copy — is written as the ops that take the record
-there (a field changed is a `set`, a field gone an `unset`, `null` deletes), as one transaction; it
-resolves to the record as it reads after. Two `modify()` calls on one record compose, each reading
-what the one before it left. A write through the storage from inside `fn` is `IN_TRANSACTION`.
-
-### Purge
-
-`delete()` leaves a tombstone, and the record's history stays in the log —
-that is what lets a peer that was away catch up. `purge(id)` is the other
-thing: the record is gone for good. It is a `purge` op, which wins over
-every other op at any stamp (a later write does not revive it, nor does a
-concurrent one on another node), and a **scrub** of every entry of the id
-in this node's log — their `data`, `meta`, `key`, `value` and the `nonce`
-that salted their signature's digest are stripped, in memory and in the
-files, with the position, origin, stamp, signature and digest kept so the
-vector and a resuming peer are unaffected — and of its copies and catalog
-rows in every [tag](./versions#tags). A peer that receives the purge
-scrubs its own log the same way, and so does any peer that receives
-anything else about that id afterwards, or that learns of the purge from a
-snapshot it bootstraps from. The chain keeps hashes only. A
-purged record is listed nowhere and reads as `null`, at a tag too; a read at
-a version before the purge rejects with `HISTORY_GONE` (`reason:
-'scrubbed'`), and a `Document` of it reads `null`.
-
-```js
-await storage.purge(id);          // nothing of it left here
-await storage.purge(id, { actor: 'dpo' });
-```
-
-Two limits. Scrubbing rewrites a log file in place — a journal line by line
-— and no backend has a rename, so a crash in the middle tears it, and a peer resuming through it
-bootstraps instead; `purge()` is idempotent, so run it again. And what a
-peer that never comes back holds is theirs.
-
-### Custom identifiers
-
-Pass `getId` to replace UUIDs with ULIDs, CUID2s, nanoids or ids minted by your
-own server. The package has no runtime dependencies, so the generator is yours
-to install and supply:
-
-```js
-const { ulid } = require('ulid');
-
-const storage = await createDatabase({ path: 'data', getId: () => ulid() });
-const id = await storage.insert({ title: 'Draft' });
-// 01ARZ3NDEKTSV4RRFFQ69G5FAV — lexicographically sortable by creation time
-```
-
-The generator takes no arguments and may be asynchronous — `insert()` awaits
-it either way:
-
-```js
-await createDatabase({ path: 'data', getId: async () => (await fetch('/next-id')).text() });
-```
-
-`Database.generateId()` is the default generator, should you want to fall back to
-it. A `getId` that is not a function is refused at `createDatabase()`.
-
-**Ids are file names.** A record is written to `data/${id}.json`, on every
-platform, so an id is letters, digits, `.`, `_`, `-` and `@`, not starting
-with a dot, 128 characters at most — UUIDs, ULIDs, CUID2s and nanoids all
-qualify. Anything else is refused with a `TypeError` (`code: 'INVALID_ID'`)
-before anything is written: from `insert()` (naming `getId`), from `set()` and
-the other writers, and from a peer — whose op is then counted as `malformed`
-and never logged. `get()` and `has()` answer `null` and `false` for such an id.
-
-One thing the engine does not check for you: **ids are matched against string
-fields.** A `Document` turns any string field whose value is a known id into a
-[reference](#references). Short, guessable ids raise the odds of an accidental
-match; UUIDs, ULIDs and CUID2s do not.
-
-### One instance per directory
-
-Two storages over one directory would both read the log's vector and both
-mint the next sequence number — the same number for two different ops, which
-every peer drops as a duplicate. So `createDatabase()` holds the directory: through the
-Web Locks API in the browser (released when the tab dies), through
-`<path>/lock.json` with the process id elsewhere (stale once that process is
-gone, or after 30 minutes when there is no way to tell). On a backend with
-`create` (exclusive create — `node:fs` and the memory backend have it) two
-openers racing for a free lock lose deterministically. The knobs are an
-object: `lock: { mode: 'wait', timeout: 5000, poll: 50, staleAfter: 60_000 }`
-— `timeout` turns a `'wait'` that never ends into `LOCKED`.
-
-```js
-const a = await createDatabase({ path: 'data' });
-await createDatabase({ path: 'data' });                   // Error, code 'LOCKED'
-await createDatabase({ path: 'data', lock: 'wait' });     // resolves once `a` closes
-const b = await createDatabase({ path: 'data', lock: false }); // yours to coordinate
-```
-
-Two browser tabs are two instances: with the default `'fail'` the second tab
-sees `LOCKED` and must work through the first (a SharedWorker that owns the
-storage, say), or wait for it with `lock: 'wait'`. A second instance that
-only reads is a **follower**, `createDatabase({ readOnly: true })` — over an
-engine several instances may open at once (`capabilities.shared`: the
-memory, IndexedDB and MongoDB engines), never over a directory or SQLite,
-where the second open is refused with a `TypeError` (the files engine's
-journal is the writer's to tidy, and a reader would load a group it is
-still writing). A follower holds no lock, writes nothing, hears what the
-writer lands through the engine's change stream, and its log and vector are
-as of its open: it neither dials nor hosts until the shared log lands.
-`lock: false` gives a second instance that writes too (its catalog, and the
-log it seals on close), which is yours to coordinate. `close()` releases the lock; a crash releases it
-in the browser and leaves a stale file elsewhere, which the next open takes
-over. The lock is per machine — on a shared network filesystem, coordinate
-yourself and pass `lock: false`.
-
-### The catalog and the cache
-
-`snapshot()` pages over the catalog too — it keeps a row for every entry with a
-file, tombstones included, so a bootstrap never lists the data directory.
-`list()` and `hasRecord()` answer from the **catalog**: every live record's
-id, collection and indexed field values (and, for an entity with
-[search fields](./query#full-text-search), the text `$text` searches), in
-memory, kept up to date by every
-write — local or a peer's — and persisted as `index/catalog.json` stamped
-with the log position it reflects: at `close()`, and in between every
-`catalog.flushEvery` changes while it is small and every sixteenth of its size
-as it grows, so a save costs a write the same share of a row whatever the
-store's size, never more than half the log's `retention.ops` apart, so a node
-stopped without `close()` finds its stamp still in the log. A reopen reads it back and re-reads only the records the log
-changed since the stamp; when the log cannot say — a first open, a stamp
-from another epoch or below the retention floor, other indexes — the
-catalog is rebuilt from one scan of `data/`. It is derived state: delete the
-file and the next open rebuilds it.
-
-The **cache** holds the last `cache.max` entries read or written, evicting
-the oldest; a record with a live `Document` is never evicted. What leaves the
-storage leaves as a **copy**, as JSON — the value `get()` returns, a cursor's
-rows, a `Document`'s data — and what comes in (`set()`, `update()`) is copied the
-same way, so editing an object on either side of the call changes nothing in
-the cache, the log or the next write's base. `getCachedData()` and `snapshot()`
-hand out the raw objects, for callers that know not to touch them. A cold read re-verifies the record against the chain block
-that committed it — the block read, parsed and hashed once for the records of its batch (the last eight
-blocks verified are kept), one hash of the record's data each; `integrity: 'lazy'` trusts the file instead
-— the choice for a browser rebuilding a large catalog. `storage.validate(id, data, block)` is still there
-for a check on demand.
-
-### When a record file lags the log
-
-A local write is durable once its op is in the log: the record file and its
-chain block come after. Two things put that file behind the log, and in both
-the cache holds the record — every read sees the write — and the log keeps
-the batch unapplied until the file lands, so a crash in between is replayed
-onto the file at the next open:
-
-- **`createDatabase({ defer })`** — 16 ms, a frame, by default. The file waits up to
-  `defer` ms, and the writes of one record within the window land as one
-  file and one block. A flush that took longer than `defer` — a large record,
-  a slow disk — makes the next window as long as it took, so the files never
-  land back to back while the writer waits behind them. `flush()`, `tag()`
-  and `close()` land them first, and a peer's write of the record lands it
-  whole. `defer: 0` writes every file at
-  once — what a process that may be killed between a write and the next
-  frame wants, at the price of a file per op.
-- **A file write that failed** — a full disk, a quota. The write is not
-  undone (it replicates from the log already); the record is held in memory
-  until the next open, and the storage's `error` event fires with
-  `code: 'UNPERSISTED'` and the `ids`. `tag()` rejects with `UNPERSISTED`
-  while such a record is held.
-
-```js
-const storage = await createDatabase({ path: 'data', defer: 50 });
-const id = await storage.insert({ title: 'Notes' });
-for (const ch of 'hello') await storage.push(id, 'body', ch);
-await storage.get(id);   // { title: 'Notes', body: 'hello' } — six ops logged, no file yet
-storage.stats().deferred; // 1 — one record waiting; 0 once the window passed
-await storage.flush();    // or now: the file and its block
-```
-
-The log itself is written in groups: a write's seq is reserved the moment
-its op is built, the mutation queue moves on to the next write at once, and
-every op appended while the previous group is being written goes to disk as
-one file with the others — what the caller awaits is the landing: the disk,
-then the file (or the deferred slot), the `afterWrite` hook and the events,
-in log order. The next write of a record builds on the one in flight before
-it; a read sees a write once it is durable. `stats().inflight` counts the
-writes between the append and the disk.
-
-### Health
-
-`storage.stats()` is what an operator reads at runtime, from memory: whether
-the storage is `closed`, how many writes wait on the mutation `queue`, the
-`cache` (`size`, `max`, `pinned` by live Records), the `catalog` (`entries`,
-tombstones included, and `dirty` puts since the last save), the `tags`
-(`count`, and `corrupt` when `tags.json` could not be read at open), the
-records whose files lag the log (`held`, the deferred ones among them, and
-`deferred`), the writes appended but not on disk yet (`inflight`), the `log`
-(`length`, `floor`, `next`, `epoch`, `segments`,
-`latestTs`, `droppedTs`, and `pins` — readers holding segments past
-retention, an undo stack mostly), the `chain`'s `tail` (or `null` under
-`chain: false`) and the `lock`'s `mode` (or `null` under `lock: false`). The
-[sync manager](./sync#lifecycle-and-events) adds `peers()` and `hosted()`, the
-storage's [`log` event](./hooks#storage) reports the log rolling, and
-[telemetry](./telemetry) adds the gauges.
-
-### Repair
-
-A record file that fails its integrity check — its data no longer hashes to
-what its chain block recorded, or the file no longer parses (a write torn by
-a crash) — rejects every read with `code: 'INTEGRITY'`,
-and stays that way: nothing repairs it behind your back, because a file that
-changed under the chain is evidence first. When you have looked,
-`storage.repair(id)` rebuilds the record from this node's own log: the
-retained entries of the id are replayed from the first whole-record op among
-them (a `write`, `merge`, `delete` or `purge`), and the result is written the
-usual way, with a chain block of its own, back into the catalog and the cache.
-What comes out is what a peer replaying this log from that op would hold —
-the same fold [`history()` and `get(id, { at })`](./versions) read the past with.
-
-```js
-try {
-  await storage.get(id);
-} catch (error) {
-  if (error.code !== 'INTEGRITY') throw error;
-  const { ops, alive } = await storage.repair(id); // { ops: 3, alive: true }
-}
-```
-
-A record the log cannot rebuild — its write compacted away so only `set`s and
-`inc`s remain, an id never written here, an encrypted record (which has no
-ops) — rejects with `code: 'UNRECOVERABLE'`; a peer that still holds the
-record is the way back then (a [bootstrap](./sync#bootstrap) carries it).
-
-### Compact
-
-A record's metadata keeps what its fields merged from: a text typed into
-from many places keeps a run per place, a list reordered often keeps its old
-slots, a tree keeps every move of every node. `storage.compact(id)` rewrites
-the record as the ops it reads as today — a `write` of its registers, then
-an `inc` per counter, an `add` per set, one `splice` per list or text and
-one move per tree node — so what lay under it goes by the reset rule, on this
-node and on every peer the ops reach, and `get()` reads the same:
-
-```js
-await storage.compact(id); // how many ops it took; 0 for a record that is not there
-```
-
-A text's marks are laid again over the new run, so `spans()` reads the same
-too. What it cannot keep is the names of the elements: every
-[cursor](./lists#cursors) into a list or a text of the record reads `null`
-from then on, and a stacking mark has a new id. A list, a text, a set or a
-tree that reads empty is left out: no op makes an empty one. A peer's op stamped
-before the rewrite and arriving after it is dropped by the reset, as with
-any whole-record write; an encrypted record rejects with `ENCRYPTED`. It is
-`applyPatches()` over the record's own reading — see [Versions and
-history](./versions#diff-and-restore).
-
-One operator per field: two that name one field — `$addToSet` and `$pop` of one array, `$set` and `$inc` of
-one number, a `$rename` into a field another operator names — are a `TypeError`, as MongoDB refuses a
-conflicting update; never two writes whose order decides. `$rename` takes a register: a counter, a set, a
-list, a text or a tree is a `TypeError`.
-
-### Encryption at rest
-
-Sealed records are the `encryption` plugin — `@alexify/syncom/encryption`,
-registered by `@alexify/syncom/all`; without it `encrypted: true` is
-`PLUGIN_MISSING`. Open the storage with `encrypted: true`, or pass the flag
-per write:
-
-```js
-const { encryption } = require('@alexify/syncom/encryption');
-
-const vault = await createDatabase({ path: 'vault', plugins: [encryption], encrypted: true });
-await vault.insert({ ssn: '...' });                       // sealed on disk
-
-await storage.insert({ ssn: '...' }, { encrypted: true }); // one record, in a plain storage
-await storage.saveData(id, data, { encrypted: true });
-```
-
-A record is sealed with a fresh AES-256-GCM key, and that key is wrapped with
-the storage's RSA-OAEP (SHA-256) public key — the same envelope on Node.js and
-in the browser, so ciphertext and keys move between the two. There is no size
-ceiling. Both key pairs live in `<path>/keys/` — the RSA one that seals
-records, the Ed25519 one that [signs ops](./sync#signatures) — unprotected:
-whoever can read the directory can read the records, and sign as this node.
-
-Encrypted records are **local**. No peer holds this node's private key, so
-they produce no operations, never appear in a snapshot, and every field-kind
-method on one — `inc()`, `add()`, `remove()`, `splice()`, `push()`,
-`treeMove()`… — rejects with `code: 'ENCRYPTED'`, as do `history()`, `diff()`
-and `compact()`, which read the log it is not in. `update()`, `set()`,
-`delete()` and `purge()` still work; they simply stay here. A record never
-changes kind: an encrypted write over a replicated record is refused
-(`ENCRYPTED`), and a plain write to an encrypted one seals it again.
-
-A sealed record protects one record from the disk; the log, the catalog and
-the other records stay plain. To encrypt the directory whole, wrap the
-backend instead — `atRest()` from the same subpath, every file under one
-key, the engine none the wiser — see [Encrypted at rest](./backends#encrypted-at-rest).
-
-A query reads sealed records too, at the key holder — and only there: a host's `query`, an agent's tools and a connector leave them out, see [Sealed records](./query#sealed-records). A sealed
-record's pair is the directory's (`keys/`): it is not rotated — a new pair is a new node. The key of a database
-**encrypted at rest** (`atRest(engine, options)`, [Engines](./backends#encrypted-at-rest)) is rotated by a copy:
-
-```js
-const { createDatabase, dropDatabase, filesEngine } = require('@alexify/syncom');
-const { rotateAtRest, atRest } = require('@alexify/syncom/encryption');
-
-// over an engine (memory, IndexedDB, SQLite, MongoDB)
-await rotateAtRest(engine, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
-const db = await createDatabase({ engine: atRest(engine, { key: newKey }), path: 'app-2' });
-await dropDatabase('app', { engine: atRest(engine, { key: oldKey }) }); // once the new place reads
-
-// over a backend — the default medium: the files engine, wrapped at its backend under each key
-await rotateAtRest({ fsi, filesEngine }, { path: 'app', from: { key: oldKey }, to: { key: newKey }, into: { path: 'app-2' } });
-const moved = await createDatabase({ fsi: atRest(fsi, { key: newKey }), path: 'app-2' });
-```
-
-The database at `path` is copied whole — every record, piece, copy, kv text, log entry and blob — into `into`
-(another path, another engine or backend, or a path with either) sealed under the new key; it is the same node, so
-no peer bootstraps. Never in place. Once copied the source is **fenced**: `moved.json` in its root namespace names
-where it went, and `createDatabase()` there is `MOVED` (`to: { path, engine }`) until `dropDatabase()` takes it —
-the same node id never writes in two places. A copy cut short leaves the source as it was and its target marked
-(`copy.json`, written first and removed last): the next copy into that target takes the leftovers away first, while
-a target that holds a database is `TARGET_NOT_EMPTY`.
-
-The room the medium has is `db.quota()` — `{ usage, quota }` in bytes, what the engine can say: the memory engine
-counts what it holds (no quota), SQLite its file's pages (`page_count × page_size`) and the free space of the file's
-volume (none for `:memory:`), IndexedDB the browser's Storage API estimate for the origin, the files engine the free
-space of its volume (`usage` null; the Storage API over OPFS), MongoDB and an engine over a port nothing (`null`,
-`null`) — and `db.persist()` asks the browser to keep the origin out of eviction. A log append refused for want of
-room is `QUOTA` (the platform's error as `cause`: node:fs's ENOSPC, the browser's QuotaExceededError, SQLite's
-SQLITE_FULL — better-sqlite3's code, node:sqlite's errcode 13 — on the error or a `cause` under it); a record file that could not be written for it is `UNPERSISTED`
-with `quota: true` (held in memory, written at the next open).
-
-## Documents
-
-`storage.document(id)` returns a live `Document`. It is cached per id, so two
-calls for the same record return the same object — and therefore the same
-event listeners.
-
-```js
-const record = await storage.document(id);
-
-record.on('update', (data, delta) => {
-  console.log(delta); // { title: 'Final' }
-});
-
-record.title = 'Final';        // stages the change and emits
-record.delta();                // { title: 'Final' }
-await record.save();           // writes, then clears the delta
-await record.inc('views', 1);  // a counter, through the record
-await record.add('tags', ['bug']); // a set, through the record
-await record.data();           // the full current object
-await record.delete();
-```
-
-Every field-kind method of the storage is on the record too, without the
-id: `record.splice('body', 0, 0, 'Hi')`, `push()`, `updateText()`, `mark()`,
-`unmark()`, `unmarkById()`, `spans()`, `cursor()`, `index()`, `setAt()`,
-`move()`, `treeMove()`, `treeRemove()`. A field of any kind but a register
-changes through those: assigning it and saving is a `set` op on it, which
-throws `FIELD_KIND`.
-
-Properties are defined from whatever keys the record had when it was loaded;
-`id` is reserved and never becomes a settable property. `record.modify(fn)` is
-[`modify()`](#update-operators) on the record, and `record.save()` what the
-staged edits make.
-
-A record also follows changes made **elsewhere** — `storage.update()` in the
-same process, or an op from a peer: its properties are refreshed, `update`
-fires with the delta, and edits staged but not yet saved stay on top. A
-record deleted elsewhere reports `update` with `null` data. A record reads
-through `get()` — the lens and [`afterRead`](./hooks#reads-stay-raw-where-it-matters)
-applied — as it loads and as it follows a change; with the lens or a read
-hook in play, the change reaches it once the write is done, in order.
-
-### References
-
-An entity declares which of its fields name other records — `refs: { author: 'Author',
-tags: ['Tag'] }`, or a metaschema relation (`author: 'Author'`, `{ many: 'Tag' }`) — and a
-`Document` reads such a field as a `Reference` (an array of them for many): `id` is the string,
-`document()` resolves it to the target's `Document` (`null` where it is not there, or not of the declared collection), `toJSON()`
-is the id again. A cursor's `populate(fields)` resolves them on every row instead.
-
-```js
-const post = await storage.Post.document(postId);
-const author = await post.author.document();  // a Document of Author, or null
-(await storage.Post.select().populate(['author']).fetch())[0].author; // { id, name, …, $type: 'Author' }
-```
-
-A string that is not declared a reference is a string, whatever it happens to equal.
-
-### ORM: methods and statics
-
-`methods` are functions on every `Document` of the collection (bound to it, non-enumerable, never
-saved), `statics` functions on the collection:
-
-```js
-const storage = await createDatabase({
-  path: 'data',
-  schema: {
-    entities: {
-      Post: {
-        methods: { summary() { return `${this.title} by ${this.author.id}`; } },
-        statics: { async drafts() { return this.select({ status: 'draft' }).fetch(); } },
-      },
-    },
-  },
-});
-(await storage.Post.document(id)).summary();
-await storage.Post.drafts();
-```
-
-A name a `Document` or a `Collection` answers to already (`save`, `select`, `id`…) is a `TypeError`
-at `createDatabase()`.
-
-## Collections
-
-Pass a `schema` and every entity name becomes a collection on the storage
-object. Records inserted through a collection carry a `$type` field naming it.
-
-```js
-const storage = await createDatabase({
-  path: 'data',
-  schema: { entities: { Post: {}, Author: {} } },
-});
-
-const post = await storage.Post.insert({ title: 'Hello' });
-post.title;                         // 'Hello'
-await storage.Post.get(post.id);    // { title: 'Hello', $type: 'Post' }
-await storage.Post.update(post.id, { title: 'Hi' });
-await storage.Post.delete(post.id);
-```
-
-In TypeScript the collection's records are typed by the entity's Standard
-Schema or by a `Schema<{ Post: Post }>` annotation — see
-[TypeScript](./typescript).
-
-`entities` may be a plain object or a `Map`. Without a schema the storage has
-no collections and you address records by id only. An entity named like
-something the storage already answers to (`get`, `close`, `log`, `sync`…)
-would replace it, so `createDatabase()` refuses it with a `TypeError`.
-`storage.collections` lists the names; `addCollections({ Tag: {} })` adds
-collections to an open database — their records, if any, indexed as they are
-found — and `removeCollection('Tag')` takes one away (the records stay).
-
-A collection answers for its own records: `get(id)` of a record of another
-collection is `null`, and `update()`, `delete()` and `document()` reject with
-`code: 'NOT_FOUND'` — the storage's own methods address any record.
-
-An entity definition is `{ schema?, idField?, validate?, index?, unique?, fields?, search?, id?,
-refs?, methods?, statics? }`; `{}` is a bare collection. `schema` validates the records
-([below](#validation)), `idField` names the key the id is handed to the validator under, `index`
-(fields and compound keys) and `unique` — explicit, or read off a metaschema schema's `indexes` and
-`unique: true` fields — are what [queries](#queries) key on, `search` names the fields `$text`
-searches, `id` a [composite id](#composite-ids), `refs` the [references](#references), `methods`
-and `statics` the [ORM](#orm-methods-and-statics), and `fields` is free-form notes kept as given.
-Anything else is a `TypeError` at `createDatabase()`: a definition with a typo is a validation that
-silently never runs.
-
-### Composite ids
-
-A record's id is minted by `getId` unless the entity says otherwise. `idField` names a field whose
-value is the id: `insert({ slug: 'hello' })` under `idField: 'slug'` is the record `hello`, the
-field itself left out of the data. `id: { fields: ['org', 'n'], separator: '-' }` derives it from
-several — `insert({ org: 'c1', n: 7 })` is `c1-7` — and the fields stay. An id a live record holds
-already is `EXISTS` (`id` on the error), decided inside the queue; `insertIfAbsent(data)` hands the
-one that is there back instead, and `upsert(data)` sets it. Every id is checked as one: `[A-Za-z0-9_@-]`
-first, then `[A-Za-z0-9._@-]`, 128 at most.
-
-### Bulk writes
-
-```js
-const { success, error } = await storage.Post.bulkInsert([{ title: 'a' }, { title: 'b' }, { id: taken, title: 'c' }]);
-// success: ['…', '…'], error: [{ index: 2, id: taken, data, error: SyncomError EXISTS }]
-await storage.Post.bulkUpsert(rows);
-await storage.Post.bulkRemove(ids);
-```
-
-A bulk write is one [transaction](#transactions): every record that could be written is, as one
-group of ops, and the ones refused — an id taken, a validator, a unique key, a record of another
-collection — are listed with their index, each with the error the single write would have thrown. One
-transaction takes 10 000 rows at most: a larger batch is a `TypeError` before anything lands — page it. An
-`afterWrite` hook that fails after the rows landed does not fail the call: the verdicts come back, and the
-failure goes to the database's `error` event (`hook.failed` in the log).
-A collection's `remove({ purge })` deletes (or, purged, scrubs from the log — every file holding a page's
-ids rewritten once) every record of the collection as it was when the call began, 500 at a time; it takes
-`{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`): the matches of a query
-go through `select(query).delete()`.
-`findByIds(ids)` reads a set of records as a `Map`: one read of the engine for the ones not cached.
-
-### Change and delete
-
-`delete(id, { data })` writes the fields of `data` into the record as it dies, one op: the tombstone
-carries them — a `reason`, a `deletedBy` — for a peer's hook, a pipeline or a
-[dump](./dump) to read, and a `get()` is `null` all the same. The `change`'s
-`{ action: 'delete', data }` says what rode on it. A cursor's `delete({ data })` does the same for
-every match, and a record revived after it comes back with those fields as its own.
-
-### App state
-
-[`createState(storage, name)`](../reference/api#state-subpath) of `@alexify/syncom/state` is one object a
-node keeps by path — `state.get('panel/width')`, `state.set('theme', 'dark')`, `observe()` — over
-a record `state.<name>` that replicates like any record, or, with `{ local: true }`, over a
-[local document](./local) this node keeps for itself.
-
-`$type` is the record's collection and never changes. `storage.set()` without
-it keeps it, `Collection.set()` stamps its own, a write that would change it
-throws, and `Collection.update()` refuses a delta that names it. A record
-outside any collection may join one, and a deleted record may be reborn in
-another.
-
-```js
-await storage.Post.set(post.id, { title: 'Replaced' }); // { title: 'Replaced', $type: 'Post' }
-await storage.set(post.id, { title: 'Again' });          // keeps $type: 'Post'
-await storage.Author.set(post.id, { name: 'x' });        // TypeError: $type is immutable
-```
-
-### Queries
-
-The full guide is [Queries](./query); the shape, in short.
-`collection.select(query)` is a cursor: build it (every builder hands a new
-one back), then `fetch()`, `count()`, `one()`, `page()`, iterate it, or
-`watch()` it. The query is Mango-shaped —
-`{ field: value }` is equality (a dotted path reaches into the record, an
-array field holds a scalar value), `{ field: { $op } }` the operators `$eq`,
-`$ne`, `$in`, `$nin`, `$gt`, `$gte`, `$lt`, `$lte`, `$exists`, `$type`,
-`$size`, `$mod`, `$all`, `$elemMatch`, `$regex`
-(with `$options`), `$and` / `$or` / `$nor` / `$not` nest, and `$text` searches an
-entity's [search fields](./query#full-text-search). A malformed query is a
-`TypeError` at `select()`.
-
-```js
-const storage = await createDatabase({
-  path: 'data',
-  schema: { entities: { Project: { index: ['orgId'], unique: ['slug', ['orgId', 'name']] } } },
-});
-
-await storage.Project.insert({ orgId: 'o1', name: 'Alioth', slug: 'alioth', stars: 3 });
-await storage.Project.insert({ orgId: 'o1', name: 'Vega', slug: 'vega', stars: 7 });
-
-await storage.Project.select({ orgId: 'o1', stars: { $gte: 5 } }).fetch();
-// [{ id: '…', orgId: 'o1', name: 'Vega', slug: 'vega', stars: 7, $type: 'Project' }]
-await storage.Project.select({ orgId: 'o1' }).order('name').limit(10).offset(0).projection(['name']).fetch();
-// [{ id: '…', name: 'Alioth' }, { id: '…', name: 'Vega' }]
-await storage.Project.count({ orgId: 'o1' }); // 2
-await storage.Project.select({ slug: 'vega' }).one(); // the record, or null
-
-const stop = storage.Project.select({ orgId: 'o1' }).order('name').watch((rows) => render(rows));
-```
-
-Rows are the records as they read (the lens applied, `$type` included)
-under their `id`; `projection(fields)` keeps only those (a dotted field comes
-back under its dotted name), `filter(fn)` takes a predicate over the loaded
-row, `order(field)` / `desc(field)` sort by any field — nothing first, then
-booleans, numbers, strings — stably, and `offset` / `limit` cut after the
-sort. A cursor does not run the read hooks: like `snapshot()` and `swap()`,
-it reads the records themselves.
-
-The entity's `index` keys and `unique` fields are what the catalog keeps: a
-sorted index per key — a field, or a compound key — bounds a query's
-equalities, a range and a sort on its fields, and a query whose fields, order
-and projection are all indexed — and has no `filter` — is answered from the
-catalog alone, with no record read; `explain()` shows [the plan](./query#the-plan).
-`watch(listener)` keeps the result as the collection changes — the record that
-changed is read once and placed — and calls the listener only when the rows
-changed, until the returned function is called; a failing run goes to
-`onError` or the logger. A cursor's `update()`, `modify()` and `delete()`
-write every match as one transaction.
-
-A `unique` key — a field, or a composite — is refused on a local write with
-a `ValidationError` whose issue has `code: 'unique'` and `conflict`, the id
-holding the key. Two nodes writing the same key at once cannot be refused:
-both records arrive, both are kept, and the `conflict` event
-`{ kind: 'unique', entity, fields, id, other, op }` names them — the
-application decides which yields.
-
-### Validation
-
-The full guide is [Schema and validation](./schema); the shape, in short.
-Give an entity a `schema` and every write to its collection but `delete()`
-and `purge()` — `insert()`, `set()`, `update()`, a `Record.save()`, `inc()`,
-`add()`, `remove()`, and every list, text and tree write — is validated as
-the whole record the write leaves behind, before anything is logged or
-written.
-Three shapes are understood, and the package requires none of them:
-
-- a **Standard Schema** — anything with a `~standard` property: an entity of a
-  metaschema `Model`, a zod, valibot or arktype schema;
-- a **function** — an ajv-compiled validator (`false` plus `fn.errors`), or any
-  function that throws on a bad value and returns the value (or nothing) on a
-  good one;
-- a **plain object** compiled through `createDatabase({ validator })` — a JSON Schema or
-  TypeBox object handed to `validator.compile(schema, { entity })`; an Ajv
-  instance fits as it is.
-
-```js
-const { Model } = require('@alexify/metaschema');
-
-const model = new Model(
-  {},
-  new Map([
-    [
-      'Project',
-      {
-        Registry: {},
-        orgId: 'string',
-        name: { type: 'string', aliases: ['title'] },
-        slug: 'string',
-        'desc?': { type: 'string', default: '' },
-      },
-    ],
-  ]),
-);
-
-const storage = await createDatabase({
-  path: 'data',
-  schema: { entities: { Project: { schema: model.entities.get('Project') } } },
-});
-
-const project = await storage.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
-await storage.get(project.id);
-// { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: '', $type: 'Project' }
-
-await storage.Project.insert({ name: 'x' });
-// ValidationError: Project failed validation at orgId: is required (+1 more)
-//   error.issues → [{ path: ['orgId'], message: 'is required', code: 'required' }, { path: ['slug'], … }]
-
-await storage.check('Project', { title: 'Alioth', slug: 'alioth', orgId: 'org1' });
-// { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: '' } — validated, nothing written
-```
-
-What the validator returns is what is written and replicated: the defaults it
-filled, the aliases it resolved (`title` became `name`), the keys it stripped —
-taken as JSON, so a `Date` a decoder produced is stored as the string it
-serializes to. A failed write rejects with a `ValidationError` — `code:
-'VALIDATION_FAILED'`, `entity`, and `issues` as `[{ path, message, code? }]`,
-with `cause` when the validator threw something of its own — and leaves nothing
-behind. `storage.check(entity, data)` runs the same validator without writing.
-
-The validator sees the record without `$type` and with its id under `idField`:
-`id` by default; metaschema's `<entityName>Id` when the schema's fields have
-that (an entity of a `Model` needs no configuration); nothing at all (`false`)
-for a schema that shows its fields and has neither, such as a metaschema
-struct. Set `idField` to override. The id is dropped from the validator's
-output again. A schema you only want read, not run — one from
-`@alexify/metaschema/definition`, say — takes `validate: false`.
-
-Two things to know about `update()`:
-
-- it is validated as the whole record it leaves, so a required field missing
-  from the delta is fine as long as the record has it;
-- it stays a `set` op: of what the validator returns, only the keys the delta
-  named (in their validated form) and the keys the record did not have (a
-  default, an alias target) are written. Write a field by its own name, not an
-  alias — a delta under an alias of a field the record already has changes
-  nothing, and the alias key an older record holds stays until a whole-record
-  write replaces it.
-
-A peer's op is validated here too, but never rewritten: an op that would leave
-the record invalid under this node's schema is skipped exactly like a
-[`beforeApply` hook returning `false`](./hooks#skipping-a-peers-op) — logged,
-relayed, replay-safe — and reported through the `error` event with
-`error.entity` and `error.issues`. Give every node the same schema and every
-node reaches the same verdict.
-
-### Schema versions
-
-`schema.version` (a positive integer, `1` by default) is stamped on every op
-this node makes as `v`, and a record remembers the version of its last
-whole-record write as `meta.v` — what tells a node on another version which
-shape a record is in. `schema.snapshot` is any JSON that describes the
-schema — metaschema's `model.toJSON()`, whose key order is deterministic —
-and is hashed:
-
-```js
-const storage = await createDatabase({
-  path: 'data',
-  schema: { version: 2, snapshot: model.toJSON(), entities: { /* … */ } },
-});
-
-storage.schemaInfo;
-// { version: 2, hash: '9f3c…', previous: null, held: null }
-```
-
-`schema.json` in the directory remembers the version and hash it last ran.
-When they differ at open, `schemaInfo.previous` holds what it was — an
-upgrade to run migrations after, a snapshot change of the same version, or a
-downgrade (logged as a warning) — and is `null` otherwise. Peers exchange
-`{ version, hash }` in [hello](./sync#schemas): the same version with another
-hash is reported as drift.
-
-### Reading across versions
-
-Nodes on different versions keep working together. A record written under an
-older version is read through a **lens** — nothing is rewritten, the view is
-computed once per cached entry — in two steps:
-
-1. the **migrations**: `migrations` is keyed by the version each one migrates
-   *to* (`2` takes a record from 1 to 2), either storage-wide `{ up }` or per
-   entity `{ Post: { up } }`; `up(data, { entity, id, from, to })` gets the
-   record without `$type` and returns it as it is under `to`;
-2. the entity's **Standard Schema validator**: its aliases and defaults are a
-   rename and a fill for free, so a metaschema entity with
-   `name: { aliases: ['title'] }` and `'desc?': { default: '' }` reads a v1
-   `{ title }` as `{ name, desc }` with no migration written. A validator that
-   refuses the record leaves step 1's result and logs at debug.
-
-`lens` picks the steps: `'both'` (default), `'migrations'`, or `'validate'`
-(refused together with `migrations`).
-
-```js
-const storage = await createDatabase({
-  path: 'data',
-  schema: {
-    version: 2,
-    entities: { Post: {} },
-    migrations: { 2: { Post: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } },
-  },
-});
-
-await storage.get(oldPost); // { name: 'Hello', $type: 'Post' } — on disk it is still { title: 'Hello' }
-```
-
-Writes go through the lens too: `update()` validates the record as it reads,
-and carries only the keys that changed. `get()`, `swap()`, a cursor and a
-`Document` as it loads read the view; `snapshot()` and `getCachedData()` read
-the raw data, and so does replication — a peer on the older version sees the
-record exactly as it was written.
-
-`migrate()` rewrites what the lens only reads: every record of an older
-version becomes a whole-record write of its view (the version with it), with
-the fields of other kinds made again after it — an `inc` per counter, an
-`add` per set, one `splice` per list or text, one move per tree node. Run it
-on one node after an upgrade; peers receive ordinary ops. It is idempotent,
-and `{ entities }` limits it to those collections:
-
-```js
-if (storage.schemaInfo.previous) {
-  await storage.migrate(); // { migrated: 12, counters: 3, sets: 1, lists: 0, texts: 2, trees: 0 }
-}
-```
-
-The other direction — an op from a **newer** version — is `ahead`:
-`'apply'` (default) applies it as it is, unvalidated (registers are
-forward-tolerant; the validator does not know the shape), and emits `schema`
-`{ kind: 'ahead', op, held: false }`; `'hold'` keeps it in the log, skipped
-and flagged with its version, relays it, and applies it at the first open
-that runs that version — `schemaInfo.held` is then `{ replayed, lost }`,
-`lost` counting held ops that retention dropped before the upgrade. A hold
-needs `sync.retention.ops` of 1000 or more (or `0`, keep everything), and a
-directory that ran a newer
-version cannot be reopened with `'hold'` on an older one.
-
-## On disk
-
-```
-data/
-├── node.json      { id } — this node's identity: its signing key (see Sync › Signatures)
-├── keys/          public.pem, private.pem (RSA, seals records); sign-public.pem, sign-private.pem (Ed25519, signs ops)
-├── blockchain/    <hash>.json per block, .blockchain.json holds the tail
-├── lock.json      { pid, id, since } — while an instance holds the directory (not with Web Locks)
-├── schema.json    { version, migrated, hash } — the schema this directory last ran
-├── index/         catalog.json — the record catalog as of a log position, search text included (derived; rebuilt when missing)
-├── data/          <id>.json per record: { data, meta, encrypted, timestamp, block, gen? }; a list or text of 1 024 runs or more keeps its runs in <id>~<n>.json beside it, 512 runs a piece
-├── log/           the operation log (see Sync)
-├── local/         <key>.json per local document (see Local documents) — never replicated
-├── pipeline/      <name>.json — a pipeline's checkpoint (see Pipelines)
-├── tags.json      { format, tags } — the tags taken here (see Versions and history › Tags); tags.corrupt.json beside it once it could not be read
-├── tags/          <name>/index/catalog.json and <name>/data/<id>.json — a tag's catalog and the record files copied before their first change after it; .pending/data/ while tags.json is unreadable
-├── branch.json    { format, parent, forkedAt, createdAt } — in a branch only (see Versions and history › Branches)
-└── remote/        <url>.json per registered sync node
-```
-
-Every record names the block that committed it, which is what makes
-[validation](./chain) possible. `meta` is the replication bookkeeping — per
-field clocks, the reset watermark, the tombstone, the counters, the sets, a
-list's or a text's block, a tree's moves — and is what lets two nodes'
-copies merge; a deleted record keeps its file as a tombstone until
-[cleanup](./cleanup) folds an old one into its catalog row.
-
-`drop()` closes the database and removes every store of it from the engine — the
-identity too: a node opened at the path again is a new node. `dropDatabase(path, { engine })`
-does the same for a closed one, held by the lock while it runs (an open instance's is `LOCKED`).
+Every method and property of a database is in the [API reference](../reference/api#database).

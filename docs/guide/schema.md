@@ -1,277 +1,165 @@
-# Schema and validation
+---
+title: Schema
+description: Define collections, validate every write with metaschema, zod or your own validator, index and constrain fields, and choose how records get their ids.
+---
 
-A schema gives a storage its collections, validates every write before it is
-stamped, keys the [query layer](./query), and carries a version so nodes on
-different versions of it keep working together. syncom validates through a
-contract, not a library: anything that implements
-[Standard Schema](https://standardschema.dev) (`~standard`), any compiled
-validator function, or any object a `validator` you inject can compile.
-Nothing is installed alongside it. The schema is the `schema` plugin —
-`@alexify/syncom/schema`, registered by `@alexify/syncom/all`; the core alone
-refuses `createDatabase({ schema })` and `createDatabase({ validator })` with `PLUGIN_MISSING`,
-and its records are untyped. The examples on this page open the core with it.
-In TypeScript a Standard Schema's `~standard.types` type the collection's
-records, and `Schema<Shapes>` types them for any other validator — see
-[TypeScript](./typescript).
+# Schema
 
-## A metaschema model
+A schema names your collections and, for each one, how its records are checked, indexed and identified.
+It is optional: a collection without a validator takes any data, and a database without a schema works by
+id alone. syncom has no schema language of its own; it validates through a contract, so a
+[metaschema](https://metaschema.vercel.app) model, a [Standard Schema](https://standardschema.dev) such as
+zod, or a plain function all work, and none of them is installed with syncom.
 
-[metaschema](https://metaschema.vercel.app) is the first-class fit: a `Model`
-is one description of the domain for the client, the server and every tool
-in between, and each of its entities is a `Schema` that syncom reads
-whole — the validator through `~standard`, the indexes off `schema.indexes`
-and `unique: true` fields, the id key by the kind's own convention, and the
-snapshot for versioning.
+The schema is the `schema` plugin, which `@alexify/syncom/all` registers. The smallest schema is a list of
+collection names:
 
-```js
-const { createDatabase } = require('@alexify/syncom');
-const { schema } = require('@alexify/syncom/schema');
-const { Model } = require('@alexify/metaschema');
+<<< @/examples/schema.mjs#bare
 
-const model = new Model(
-  {},
-  new Map([
-    [
-      'Project',
-      {
-        Registry: {},
-        orgId: 'string',
-        name: { type: 'string', length: { min: 3, max: 100 }, aliases: ['title'] },
-        slug: { type: 'string', unique: true },
-        'desc?': { type: 'string', default: '' },
-        byOrg: { index: ['orgId'] },
-        byOrgName: { unique: ['orgId', 'name'] },
-      },
-    ],
-  ]),
-);
+## Validate tasks with a metaschema model
 
-const storage = await createDatabase({
-  plugins: [schema],
-  path: 'data',
-  schema: {
-    version: 2,
-    snapshot: model.toJSON(),
-    entities: Object.fromEntries([...model.entities].map(([name, schema]) => [name, { schema }])),
-  },
-});
+metaschema is the first-class fit: one model describes your data for the browser, the server and every
+tool between them, and syncom reads everything it needs off each entity. The validator runs on every
+write, the `unique` field and the `index` become the catalog's keys, and the id is handed to the validator
+under the name the entity expects.
 
-const project = await storage.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
-await storage.get(project.id);
-// { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: '', $type: 'Project' }
-//   `title` became `name` (the alias), `desc` was filled (the default)
+<<< @/examples/schema.mjs#model
 
-await storage.Project.insert({ name: 'x', slug: 'alioth', orgId: 'org2' });
-// ValidationError: Project failed validation at name: value is too short
-await storage.Project.insert({ name: 'Alioth', slug: 'other', orgId: 'org1' });
-// ValidationError … code: 'unique', path: ['orgId', 'name'] — byOrgName
+What the validator returns is what syncom writes and replicates. Here the alias `name` became `title` and
+the default filled in `done`, so every node holds the record in the same shape.
 
-await storage.check('Project', { title: 'Vega', slug: 'vega', orgId: 'org1' });
-// { name: 'Vega', slug: 'vega', orgId: 'org1', desc: '' } — validated, nothing written
-```
+The validator sees each write as the whole record it leaves behind, not only the fields you sent. A
+counter or a set is checked as the record reads after the change:
 
-What the entity brought with it:
+<<< @/examples/schema.mjs#kinds
 
-| From the metaschema `Schema` | What syncom does |
-| --- | --- |
-| `~standard.validate` | Validates every write of the collection; its value — defaults, decoders, aliases resolved — is what is written and replicated |
-| `fields.projectId` (the `Registry` kind's id field) | The record id is handed to the validator as `projectId`; a `Struct` without an id-like field is handed none |
-| `indexes` (`byOrg: { index }`, `byOrgName: { unique }`) and `slug: { unique: true }` | The catalog's indexes and unique keys; a `many` relation is left alone |
-| `model.toJSON()` as `snapshot` | Hashed into `schemaInfo.hash`, exchanged in hello, drift reported |
-| `unknown: 'reject'` (metaschema's default) | A key the schema does not know is a `ValidationError` with `code: 'unexpected'`; `Registry: { unknown: 'ignore' }` lets peers on a newer schema add fields |
+Fields the model does not name are refused, which is metaschema's default (`unknown: 'reject'`). Declare
+every field your app writes, counters and sets included, or give the entity `Registry: { unknown: 'ignore' }`
+so that peers on a newer schema can add fields.
 
-One model file shared by the web app and the API is the whole point: the
-browser validates before it writes, the hub validates the same record with
-the same schema when the op arrives, and both reach the same verdict.
+## Handle a validation error
 
-## Other validators
+A write that fails validation rejects with a `ValidationError` and writes nothing: no operation, no log
+entry, nothing sent to peers. Its `issues` say what is wrong, one entry per problem.
 
-The entity's `schema` may be:
+<<< @/examples/schema.mjs#error
 
-- **any Standard Schema** — zod v4, valibot, arktype, metaschema: the
-  `~standard` property is all syncom reads. `idField` is read off a `shape`
-  (zod) or `entries` (valibot) map the same way as off `fields`. With zod,
-  `z.object({ id: z.string(), … })` is handed the id as `id`; a strict object
-  without an `id` key takes `idField: false`. Indexes are explicit then —
-  `{ schema: ProjectZod, index: ['orgId'], unique: ['slug'] }` — since a zod
-  schema has none to read;
-- **a function** — an ajv-compiled validator (`false` and `fn.errors`), or
-  any function that throws on a bad value and returns the value, or
-  nothing, on a good one;
-- **a plain object** with `createDatabase({ validator })` — a JSON Schema or TypeBox
-  object: `validator.compile(schema, { entity })` returns the function above.
-  An Ajv instance fits as it is.
+`code` is `VALIDATION_FAILED`, `entity` names the collection, and each issue has a `path`, a `message` and,
+where the validator gives one, a `code`. When a validator throws an error of its own, it rides along as
+`cause`.
 
-```js
-const ajv = new Ajv();
-const storage = await createDatabase({
-  path: 'data',
-  validator: ajv,                                    // compile(schema) → a validator
-  schema: {
-    entities: {
-      Event: { schema: { type: 'object', properties: { at: { type: 'string' } }, required: ['at'] } },
-      Note: { schema: compiledByAjv, idField: false },
-      Thin: { schema: definitionOnly, validate: false }, // @alexify/metaschema/definition: indexes read, nothing validated
-    },
-  },
-});
-```
+## Check data without writing it
 
-Whatever the shape, a failing write rejects with `ValidationError` —
-`code: 'VALIDATION_FAILED'`, `entity`, `issues` as `[{ path, message, code? }]`
-(ajv's `instancePath` and `keyword` map onto `path` and `code`), `cause` when
-the validator threw something of its own — and nothing was stamped, logged
-or written. The validator's value is taken as JSON: a `Date` a decoder made
-is stored as the string it serializes to.
+`check()` runs the collection's validator the way a write would and returns the result. Use it to validate
+a form before you save, or to see what defaults and aliases will do:
 
-## How a write is validated
+<<< @/examples/schema.mjs#check
 
-The validator sees the record **as the op leaves it**: for a `write` the
-whole new record, for a `set` the whole record after the delta, for an
-`inc`, `add`, `remove`, or a list, text or tree write (`splice`, `assign`,
-`move`, `mark`, `tree`) the record with that field as it reads after the op —
-under its id field, without `$type`. A counter, set, list, text or tree op
-carries no record data, so for it the verdict alone counts — and a field the
-schema does not name is an unknown key there too, refused under
-`unknown: 'reject'` like any other. What the validator returns is folded back
-into a `write` or a `set`:
+## Use zod, valibot or your own validator
 
-- a `write` becomes the validated record — defaults filled, aliases
-  renamed, unknown keys stripped if the validator strips;
-- a `set` keeps only the keys it named (in their validated form) and the
-  keys whose validated value differs from how the record read before — a
-  default on a record that lacked it, an alias target. A delta key the
-  validator dropped drops out of the op. A `set` is never promoted to a
-  `write`: that would reset the record and erase concurrent sets and
-  counters from other peers. So write a field by its own name, not an alias:
-  a delta under an alias of a field the record already has changes nothing.
+An entity's `schema` can be any of three things, and syncom decides which by looking at it:
 
-A peer's op is validated here too, against this node's schema, and never
-rewritten: an op that would leave the record invalid is skipped — logged,
-relayed, replay-safe, exactly as a `beforeApply` returning `false` — and
-reported through the `error` event (`error.entity`, `error.issues`) and the
-`syncom.ops.rejected` metric with reason `validation`. `merge`, `delete`
-and `purge` are not validated.
+- a **Standard Schema**: anything with a `~standard` property. zod, valibot, arktype and metaschema schemas
+  all are one, so `{ schema: z.object({ name: z.string() }) }` works as it is;
+- a **function**: it returns the value to write (or nothing, to write the input as it is) and throws on bad
+  input; an ajv-compiled validator, which returns `false` and sets `errors`, fits too;
+- a **plain object** such as a JSON Schema, compiled by the `validator` you pass to `createDatabase()`. An
+  Ajv instance fits as it is: `createDatabase({ validator: new Ajv(), schema })`.
 
-## Versions
+Here are the first two, written by hand. The Standard Schema trims the name and fills a default role; the
+function lowercases a label:
 
-`schema.version` is a positive integer (default 1). Every op this node makes
-carries it as `v`, every record remembers the version of its last
-whole-record write as `meta.v`, `schema.json` in the directory remembers
-what it last ran, and hello exchanges `{ version, hash }` with every peer.
-Two nodes on two versions keep syncing: registers are forward-tolerant, and
-what differs is how each reads the other's records.
+<<< @/examples/schema.mjs#standard
 
-### Reading an older record: the lens
+<<< @/examples/schema.mjs#function
 
-A record written under an older version is read through a lens — nothing is
-rewritten, the view is computed once per cached entry — in two steps:
+<<< @/examples/schema.mjs#validators
 
-1. **migrations** you wrote, keyed by the version they migrate *to*:
-2. the entity's **Standard Schema validator**, whose aliases and defaults are
-   a rename and a fill for free.
+Whatever the validator returns is stored as JSON, so a `Date` a decoder produced is stored as the string it
+serializes to. A zod or valibot object schema hands syncom its fields too, so the id is passed under `id` if
+the schema declares that field; a schema of your own that wants no id gets `idField: false`.
 
-With a metaschema model, step 2 is often all there is. The `Project` above
-went from a v1 with `title` to the v2 with `name: { aliases: ['title'] }` and
-`'desc?': { default: '' }`:
+## Index fields for queries
 
-```js
-const upgraded = await createDatabase({ path: 'data', schema: { version: 2, snapshot: model.toJSON(), entities } });
+`index` lists the fields and compound keys the catalog keeps sorted, so that [queries](./query) on them
+read only what matches. A metaschema model declares them itself; with any other validator, list them on the
+entity:
 
-upgraded.schemaInfo.previous;      // { version: 1, hash: '…' } — this directory ran v1
-await upgraded.get(legacy);        // { name: 'Old', slug: 'old', orgId: 'org1', desc: '', $type: 'Project' }
-upgraded.getCachedData(legacy);    // { title: 'Old', slug: 'old', orgId: 'org1', $type: 'Project' } — raw, as on disk
-```
+<<< @/examples/schema.mjs#index
 
-What an alias cannot express is a migration:
+A compound key serves queries that match its first fields exactly and range or sort on the next one.
+[Query optimizer](./query-optimizer) shows how a query picks an index and how to see the plan.
 
-```js
-const storage = await createDatabase({
-  path: 'data',
-  schema: {
-    version: 2,
-    entities: { Post: {} },
-    migrations: {
-      2: { Post: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } }, // per entity
-      // 3: { up: (data, { entity, id, from, to }) => data },                   // or storage-wide
-    },
-  },
-});
-```
+## Keep a field unique
 
-`up` gets the record without `$type` and returns it as it is under the next
-version; the chain runs from the record's version up to this one, then the
-validator. `lens: 'migrations'` or `'validate'` picks one step (the default
-`'both'` runs both; `'validate'` refuses a schema that also has
-`migrations`).
+`unique` lists the fields, or combinations of fields, that no two records of the collection may share. A
+metaschema field with `unique: true` declares one; otherwise, name it on the entity
+(`unique: ['key', ['board', 'title']]`). A local write that would take a value another record holds is
+refused with a `ValidationError` whose issue has `code: 'unique'` and the id of the record that holds it:
 
-The lens applies everywhere a record is read as a record — `get()`,
-`swap()`, the [query layer](./query), a `Document` as it loads and as it
-follows a change — and to what a write is validated against;
-`snapshot()`, `getCachedData()` and replication stay raw.
+<<< @/examples/schema.mjs#unique
 
-### Rewriting: `migrate()`
+Uniqueness holds on one node. Two nodes that write the same key while apart cannot refuse each other's
+write, so both records arrive and are kept, and every node that applies the second one emits a `conflict`
+event naming both. Your app decides which one yields, and deleting it converges like any other write.
 
-```js
-if (storage.schemaInfo.previous) await storage.migrate();
-// { migrated: 12, counters: 3, sets: 1, lists: 0, texts: 2, trees: 0 }
-```
+## Choose how records are identified
 
-Every record of an older version becomes a whole-record write of its view,
-with the fields of other kinds made again after it (a write resets them) —
-an `inc` per counter, an `add` per set, one `splice` per list or text (one
-run), one move per tree node; an empty set, list or text and a tree with
-nothing to read are dropped. The ops carry this node's version, peers
-receive ordinary ops, and a record already of this version is left alone —
-idempotent. Run it on one node after an upgrade;
-`{ entities: ['Project'] }` limits it, `{ batch }` sets how many records go
-between turns of the event loop, `{ actor }` names the writer.
+By default a record's id is minted when you insert it. A collection can take it from the record instead:
+`idField` names one field whose value is the id (the field is then left out of the data), and `id` builds
+the id from several fields joined by a separator (the fields stay).
 
-### A newer peer: `ahead`
+<<< @/examples/schema.mjs#ids
 
-An op from a newer version than this node runs is `ahead`. `'apply'` (the
-default) applies it as it is — unvalidated, since the validator does not
-know the shape — and emits `schema` `{ kind: 'ahead', op, held: false }`.
-`'hold'` keeps it in the log, flagged with its version and relayed, until an
-open runs that version; the held ops are then applied and
-`schemaInfo.held = { replayed, lost }` says how many, `lost` counting ops
-retention dropped before the upgrade (a hold needs `sync.retention.ops` of
-1000 or more, or `0` — keep everything).
+An id taken from the data can already be in use. `insert()` then rejects with `EXISTS`, decided inside the
+database's write queue so that two inserts cannot both pass, while `insertIfAbsent()` returns the record
+that is there and `upsert()` overwrites it:
 
-### Drift
+<<< @/examples/schema.mjs#exists
 
-The same version with another snapshot hash on a peer — two builds of "the
-same" schema that disagree — is reported on both sides as the storage's
-`schema` event `{ kind: 'drift', peer, version, hash, local }` and a
-warning; the link stays up. Under `unknown: 'reject'` a drifted peer's new
-field is a validation failure here (the op is skipped); give the entity
-`unknown: 'ignore'`, or bump the version. Catch it before it ships —
-metaschema's `diff` and `compatibility` are built for the CI gate:
+The fields that make a composite id, and a record's collection (`$type`), cannot change once written.
 
-```js
-const { diff, compatibility } = require('@alexify/metaschema/model');
-compatibility(diff(previousModel, model)); // 'full' | 'backward' | 'forward' | 'none'
-```
+## Know what a peer's write goes through
 
-## The reference
+A write from a peer is validated against this node's schema too, but never rewritten. An operation that
+would leave the record invalid here is skipped: it is still logged and passed on to other peers, so each
+node judges it for itself, and the database's `error` event reports it with the entity and the issues.
+Give every node the same schema and every node reaches the same verdict.
 
-| Option | Where | Meaning |
-| --- | --- | --- |
-| `schema.version` | `createDatabase({ schema })` | A positive integer, default 1; on every op as `v` |
-| `schema.snapshot` | `createDatabase({ schema })` | Any JSON describing the schema (`model.toJSON()`); hashed, in hello |
-| `schema.entities[name]` | `createDatabase({ schema })`, `addCollections()` | `{ schema?, idField?, validate?, index?, unique?, fields?, search?, id?, refs?, methods?, statics? }`; `{}` is a bare collection |
-| `schema.entities[name].index` | | Fields and compound keys — `['orgId', ['orgId', 'createdAt']]` — each a sorted index the catalog keeps; read off a metaschema schema's `indexes` (a compound one stays a key) and `index: true` fields when absent. See [The plan](./query#the-plan) |
-| `schema.entities[name].id` | | A composite id: `{ fields, separator? }` — the record id is the fields' values joined (`'.'` unless given), derived on every insert; see [Composite ids](./database#composite-ids) |
-| `schema.entities[name].refs` | | `{ author: 'Author', tags: ['Tag'] }` — the records a field names; a `Document` reads it as a `Reference`, `populate()` resolves it; read off a metaschema relation (`author: 'Author'`, `{ many: 'Tag' }`) when absent. See [References](./database#references) |
-| `schema.entities[name].methods`, `.statics` | | Functions on every `Document` of the collection (bound, non-enumerable), and on the collection; a name a Document or a Collection answers to already is a `TypeError`. See [ORM](./database#orm-methods-and-statics) |
-| `schema.entities[name].search` | `createDatabase({ schema })` | Field paths `$text` searches; explicit for every validator, never read off a schema; needs `createDatabase({ search })` — see [Full-text search](./query#full-text-search) |
-| `schema.migrations` | `createDatabase({ schema })` | `{ [toVersion]: { up } \| { [entity]: { up } } }` |
-| `schema.ahead` | `createDatabase({ schema })` | `'apply'` (default) or `'hold'` |
-| `schema.lens` | `createDatabase({ schema })` | `'both'` (default), `'migrations'`, `'validate'` |
-| `validator` | `createDatabase({ validator })` | `{ compile(schema, { entity }) }` for plain-object schemas |
-| `storage.check(entity, data)` | — | The validator's value, nothing written |
-| `storage.schemaInfo` | — | `{ version, hash, previous, held }` |
-| `storage.migrate(options?)` | — | `{ migrated, counters, sets, lists, texts, trees }` — how many records, then how many fields of each kind made again |
+## Evolve the schema
 
-See [Database](./database#collections) for `$type` and the collection
-methods, and [Sync](./sync#schemas) for what hello carries.
+`version` is a positive integer, `1` by default, stamped on every operation the node makes, and `snapshot`
+is any JSON that describes the schema (metaschema's `model.toJSON()`). The database remembers the version
+it last ran, and `schemaInfo` tells you when it changed:
+
+<<< @/examples/schema.mjs#version
+
+Nodes on different versions keep syncing. A record written under an older version is read through a lens
+of migrations you write and the validator's own aliases and defaults, and `migrate()` rewrites old records
+when you are ready; [Schema migration](./migration-schema) covers both.
+
+## Limitations
+
+- A unique key is enforced per node: concurrent writes on two nodes both survive, and you get a `conflict`
+  event instead of an error.
+- A record written through the database without a collection (`db.insert()` with no `$type`) is not
+  validated by any entity's schema.
+- Collections added with `addCollections()` are not saved: add them again after every open.
+
+## Coming from RxDB
+
+A collection does not need a JSON schema, a primary key definition or a storage wrapper for validation.
+When you do validate, the validator's output is what gets written (defaults, aliases, stripped keys), and
+a `unique` key holds for fields other than the id, which RxDB does not offer.
+
+::: code-group
+
+<<< @/examples/schema.mjs#model [syncom]
+
+<<< @/examples/rxdb/schema.mjs#schema [RxDB]
+
+:::
+
+<FromRxdb page="rx-schema" :rows="['schemaless', 'schemaFormat', 'validators', 'validatorOutput', 'unique', 'compositeKey']" />
+
+Every key an entity takes, and the schema's own options, are in the [API reference](../reference/api#schema-subpath).

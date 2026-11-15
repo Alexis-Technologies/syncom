@@ -1,54 +1,81 @@
+---
+title: Local documents
+description: Keep values on one device beside the records with db.local and collection.local, never logged, never synced, never seen by a peer.
+---
+
 # Local documents
 
-`@alexify/syncom/local` keeps values beside the records that never become an op — not logged, not in the
-catalog or a snapshot, never at a peer: the window's layout, a draft, a filter, what one node keeps for
-itself. Register the plugin and the database has `db.local`.
+Some values belong to one device: the window layout, a half-written draft, the filter a user last picked, the
+time of the last sync shown in a status bar. Writing them as records would put them in the log and send them to
+every peer. A local document is stored next to the records but is never an op: not logged, not synced, not in a
+snapshot, never seen by another node.
 
-```js
-const { createDatabase } = require('@alexify/syncom');
-const { local } = require('@alexify/syncom/local');
+## Read and write a local document
 
-const db = await createDatabase({ path: 'data', plugins: [local] });
-await db.local.set('layout', { panel: 320 }); // { panel: 320 }
-await db.local.get('layout');                 // { panel: 320 }
-await db.local.list();                        // ['layout']
-await db.local.delete('layout');
-```
+<<< @/examples/local.mjs#basics
 
-A value is JSON; a key is a kv key — a text of at most 255 characters without `/`. `@alexify/syncom/all`
-registers the plugin.
+`db.local` is a small key-value store. A value is any JSON value; a key is text of up to 255 characters without
+`/`. `get()` returns `null` for a key that is not there, and `list()` returns the keys, sorted.
 
-## A collection's store
+The `local` plugin provides `db.local`. `@alexify/syncom/all` includes it; with the core alone, add it:
 
-`collection.local` is the same store under the collection's prefix: `db.Post.local.set('filter', 'open')`
-writes the key `Post.filter`, and `db.Post.local.list()` lists the keys of that prefix without it.
+<<< @/examples/local.mjs#plugin
 
-## Following a value
+## Keep values per collection
 
-`set(key, fn)` writes what the function answers over the value as it is (null for none; `undefined` leaves it) —
-the changes of one key go one at a time, so counters and merges made at once compose:
+<<< @/examples/local.mjs#collection
 
-```js
-await Promise.all([db.local.set('opened', (n) => (n ?? 0) + 1), db.local.set('opened', (n) => (n ?? 0) + 1)]); // 2
-```
+`collection.local` is the same store under the collection's name as a prefix: the collection's key `filter` is
+the database's key `Task.filter`. Use it to keep a collection's view settings next to the collection.
 
-`observe(key, listener)` calls the listener after every `set` and `delete` of the key in this instance
-(`null` once deleted) and returns the stop; the database emits `local` (`{ key, value }`, the full key) on
-every write. `toStore(db.local, key)` of `@alexify/syncom/store` is a store of the value, for a framework.
+## Update a value from its current one
 
-```js
-const stop = db.local.observe('layout', (value) => render(value));
-db.on('local', ({ key, value }) => console.log(key, value));
-```
+<<< @/examples/local.mjs#function
 
-Another instance over one engine hears nothing: a local document is one node's. A follower
-(`readOnly: true`) cannot write one.
+`set(key, fn)` writes what the function returns for the current value (`null` when there is none). Writes to one key
+run one at a time, so two updates made at once both count. Return `undefined` to leave the value as it is.
 
-A write after `close()` is refused with `CLOSED`, and after a lost lease with `READ_ONLY` — as a write
-through the queue would be; the engine the database let go of is never written behind its back.
+## React to changes
 
-## What it is not
+<<< @/examples/local.mjs#observe
 
-A local document is kept across a reopen and swept by `drop()`, and `copyEngine()` carries the `local`
-namespace along; it is never replicated, never validated, never versioned. For state several nodes share,
-use a record — or [app state](./database#app-state) over one.
+`observe(key, listener)` calls the listener after every `set` and `delete` of that key (with `null` once deleted)
+and returns a function that stops it. The database also emits a `local` event with the full key and the value on
+every local write. For a UI framework, `toStore(db.local, key)` from `@alexify/syncom/store` turns a key into a
+store (see [Reactivity](./reactivity)).
+
+Only this instance hears these: another instance over the same storage (another tab, say) gets no event.
+
+## What a local document is not
+
+A local document never reaches another node:
+
+<<< @/examples/local.mjs#peers
+
+It is kept across restarts, removed with the database by `dropDatabase()`, and carried along by a
+[storage migration](./migration-storage). It has no schema, no validation, no version history and no conflict
+handling, because nothing else ever writes it. For a value that several devices should share, use a record, or
+[app state](./state) over one.
+
+A local write is refused where any write would be: after `close()` with `CLOSED`, and on a database that cannot
+write (a follower tab, or one whose lease was lost) with `READ_ONLY`. Reads keep working.
+
+<<< @/examples/local.mjs#closed
+
+## Coming from RxDB
+
+The same idea as RxDB's local documents, with less ceremony: no opt-in flag per database or collection, no
+document object to fetch before you read it, and keys scoped to a collection by prefix. A local value is plain
+JSON, so there is no `get('field')` on it; read the value and use it.
+
+::: code-group
+
+<<< @/examples/local.mjs#basics [syncom]
+
+<<< @/examples/rxdb/local.mjs#basics [RxDB]
+
+:::
+
+<FromRxdb page="rx-local-document" :rows="['localDocs', 'rxState']" />
+
+Every member is in the [reference](../reference/api#local-subpath).
