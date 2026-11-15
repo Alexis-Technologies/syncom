@@ -1,7 +1,16 @@
 import { expectError, expectType } from 'tsd';
 import { sync as syncPlugin, SyncManager, isSyncLink } from '../src/sync/sync.js';
 import type { SyncUnitOptions } from '../src/sync/sync.js';
-import type { Plugin, SyncApi, SyncUnit, HostedPeer, Node, SchemaInfo, SharedStats } from '../src/sync/sync.js';
+import type {
+  Plugin,
+  SyncApi,
+  SyncUnit,
+  SyncProcedure,
+  HostedPeer,
+  Node,
+  SchemaInfo,
+  SharedStats,
+} from '../src/sync/sync.js';
 import { createDatabase } from '../index.js';
 
 expectType<Plugin<SyncApi>>(syncPlugin);
@@ -104,6 +113,8 @@ storage.sync.on('error', (error) => {
 expectType<boolean>(storage.sync.peers()[0].behind);
 
 expectType<HostedPeer[]>(storage.sync.hosted());
+expectType<Array<{ node: string; connections: number }>>(storage.sync.sessions());
+expectType<SyncProcedure>(storage.sync.unit().blob);
 expectType<string | null>(storage.sync.hosted()[0].cursor);
 expectType<number | null | string>(storage.sync.peers()[0].lastError!.code);
 

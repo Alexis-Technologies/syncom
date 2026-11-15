@@ -1,7 +1,7 @@
 // The `@alexify/syncom/connector/graphql` subpath: the connector's handlers over a GraphQL endpoint, the queries
 // and the reading of their answers the application's — one adapter for every schema.
 
-import type { ConnectorDocument, PullHandlers, PullResult, PushHandlers, PushRow } from './connector.js';
+import type { ConnectorDocument, PullHandlers, PullResult, PushHandlers, PushRefusal, PushRow } from './connector.js';
 import type { RecordData } from '../../index.js';
 
 export interface GraphqlPull<T = RecordData, C = unknown> {
@@ -14,8 +14,10 @@ export interface GraphqlPull<T = RecordData, C = unknown> {
 export interface GraphqlPush<T = RecordData> {
   query: string;
   variables: (rows: PushRow<T>[]) => Record<string, unknown>;
-  /** The answer's `data` read into the conflicts (the rows refused, as the backend holds them); nothing is none. */
-  read: (data: any) => ConnectorDocument<T>[] | void | Promise<ConnectorDocument<T>[] | void>;
+  /** The answer's `data` read into the rows refused — a conflict as the backend holds it, or `{ id, error }` refused by name; nothing is none. */
+  read: (
+    data: any,
+  ) => (ConnectorDocument<T> | PushRefusal)[] | void | Promise<(ConnectorDocument<T> | PushRefusal)[] | void>;
 }
 
 export interface GraphqlOptions<T = RecordData, C = unknown> {

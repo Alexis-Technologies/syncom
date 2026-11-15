@@ -743,7 +743,7 @@ export interface LogEntry {
 
 export interface OpLogOptions {
   rollAfter?: number;
-  retention?: { ops?: number; days?: number };
+  retention?: { ops?: number; days?: number } | 'all';
   logger?: Logger | false;
   telemetry?: SyncomTelemetryOptions | SyncomTelemetryWriter;
   fsi?: Fsi;
@@ -1265,7 +1265,7 @@ export interface SyncOptions {
   pageSize?: number;
   /** Assigns a scope to a record; unscoped (`'*'`) records reach every peer. */
   scope?: (id: string, data: Record<string, unknown>) => string;
-  retention?: { ops?: number; days?: number };
+  retention?: { ops?: number; days?: number } | 'all';
   log?: { rollAfter?: number };
   /**
    * How far ahead of this node's clock a peer's stamp may be, in
@@ -2029,10 +2029,15 @@ export interface SyncLink {
   ): { unsubscribe(): void; readonly lastEventId?: string };
   /** Binary-capable transports: the chunks of a streamed snapshot page. */
   stream?(id: string): AsyncIterable<Uint8Array | string>;
-  on(event: 'open' | 'close' | 'reconnect', listener: (...args: unknown[]) => void): void;
-  off(event: 'open' | 'close' | 'reconnect', listener: (...args: unknown[]) => void): void;
+  /** A fire-and-forget event to the host — what presence travels as; a link without it carries the ops alone. */
+  send?(event: 'syncom/presence', data: unknown): void;
+  /** The link's own events, and the host's: `syncom/presence` (a presence update), `syncom/revoke` (`{ scopes }` taken back). */
+  on(event: SyncLinkEvent, listener: (...args: unknown[]) => void): void;
+  off(event: SyncLinkEvent, listener: (...args: unknown[]) => void): void;
   close(): void;
 }
+
+export type SyncLinkEvent = 'open' | 'close' | 'reconnect' | 'syncom/presence' | 'syncom/revoke';
 
 export interface SnapshotPage {
   records: Array<Entry & { id: string }>;
@@ -2213,10 +2218,10 @@ export interface Plugins {
 export function createPlugins(modules: readonly Plugin<any>[]): Plugins;
 
 type UnionToIntersection<U> = (U extends unknown ? (x: U) => void : never) extends (x: infer I) => void ? I : never;
+/** The methods one plugin adds — distributed over a union, so each plugin of a list is read on its own. */
+type ApiOf<Q> = Q extends Plugin<infer A> ? A : never;
 /** The methods the plugins of `P` add to a storage, intersected. */
-export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersection<
-  P[number] extends Plugin<infer A> ? A : never
->;
+export type PluginMethods<P extends readonly Plugin<any>[]> = UnionToIntersection<ApiOf<P[number]>>;
 
 /** What `openText()` takes. */
 export interface TextHandleOptions {

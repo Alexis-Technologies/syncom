@@ -35,8 +35,9 @@ db.splice(task.id, 'notes', 0, 0, 'Start here').catch(() => {});
 
 import { text } from '@alexify/syncom/text';
 
-const notes = await createDatabase({ path: 'notes', plugins: [text] });
-const id = await notes.insert({ title: 'Write the docs' });
+// Every plugin in the list adds its own: the schema's collections and the text plugin's splice() together.
+const notes = await createDatabase({ path: 'notes', plugins: [schema, text], schema: board });
+const { id } = await notes.Task.insert({ title: 'Write the docs', done: false });
 await notes.splice(id, 'notes', 0, 0, 'Start here'); // typed: the text plugin is in `plugins`
 // #endregion plugins
 await db.close();

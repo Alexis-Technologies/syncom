@@ -165,6 +165,8 @@ export interface SyncUnit {
   changes: SyncProcedure;
   /** The challenge hello handed a peer, signed under its key. */
   prove: SyncProcedure;
+  /** An attachment's bytes by digest (`syncom/blob { digest, id, name }`), as `allow.blob` serves them. */
+  blob: SyncProcedure;
   /** `unit({ query: true })`: a query over an entity, its rows in the peer's scopes; a count. */
   query?: SyncProcedure;
   count?: SyncProcedure;
@@ -289,6 +291,8 @@ export interface SyncManager {
   peers(): PeerView[];
   /** Hosting side: every peer with a live `changes` feed here. */
   hosted(): HostedPeer[];
+  /** Hosting side: every peer greeted here with a live session, and how many connections hold one — what a `revoke` reaches. */
+  sessions(): Array<{ node: string; connections: number }>;
   /**
    * Resolves once every enabled node is in sync with this one: each link up and greeted, nothing left to push to it
    * and its feed read to its end (the host's idle page); `signal` cuts the wait short.

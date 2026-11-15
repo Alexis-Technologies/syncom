@@ -97,9 +97,6 @@ types say so.
 - The types follow your declarations, not your data: a record written before a schema change, or by a
   peer on another schema version, can hold fields the types do not know. The validator and the
   [lens](./migration-schema) handle such records at run time.
-- A plugin's methods are lost from the type when it is listed next to a plugin that adds none, such as
-  `plugins: [schema, text]`. Until that is fixed, open such a database through `@alexify/syncom/all`, whose
-  type has every method.
 - A `Map` of entities is opaque to the compiler and adds no collections to the type; use a plain object.
 
 ## Coming from RxDB

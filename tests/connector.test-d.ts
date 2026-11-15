@@ -72,6 +72,7 @@ replication.on('received', ({ documents, applied }) => expectType<number>(docume
 replication.on('conflict', ({ id, resolved }) => expectType<string>(id + String(resolved)));
 replication.on('error', (error) => expectType<'REPLICATION_FAILED'>(error.code));
 replication.on('error', (error) => expectType<number | null>(error.retryIn));
+replication.on('error', (error) => expectType<string>(error.connector));
 replication.on('refused', ({ direction, id, reason }) => expectType<string>(direction + id + reason));
 expectType<number>(replication.stats().refused);
 expectType<number>(replication.stats().parked);

@@ -10,7 +10,7 @@ expectType<AsyncIterableIterator<DumpRecord[]>>(exportPages(db, { limit: 10 }));
 expectType<Promise<{ mode: 'merge' | 'insert'; records: number }>>(
   importJSON(db, { records: [{ id: 'x', data: {} }] }, { mode: 'insert' }),
 );
-expectType<Promise<{ records: number; pieces: number; copies: number; kv: number; entries: number }>>(
+expectType<Promise<{ records: number; pieces: number; copies: number; kv: number; entries: number; blobs: number }>>(
   migrateStorage({ from: engine, to: engine, path: 'p' }),
 );
 expectType<Promise<{ mode: 'merge'; records: number }>>(migrateStorage({ from: db, to: db, mode: 'merge' }));

@@ -15,6 +15,8 @@ export interface WrpcClientLike {
   off(event: string, listener: (...args: unknown[]) => void): void;
   close(): void;
   getStream?(id: string): AsyncIterable<Uint8Array>;
+  /** A fire-and-forget event to the server — what `send` (presence) goes through. */
+  sendEvent?(event: string, data: unknown): void;
   readonly api?: Record<string, unknown>;
 }
 
@@ -25,6 +27,8 @@ export interface WrpcLinkOptions {
 
 export interface WrpcLink extends SyncLink {
   stream(id: string): AsyncIterable<Uint8Array>;
+  /** The client's `sendEvent` under the unit's name. */
+  send(event: 'syncom/presence', data: unknown): void;
   readonly client: WrpcClientLike;
 }
 
@@ -52,5 +56,6 @@ export const SYNC_INTROSPECTION: {
     readonly prove: {};
     readonly query: {};
     readonly count: {};
+    readonly blob: {};
   };
 };

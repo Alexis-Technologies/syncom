@@ -2,6 +2,7 @@ import { expectType } from 'tsd';
 import { graphql } from '../src/connector/graphql.js';
 import type { GraphqlHandlers } from '../src/connector/graphql.js';
 import { replicate } from '../src/connector/connector.js';
+import type { ConnectorDocument, PushRefusal } from '../src/connector/connector.js';
 import { createDatabase } from '../index.js';
 
 const db = await createDatabase({ path: 'data' });
@@ -24,4 +25,17 @@ replicate(db, { name: 'gql', collection: 'Task', ...handlers });
 graphql({
   request: async () => ({}),
   push: { query: 'mutation p { p }', variables: (rows) => ({ rows }), read: () => undefined },
+});
+// A push's reader answers a conflict as the backend holds it, or a row refused by name.
+graphql<{ title: string }>({
+  request: async () => ({}),
+  push: {
+    query: 'mutation p { p }',
+    variables: (rows) => ({ rows }),
+    read: (data: { refused: { id: string; code: string }[] }) => {
+      const rows: (ConnectorDocument<{ title: string }> | PushRefusal)[] = [];
+      for (const row of data.refused) rows.push({ id: row.id, error: { code: row.code } });
+      return rows;
+    },
+  },
 });

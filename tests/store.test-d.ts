@@ -3,6 +3,7 @@ import { toStore, fromEvents } from '../src/store/store.js';
 import type { SyncomStore, StoreOptions } from '../src/store/store.js';
 import type { Database, Cursor, QueryRow, SyncomDocument, RecordData } from '../src/all/all.js';
 import { createPresence } from '../src/presence/presence.js';
+import { createState } from '../src/state/state.js';
 
 declare const storage: Database;
 declare const cursor: Cursor<QueryRow<{ title: string }>>;
@@ -18,6 +19,12 @@ expectType<SyncomStore<{ title: string } | null | undefined>>(toStore(record));
 expectType<SyncomStore<Map<string, Record<string, unknown>>>>(toStore(createPresence(storage)));
 expectType<SyncomStore<RecordData | null | undefined>>(toStore(storage, 'id'));
 expectType<SyncomStore<{ n: number } | null | undefined>>(toStore<{ n: number }>(storage, 'id', { path: 'profile' }));
+// A local document by key, and app state by path — the options come third for both.
+expectType<SyncomStore<{ dark: boolean } | null | undefined>>(toStore<{ dark: boolean }>(storage.local, 'theme'));
+const ui = createState(storage, 'ui');
+expectType<SyncomStore<string | undefined>>(toStore<string>(ui, 'theme/mode'));
+expectType<SyncomStore<unknown>>(toStore(ui));
+expectType<SyncomStore<number | undefined>>(toStore<number>(ui, null, { initial: 0 }));
 expectType<SyncomStore<number | undefined>>(fromEvents(storage, ['change'], async () => 1, { initial: 0 }));
 expectError(toStore(storage, 'id', { path: 5 }));
 expectError(rows.subscribe('x'));

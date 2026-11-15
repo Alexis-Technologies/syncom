@@ -339,6 +339,10 @@ declare const log: syncom.OpLog;
 expectType<syncom.LogEntry[] | null>(log.since(undefined, { scopes: ['*'], limit: 10 }));
 expectType<Promise<syncom.LogEntry[]>>(log.append([]));
 expectAssignable<StorageOptions>({ logger: false, sync: { scope: () => 'docs', retention: { ops: 10 } } });
+// `'all'` keeps every op (src/log.js reads it as no bound).
+expectAssignable<StorageOptions>({ sync: { retention: 'all' } });
+expectAssignable<syncom.OpLogOptions>({ retention: 'all' });
+expectType<Promise<syncom.OpLog>>(new syncom.OpLog('base', { retention: 'all' }));
 expectError(syncom.createDatabase({ sync: { scope: 'docs' } }));
 
 // telemetry — structural, so a real SDK fits without importing @opentelemetry/api.
@@ -428,6 +432,20 @@ expectError(syncom.createDatabase({ hooks: { beforeWrite: 'x' } }));
 expectError(syncom.createDatabase({ hooks: { beforeWrite: () => 'not an object' } }));
 expectType<Promise<syncom.ApplyRemoteResult>>(storage.applyRemote([], { peer: { url: null, node: 'n' } }));
 storage.applyRemote([]).then((result) => expectType<number>(result.skipped));
+// A link's `send` (presence) is optional; the host's events ride on `on`/`off` beside the link's own.
+declare const someLink: syncom.SyncLink;
+expectType<void | undefined>(someLink.send?.('syncom/presence', { node: 'a' }));
+someLink.on('syncom/revoke', () => {});
+someLink.off('syncom/presence', () => {});
+expectError(someLink.on('message', () => {}));
+expectAssignable<syncom.SyncLink>({
+  call: async () => null,
+  subscribe: () => ({ unsubscribe() {} }),
+  send: (event: string, data: unknown) => void [event, data],
+  on: () => {},
+  off: () => {},
+  close: () => {},
+});
 expectAssignable<StorageOptions>({
   sync: {
     connect: async () => ({}) as syncom.SyncLink,
@@ -824,6 +842,14 @@ declare const somePlugin: syncom.Plugin<{ fly(): Promise<void> }>;
 const flown = await syncom.createDatabase({ plugins: [somePlugin] });
 expectType<Promise<void>>(flown.fly());
 expectType<Promise<string>>(flown.insert({}));
+// Several plugins: each one's methods are read on its own, so a plugin that adds none keeps the others'.
+declare const bare: syncom.Plugin;
+declare const otherPlugin: syncom.Plugin<{ swim(): Promise<void> }>;
+const mixed = await syncom.createDatabase({ plugins: [bare, somePlugin, otherPlugin] });
+expectType<Promise<void>>(mixed.fly());
+expectType<Promise<void>>(mixed.swim());
+expectType<Promise<void>>((await new syncom.Database({ plugins: [bare, somePlugin] })).fly());
+expectError((await syncom.createDatabase({ plugins: [bare] })).fly());
 
 // E9.3: typed records — from the entity's Standard Schema (`~standard.types`), or from `Schema<Shapes>`.
 interface Post {

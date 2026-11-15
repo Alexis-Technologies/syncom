@@ -61,7 +61,7 @@ export function migrateStorage(options: {
   path: string;
   mode?: 'copy';
   batch?: number;
-}): Promise<{ records: number; pieces: number; copies: number; kv: number; entries: number }>;
+}): Promise<{ records: number; pieces: number; copies: number; kv: number; entries: number; blobs: number }>;
 export function migrateStorage(options: {
   from: Database;
   to: Database;

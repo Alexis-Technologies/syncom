@@ -96,6 +96,7 @@ export type {
   SyncomCounter,
   SyncomHistogram,
   SyncLink,
+  SyncLinkEvent,
   OutboundOptions,
   DatabaseConstructor,
   ClockStamp,

@@ -128,7 +128,8 @@ export interface ConnectorEvents {
     error: Error & {
       code: 'REPLICATION_FAILED';
       direction: 'pull' | 'push' | null;
-      name: string;
+      /** The connector's `name`. */
+      connector: string;
       cause?: unknown;
       retryIn: number | null;
     },

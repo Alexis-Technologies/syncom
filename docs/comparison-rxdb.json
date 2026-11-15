@@ -2443,7 +2443,7 @@
         },
         "customTransport": {
           "mark": "✅",
-          "text": "`SyncLink`: `call`, `subscribe` with `lastEventId`, `on`/`off`, `close`; optional `stream`",
+          "text": "`SyncLink`: `call`, `subscribe` with `lastEventId`, `on`/`off`, `close`; optional `stream` and `send` (presence)",
           "source": "src/sync/link.js:7-13; docs/guide/replication.md; tests/utils/memory-link.js",
           "detail": "The link only carries the four procedures; the far end still runs syncom."
         },
