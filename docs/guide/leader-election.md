@@ -32,9 +32,11 @@ should do. Each "tab" below joins the same election:
 
 <<< @/examples/leader-election.mjs#elect
 
-`onLead` fires at every grant from the moment you attach it. A grant can arrive before `elect()` returns
-(Node.js grants a free lock at once), so check `election.leader` as well, as the example does. When the
-leader goes away, the next tab in line leads:
+`onLead` fires at every grant, the first one included: `elect()` asks for the lock only after it returns,
+so a listener you attach right away hears the first grant, and `election.leader` is `false` until then. If
+you attach the listener later, after an `await`, the lock may already be yours: check `election.leader` as
+well, as the example does, and the work runs once either way. When the leader goes away, the next tab in
+line leads:
 
 <<< @/examples/leader-election.mjs#release
 
@@ -42,7 +44,7 @@ leader goes away, the next tab in line leads:
 aside for now and `request()` asks again later, and `onLost` tells you when the lead was taken from you.
 `election.mode` says how the election runs: `'locks'`, `'heartbeat'`, `'follower'` for an instance created
 with `follower: true` that never leads, or `'alone'` when neither locks nor a channel were given and the
-instance leads at once.
+instance leads as soon as `elect()` returns.
 
 ## Elect without Web Locks
 

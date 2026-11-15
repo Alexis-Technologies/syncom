@@ -73,8 +73,12 @@ name]` → `db.sync.fetchBlob`, the bytes landing in the shared store, `{ length
   for platforms without locks: claim, lead, bye (a claim round: the smallest token leads at the next beat), the
   smaller token stays; its two leaders at once are settled by the database's lock, never by writes racing. Either
   way `onLead` fires at EVERY grant (never a one-shot promise), `yield()` steps aside and `request()` asks again;
-  a lock stolen (`AbortError`) is `onLost`. `follower: true` never leads (`mode: 'follower'`: a tab beside a
-  SharedWorker that holds the election). Neither given: `mode: 'alone'`, the instance leads at once.
+  a lock stolen (`AbortError`) is `onLost`. The first grant is heard too: `elect()` asks a microtask after it
+  returns (Node's `navigator.locks` grants a free lock inside `request()`), so `leader` is false on return and a
+  listener attached in the same tick hears it — never replayed to a later listener, which reads `leader` (the
+  `onLead(lead); if (leader) lead()` pattern would run twice). `follower: true` never leads (`mode: 'follower'`: a
+  tab beside a SharedWorker that holds the election). Neither given: `mode: 'alone'`, the instance leads the same
+  microtask later.
 - **The wire is wrpc's, and the worker leads.** `createSharedChannel(client)` of the wrpc subpath is the follower's
   channel; the leader's `serve()` is a router unit (`syncom-db`, `PROCEDURES`); a SharedWorker attaches each tab's
   port on its `wrpc:connect` (`rpc.attachPort(event.ports[0])`) — the handshake of wrpc's worker transport, run in

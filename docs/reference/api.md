@@ -1215,7 +1215,7 @@ several instances over one database, one leading and the others following and wr
 | --- | --- | --- |
 | `createDatabase` | — | The constructor of the flavour in use (the core's, `/all`'s): the subpath bundles nothing of the core |
 | `path`, `engine`, … | — | What `createDatabase()` takes; the engine must be one several instances may open (`capabilities.shared`: memory, IndexedDB, MongoDB) — the files engine and SQLite refuse a follower with a `TypeError` |
-| `election` | `{}` | `{ locks }` — Web Locks: `syncom:leader:<path>` requested exclusive, granted when free, let go with its holder; `{ channel, heartbeat, misses }` — a `BroadcastChannel`-shaped heartbeat: a candidate claims with its token and waits one beat, a leader says `lead` every `heartbeat` ms (1 000), a candidate that hears no leader for `misses` beats (3) and no smaller claim in its round leads, two leaders settle by token (the smaller stays); `{ follower: true }` — never leads (`mode: 'follower'`); none of them — leads at once (`mode: 'alone'`) |
+| `election` | `{}` | `{ locks }` — Web Locks: `syncom:leader:<path>` requested exclusive, granted when free, let go with its holder; `{ channel, heartbeat, misses }` — a `BroadcastChannel`-shaped heartbeat: a candidate claims with its token and waits one beat, a leader says `lead` every `heartbeat` ms (1 000), a candidate that hears no leader for `misses` beats (3) and no smaller claim in its round leads, two leaders settle by token (the smaller stays); `{ follower: true }` — never leads (`mode: 'follower'`); none of them — leads as soon as `elect()` returns (`mode: 'alone'`) |
 | `channel` | — | `async () => ({ call(method, payload) })` — a follower's way to the leader, called again for a fresh channel after a failure; without it a follower's write is `NOT_LEADER` |
 | `grace` | `50` | Milliseconds `openShared()` waits for the grant before it opens as a follower: the first instance leads at once, the next follows without a pause |
 | `failover` | `10000` | Milliseconds a follower's write is tried again while no leader answers, then `LEADER_LOST`; on a fresh path, how long a follower waits for the elected instance to write the identity (`LEADER_LOST`, `reason: 'fresh'`) |
@@ -1268,7 +1268,9 @@ mounts — one per entry of `MUTATORS`, then `transact`, `collection`, `local` a
 
 Events (contained): `leader`, `follower`, `rebind` `({ path, generation })`, `error` (the instance's, and `PROMOTE_FAILED` when the
 elected instance could not open as the leader: it yields and asks again). `elect({ name, locks, channel, follower, heartbeat, misses })`
-is the election on its own, re-armable: `{ leader, token, mode, onLead(fn) → off, onLost(fn) → off, yield(), request(), release() }`.
+is the election on its own, re-armable: `{ leader, token, mode, onLead(fn) → off, onLost(fn) → off, yield(), request(), release() }` —
+`onLead` at every grant, the first included: the lock is asked for a microtask after `elect()` returns (`alone` leads then too), so
+`leader` is `false` on return and a listener attached in the same tick hears the first grant; a `yield()` or `release()` in that tick asks nothing.
 `createSharedChannel(client, { unit }?)` of `@alexify/syncom/wrpc` is the follower's channel over a `WrpcClient`.
 
 ## Attachments (subpath)

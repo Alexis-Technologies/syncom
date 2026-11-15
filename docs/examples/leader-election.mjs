@@ -19,8 +19,8 @@ import { elect } from '@alexify/syncom/shared';
 const joinElection = (tab) => {
   const election = elect({ name: 'board:reminders', locks: navigator.locks });
   const lead = () => console.log(`${tab} sends the reminders`);
-  election.onLead(lead); // at every grant from now on
-  if (election.leader) lead(); // the lock may be granted before elect() returns
+  election.onLead(lead); // at every grant, the first one included
+  if (election.leader) lead(); // already granted when you attach late, after an await
   return election;
 };
 

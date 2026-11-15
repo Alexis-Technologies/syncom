@@ -80,7 +80,7 @@ const lost = (key: number) => {
   note(`${tab.label} yields: a leader with a smaller token spoke`);
 };
 
-// The view follows `leader` as well as the events: the first grant may come before onLead is attached.
+// The view follows `leader` as well as the events, as an application that attaches its listener late would.
 const follow = () => {
   for (const tab of tabs.value) {
     const elector = held.get(tab.key)?.elector;

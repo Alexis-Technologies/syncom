@@ -10,9 +10,10 @@
 // ms; a candidate that hears no leader for `misses` beats and no smaller
 // claim in its round leads; a leader that hears a lead from a smaller token
 // yields (`onLost`). The election is re-armable: `onLead` fires at EVERY
-// grant, `yield()` lets the lock (or the lead) go and `request()` asks for
-// it again — an instance that could not open as the leader steps aside and
-// comes back. Two leaders at once never write at once: the database's own
+// grant, the first included (never before `elect()` returns, so a listener
+// attached right after it hears it), `yield()` lets the lock (or the lead)
+// go and `request()` asks for it again — an instance that could not open as
+// the leader steps aside and comes back. Two leaders at once never write at once: the database's own
 // lock is the last word, and a claimant it refuses tries again. A
 // `follower` never leads (a tab beside a SharedWorker that does). No requires.
 
@@ -34,9 +35,10 @@ const listen = (channel, listener) => {
 
 /**
  * `{ leader, token, mode, onLead, onLost, yield, request, release }`: `onLead(listener)` is called at every
- * grant (answers the off), `leader` is whether this instance leads now, `mode` is `'locks'`, `'heartbeat'`,
- * `'follower'` (never leads) or `'alone'` (neither given: this instance leads at once — one process, one
- * instance); `yield()` steps aside, `request()` asks again, `release()` leaves for good.
+ * grant, the first included (answers the off), `leader` is whether this instance leads now (false on return),
+ * `mode` is `'locks'`, `'heartbeat'`, `'follower'` (never leads) or `'alone'` (neither given: this instance leads
+ * a microtask later — one process, one instance); `yield()` steps aside, `request()` asks again, `release()`
+ * leaves for good.
  */
 const elect = ({
   name,
@@ -101,7 +103,7 @@ const elect = ({
     result.mode = 'locks';
     // `wanted`: whether a grant is to be kept when it comes; `pending`: a request in flight; `free` lets the held
     // grant go. A yield before the grant lets the lock go the moment it is granted.
-    let wanted = false;
+    let wanted = true;
     let pending = false;
     let free = null;
     const request = () => {
@@ -138,7 +140,12 @@ const elect = ({
       leader = false;
       free?.();
     };
-    request();
+    // The first request a microtask later: a free lock may be granted inside `request()` (Node's `navigator.locks`
+    // does), and `onLead` attached right after `elect()` must hear that grant. A yield or a release in the same tick
+    // stands: nothing is asked.
+    queueMicrotask(() => {
+      if (wanted) request();
+    });
     return result;
   }
 
@@ -206,8 +213,9 @@ const elect = ({
     return result;
   }
 
-  // Nothing to elect with: one instance, the leader.
-  leader = true;
+  // Nothing to elect with: one instance, the leader — granted a microtask later, as a free lock is, so `onLead`
+  // attached right after `elect()` hears it.
+  queueMicrotask(() => result.request());
   return result;
 };
 

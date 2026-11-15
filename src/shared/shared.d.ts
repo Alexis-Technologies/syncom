@@ -60,8 +60,9 @@ export interface ElectionOptions {
 export interface Election {
   readonly token: string;
   readonly mode: 'locks' | 'heartbeat' | 'follower' | 'alone';
+  /** Whether this instance leads now: `false` when `elect()` returns — the first request goes a microtask later. */
   readonly leader: boolean;
-  /** Called at every grant; answers the off. */
+  /** Called at every grant, the first included (a listener attached in the same tick as `elect()` hears it); answers the off. */
   onLead(listener: () => void): () => void;
   /** Called when the lead is lost: a smaller token leads, the lock was stolen. */
   onLost(listener: () => void): () => void;

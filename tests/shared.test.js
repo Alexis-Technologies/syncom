@@ -206,6 +206,46 @@ test('Shared database', async (t) => {
   );
 
   await t.test(
+    'the first grant is heard: onLead attached right after elect() fires once, under locks granted at once and alone',
+    async () => {
+      // Node's navigator.locks and the fake grant a free lock inside request(): elect() asks a microtask later, so a
+      // listener attached in the same tick hears the first grant and `leader` is false until then.
+      const elections = [
+        ['navigator.locks', { locks: globalThis.navigator?.locks ?? null }],
+        ['fake locks', { locks: createFakeLocks() }],
+        ['alone', {}],
+      ];
+      for (let i = 0; i < elections.length; i++) {
+        const [label, options] = elections[i];
+        if (label === 'navigator.locks' && options.locks === null) continue;
+        const election = elect({ name: `syncom:leader:first:${i}`, ...options });
+        assert.strictEqual(election.leader, false, `${label}: not yet granted when elect() returns`);
+        let heard = 0;
+        election.onLead(() => heard++);
+        await sleep(10);
+        assert.strictEqual(election.leader, true, `${label}: it leads`);
+        assert.strictEqual(heard, 1, `${label}: the first grant heard once`);
+        // The documented pattern — onLead, then `leader` checked — runs the work once, attached late or not.
+        let ran = 0;
+        const lead = () => ran++;
+        election.onLead(lead);
+        if (election.leader) lead();
+        assert.strictEqual(ran, 1, `${label}: attached late, the work runs once`);
+        election.release();
+      }
+      // Released in the same tick, it never asks: nothing held, nothing heard.
+      const locks = createFakeLocks();
+      const gone = elect({ name: 'g', locks });
+      let heard = 0;
+      gone.onLead(() => heard++);
+      gone.release();
+      await sleep(10);
+      assert.strictEqual(heard, 0);
+      assert.strictEqual(locks.held('g'), false);
+    },
+  );
+
+  await t.test(
     'two instances over one engine: the first leads, the second follows and writes through it; both read what lands; the leader’s alone',
     async (t2) => {
       const { open, port, locks } = profile(t2);
