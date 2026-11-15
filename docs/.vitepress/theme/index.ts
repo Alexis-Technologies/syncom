@@ -1,13 +1,20 @@
 import DefaultTheme from 'vitepress/theme';
 import type { Theme } from 'vitepress';
 import './custom.css';
+import FromRxdb from './components/FromRxdb.vue';
+import NotInSyncom from './components/NotInSyncom.vue';
+import DocsOverview from './components/DocsOverview.vue';
 
 // Extends the default VitePress theme with the syncom brand styling (see custom.css).
 // This is exactly the pattern Pinia / Vite / Vue use to brand their docs — the
 // layout and components stay the default theme, the look comes from CSS variables.
 export default {
   extends: DefaultTheme,
-  enhanceApp({ router }) {
+  enhanceApp({ app, router }) {
+    // The components every guide page may use without importing them (docs/CLAUDE.md lists them).
+    app.component('FromRxdb', FromRxdb);
+    app.component('NotInSyncom', NotInSyncom);
+    app.component('DocsOverview', DocsOverview);
     // Vercel Web Analytics + Speed Insights. The framework-agnostic `inject`
     // entrypoints are used rather than the `/vue` components: those require
     // `vue-router`, which VitePress does not use (it ships its own router).

@@ -1,0 +1,42 @@
+{
+  "text": "How syncom works",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Transactions and conflicts",
+      "link": "/guide/transactions-conflicts"
+    },
+    {
+      "text": "The operation log",
+      "link": "/guide/operation-log"
+    },
+    {
+      "text": "The sync protocol",
+      "link": "/guide/sync-protocol"
+    },
+    {
+      "text": "Retention and acknowledgements",
+      "link": "/guide/retention"
+    },
+    {
+      "text": "Query cache",
+      "link": "/guide/query-cache"
+    },
+    {
+      "text": "Plugins",
+      "link": "/guide/plugins"
+    },
+    {
+      "text": "Errors",
+      "link": "/guide/errors"
+    },
+    {
+      "text": "Architecture",
+      "link": "/guide/architecture"
+    },
+    {
+      "text": "Glossary",
+      "link": "/guide/glossary"
+    }
+  ]
+}

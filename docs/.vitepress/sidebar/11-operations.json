@@ -1,0 +1,18 @@
+{
+  "text": "Operations",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "OpenTelemetry",
+      "link": "/guide/telemetry"
+    },
+    {
+      "text": "Devtools",
+      "link": "/guide/devtools"
+    },
+    {
+      "text": "Health and maintenance",
+      "link": "/guide/health"
+    }
+  ]
+}

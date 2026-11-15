@@ -1,0 +1,14 @@
+{
+  "text": "Server",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Hosting a node",
+      "link": "/guide/server"
+    },
+    {
+      "text": "Scaling",
+      "link": "/guide/server-scaling"
+    }
+  ]
+}

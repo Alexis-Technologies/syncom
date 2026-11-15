@@ -1,0 +1,54 @@
+{
+  "text": "Storages",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Storage overview",
+      "link": "/guide/storage"
+    },
+    {
+      "text": "IndexedDB",
+      "link": "/guide/storage-indexeddb"
+    },
+    {
+      "text": "OPFS",
+      "link": "/guide/storage-opfs"
+    },
+    {
+      "text": "Memory",
+      "link": "/guide/storage-memory"
+    },
+    {
+      "text": "Filesystem (Node.js)",
+      "link": "/guide/storage-filesystem"
+    },
+    {
+      "text": "SQLite",
+      "link": "/guide/storage-sqlite"
+    },
+    {
+      "text": "MongoDB",
+      "link": "/guide/storage-mongodb"
+    },
+    {
+      "text": "localStorage",
+      "link": "/guide/storage-localstorage"
+    },
+    {
+      "text": "Expo filesystem",
+      "link": "/guide/storage-expo"
+    },
+    {
+      "text": "Dexie.js",
+      "link": "/guide/storage-dexie"
+    },
+    {
+      "text": "DenoKV",
+      "link": "/guide/storage-denokv"
+    },
+    {
+      "text": "FoundationDB",
+      "link": "/guide/storage-foundationdb"
+    }
+  ]
+}

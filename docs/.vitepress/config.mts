@@ -1,5 +1,16 @@
+import { readdirSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitepress';
 import { withMermaid } from 'vitepress-plugin-mermaid';
+
+// The guide's sidebar, one JSON file per group in sidebar/ (read in file-name order): the theme's
+// <DocsOverview> and scripts/llms.js read the same files, and tests/package/docs-map.test.js holds
+// every page of docs/guide to one entry of them.
+const sidebarDir = fileURLToPath(new URL('./sidebar/', import.meta.url));
+const guideSidebar = readdirSync(sidebarDir)
+  .filter((name) => name.endsWith('.json'))
+  .sort()
+  .map((name) => JSON.parse(readFileSync(sidebarDir + name, 'utf8')));
 
 const ogTitle = 'syncom — distributed data sync engine for Node.js and the browser';
 const ogDescription =
@@ -136,7 +147,7 @@ export default withMermaid({
 
       // ─── Top navigation ──────────────────────────────────────────────
       nav: [
-        { text: 'Guide', link: '/guide/getting-started', activeMatch: '/guide/' },
+        { text: 'Guide', link: '/guide/quickstart', activeMatch: '/guide/' },
         { text: 'Reference', link: '/reference/api', activeMatch: '/reference/' },
         {
           // Hand-synced with package.json "version" — part of the release
@@ -152,76 +163,16 @@ export default withMermaid({
 
       // ─── Sidebar ─────────────────────────────────────────────────────
       sidebar: {
-        '/guide/': [
-          {
-            text: 'Introduction',
-            items: [
-              { text: 'Why syncom?', link: '/guide/why' },
-              { text: 'Compared with alternatives', link: '/guide/comparison' },
-              { text: 'Compared with RxDB', link: '/guide/vs-rxdb' },
-              { text: 'Compared with CRDT libraries', link: '/guide/vs-crdt' },
-              { text: 'Benchmarks', link: '/guide/benchmarks' },
-              { text: 'Getting Started', link: '/guide/getting-started' },
-              { text: 'Architecture', link: '/guide/architecture' },
-              { text: 'Entry points', link: '/guide/entry-points' },
-            ],
-          },
-          {
-            text: 'Core',
-            items: [
-              { text: 'Database', link: '/guide/database' },
-              { text: 'Schema and validation', link: '/guide/schema' },
-              { text: 'TypeScript', link: '/guide/typescript' },
-              { text: 'Queries', link: '/guide/query' },
-              { text: 'Lists, text and trees', link: '/guide/lists' },
-              { text: 'Editors', link: '/guide/editors' },
-              { text: 'Frameworks', link: '/guide/frameworks' },
-              { text: 'Versions and history', link: '/guide/versions' },
-              { text: 'Local documents', link: '/guide/local' },
-              { text: 'Pipelines', link: '/guide/pipeline' },
-              { text: 'Hooks and events', link: '/guide/hooks' },
-              { text: 'CRDT deltas', link: '/guide/crdt' },
-              { text: 'Blockchain log', link: '/guide/chain' },
-              { text: 'Smart contracts', link: '/guide/contracts' },
-            ],
-          },
-          {
-            text: 'Replication',
-            items: [
-              { text: 'Sync', link: '/guide/sync' },
-              { text: 'Presence', link: '/guide/presence' },
-              { text: 'wrpc transport', link: '/guide/wrpc' },
-              { text: 'WebRTC', link: '/guide/webrtc' },
-              { text: 'Scaling', link: '/guide/scaling' },
-            ],
-          },
-          {
-            text: 'Platforms',
-            items: [
-              { text: 'Browser', link: '/guide/browser' },
-              { text: 'Backends', link: '/guide/backends' },
-            ],
-          },
-          {
-            text: 'Operations',
-            items: [
-              { text: 'OpenTelemetry', link: '/guide/telemetry' },
-              { text: 'Devtools', link: '/guide/devtools' },
-              { text: 'Testing', link: '/guide/testing' },
-              { text: 'Agent tools', link: '/guide/mcp' },
-              { text: 'Dumps and backups', link: '/guide/dump' },
-              { text: 'Tombstone cleanup', link: '/guide/cleanup' },
-              { text: 'Connectors', link: '/guide/connector' },
-              { text: 'Several tabs', link: '/guide/shared' },
-              { text: 'Attachments', link: '/guide/attachments' },
-            ],
-          },
-        ],
+        '/guide/': guideSidebar,
         '/reference/': [
           {
             text: 'Reference',
             items: [
               { text: 'API', link: '/reference/api' },
+              { text: 'Events and hooks', link: '/reference/events' },
+              { text: 'Engines and backends', link: '/reference/engines' },
+              { text: 'Entry points', link: '/reference/entry-points' },
+              { text: 'Telemetry', link: '/reference/telemetry' },
               { text: 'Wire format', link: '/reference/wire' },
             ],
           },

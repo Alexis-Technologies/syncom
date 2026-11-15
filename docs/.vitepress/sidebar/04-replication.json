@@ -1,0 +1,74 @@
+{
+  "text": "Replication",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Sync engine",
+      "link": "/guide/replication"
+    },
+    {
+      "text": "Partial sync",
+      "link": "/guide/partial-sync"
+    },
+    {
+      "text": "syncom server replication",
+      "link": "/guide/replication-server"
+    },
+    {
+      "text": "WebSocket",
+      "link": "/guide/replication-websocket"
+    },
+    {
+      "text": "WebRTC P2P",
+      "link": "/guide/replication-webrtc"
+    },
+    {
+      "text": "NATS and brokers",
+      "link": "/guide/replication-nats"
+    },
+    {
+      "text": "Presence",
+      "link": "/guide/presence"
+    },
+    {
+      "text": "Connectors",
+      "link": "/guide/connectors"
+    },
+    {
+      "text": "HTTP",
+      "link": "/guide/replication-http"
+    },
+    {
+      "text": "GraphQL",
+      "link": "/guide/replication-graphql"
+    },
+    {
+      "text": "CouchDB",
+      "link": "/guide/replication-couchdb"
+    },
+    {
+      "text": "Firestore",
+      "link": "/guide/replication-firestore"
+    },
+    {
+      "text": "MongoDB",
+      "link": "/guide/replication-mongodb"
+    },
+    {
+      "text": "Supabase",
+      "link": "/guide/replication-supabase"
+    },
+    {
+      "text": "Appwrite",
+      "link": "/guide/replication-appwrite"
+    },
+    {
+      "text": "Google Drive",
+      "link": "/guide/replication-google-drive"
+    },
+    {
+      "text": "OneDrive",
+      "link": "/guide/replication-onedrive"
+    }
+  ]
+}

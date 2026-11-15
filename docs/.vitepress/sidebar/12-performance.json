@@ -1,0 +1,22 @@
+{
+  "text": "Performance",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Engine performance",
+      "link": "/guide/storage-performance"
+    },
+    {
+      "text": "Performance tips",
+      "link": "/guide/performance-tips"
+    },
+    {
+      "text": "IndexedDB performance",
+      "link": "/guide/slow-indexeddb"
+    },
+    {
+      "text": "Browser storage compared",
+      "link": "/guide/browser-storage"
+    }
+  ]
+}

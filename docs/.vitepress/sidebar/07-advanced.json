@@ -1,0 +1,86 @@
+{
+  "text": "Advanced Features",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Testing",
+      "link": "/guide/testing"
+    },
+    {
+      "text": "Schema migration",
+      "link": "/guide/migration-schema"
+    },
+    {
+      "text": "Storage migration",
+      "link": "/guide/migration-storage"
+    },
+    {
+      "text": "Attachments",
+      "link": "/guide/attachments"
+    },
+    {
+      "text": "Pipelines",
+      "link": "/guide/pipeline"
+    },
+    {
+      "text": "Reactivity",
+      "link": "/guide/reactivity"
+    },
+    {
+      "text": "App state",
+      "link": "/guide/state"
+    },
+    {
+      "text": "Local documents",
+      "link": "/guide/local"
+    },
+    {
+      "text": "Cleanup",
+      "link": "/guide/cleanup"
+    },
+    {
+      "text": "JSON import and export",
+      "link": "/guide/import-export"
+    },
+    {
+      "text": "Backup",
+      "link": "/guide/backup"
+    },
+    {
+      "text": "Leader election",
+      "link": "/guide/leader-election"
+    },
+    {
+      "text": "Hooks and events",
+      "link": "/guide/hooks"
+    },
+    {
+      "text": "CRDT",
+      "link": "/guide/crdt"
+    },
+    {
+      "text": "Population",
+      "link": "/guide/population"
+    },
+    {
+      "text": "ORM",
+      "link": "/guide/orm"
+    },
+    {
+      "text": "Full-text search",
+      "link": "/guide/fulltext-search"
+    },
+    {
+      "text": "Vector search",
+      "link": "/guide/vector-search"
+    },
+    {
+      "text": "Query optimizer",
+      "link": "/guide/query-optimizer"
+    },
+    {
+      "text": "Agent tools (MCP)",
+      "link": "/guide/mcp"
+    }
+  ]
+}

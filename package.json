@@ -235,14 +235,16 @@
     "bench:compare": "node bench/compare.js",
     "bench:size": "node bench/compare/size.js",
     "bench:report": "node bench/report.js",
-    "lint": "oxlint src tests scripts bench examples",
-    "format": "oxfmt src tests scripts bench examples",
-    "format:check": "oxfmt --check src tests scripts bench examples",
+    "lint": "oxlint src tests scripts bench examples docs/examples",
+    "format": "oxfmt src tests scripts bench examples docs/examples",
+    "format:check": "oxfmt --check src tests scripts bench examples docs/examples",
     "size": "node scripts/size.js",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "docs:comparison": "node scripts/comparison.js"
+    "docs:comparison": "node scripts/comparison.js",
+    "docs:examples:rxdb": "node scripts/docs-examples-rxdb.js",
+    "docs:llms": "node scripts/llms.js"
   },
   "tsd": {
     "directory": "tests"

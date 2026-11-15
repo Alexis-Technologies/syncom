@@ -1,0 +1,50 @@
+{
+  "text": "Storage Wrappers",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Schema validation",
+      "link": "/guide/schema-validation"
+    },
+    {
+      "text": "Encryption",
+      "link": "/guide/encryption"
+    },
+    {
+      "text": "Logger",
+      "link": "/guide/logger"
+    },
+    {
+      "text": "Remote engine",
+      "link": "/guide/storage-remote"
+    },
+    {
+      "text": "Worker",
+      "link": "/guide/storage-worker"
+    },
+    {
+      "text": "SharedWorker",
+      "link": "/guide/storage-shared-worker"
+    },
+    {
+      "text": "Memory over disk",
+      "link": "/guide/storage-layered"
+    },
+    {
+      "text": "Electron",
+      "link": "/guide/electron"
+    },
+    {
+      "text": "Faster open",
+      "link": "/guide/open-cost"
+    },
+    {
+      "text": "Key compression",
+      "link": "/guide/key-compression"
+    },
+    {
+      "text": "Sharding",
+      "link": "/guide/sharding"
+    }
+  ]
+}

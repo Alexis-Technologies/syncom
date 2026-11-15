@@ -1,0 +1,38 @@
+{
+  "text": "Core Entities",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Database",
+      "link": "/guide/database"
+    },
+    {
+      "text": "Schema",
+      "link": "/guide/schema"
+    },
+    {
+      "text": "Collection",
+      "link": "/guide/collection"
+    },
+    {
+      "text": "Document",
+      "link": "/guide/document"
+    },
+    {
+      "text": "Query",
+      "link": "/guide/query"
+    },
+    {
+      "text": "Query examples",
+      "link": "/guide/query-examples"
+    },
+    {
+      "text": "Query builder",
+      "link": "/guide/query-builder"
+    },
+    {
+      "text": "Fields that merge",
+      "link": "/guide/fields"
+    }
+  ]
+}

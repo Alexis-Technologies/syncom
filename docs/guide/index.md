@@ -1,0 +1,17 @@
+---
+title: Overview
+description: Every page of the syncom guide, grouped from the first steps to the internals.
+---
+
+# syncom documentation
+
+**syncom** is a local-first data engine for JavaScript. Your app reads and writes records on the device,
+every write goes into an operation log, and other nodes (servers, browsers, peers) replicate that log and
+converge on the same records without a central coordinator. It runs in Node.js and in the browser, with no
+runtime dependencies.
+
+New here? Start with the [Quickstart](./quickstart), then read [Sync engine](./replication) to see how
+nodes stay in step. If you know RxDB, every page ends with a "Coming from RxDB" section, and
+[Compared with RxDB](./vs-rxdb) has the whole comparison.
+
+<DocsOverview />

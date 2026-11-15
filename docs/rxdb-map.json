@@ -1,0 +1,593 @@
+{
+  "rxdb": "17.6.0",
+  "source": "docs-src/sidebars.js of rxdb at 69cf11eb6 (2026-10-23; the 17.6.0 tag plus Query Examples and Query Builder in the sidebar): every doc of the sidebar but Articles, Releases, contribute and Contact",
+  "verdicts": {
+    "same": "Same idea",
+    "different": "Works differently",
+    "partial": "Partly",
+    "absent": "Not in syncom"
+  },
+  "pages": {
+    "overview": {
+      "label": "Overview",
+      "group": "Getting Started",
+      "page": "/guide/",
+      "verdict": "same",
+      "url": "https://rxdb.info/overview.html"
+    },
+    "quickstart": {
+      "label": "Quickstart",
+      "group": "Getting Started",
+      "page": "/guide/quickstart",
+      "verdict": "same",
+      "url": "https://rxdb.info/quickstart.html"
+    },
+    "install": {
+      "label": "Installation",
+      "group": "Getting Started",
+      "page": "/guide/install",
+      "verdict": "partial",
+      "url": "https://rxdb.info/install.html"
+    },
+    "dev-mode": {
+      "label": "Dev Mode",
+      "group": "Getting Started",
+      "page": "/guide/dev-mode",
+      "verdict": "absent",
+      "url": "https://rxdb.info/dev-mode.html"
+    },
+    "tutorials/typescript": {
+      "label": "TypeScript",
+      "group": "Getting Started",
+      "page": "/guide/typescript",
+      "verdict": "same",
+      "url": "https://rxdb.info/typescript.html"
+    },
+    "rx-database": {
+      "label": "RxDatabase",
+      "group": "Core Entities",
+      "page": "/guide/database",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-database.html"
+    },
+    "rx-schema": {
+      "label": "RxSchema",
+      "group": "Core Entities",
+      "page": "/guide/schema",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-schema.html"
+    },
+    "rx-collection": {
+      "label": "RxCollection",
+      "group": "Core Entities",
+      "page": "/guide/collection",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-collection.html"
+    },
+    "rx-document": {
+      "label": "RxDocument",
+      "group": "Core Entities",
+      "page": "/guide/document",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-document.html"
+    },
+    "rx-query": {
+      "label": "RxQuery",
+      "group": "Core Entities",
+      "page": "/guide/query",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-query.html"
+    },
+    "rx-query-examples": {
+      "label": "Query Examples",
+      "group": "Core Entities",
+      "page": "/guide/query-examples",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-query-examples.html"
+    },
+    "query-builder": {
+      "label": "Query Builder",
+      "group": "Core Entities",
+      "page": "/guide/query-builder",
+      "verdict": "partial",
+      "url": "https://rxdb.info/query-builder.html"
+    },
+    "rx-storage": {
+      "label": "RxStorage Overview",
+      "group": "Storages",
+      "page": "/guide/storage",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-storage.html"
+    },
+    "rx-storage-localstorage": {
+      "label": "LocalStorage",
+      "group": "Storages",
+      "page": "/guide/storage-localstorage",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-localstorage.html"
+    },
+    "rx-storage-indexeddb": {
+      "label": "IndexedDB",
+      "group": "Storages",
+      "page": "/guide/storage-indexeddb",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-indexeddb.html"
+    },
+    "rx-storage-opfs": {
+      "label": "OPFS",
+      "group": "Storages",
+      "page": "/guide/storage-opfs",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-opfs.html"
+    },
+    "rx-storage-memory": {
+      "label": "Memory",
+      "group": "Storages",
+      "page": "/guide/storage-memory",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-memory.html"
+    },
+    "rx-storage-filesystem-node": {
+      "label": "Filesystem Node",
+      "group": "Storages",
+      "page": "/guide/storage-filesystem",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-filesystem-node.html"
+    },
+    "rx-storage-sqlite": {
+      "label": "SQLite",
+      "group": "Storages",
+      "page": "/guide/storage-sqlite",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-sqlite.html"
+    },
+    "rx-storage-filesystem-expo": {
+      "label": "Expo Filesystem",
+      "group": "Storages",
+      "page": "/guide/storage-expo",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-filesystem-expo.html"
+    },
+    "rx-storage-dexie": {
+      "label": "Dexie.js",
+      "group": "Storages",
+      "page": "/guide/storage-dexie",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-dexie.html"
+    },
+    "rx-storage-mongodb": {
+      "label": "MongoDB",
+      "group": "Storages",
+      "page": "/guide/storage-mongodb",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-mongodb.html"
+    },
+    "rx-storage-denokv": {
+      "label": "DenoKV",
+      "group": "Storages",
+      "page": "/guide/storage-denokv",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-denokv.html"
+    },
+    "rx-storage-foundationdb": {
+      "label": "FoundationDB",
+      "group": "Storages",
+      "page": "/guide/storage-foundationdb",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-foundationdb.html"
+    },
+    "schema-validation": {
+      "label": "Schema Validation",
+      "group": "Storage Wrappers",
+      "page": "/guide/schema-validation",
+      "verdict": "different",
+      "url": "https://rxdb.info/schema-validation.html"
+    },
+    "encryption": {
+      "label": "Encryption",
+      "group": "Storage Wrappers",
+      "page": "/guide/encryption",
+      "verdict": "different",
+      "url": "https://rxdb.info/encryption.html"
+    },
+    "key-compression": {
+      "label": "Key Compression",
+      "group": "Storage Wrappers",
+      "page": "/guide/key-compression",
+      "verdict": "absent",
+      "url": "https://rxdb.info/key-compression.html"
+    },
+    "logger": {
+      "label": "Logger",
+      "group": "Storage Wrappers",
+      "page": "/guide/logger",
+      "verdict": "different",
+      "url": "https://rxdb.info/logger.html"
+    },
+    "rx-storage-remote": {
+      "label": "Remote RxStorage",
+      "group": "Storage Wrappers",
+      "page": "/guide/storage-remote",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-remote.html"
+    },
+    "rx-storage-worker": {
+      "label": "Worker RxStorage",
+      "group": "Storage Wrappers",
+      "page": "/guide/storage-worker",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-worker.html"
+    },
+    "rx-storage-shared-worker": {
+      "label": "SharedWorker",
+      "group": "Storage Wrappers",
+      "page": "/guide/storage-shared-worker",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-storage-shared-worker.html"
+    },
+    "rx-storage-memory-mapped": {
+      "label": "Memory Mapped",
+      "group": "Storage Wrappers",
+      "page": "/guide/storage-layered",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-storage-memory-mapped.html"
+    },
+    "rx-storage-sharding": {
+      "label": "Sharding",
+      "group": "Storage Wrappers",
+      "page": "/guide/sharding",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-sharding.html"
+    },
+    "rx-storage-localstorage-meta-optimizer": {
+      "label": "Localstorage Meta Optimizer",
+      "group": "Storage Wrappers",
+      "page": "/guide/open-cost",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rx-storage-localstorage-meta-optimizer.html"
+    },
+    "electron": {
+      "label": "Electron",
+      "group": "Storage Wrappers",
+      "page": "/guide/electron",
+      "verdict": "partial",
+      "url": "https://rxdb.info/electron.html"
+    },
+    "replication": {
+      "label": "Sync Engine",
+      "group": "Replication",
+      "page": "/guide/replication",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication.html"
+    },
+    "replication-http": {
+      "label": "HTTP Replication",
+      "group": "Replication",
+      "page": "/guide/replication-http",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-http.html"
+    },
+    "replication-server": {
+      "label": "RxServer Replication",
+      "group": "Replication",
+      "page": "/guide/replication-server",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication-server.html"
+    },
+    "replication-graphql": {
+      "label": "GraphQL Replication",
+      "group": "Replication",
+      "page": "/guide/replication-graphql",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-graphql.html"
+    },
+    "replication-websocket": {
+      "label": "WebSocket Replication",
+      "group": "Replication",
+      "page": "/guide/replication-websocket",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication-websocket.html"
+    },
+    "replication-couchdb": {
+      "label": "CouchDB Replication",
+      "group": "Replication",
+      "page": "/guide/replication-couchdb",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-couchdb.html"
+    },
+    "replication-webrtc": {
+      "label": "WebRTC P2P Replication",
+      "group": "Replication",
+      "page": "/guide/replication-webrtc",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication-webrtc.html"
+    },
+    "replication-firestore": {
+      "label": "Firestore Replication",
+      "group": "Replication",
+      "page": "/guide/replication-firestore",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-firestore.html"
+    },
+    "replication-mongodb": {
+      "label": "MongoDB Replication",
+      "group": "Replication",
+      "page": "/guide/replication-mongodb",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-mongodb.html"
+    },
+    "replication-supabase": {
+      "label": "Supabase Replication",
+      "group": "Replication",
+      "page": "/guide/replication-supabase",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-supabase.html"
+    },
+    "replication-google-drive": {
+      "label": "Google Drive Replication",
+      "group": "Replication",
+      "page": "/guide/replication-google-drive",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication-google-drive.html"
+    },
+    "replication-microsoft-onedrive": {
+      "label": "Microsoft OneDrive Replication",
+      "group": "Replication",
+      "page": "/guide/replication-onedrive",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication-microsoft-onedrive.html"
+    },
+    "replication-nats": {
+      "label": "NATS Replication",
+      "group": "Replication",
+      "page": "/guide/replication-nats",
+      "verdict": "different",
+      "url": "https://rxdb.info/replication-nats.html"
+    },
+    "replication-appwrite": {
+      "label": "Appwrite Replication",
+      "group": "Replication",
+      "page": "/guide/replication-appwrite",
+      "verdict": "same",
+      "url": "https://rxdb.info/replication-appwrite.html"
+    },
+    "partial-sync": {
+      "label": "Partial Sync",
+      "group": "Replication",
+      "page": "/guide/partial-sync",
+      "verdict": "different",
+      "url": "https://rxdb.info/partial-sync.html"
+    },
+    "rx-server": {
+      "label": "RxServer",
+      "group": "Server",
+      "page": "/guide/server",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-server.html"
+    },
+    "rx-server-scaling": {
+      "label": "RxServer Scaling",
+      "group": "Server",
+      "page": "/guide/server-scaling",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-server-scaling.html"
+    },
+    "transactions-conflicts-revisions": {
+      "label": "Transactions Conflicts Revisions",
+      "group": "How RxDB works",
+      "page": "/guide/transactions-conflicts",
+      "verdict": "different",
+      "url": "https://rxdb.info/transactions-conflicts-revisions.html"
+    },
+    "query-cache": {
+      "label": "Query Cache",
+      "group": "How RxDB works",
+      "page": "/guide/query-cache",
+      "verdict": "same",
+      "url": "https://rxdb.info/query-cache.html"
+    },
+    "plugins": {
+      "label": "Creating Plugins",
+      "group": "How RxDB works",
+      "page": "/guide/plugins",
+      "verdict": "different",
+      "url": "https://rxdb.info/plugins.html"
+    },
+    "errors": {
+      "label": "Errors",
+      "group": "How RxDB works",
+      "page": "/guide/errors",
+      "verdict": "same",
+      "url": "https://rxdb.info/errors.html"
+    },
+    "testing": {
+      "label": "Testing",
+      "group": "Advanced Features",
+      "page": "/guide/testing",
+      "verdict": "same",
+      "url": "https://rxdb.info/testing.html"
+    },
+    "migration-schema": {
+      "label": "Schema Migration",
+      "group": "Advanced Features",
+      "page": "/guide/migration-schema",
+      "verdict": "different",
+      "url": "https://rxdb.info/migration-schema.html"
+    },
+    "migration-storage": {
+      "label": "Storage Migration",
+      "group": "Advanced Features",
+      "page": "/guide/migration-storage",
+      "verdict": "same",
+      "url": "https://rxdb.info/migration-storage.html"
+    },
+    "rx-attachment": {
+      "label": "Attachments",
+      "group": "Advanced Features",
+      "page": "/guide/attachments",
+      "verdict": "different",
+      "url": "https://rxdb.info/rx-attachment.html"
+    },
+    "rx-pipeline": {
+      "label": "RxPipelines",
+      "group": "Advanced Features",
+      "page": "/guide/pipeline",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-pipeline.html"
+    },
+    "reactivity": {
+      "label": "Custom Reactivity",
+      "group": "Advanced Features",
+      "page": "/guide/reactivity",
+      "verdict": "different",
+      "url": "https://rxdb.info/reactivity.html"
+    },
+    "rx-state": {
+      "label": "RxState",
+      "group": "Advanced Features",
+      "page": "/guide/state",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-state.html"
+    },
+    "rx-local-document": {
+      "label": "Local Documents",
+      "group": "Advanced Features",
+      "page": "/guide/local",
+      "verdict": "same",
+      "url": "https://rxdb.info/rx-local-document.html"
+    },
+    "cleanup": {
+      "label": "Cleanup",
+      "group": "Advanced Features",
+      "page": "/guide/cleanup",
+      "verdict": "same",
+      "url": "https://rxdb.info/cleanup.html"
+    },
+    "json-import-export": {
+      "label": "JSON Import/Export",
+      "group": "Advanced Features",
+      "page": "/guide/import-export",
+      "verdict": "same",
+      "url": "https://rxdb.info/json-import-export.html"
+    },
+    "backup": {
+      "label": "Backup",
+      "group": "Advanced Features",
+      "page": "/guide/backup",
+      "verdict": "partial",
+      "url": "https://rxdb.info/backup.html"
+    },
+    "leader-election": {
+      "label": "Leader Election",
+      "group": "Advanced Features",
+      "page": "/guide/leader-election",
+      "verdict": "same",
+      "url": "https://rxdb.info/leader-election.html"
+    },
+    "middleware": {
+      "label": "Middleware",
+      "group": "Advanced Features",
+      "page": "/guide/hooks",
+      "verdict": "different",
+      "url": "https://rxdb.info/middleware.html"
+    },
+    "crdt": {
+      "label": "CRDT",
+      "group": "Advanced Features",
+      "page": "/guide/crdt",
+      "verdict": "different",
+      "url": "https://rxdb.info/crdt.html"
+    },
+    "population": {
+      "label": "Population",
+      "group": "Advanced Features",
+      "page": "/guide/population",
+      "verdict": "same",
+      "url": "https://rxdb.info/population.html"
+    },
+    "orm": {
+      "label": "ORM",
+      "group": "Advanced Features",
+      "page": "/guide/orm",
+      "verdict": "same",
+      "url": "https://rxdb.info/orm.html"
+    },
+    "fulltext-search": {
+      "label": "Fulltext Search",
+      "group": "Advanced Features",
+      "page": "/guide/fulltext-search",
+      "verdict": "different",
+      "url": "https://rxdb.info/fulltext-search.html"
+    },
+    "articles/javascript-vector-database": {
+      "label": "Vector Database",
+      "group": "Advanced Features",
+      "page": "/guide/vector-search",
+      "verdict": "partial",
+      "url": "https://rxdb.info/javascript-vector-database.html"
+    },
+    "query-optimizer": {
+      "label": "Query Optimizer",
+      "group": "Advanced Features",
+      "page": "/guide/query-optimizer",
+      "verdict": "different",
+      "url": "https://rxdb.info/query-optimizer.html"
+    },
+    "webmcp": {
+      "label": "WebMCP",
+      "group": "Advanced Features",
+      "page": "/guide/mcp",
+      "verdict": "same",
+      "url": "https://rxdb.info/webmcp.html"
+    },
+    "third-party-plugins": {
+      "label": "Third Party Plugins",
+      "group": "Advanced Features",
+      "page": "/guide/plugins#third-party-plugins",
+      "verdict": "absent",
+      "url": "https://rxdb.info/third-party-plugins.html"
+    },
+    "react": {
+      "label": "React",
+      "group": "Integrations",
+      "page": "/guide/react",
+      "verdict": "different",
+      "url": "https://rxdb.info/react.html"
+    },
+    "articles/tanstack-db/rxdb-collection-for-tanstack-db": {
+      "label": "TanStack DB",
+      "group": "Integrations",
+      "page": "/guide/tanstack-db",
+      "verdict": "absent",
+      "url": "https://rxdb.info/rxdb-collection-for-tanstack-db.html"
+    },
+    "rx-storage-performance": {
+      "label": "RxStorage Performance",
+      "group": "Performance",
+      "page": "/guide/storage-performance",
+      "verdict": "partial",
+      "url": "https://rxdb.info/rx-storage-performance.html"
+    },
+    "nosql-performance-tips": {
+      "label": "NoSQL Performance Tips",
+      "group": "Performance",
+      "page": "/guide/performance-tips",
+      "verdict": "different",
+      "url": "https://rxdb.info/nosql-performance-tips.html"
+    },
+    "slow-indexeddb": {
+      "label": "Slow IndexedDB",
+      "group": "Performance",
+      "page": "/guide/slow-indexeddb",
+      "verdict": "different",
+      "url": "https://rxdb.info/slow-indexeddb.html"
+    },
+    "articles/localstorage-indexeddb-cookies-opfs-sqlite-wasm": {
+      "label": "LocalStorage vs. IndexedDB vs. Cookies vs. OPFS vs. WASM-SQLite",
+      "group": "Performance",
+      "page": "/guide/browser-storage",
+      "verdict": "partial",
+      "url": "https://rxdb.info/localstorage-indexeddb-cookies-opfs-sqlite-wasm.html"
+    }
+  }
+}

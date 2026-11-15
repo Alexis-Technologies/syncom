@@ -1,0 +1,18 @@
+{
+  "text": "Integrations",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "React",
+      "link": "/guide/react"
+    },
+    {
+      "text": "Other frameworks",
+      "link": "/guide/frameworks"
+    },
+    {
+      "text": "TanStack DB",
+      "link": "/guide/tanstack-db"
+    }
+  ]
+}

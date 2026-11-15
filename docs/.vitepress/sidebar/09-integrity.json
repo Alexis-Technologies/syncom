@@ -1,0 +1,22 @@
+{
+  "text": "Integrity",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Signing and identity",
+      "link": "/guide/signing"
+    },
+    {
+      "text": "Audit chain",
+      "link": "/guide/chain"
+    },
+    {
+      "text": "Purge",
+      "link": "/guide/purge"
+    },
+    {
+      "text": "Smart contracts",
+      "link": "/guide/contracts"
+    }
+  ]
+}

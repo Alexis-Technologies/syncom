@@ -1,0 +1,22 @@
+{
+  "text": "Comparisons",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Compared with alternatives",
+      "link": "/guide/comparison"
+    },
+    {
+      "text": "Compared with RxDB",
+      "link": "/guide/vs-rxdb"
+    },
+    {
+      "text": "Compared with CRDT libraries",
+      "link": "/guide/vs-crdt"
+    },
+    {
+      "text": "Benchmarks",
+      "link": "/guide/benchmarks"
+    }
+  ]
+}

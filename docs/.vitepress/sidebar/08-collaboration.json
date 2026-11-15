@@ -1,0 +1,34 @@
+{
+  "text": "Collaborative data",
+  "collapsed": true,
+  "items": [
+    {
+      "text": "Lists",
+      "link": "/guide/lists"
+    },
+    {
+      "text": "Text and rich text",
+      "link": "/guide/text"
+    },
+    {
+      "text": "Trees",
+      "link": "/guide/trees"
+    },
+    {
+      "text": "Editors",
+      "link": "/guide/editors"
+    },
+    {
+      "text": "Versions and history",
+      "link": "/guide/versions"
+    },
+    {
+      "text": "Branches",
+      "link": "/guide/branches"
+    },
+    {
+      "text": "Undo and redo",
+      "link": "/guide/undo"
+    }
+  ]
+}

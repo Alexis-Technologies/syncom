@@ -1,0 +1,30 @@
+{
+  "text": "Getting Started",
+  "collapsed": false,
+  "items": [
+    {
+      "text": "Overview",
+      "link": "/guide/"
+    },
+    {
+      "text": "Quickstart",
+      "link": "/guide/quickstart"
+    },
+    {
+      "text": "Installation",
+      "link": "/guide/install"
+    },
+    {
+      "text": "Development checks",
+      "link": "/guide/dev-mode"
+    },
+    {
+      "text": "TypeScript",
+      "link": "/guide/typescript"
+    },
+    {
+      "text": "Why syncom?",
+      "link": "/guide/why"
+    }
+  ]
+}
