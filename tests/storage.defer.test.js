@@ -33,7 +33,9 @@ test('open({ defer }): record files lag the log by the window, never the reads',
   await t.test(
     'writes within the window coalesce into one file and one block; reads see every write at once',
     async (t2) => {
-      const { dir, storage } = await openTemp(t2, { defer: 40 });
+      // A window wide enough that the six writes fit in it on a busy machine: at 40 ms a loaded run landed the
+      // record between two of them, and the file was there with one letter.
+      const { dir, storage } = await openTemp(t2, { defer: 400 });
       const id = await storage.insert({ title: 'doc' });
       for (const ch of 'hello') await storage.push(id, 'body', ch);
       assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'hello' }, 'the cache reads every write');
