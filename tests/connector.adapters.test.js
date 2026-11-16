@@ -833,6 +833,15 @@ test('Connector adapters', async (t) => {
             name: 'TypeError',
             message: /Timestamp/,
           });
+          // The read is the SDK's `getDocs` as handed in: one that answers from the server alone and fails offline
+          // (`getDocsFromServer` in its place) makes the pull fail — the connector's to retry — never a partial page.
+          const offline = async () => {
+            throw Object.assign(new Error('Failed to get documents from server.'), { code: 'unavailable' });
+          };
+          await assert.rejects(
+            () => firestore({ ...options(), sdk: { ...fake.sdk, getDocs: offline } }).pull.handler(null, 10),
+            { code: 'unavailable' },
+          );
           assert.throws(() => firestore({ sdk: fake.sdk, collection: fake.collection }), {
             name: 'TypeError',
             message: /database/,

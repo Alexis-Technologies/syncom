@@ -82,6 +82,14 @@ its checkpoint, the connector passes over the documents it already knows, and th
 - **Documents need the stamp field.** A query ordered by a field leaves out documents that lack it, so documents
   written before you connected are not pulled until they carry `serverTimestamp` (and `_deleted: false`). Backfill
   them once.
+- **A pull answered from the SDK's cache can pass documents by.** The adapter pulls with `getDocs()`, and the SDK's
+  reference says it "may return cached data or fail if you are offline". A page that comes from the cache holds the
+  documents the cache has, which need not be every document that matches, and the adapter does not tell such a page
+  from a complete one: the checkpoint moves to its last document, and a document the cache lacked stays behind it,
+  not pulled. `lookback` covers the ones stamped within its window. To have an offline pull fail and be retried
+  instead, pass the SDK with `getDocs` replaced by its `getDocsFromServer`
+  (`sdk: { ...firestoreSdk, getDocs: firestoreSdk.getDocsFromServer }`), which the SDK documents as returning an
+  error when the network is not available.
 - **Deletions are documents.** A `deleteDoc` by another client is never seen; set `_deleted: true` instead.
 - **Ids Firestore keeps for itself.** An id of the form `__name__` is refused by the SDK; the connector parks that row
   as `refused` with the SDK's error code, and the rest of the batch goes on. A value the SDK cannot store (a nested
