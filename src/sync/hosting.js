@@ -22,12 +22,13 @@ const { opKey } = require('../vector.js');
 const { notify } = require('../hooks.js');
 const { GLOBAL_SCOPE, opInScope } = require('../scope.js');
 const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js');
-const { DB, SIGNER, SOURCE } = require('../symbols.js');
+const { SIGNER, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
 const { streams, sendAll, collect } = require('./chunks.js');
 const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 const {
+  coded,
   refuse,
   refuseCall,
   peerOf,
@@ -43,7 +44,7 @@ const {
   remember,
   handPresence,
 } = require('./rules.js');
-const { normalizeQuery, query, count, blob, blobNamed } = require('./reads.js');
+const { normalizeQuery, query, count, blob, blobNamed, namedBlobs } = require('./reads.js');
 
 // The scopes a hello may ask for: every op of a feed is matched against them.
 const MAX_SCOPES = 256;
@@ -290,6 +291,16 @@ const push = (host) => async (context, args) => {
     if (forged > 0) refuseOps(host, node, 'forged', forged);
     if (unsigned > 0) refuseOps(host, node, 'unsigned', unsigned);
     const result = await host.shared.forward(taking, node, scopes);
+    // The attachments the page names are the writer's to land yet: their bytes are "not yet" this hub's to take
+    // (`blobPut`), rather than unnamed.
+    const named = [];
+    for (let i = 0; i < taking.length; i++) {
+      const op = taking[i];
+      if (!isPlainObject(op.data) || typeof op.id !== 'string') continue;
+      named.length = 0;
+      namedBlobs(op.data, named);
+      for (let j = 0; j < named.length; j++) host.shared.expect(node, `${named[j][1]}/${op.id}/${named[j][0]}`);
+    }
     return {
       ...result,
       forged: result.forged + forged,
@@ -332,15 +343,21 @@ const push = (host) => async (context, args) => {
 // announced before a byte is read), and when their SHA-256 is the digest (400 `BLOB_MISMATCH`); a stream that is
 // not there, or not the size it announced, is 400 `BAD_BLOB`. Without bytes it is a probe: `have` says whether this
 // host holds them, so the bytes cross once, and `stream` whether this connection carries one. A unit that takes no
-// pushes takes no bytes (403 `READ_ONLY`), nor a hub that cannot write (503), nor a host without a blobs store (403
-// `NOT_SERVED`). Kept, the bytes go on to the hosts this node pushed the register to (`landed`).
+// pushes takes no bytes (403 `READ_ONLY`), nor a host without a blobs store (403 `NOT_SERVED`). A hub that cannot
+// write is one of two (the seam's `blobStore`): a FOLLOWER keeps the bytes all the same, in the engine's own store —
+// the one its writer reads; a blob is content-addressed and outside every write set, so no lock and no op is
+// involved — through this same door, which opens once it hears the record: until then a register it forwarded for
+// the peer is 425 `NOT_YET` (`shared.expects`: FORWARD_TTL long, to the node that pushed it and no other — every
+// other miss stays the one 404), so a blob is written only where the writer holds the record naming it and its
+// sweep cannot take it; a hub whose LEASE WAS LOST writes nothing more and says so for good (403 `READ_ONLY`).
+// Kept, the bytes go on to the hosts this node pushed the register to (`landed`).
 const blobPut = (host) => async (context, args) => {
   const { storage, limits } = host;
   const state = peerOf(host, context, 'blobPut');
   const no = (message, code, reason) => refuseCall(host, 'blobPut', message, code, reason, state.node);
   if (!host.allow.push) throw no('This host takes no pushes', 403, 'READ_ONLY');
-  if (storage.readOnly) throw no('This hub is read-only', 503, 'READ_ONLY');
-  const store = storage[DB]?.blobs;
+  const store = storage[SOURCE].blobStore();
+  if (store === null) throw no('This hub lost its lease and writes nothing more: upload to another', 403, 'READ_ONLY');
   if (store === undefined) throw no('This host keeps no blobs', 403, 'NOT_SERVED');
   const { digest, id, name, base64, stream, size } = args ?? {};
   if (!isDigest(digest)) throw no('blobPut needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST');
@@ -365,7 +382,13 @@ const blobPut = (host) => async (context, args) => {
     const max = own ? limits.bytesPerBlob : MAX_BLOB_BYTES;
     const past = () => no(`A blob past ${max} bytes`, 413, own ? 'BYTES_PER_BLOB' : 'BLOB_TOO_LARGE');
     if (streamed ? size > max : base64 !== undefined && base64.length > Math.ceil(max / 3) * 4) throw past();
-    if (!(await blobNamed(host, state, digest, id, name))) throw no('No record of yours names it', 404, 'NOT_NAMED');
+    if (!(await blobNamed(host, state, digest, id, name))) {
+      // No refusal: the course of an upload through a follower, neither logged nor counted as one.
+      if (storage.readOnly && host.shared !== null && host.shared.expects(state.node, `${digest}/${id}/${name}`)) {
+        throw coded('The writer has not landed the record that names it yet', 425, 'NOT_YET');
+      }
+      throw no('No record of yours names it', 404, 'NOT_NAMED');
+    }
     if (await store.has(digest)) return { digest, have: true };
     if (!streamed && base64 === undefined) return { digest, have: false, stream: streams(client) };
     const bytes = streamed ? await collect(readable, size) : fromBase64(base64);
@@ -490,7 +513,11 @@ const sharedChanges = async function* (host, context, args, subscription) {
           if (parsed !== null && parsed !== undefined) {
             for (let i = 0; i < parsed.ops.length; i++) {
               const op = parsed.ops[i];
-              if (opInScope(op, scopes) && op.origin !== node && op.from !== node) ops.push(op);
+              if (op.origin === node) {
+                // The peer's own op, landed by a writer: no page for it, but the lull after it is told (an idle
+                // page) — what the peer waits for of its own ops, an upload this hub said "not yet" to, is asked again.
+                idle = false;
+              } else if (opInScope(op, scopes) && op.from !== node) ops.push(op);
             }
           }
           cursor = entry.id;

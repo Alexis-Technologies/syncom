@@ -19,7 +19,8 @@ src/sync/rules.js         what the procedures stand on: a refusal on the wire (c
                           hooks.js, protocol.js, scope.js, symbols.js only
 src/sync/reads.js         the thin client's reads: query/count (normalizeQuery, the $regex gate regexRefusal, cursorOf, the scoped walk
                           walkScoped, greeted/ungreet for a hello carried by the call) and blob (blobNamed: served by the record that names
-                          it; blobPut's door too) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js,
+                          it; blobPut's door too; namedBlobs: the registers an op's data names — what a dialer uploads and a forwarding
+                          hub waits for) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js,
                           chunks.js, blobs.js only
 src/sync/chunks.js        a blob's bytes over a link's stream: streams (a host's client that carries binary streams), sendAll (the
                           transport's own writeAll, wrpc ≥ 2.1, then the end) and collect (the pieces read to the size announced, no
@@ -34,7 +35,8 @@ src/sync/outbound.js      outbound(log, { exclude, vector, scopes, own }) — th
 src/sync/shared-log.js    isSharedLog — the shared-log contract (wrpc BrokerLog shape: append/read/parseId); the root barrel exports it — no requires
 src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`): the relay (what this hub accepts → the topic, a batch an
                           entry), the consumer (the topic and the inbox → applyRemote; a read-only hub shadows the vector), the marker a
-                          snapshot is positioned at, a read-only hub's forwarded push; normalizeShared, parseEntry — requires wire.js,
+                          snapshot is positioned at, a read-only hub's forwarded push, what its pages named (expect/expects) and the
+                          bytes a follower kept (landed → the inbox); normalizeShared, parseEntry — requires wire.js,
                           protocol.js, shared-log.js, vector.js, shape.js, errors.js, hooks.js only
 ```
 
@@ -151,10 +153,25 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   digest under `allow.blob` `'named'` (the default) only where a live record in the peer's scopes names it under the
   name the call gives (`blobNamed`: the catalog's row, the seam's `load`, `ATTACHMENTS_FIELD` of protocol.js, the
   scope function) — one 404 for every miss, so nothing is told — and by digest alone under `'any'`. `blobPut` takes
-  bytes through the same door (404 `NOT_NAMED`; `allow.push`, a writing hub, a blobs store, `limits.bytesPerBlob` and
+  bytes through the same door (404 `NOT_NAMED`; `allow.push`, a blobs store, `limits.bytesPerBlob` and
   the cap, the digest hashed over the bytes) and hands what it kept to `landed` — the manager uploads it on to the
   hosts that wait for it (`#blobLanded`); the dialer uploads what a page the host took names after the page, on the
-  push chain (`#noteUploads`, `#upload`), never as a push of its own. What waits is the NODE's, not the peer's, and
+  push chain (`#noteUploads`, `#upload`), never as a push of its own. A hub that cannot write is one of two, and
+  the seam says which (`storage[SOURCE].blobStore()`: the engine's own store, undefined where it keeps none, NULL
+  once the lease was lost — never `storage.readOnly`, which is true of both): a FOLLOWER takes the bytes into the
+  engine's store — the one its writer reads, a blob content-addressed and outside every write set, no lock, no op —
+  through the same door, which opens only once it HEARS the record (the engine's change stream), so a blob is
+  written only where the writer holds the record naming it; a register it forwarded for the peer is 425 `NOT_YET`
+  until then (`SharedHub.expect`/`expects`: the host's key `<digest>/<id>/<name>` by the node that pushed it,
+  `FORWARD_TTL` long, `MAX_EXPECTED` a node, in memory — to that node and no other, every other miss the one 404;
+  thrown through `coded`, never `refuseCall`: no refusal, neither logged nor counted), and what it kept it tells the
+  writer through the inbox (`SharedHub.landed`, the `{ v, node, landed }` entry → `manager.adoptBlob` →
+  `#blobLanded`: a writer that dials relayed the register before the bytes were in its store). A hub whose LEASE
+  WAS LOST writes nothing more and refuses for good (403 `READ_ONLY`, final at the dialer — never 503, which the
+  dialer tried again at every push for ever). The dialer notes a forwarded page like any other; 425 leaves the entry
+  and reports nothing (`peer.deferred`), and the host's next IDLE page asks again (`#receive`, on the push chain) —
+  which is why `sharedChanges` resets `idle` on the peer's own op: the lull after an echo is told, though the echo
+  makes no page. No timer and no count on the dialer: the wait is the host's to end. What waits is the NODE's, not the peer's, and
   on disk (src/sync/uploads.js: `uploads.json` of the root kv, written when an entry is noted and when one goes —
   uploaded, refused for good, past `MAX_UPLOADS`, its node removed — coalesced, never awaited by a push, a failed
   write logged): `peer.uploads` is the node's Map, so a peer dialed again — a reconnect, a restart — takes up what

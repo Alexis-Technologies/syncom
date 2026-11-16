@@ -683,6 +683,18 @@ test('Hubs over a shared log', async (t) => {
         'the A ops alone: not B, not the echo',
       );
       for (const page of received) assert.strictEqual(page.eventId, page.value.eventId);
+      // The peer's own op makes no page, but the lull after it is told: an idle page at its entry — what the peer
+      // waits for of its own ops (an upload a follower said "not yet" to) is asked again then.
+      await waitUntil(() => received[received.length - 1].value.idle === true);
+      const quiet = received.length;
+      const before = received[quiet - 1].eventId;
+      await link.call('syncom/push', { ops: packOps([{ ...own, seq: 2, id: 'own-2' }]) });
+      await waitUntil(() => received.length > quiet);
+      await sleep(80);
+      assert.strictEqual(received.length, quiet + 1, 'one page: none for the echo itself');
+      assert.deepStrictEqual(received[quiet].value.ops, []);
+      assert.strictEqual(received[quiet].value.idle, true);
+      assert.notStrictEqual(received[quiet].eventId, before, 'labelled at the entry that carried the echo');
       // A cursor of another log: the feed ends with bootstrap.
       const foreign = [];
       link.subscribe('syncom/changes', { scopes: ['A'] }, { lastEventId: 'other.5', onData: (v) => foreign.push(v) });

@@ -81,6 +81,9 @@ const FORWARD_TTL = 30_000;
 // How long `stop()` waits for an append in flight before it lets go of it (`sharedLog.stopWait`): what it carried
 // is above the watermark, so the next start appends it again.
 const DEFAULT_STOP_WAIT = 5000;
+// What a read-only hub remembers of the pages one node pushed and it forwarded (`expect`), the oldest let go past
+// it: what a dialer keeps to upload to one host (MAX_UPLOADS, src/sync/uploads.js) — it asks for no more.
+const MAX_EXPECTED = 1024;
 const NOOP = () => {};
 
 const token = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
@@ -129,6 +132,9 @@ const markText = (node) => JSON.stringify({ v: ENTRY_VERSION, node, mark: true }
 // What a writer did not take of an inbox entry — `[[key, seq]…]`, each op's stream key and seq — for the followers
 // to let go of the hold they keep for it.
 const droppedText = (node, dropped, inbox) => JSON.stringify({ v: ENTRY_VERSION, node, dropped, inbox });
+// The digests of the bytes a read-only hub kept in the engine's store (a peer's upload), told to the writer through
+// the inbox: its manager sends them on to the hosts it dials.
+const landedText = (node, landed) => JSON.stringify({ v: ENTRY_VERSION, node, landed });
 // A revocation (`sync.revoke`), for every hub of the log to fold: the node and the scopes taken back from it.
 const revokeText = (node, revoked, scopes) =>
   JSON.stringify({ v: ENTRY_VERSION, node, revoke: { node: revoked, scopes } });
@@ -166,7 +172,8 @@ const revokeOf = (value) => {
  * appender's node id, the ops unpacked, the scopes an inbox entry was
  * forwarded under or null) — with `dropped` (`[[key, seq]…]`, `ops` empty)
  * for what a writer did not take of an inbox entry, with `revoke`
- * (`{ node, scopes }`, `ops` empty) for scopes a hub took back from a node —
+ * (`{ node, scopes }`, `ops` empty) for scopes a hub took back from a node,
+ * with `landed` (digests, `ops` empty) for bytes a read-only hub kept —
  * null for a marker, undefined for a text that is no entry of ours.
  */
 const parseEntry = (text) => {
@@ -186,6 +193,7 @@ const parseEntry = (text) => {
     const revoke = revokeOf(value.revoke);
     return revoke === null ? undefined : { node: value.node, ops: [], scopes: null, revoke };
   }
+  if (Array.isArray(value.landed)) return { node: value.node, ops: [], scopes: null, landed: value.landed };
   if (!Array.isArray(value.ops)) return undefined;
   return { node: value.node, ops: unpackOps(value.ops), scopes: scopesOf(value.scopes) };
 };
@@ -245,6 +253,10 @@ class SharedHub {
   // What a read-only hub forwarded and the topic has not shown yet: a client's stream held at it (`{ seq, at }` by
   // stream key), let go of as the shadow passes it, a writer drops it, or FORWARD_TTL passes.
   #forwarded = new Map();
+  // What the pages a read-only hub forwarded named for the writer to land, by the node that pushed them: the host's
+  // keys (an attachment's digest, record and name), each with when — "not yet" rather than "not named" to that
+  // node, FORWARD_TTL long (`expects`). `{ keys, at }` a node, `at` its newest.
+  #expected = new Map();
   // A writing hub's vector as its reads reflect it: every op offered (announced, so landed), none merely reserved —
   // what a hello and a snapshot's first page answer, so a client takes as seen nothing a page could lack.
   #relayed;
@@ -665,6 +677,9 @@ class SharedHub {
         } else if (this.#storage.readOnly) {
           if (name === 'inbox') return false;
           this.#shadowAdvance(parsed.ops);
+        } else if (parsed.landed !== undefined) {
+          // A follower kept bytes in the store this hub reads: sent on to the hosts this hub dials.
+          for (let i = 0; i < parsed.landed.length; i++) this.#manager.adoptBlob?.(parsed.landed[i]);
         } else if (parsed.ops.length > 0 && !(await this.#apply(name, topic, entry, parsed))) return false;
       }
     }
@@ -953,6 +968,47 @@ class SharedHub {
       .catch((error) => this.#logger.warn({ event: 'shared.revoke.failed', topic: this.#topic, node, err: error }));
   }
 
+  /**
+   * A key a page `node` pushed here named, forwarded for the writer to land (the host's: an attachment's digest,
+   * record and name): remembered FORWARD_TTL, `MAX_EXPECTED` at most, the oldest let go.
+   */
+  expect(node, key) {
+    const now = Date.now();
+    let held = this.#expected.get(node);
+    if (held === undefined) this.#expected.set(node, (held = { keys: new Map(), at: now }));
+    held.at = now;
+    held.keys.delete(key);
+    held.keys.set(key, now);
+    // The node's own bound: one peer's pages never cost another its wait.
+    if (held.keys.size > MAX_EXPECTED) held.keys.delete(held.keys.keys().next().value);
+  }
+
+  /**
+   * Whether `node` pushed a page naming `key` that this hub forwarded and the writer may not have landed yet — "not
+   * yet" rather than "not named", to the node that said it and to no other. Past FORWARD_TTL it is forgotten.
+   */
+  expects(node, key) {
+    const keys = this.#expected.get(node)?.keys;
+    const at = keys?.get(key);
+    if (at === undefined) return false;
+    if (Date.now() - at <= FORWARD_TTL) return true;
+    keys.delete(key);
+    return false;
+  }
+
+  /**
+   * Bytes a read-only hub kept in the engine's store (a peer's upload), told to the writer through the inbox: the
+   * store is the one it reads, and it may dial hosts that wait for them. Best effort — untold, they go up at the
+   * writer's next look at what waits (a restart).
+   */
+  landed(digest) {
+    if (!this.#storage.readOnly || this.#inbox === false) return;
+    const text = landedText(this.#storage.nodeId, [digest]);
+    this.#log
+      .append(this.#inbox, text, { headers: { by: this.#token } })
+      .catch((error) => this.#logger.warn({ event: 'shared.landed.failed', topic: this.#inbox, digest, err: error }));
+  }
+
   /** Resolves once the consumer passed the entry `id`; rejects after `timeout` ms. */
   reached(id, timeout = REACH_TIMEOUT) {
     if (this.#recentSet.has(id)) return Promise.resolve();
@@ -980,6 +1036,7 @@ class SharedHub {
     const shadow = this.vector();
     const now = Date.now();
     for (const [key, held] of this.#forwarded) if (now - held.at > FORWARD_TTL) this.#forwarded.delete(key);
+    for (const [pusher, held] of this.#expected) if (now - held.at > FORWARD_TTL) this.#expected.delete(pusher);
     const result = {
       vector: {},
       applied: 0,

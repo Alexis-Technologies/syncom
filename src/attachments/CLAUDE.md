@@ -49,7 +49,9 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   where no stream goes; the host's door is `blobNamed` again, the digest checked over the bytes, `bytesPerBlob`
   and the cap); bytes a relay lacks wait in the node's queue until they land (`#blobLanded`: an upload taken, a fetch
   kept), so a chain of hubs carries them. A refused upload is final, a failed one retried at the next push, both
-  `BLOB_UPLOAD_FAILED`, never the push's failure; a follower takes no bytes. What waits is on disk
+  `BLOB_UPLOAD_FAILED`, never the push's failure. A follower hub takes the bytes too — into the engine's store its
+  writer reads, once it hears the record ("not yet", 425, until then; asked again at its feed's lull) — and a hub
+  whose lease was lost takes none, for good (403; the rule is src/sync/CLAUDE.md's). What waits is on disk
   (src/sync/uploads.js, `uploads.json` of the root kv, 1024 a node): a restart uploads it at the next hello, with
   no new write.
 - **The store is the engine's; the plugin refuses an engine without one.** Every shipped engine keeps `blobs` (memory: a Map;

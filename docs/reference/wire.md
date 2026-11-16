@@ -644,7 +644,10 @@ land under its `authorizeWrite`, `vector` moved past them, a duplicate or a
 gap by the vector the log keeps current — and by what was forwarded before
 and the topic has not shown yet — counted and not forwarded. The hub's own
 vector moves once the topic shows an op; what the writer did not take of an
-inbox entry it names in the topic (`dropped`), and the hold is let go.
+inbox entry it names in the topic (`dropped`), and the hold is let go. The
+attachments a forwarded page names are remembered for the node that pushed
+it, 30 s and 1 024 a node: a [`blobPut`](#blobput) of one answers "not yet"
+until the hub hears the record.
 
 | Code | `reason` | When |
 | --- | --- | --- |
@@ -707,16 +710,32 @@ Past `limits.bytesPerBlob` it is 413 `BYTES_PER_BLOB`, past 64 MiB (`MAX_BLOB_BY
 `BAD_DIGEST` for what is no digest; 400 `BAD_BLOB` for bytes that are no base64 text, for `stream` and `base64`
 together, a `size` that is no non-negative integer, a stream this connection did not announce (or cannot carry), and a
 stream that ended short of its `size` or ran past it; 403 `READ_ONLY` where the unit takes no pushes (`allow.push`
-false), 503 `READ_ONLY` on a hub that cannot write (a follower takes no bytes: upload to a hub that writes), 403
-`NOT_SERVED` on a host without a blobs store; 428 `HELLO_FIRST` before a hello, 403 `UNPROVEN` under `prove`.
+false) and on a hub whose lease was lost, 403 `NOT_SERVED` on a host without a blobs store; 428 `HELLO_FIRST` before
+a hello, 403 `UNPROVEN` under `prove`.
+
+**A hub that cannot write** is one of two. A follower (`readOnly: true`) opens over a shared engine alone, so its
+blobs store is the one its writer reads: it takes the bytes through this same door — the record that names them,
+the limits, the digest — and keeps them in that store. A blob is content-addressed and outside every write set, so
+no lock is held and no op made. The record reaches a follower later than the push it forwarded, so the door is
+shut right after the push; for a register the caller itself pushed through this hub the answer is then 425
+`NOT_YET` rather than 404, for 30 s after the forward (the hub's memory of what it forwarded, 1 024 registers a
+node, lost with the process). Every other miss — another node asking, another name, another digest, a register
+this hub did not forward, one the writer did not land in that time — stays the one 404. A follower so writes a blob
+only where its writer holds the record that names it, and what it kept it tells the writer through the inbox (the
+[`landed`](#the-shared-log) entry), whose manager sends the bytes on to the hosts it dials. A hub whose lease was
+lost is no follower: it writes nothing more, a blob neither, and says so for good — 403 `READ_ONLY`.
 
 The dialer keeps, per host, the attachments a page the host took names (every `_attachments/<name>` entry a
-pushed op sets, by digest, 1 024 at most; none of an op the host refused, none on a page a follower forwarded) and
-uploads the bytes it holds after the page, on the push chain: a probe, then the bytes. Bytes it lacks — a relay
-that never read them — wait until they land here (an upload from a node behind it, a `fetchBlob`), then go up. A
+pushed op sets, by digest, 1 024 at most; none of an op the host refused; a page a hub forwarded is noted like any
+other) and uploads the bytes it holds after the page, on the push chain: a probe, then the bytes. Bytes it lacks — a
+relay that never read them — wait until they land here (an upload from a node behind it, a `fetchBlob`), then go up. A
 refusal (400, 403, 404, 413) is final; a failure on the way — a link that went down with chunks still to send
 fails the call (503) — is tried again at the next push, a reconnect's included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
-`retry`); neither fails the push.
+`retry`); neither fails the push. "Not yet" (425) is neither: the entry stays, nothing is reported, and it is asked
+again at the host's next idle page — a hub's feed sends one after the caller's own ops passed it, which is when the
+writer has landed them — and at the next push or hello. The wait is the host's to end: past its 30 s the answer is
+the bytes taken or the 404, so nothing is asked for ever. An op pushed again (a host whose vector lacks it) is noted
+again.
 
 What waits is saved, so a restart takes it up: `uploads.json` of the root kv namespace holds, per dialed node, the
 `[digest, id, name]` of every entry in the order noted. It is written when an entry is noted and when one goes — its
@@ -847,7 +866,8 @@ read yet), and again after every page with ops: the dialer's `caughtUp`.
 feed when the cursor cannot be resumed — another epoch, or compacted past
 it — and the dialer pages `snapshot` instead. Over a [shared log](#the-shared-log)
 the position is the log's entry id, one page per entry (its ops narrowed to
-the scopes, less the subscriber's own; an empty page at least every 64
+the scopes, less the subscriber's own, which make no page but are followed by
+an idle page at the next lull; an empty page at least every 64
 entries passed), a subscription with no cursor is told to bootstrap, and a
 position the log no longer has — another log's, trimmed past — ends the
 feed with `bootstrap` too.
@@ -1065,7 +1085,9 @@ every hub to fold (`sync.revoke`). `{ v: 1, node, dropped: [[key, seq]…], inbo
 writer did not take of the inbox entry `inbox` — a gap, an equivocation —
 by stream key and seq: a follower lets go of the hold it kept on the
 client's stream for it (an op refused by the rule or as out of scope is
-logged as a withheld scrub and travels as an op). `by` lets a hub pass its own entries without parsing them. A log
+logged as a withheld scrub and travels as an op). `{ v: 1, node, landed: ["<digest>", …] }` is an inbox entry too:
+the bytes a follower kept in the engine's blobs store (a peer's [`blobPut`](#blobput)), which the writer's manager
+sends on to the hosts it dials. `by` lets a hub pass its own entries without parsing them. A log
 may yield a **hole** — `{ id, value: null, headers: { hole: '1' } }`, an id
 whose entry never came (`mongoSharedLog`: a crashed appender's number) —
 which a hub tells (`SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The
@@ -1096,7 +1118,8 @@ What a hub does with the log (`src/sync/shared.js`):
 - **The feeds.** `changes` is served from the topic alone: one page per
   entry, labelled with the entry's id and never split, the ops narrowed to
   the scopes and less the subscriber's own, an empty page at least every 64
-  entries passed and an idle page after 50 ms of nothing. The consumer's one
+  entries passed and an idle page after 50 ms of nothing — after the
+  subscriber's own ops passed too, though they made no page. The consumer's one
   read of the log serves every feed from the last 1 024 entries it passed;
   a feed whose cursor is behind them, or on a stopped hub, reads the log its
   own way until an entry the ring holds comes by.
@@ -1130,7 +1153,9 @@ What a hub does with the log (`src/sync/shared.js`):
   inbox; the shadow moves on topic entries alone, never on a forward, so a
   writer's refusal is never acknowledged for good. It serves no snapshot
   (403 `READ_ONLY`): its shadow runs ahead of its engine. Without an inbox
-  (`inbox: false`) a push is 503 `READ_ONLY`.
+  (`inbox: false`) a push is 503 `READ_ONLY`. A follower takes an
+  attachment's bytes into the engine's store all the same; a hub whose lease
+  was lost takes none, for good ([`blobPut`](#blobput)).
 - **The writer over the inbox** rules each entry as it rules a push — its
   `authorizeWrite` and the client's scopes, a refusal logged as a withheld
   scrub and relayed — tells each refusal through the `refused` event (`via:

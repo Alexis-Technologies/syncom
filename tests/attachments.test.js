@@ -776,6 +776,177 @@ test('Attachments', async (t) => {
   );
 
   await t.test(
+    'a follower hub over a shared engine takes the bytes: A dials the follower, B the writer, and B reads what A attached; not yet until the writer landed the register, then asked again at the feed’s lull; the writer sends them on',
+    async (t2) => {
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const { createMemorySharedLog } = require('./utils/shared-log.js');
+      const log = createMemorySharedLog();
+      // U is a host the writer dials. W and F are one database over one engine — the writer and a follower beside
+      // it — sharing a log; a load balancer hands a fresh client to W (a follower serves no snapshot), then to F.
+      const u = await createStorage(t2, 'U');
+      const upstream = u.sync.unit({ access: 'public' });
+      const w = await createStorage(t2, 'HUB', {
+        sync: { sharedLog: log, connect: () => new MemoryLink(upstream), autoStart: false },
+      });
+      await w.sync.addNode({ url: 'mem://U' });
+      await w.sync.start();
+      await w.sync.awaitInitialReplication();
+      const warnings = [];
+      const logger = { warn: (event) => warnings.push(event), error: () => {}, info: () => {}, debug: () => {} };
+      const f = await createStorage(t2, 'HUB', { readOnly: true, logger, sync: { sharedLog: log } });
+      assert.strictEqual(f.readOnly, true);
+      const units = new Map([
+        ['W', w.sync.unit({ access: 'public' })],
+        ['F', f.sync.unit({ access: 'public' })],
+      ]);
+      units.set('LB', units.get('W'));
+      let dial = null;
+      const connect = (node) => (dial = new MemoryLink(units.get(node.url.slice('mem://'.length))));
+      const a = await createStorage(t2, 'A', { sync: { connect, autoStart: false } });
+      const b = await createStorage(t2, 'B', { sync: { connect, autoStart: false } });
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      await a.sync.addNode({ url: 'mem://LB' });
+      await b.sync.addNode({ url: 'mem://W' });
+      await a.sync.start();
+      await b.sync.start();
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      await a.sync.stop();
+      units.set('LB', units.get('F'));
+      await a.sync.start();
+      await waitUntil(() => a.sync.peers()[0]?.subscribed && f.sync.hosted().length === 1);
+      const link = dial;
+
+      // A attaches through the follower: the register is forwarded to the writer, the bytes follow it into the
+      // engine's store once the follower hears the record.
+      const id = await a.insert({ title: 'through a follower' });
+      const bytes = new Uint8Array(3000).fill(9);
+      const entry = await a.attachments.put(id, 'photo.bin', bytes, { type: 'image/x-test' });
+      await waitUntil(() => f[DB].blobs.has(entry.digest));
+      assert.strictEqual(await w.attachments.has(id, 'photo.bin'), true, 'one store: the writer reads them');
+      assert.deepStrictEqual((await w.get(id))[FIELD], { 'photo.bin': entry });
+      assert.deepStrictEqual(errors, [], 'not yet is no failure: nothing was reported');
+      assert.ok(f.sync.shared().forwarded >= 2, 'the pages went through the inbox');
+      // B, who dials the writer, reads them.
+      await waitUntil(() => b.hasRecord(id));
+      assert.strictEqual(await b.attachments.has(id, 'photo.bin'), false);
+      same((await b.attachments.get(id, 'photo.bin')).bytes, bytes);
+      // The writer relayed the register to the host it dials before the bytes were in its store: told by the
+      // follower (the inbox), it sends them on.
+      await waitUntil(() => u.attachments.has(id, 'photo.bin'));
+      // The follower wrote them where the writer holds the record that names them: a sweep takes nothing.
+      assert.deepStrictEqual(await w.attachments.sweep(), { blobs: 1, marked: 1, removed: 0, pending: 0 });
+      assert.strictEqual(await f[DB].blobs.has(entry.digest), true);
+
+      // The writer's consumer stopped: a page the follower forwarded stays in the inbox, the record names nothing
+      // yet, and the follower says so — "not yet" (425), to the node that pushed the register and to no other.
+      await w.sync.stop();
+      const { packOps } = require('../src/ops.js');
+      const { toBase64 } = require('../src/crypto/pem.js');
+      const probe = new MemoryLink(units.get('F'));
+      await probe.call('syncom/hello', { node: 'probe', version: 1 });
+      const other = new MemoryLink(units.get('F'));
+      await other.call('syncom/hello', { node: 'other', version: 1 });
+      const held = bytesOf('held');
+      const lapsed = bytesOf('lapsed');
+      const register = async (value) => ({ digest: await hashBytes(value), type: 'text/plain', length: value.length });
+      const [r1, r2] = [await register(held), await register(lapsed)];
+      const op = (seq, record, data) => ({
+        origin: 'probe',
+        seq,
+        ts: Date.now() + seq,
+        type: 'write',
+        id: record,
+        data,
+      });
+      const pushed = await probe.call('syncom/push', {
+        ops: packOps([op(1, 'p1', { [`${FIELD}/f`]: r1 }), op(2, 'p2', { [`${FIELD}/f`]: r2 })]),
+      });
+      assert.strictEqual(pushed.forwarded, true);
+      const named = { digest: r1.digest, id: 'p1', name: 'f' };
+      const notYet = { code: 425, reason: 'NOT_YET' };
+      await assert.rejects(probe.call('syncom/blobPut', named), notYet);
+      await assert.rejects(probe.call('syncom/blobPut', { ...named, base64: toBase64(held) }), notYet);
+      assert.strictEqual(
+        await w[DB].blobs.has(r1.digest),
+        false,
+        'no byte ahead of the record: nothing a sweep could take',
+      );
+      // Every other miss is the one 404, which tells nothing: another node, another name, another digest.
+      const unnamed = { code: 404, reason: 'NOT_NAMED' };
+      await assert.rejects(other.call('syncom/blobPut', named), unnamed);
+      await assert.rejects(probe.call('syncom/blobPut', { ...named, name: 'g' }), unnamed);
+      await assert.rejects(probe.call('syncom/blobPut', { ...named, digest: r2.digest }), unnamed);
+      // Never forever: past FORWARD_TTL (30 s) a register the writer did not land is not named, for good.
+      const now = Date.now;
+      Date.now = () => now() + 31_000;
+      try {
+        await assert.rejects(probe.call('syncom/blobPut', { digest: r2.digest, id: 'p2', name: 'f' }), unnamed);
+        // The next page the follower forwards (an op that names nothing) lets go of every node whose registers lapsed.
+        const inc = { origin: 'other', seq: 1, ts: now(), type: 'inc', id: 'p1', key: 'n', value: 1 };
+        assert.strictEqual((await other.call('syncom/push', { ops: packOps([inc]) })).forwarded, true);
+      } finally {
+        Date.now = now;
+      }
+      await assert.rejects(probe.call('syncom/blobPut', { digest: r2.digest, id: 'p2', name: 'f' }), unnamed);
+      await assert.rejects(probe.call('syncom/blobPut', named), unnamed);
+      // And bounded: of 1030 registers one node pushed in a page, the follower waits for the newest 1024.
+      const bulk = new MemoryLink(units.get('F'));
+      await bulk.call('syncom/hello', { node: 'bulk', version: 1 });
+      const digestOf = (n) => n.toString(16).padStart(64, '0');
+      const many = {};
+      for (let i = 0; i < 1030; i++) many[`${FIELD}/f${i}`] = { digest: digestOf(i), type: 'x/y', length: 1 };
+      await bulk.call('syncom/push', { ops: packOps([{ ...op(1, 'p3', many), origin: 'bulk' }]) });
+      const one = (n) => bulk.call('syncom/blobPut', { digest: digestOf(n), id: 'p3', name: `f${n}` });
+      await assert.rejects(one(5), unnamed);
+      await assert.rejects(one(6), notYet);
+      await assert.rejects(one(1029), notYet);
+      // A, behind the same follower: its upload waits without a word, and goes up once the writer is back — at the
+      // lull of the feed after its own ops passed, with no new write.
+      const calls = (method) => link.calls.filter((called) => called === method).length;
+      const asked = calls('syncom/blobPut');
+      const second = await a.attachments.put(id, 'later.bin', bytesOf('later'), { type: 'text/plain' });
+      await waitUntil(() => calls('syncom/blobPut') > asked);
+      await a.sync.awaitInSync();
+      assert.strictEqual(await f[DB].blobs.has(second.digest), false);
+      assert.deepStrictEqual(errors, []);
+      const pushes = calls('syncom/push');
+      await w.sync.start();
+      await waitUntil(() => f[DB].blobs.has(second.digest));
+      assert.deepStrictEqual(errors, []);
+      assert.strictEqual(calls('syncom/push'), pushes, 'no page was pushed for it');
+      // The register the probe pushed has landed: the same door takes its bytes now, checked as a writer checks them.
+      await waitUntil(() => f.hasRecord('p1'));
+      assert.deepStrictEqual(await probe.call('syncom/blobPut', named), {
+        digest: r1.digest,
+        have: false,
+        stream: false,
+      });
+      await assert.rejects(probe.call('syncom/blobPut', { ...named, base64: toBase64(bytesOf('forged')) }), {
+        code: 400,
+        reason: 'BLOB_MISMATCH',
+      });
+      // The inbox down for one append: the bytes are kept all the same, and what the writer was not told is logged.
+      // An inbox entry that names no digest is passed.
+      await log.append('syncom.inbox', JSON.stringify({ v: 1, node: 'x', landed: ['no digest', 7] }), {
+        headers: { by: 'a hand' },
+      });
+      log.fail('syncom.inbox');
+      assert.deepStrictEqual(await probe.call('syncom/blobPut', { ...named, base64: toBase64(held) }), {
+        digest: r1.digest,
+        have: true,
+      });
+      await waitUntil(() => warnings.some((event) => event.event === 'shared.landed.failed'));
+      assert.strictEqual(warnings.find((event) => event.event === 'shared.landed.failed').digest, r1.digest);
+      same((await w.attachments.get('p1', 'f', { fetch: false })).bytes, held);
+      assert.strictEqual((await w.attachments.sweep()).removed, 0);
+      // A follower's database refuses a put of its own all the same: the door is the host's, not the wrapper's.
+      await assert.rejects(f[DB].blobs.put(r2.digest, lapsed), { code: 'READ_ONLY' });
+    },
+  );
+
+  await t.test(
     'syncom/blobPut takes the bytes a live record in the peer’s scopes names, checked against the digest and the limits; a probe without bytes answers whether the host holds them',
     async (t2) => {
       const scope = (id, data) => data.$type ?? '*';
@@ -839,6 +1010,22 @@ test('Attachments', async (t) => {
       // Before hello there is no peer to take bytes from.
       const stranger = new MemoryLink(host.sync.unit({ access: 'public' }));
       await assert.rejects(stranger.call('syncom/blobPut', { digest, id, name: 'f' }), { code: 428 });
+      // A host over an engine without a blobs store keeps none.
+      const plain = syncom.memoryEngine();
+      const without = Object.freeze({
+        name: 'no-blobs',
+        capabilities: Object.freeze({ ...plain.capabilities, blobs: false }),
+        open: async (path, options) => {
+          const { blobs, ...rest } = await plain.open(path, options);
+          return Object.freeze(rest);
+        },
+        remove: (path) => plain.remove(path),
+      });
+      const bare = await syncom.createDatabase({ engine: without, path: 'bare', logger: false });
+      t2.after(() => bare.close().catch(() => {}));
+      const none = new MemoryLink(bare.sync.unit({ access: 'public' }));
+      await none.call('syncom/hello', { node: 'peer', version: 1 });
+      await assert.rejects(none.call('syncom/blobPut', { digest, id, name: 'f' }), { code: 403, reason: 'NOT_SERVED' });
     },
   );
 

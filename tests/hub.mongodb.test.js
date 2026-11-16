@@ -11,6 +11,8 @@ const assert = require('node:assert');
 const syncom = require('../src/all/all.js');
 const { packOps } = require('../src/ops.js');
 const { mongoEngine, mongoSharedLog } = require('../src/mongodb/mongodb.js');
+const { attachments, FIELD } = require('../src/attachments/attachments.js');
+const { DB } = require('../src/symbols.js');
 const { createFakeMongo } = require('./utils/fake-mongo.js');
 const { MemoryLink } = require('./utils/memory-link.js');
 const { waitUntil } = require('./utils/mesh.js');
@@ -507,6 +509,149 @@ test('A writer and a follower hub over one MongoDB database', async (t) => {
         (error) => error.code === 403 && error.reason === 'READ_ONLY',
       );
       await sleep(10);
+    },
+  );
+
+  await t.test(
+    'a follower over MongoDB keeps a peer’s upload in the blobs collection its writer reads: a client of the follower attaches, a client of the writer reads the bytes',
+    async (t2) => {
+      const client = createFakeMongo();
+      const log = () => mongoSharedLog({ client, poll: 20 });
+      const plugins = [attachments()];
+      const hub = { ...base, path: 'hub', engine: mongoEngine({ client }), plugins };
+      const writer = await syncom.createDatabase({ ...hub, sync: { sharedLog: log() } });
+      t2.after(() => writer.close().catch(() => {}));
+      const follower = await syncom.createDatabase({ ...hub, readOnly: true, sync: { sharedLog: log() } });
+      t2.after(() => follower.close().catch(() => {}));
+      const units = new Map([
+        ['W', writer.sync.unit({ access: 'public' })],
+        ['F', follower.sync.unit({ access: 'public' })],
+      ]);
+      units.set('LB', units.get('W'));
+      const connect = (node) => new MemoryLink(units.get(node.url.slice('mem://'.length)));
+      const open = async (path) => {
+        const db = await syncom.createDatabase({
+          ...base,
+          path,
+          engine: syncom.memoryEngine(),
+          plugins,
+          sync: { connect, autoStart: false },
+        });
+        t2.after(() => db.close().catch(() => {}));
+        return db;
+      };
+      const [a, b] = [await open('a'), await open('b')];
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      await a.sync.addNode({ url: 'mem://LB' });
+      await b.sync.addNode({ url: 'mem://W' });
+      await a.sync.start();
+      await b.sync.start();
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      // The load balancer moves A to the follower.
+      await a.sync.stop();
+      units.set('LB', units.get('F'));
+      await a.sync.start();
+      await waitUntil(() => a.sync.peers()[0]?.subscribed && follower.sync.hosted().length === 1);
+      const id = await a.insert({ title: 'through a follower' });
+      const bytes = new Uint8Array(5000).fill(4);
+      const entry = await a.attachments.put(id, 'scan.bin', bytes, { type: 'x/y' });
+      await waitUntil(() => writer.attachments.has(id, 'scan.bin'), { timeout: 10_000 });
+      assert.deepStrictEqual((await writer.get(id))[FIELD], { 'scan.bin': entry });
+      assert.deepStrictEqual(errors, [], 'the wait for the writer is no failure');
+      await waitUntil(() => b.hasRecord(id));
+      assert.deepStrictEqual([...(await b.attachments.get(id, 'scan.bin')).bytes], [...bytes]);
+      assert.strictEqual((await writer.attachments.sweep()).removed, 0, 'written where the writer holds the record');
+    },
+  );
+
+  await t.test(
+    'a hub whose lease was lost takes no bytes, for good: 403 READ_ONLY, reported once by the dialer and never asked again',
+    async (t2) => {
+      const client = createFakeMongo();
+      const plugins = [attachments()];
+      const log = () => mongoSharedLog({ client, poll: 20 });
+      const engine = mongoEngine({ client, name: 'leased' });
+      const hub = await syncom.createDatabase({
+        ...base,
+        path: 'hub',
+        engine,
+        lock: { staleAfter: 200 },
+        plugins,
+        sync: { sharedLog: log() },
+      });
+      t2.after(() => hub.close().catch(() => {}));
+      const unit = hub.sync.unit({ access: 'public' });
+      let dial = null;
+      const dialer = await syncom.createDatabase({
+        ...base,
+        path: 'dialer',
+        engine: syncom.memoryEngine(),
+        plugins,
+        sync: { connect: () => (dial = new MemoryLink(unit)), autoStart: false },
+      });
+      t2.after(() => dialer.close().catch(() => {}));
+      await dialer.sync.addNode({ url: 'mem://hub' });
+      await dialer.sync.start();
+      await dialer.sync.awaitInitialReplication();
+      // The lease lapses on the server's clock and another instance takes it: the hub is read-only from here on —
+      // no follower, a writer that was — and forwards what it is pushed to the inbox, which its successor lands.
+      hub.on('error', () => {});
+      client.advance(201);
+      const successor = await syncom.createDatabase({
+        ...base,
+        path: 'hub',
+        engine,
+        plugins,
+        sync: { sharedLog: log() },
+      });
+      t2.after(() => successor.close().catch(() => {}));
+      await waitUntil(() => hub.readOnly);
+      assert.strictEqual(hub.stats().lock.lost, true);
+      const errors = [];
+      dialer.sync.on('error', (error) => errors.push(error));
+      const id = await dialer.insert({ title: 'to a hub that writes nothing more' });
+      const entry = await dialer.attachments.put(id, 'f.bin', new Uint8Array(64).fill(2), { type: 'x/y' });
+      await waitUntil(() => errors.length > 0);
+      await dialer.sync.awaitInSync();
+      const failed = errors.filter((error) => error.code === 'BLOB_UPLOAD_FAILED');
+      assert.strictEqual(failed.length, 1, 'reported once');
+      assert.deepStrictEqual(
+        [failed[0].digest, failed[0].cause.code, failed[0].cause.reason, failed[0].retry],
+        [entry.digest, 403, 'READ_ONLY', false],
+      );
+      const asked = () => dial.calls.filter((method) => method === 'syncom/blobPut').length;
+      assert.strictEqual(asked(), 1, 'the probe alone: no byte was sent');
+      // The push went on — forwarded, landed by the successor — and the store took nothing: the hub did not try.
+      await waitUntil(() => successor.hasRecord(id), { timeout: 10_000 });
+      assert.deepStrictEqual((await successor.get(id))[FIELD], { 'f.bin': entry });
+      assert.strictEqual(await successor[DB].blobs.has(entry.digest), false);
+      // Gone from what waits: another push, the feed's lull and a reconnect ask nothing more.
+      const queued = await dialer[DB].kv.get('', 'uploads.json');
+      assert.deepStrictEqual(JSON.parse(queued), { v: 1, nodes: {} });
+      await dialer.update(id, { n: 1 });
+      await waitUntil(async () => (await successor.get(id)).n === 1, { timeout: 10_000 });
+      await dialer.sync.awaitInSync();
+      // The hub's vector — the log's, as its hello answers it — shows the ops: a reconnect pushes none of them again.
+      const seen = new MemoryLink(unit);
+      await waitUntil(async () => {
+        const { vector } = await seen.call('syncom/hello', { node: 'seen', version: 1 });
+        return vector[dialer.nodeId] === dialer.vector[dialer.nodeId];
+      });
+      const first = dial;
+      first.disconnect();
+      await first.reconnect();
+      await dialer.sync.awaitInSync();
+      assert.strictEqual(asked(), 1);
+      assert.strictEqual(errors.filter((error) => error.code === 'BLOB_UPLOAD_FAILED').length, 1);
+      // Asked by hand, with the bytes or without: the same answer.
+      const probe = new MemoryLink(unit);
+      await probe.call('syncom/hello', { node: 'probe', version: 1 });
+      await assert.rejects(probe.call('syncom/blobPut', { digest: entry.digest, id, name: 'f.bin' }), {
+        code: 403,
+        reason: 'READ_ONLY',
+      });
     },
   );
 });

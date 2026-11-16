@@ -139,6 +139,9 @@ class Database extends Emitter {
   // A follower (`readOnly: true`), or a writer whose lease was lost: every write is READ_ONLY.
   #readOnly = false;
   #leaseLost = false;
+  // The engine's own blobs store, past the wrapper that refuses a follower's writes (the `[SOURCE]` seam's
+  // `blobStore`); undefined where the engine keeps none.
+  #rawBlobs;
   // What another instance wrote, heard through the engine's change stream (a
   // follower): read one message after another; what came before the
   // collections were up waits.
@@ -391,6 +394,7 @@ class Database extends Emitter {
     // The engine's database: every store the open reads and writes through.
     const opened = await this.#engine.open(this.#path, { logger: this.#logger, durable: this.#settings.durable });
     const db = checkEngineDb(opened, 'createDatabase({ engine })');
+    this.#rawBlobs = db.blobs;
     // A follower reads through the engine and writes nothing — not even the
     // log's index — so it holds no lock: the writer does.
     this.#db = this.#readOnly ? readOnlyDb(db, (what) => this.#refused(what)) : db;
@@ -1233,6 +1237,12 @@ class Database extends Emitter {
           }
         }
       },
+      // The blobs store a peer's upload is kept in (the sync host's `blobPut`): the engine's own. A follower's too,
+      // past the wrapper that refuses its writes — it opens over a `shared` engine alone, so the store is the one
+      // its writer reads, and a blob is content-addressed and outside every write set: no lock is held for it, no
+      // op made. Undefined where the engine keeps none; null once this instance lost its lease — it writes
+      // nothing more, a blob neither.
+      blobStore: () => (this.#leaseLost ? null : this.#rawBlobs),
       // A plugin's own write (a local document) refused as the queue would refuse a write: closed, or read-only.
       guard: (what) => {
         if (this.#closed) throw new SyncomError('CLOSED', 'Storage is closed');

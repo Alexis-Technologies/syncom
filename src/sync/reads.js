@@ -194,6 +194,19 @@ const query = (host) => async (context, args) => {
 // what is no digest, 404 where this host holds no bytes (or has no blobs store). `blobNamed` is `blobPut`'s door
 // too (src/sync/hosting.js): a peer uploads only the bytes a record it may read names.
 
+// The attachments an op's data names — the `_attachments/<name>` registers, kept apart as an op and a record file
+// keep every path — each `[name, digest]`, pushed onto `out`: what a dialer uploads after a push, and what a hub
+// that forwarded the page waits for its writer to land.
+const ATTACHMENTS_PREFIX = `${ATTACHMENTS_FIELD}/`;
+const namedBlobs = (data, out) => {
+  for (const key of Object.keys(data)) {
+    const entry = data[key];
+    if (key.startsWith(ATTACHMENTS_PREFIX) && isPlainObject(entry) && isDigest(entry.digest)) {
+      out.push([key.slice(ATTACHMENTS_PREFIX.length), entry.digest]);
+    }
+  }
+};
+
 const blobNamed = async (host, state, digest, id, name) => {
   if (typeof id !== 'string' || typeof name !== 'string') return false;
   const { row, load } = host.storage[SOURCE];
@@ -274,4 +287,4 @@ const count = (host) => async (context, args) => {
  * a schema that disagrees with this node's.
  */
 
-module.exports = { normalizeQuery, query, count, blob, blobNamed };
+module.exports = { normalizeQuery, query, count, blob, blobNamed, namedBlobs };

@@ -6,6 +6,7 @@ import { MemoryBroker } from '@alexify/wrpc/broker';
 import { createDatabase } from '@alexify/syncom/all';
 import { createWrpcLink } from '@alexify/syncom/wrpc';
 import { memoryEngine } from '@alexify/syncom/memory';
+import { attachments } from '@alexify/syncom/attachments';
 
 const schema = { entities: { Task: { index: ['done'] } } };
 const connect = async (node) => createWrpcLink(await WrpcClient.connect(node.url));
@@ -92,8 +93,16 @@ const engine = memoryEngine();
 const log = new MemoryBroker({ logger: false }).log;
 // The writer holds the database and lands every op; a follower reads the records it lands and hosts over the log
 // (server-scaling-mongodb.mjs, which the page shows, does the same over MongoDB).
-const writer = await createDatabase({ path: 'hub', engine, schema, sync: { sharedLog: log } });
-const follower = await createDatabase({ path: 'hub', engine, schema, readOnly: true, sync: { sharedLog: log } });
+const plugins = [attachments()];
+const writer = await createDatabase({ path: 'hub', engine, schema, plugins, sync: { sharedLog: log } });
+const follower = await createDatabase({
+  path: 'hub',
+  engine,
+  schema,
+  plugins,
+  readOnly: true,
+  sync: { sharedLog: log },
+});
 const followerRouter = defineRouter({ syncom: follower.sync.unit({ access: 'public' }) });
 const serverW = await serve(writer, 8305);
 const serverF = new Server({ router: followerRouter, host: '127.0.0.1', port: 8306, protocol: 'http', logger: false });
@@ -103,6 +112,7 @@ let tabletTarget = 'ws://127.0.0.1:8305/api';
 const tablet = await createDatabase({
   path: 'tablet',
   schema,
+  plugins,
   logger: false,
   sync: { connect: async () => createWrpcLink(await WrpcClient.connect(tabletTarget)) },
 });
@@ -119,6 +129,16 @@ const viaFollower = await tablet.Task.insert({ title: 'Pushed to the follower', 
 await wait(async () => (await writer.Task.get(viaFollower.id)) !== null);
 await wait(async () => (await follower.Task.get(viaFollower.id)) !== null);
 assert.ok(follower.sync.shared().forwarded >= 1);
+// An attachment goes up through the follower too. It forwards the entry, answers "not yet" until the writer has
+// landed it, then takes the bytes — a stream over the WebSocket — into the database's blob store, the one the
+// writer reads.
+const uploadErrors = [];
+tablet.sync.on('error', (error) => uploadErrors.push(error));
+const photo = new Uint8Array(200_000).fill(7);
+await tablet.attachments.put(viaFollower.id, 'photo.jpg', photo, { type: 'image/jpeg' });
+await wait(() => writer.attachments.has(viaFollower.id, 'photo.jpg'));
+assert.equal((await writer.attachments.get(viaFollower.id, 'photo.jpg', { fetch: false })).bytes.length, 200_000);
+assert.deepEqual(uploadErrors, [], 'the wait for the writer is not reported');
 // A fresh client cannot bootstrap from a follower: it serves no snapshot.
 const fresh = await createDatabase({ path: 'fresh', schema, logger: false, sync: { connect } });
 const freshErrors = [];

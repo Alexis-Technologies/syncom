@@ -27,8 +27,9 @@ const { isSyncLink } = require('./link.js');
 const { writerOf, traced } = require('../telemetry/writer.js');
 const { notify, runHook, normalizeHooks } = require('../hooks.js');
 const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
-const { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf, proveMessage } = require('./protocol.js');
+const { PROTOCOL, DEFAULT_PAGE_SIZE, schemaOf, kindsOf, proveMessage } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
+const { namedBlobs } = require('./reads.js');
 const { NodeRegistry } = require('./registry.js');
 const { UploadQueue } = require('./uploads.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
@@ -57,20 +58,12 @@ const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
 // What a host's refusal of an upload is, rather than a failure of the transport: the same bytes would be refused
-// again (a digest that is none, bytes that are not it, a record that does not name them, past a limit).
+// again (a digest that is none, bytes that are not it, a record that does not name them, past a limit, a hub that
+// writes nothing more).
 const FINAL_UPLOAD = new Set([400, 403, 404, 413]);
-
-// The attachments an op's data names — the `_attachments/<name>` registers, kept apart as an op and a record file
-// keep every path — each `[name, digest]`, pushed onto `out`.
-const ATTACHMENTS_PREFIX = `${ATTACHMENTS_FIELD}/`;
-const namedBlobs = (data, out) => {
-  for (const key of Object.keys(data)) {
-    const entry = data[key];
-    if (key.startsWith(ATTACHMENTS_PREFIX) && isPlainObject(entry) && isDigest(entry.digest)) {
-      out.push([key.slice(ATTACHMENTS_PREFIX.length), entry.digest]);
-    }
-  }
-};
+// A hub that forwarded the register and whose writer has not landed it yet (`NOT_YET`): no refusal and no failure —
+// asked again at the host's next lull.
+const UPLOAD_NOT_YET = 425;
 
 // The hooks a manager accepts (`createDatabase({ sync: { hooks } })`).
 // `beforeSend({ op, peer })` sees every op about to go to a peer: `false`
@@ -524,6 +517,14 @@ class SyncManager extends Emitter {
     }
   }
 
+  /**
+   * Bytes a follower of this database kept in the engine's store — a peer's upload, told through the shared log's
+   * inbox (src/sync/shared.js): sent on to the hosts this hub dials, which waited for them.
+   */
+  adoptBlob(digest) {
+    if (isDigest(digest)) this.#blobLanded(digest);
+  }
+
   /** Hosting side: the peers greeted here with a live session, and how many connections each holds. */
   sessions() {
     const out = [];
@@ -616,6 +617,8 @@ class SyncManager extends Emitter {
       // once the bytes land here (#blobLanded). The node's, kept on disk (src/sync/uploads.js): a peer dialed again —
       // a reconnect, a restart — takes up what the one before left.
       uploads: this.#uploads.of(node.url),
+      // The host said "not yet" to one of them (a hub that forwarded the register): asked again at its next lull.
+      deferred: false,
       // A relay that failed: what the host lacks is pushed from the vector
       // at the next sign of life on the link (see #recover), backed off by
       // timestamp after a failed recovery.
@@ -1135,10 +1138,11 @@ class SyncManager extends Emitter {
 
   // The attachments a page the host took names — every register a pushed op sets — kept for #upload by digest
   // (the first record and name naming it), MAX_UPLOADS a node, the oldest let go, and saved (src/sync/uploads.js):
-  // noted here, an entry outlives the process. An op the host refused names nothing it holds; a hub that forwarded
-  // the page cannot write the bytes; a withheld op names nothing.
+  // noted here, an entry outlives the process. An op the host refused names nothing it holds; a withheld op names
+  // nothing. A page a hub forwarded is noted like any other: the hub takes the bytes once its writer landed the page
+  // ("not yet" until then, #upload), or says for good that it takes none.
   #noteUploads(peer, page, answer) {
-    if (peer.closed || answer?.forwarded === true || this.#storage[DB]?.blobs === undefined) return;
+    if (peer.closed || this.#storage[DB]?.blobs === undefined) return;
     let refused = null;
     if (Array.isArray(answer?.refused)) {
       refused = new Set();
@@ -1165,11 +1169,14 @@ class SyncManager extends Emitter {
   // that never read them) wait — asked after no push again — until they land here (#blobLanded hands their
   // digest). A refusal is final and a transport's failure tried again at the next push; both are reported
   // (`BLOB_UPLOAD_FAILED`), never thrown — the push stands. An entry goes from the node's queue, and from the disk,
-  // once its bytes went up or were refused for good — never asked again, a restart later neither. Runs on the
-  // push chain.
+  // once its bytes went up or were refused for good — never asked again, a restart later neither. "Not yet" (425: a
+  // hub that forwarded the register, its writer still to land it) is neither: the entry stays, nothing is reported,
+  // and the host's next lull asks again (`peer.deferred`, #receive) — the host's word, FORWARD_TTL long at most,
+  // then its answer is the bytes taken or a refusal. Runs on the push chain.
   async #upload(peer, landed = null) {
     const { uploads } = peer;
     const store = this.#storage[DB]?.blobs;
+    peer.deferred = false;
     if (uploads.size === 0 || store === undefined) return;
     const { url } = peer.node;
     for (const [digest, entry] of uploads) {
@@ -1194,6 +1201,10 @@ class SyncManager extends Emitter {
         this.#uploads.settle(url, digest);
         if (size > 0) this.#otel.recordBlob('uploaded', 'ok', size);
       } catch (error) {
+        if (error?.code === UPLOAD_NOT_YET) {
+          peer.deferred = true;
+          continue;
+        }
         const final = FINAL_UPLOAD.has(error?.code);
         if (final) this.#uploads.settle(url, digest);
         this.#otel.recordBlob('uploaded', final ? 'refused' : 'failed', 0);
@@ -1392,6 +1403,9 @@ class SyncManager extends Emitter {
       peer.caughtUp = peer.connected;
       peer.initial = true;
       if (eventId) peer.node.cursor = eventId;
+      // A lull of the host's feed: what it said "not yet" to — an upload whose register its writer had still to
+      // land — is asked again, on the push chain.
+      if (peer.deferred) this.#serializePush(peer, () => this.#upload(peer)).catch(() => {});
       this.#settle();
       return;
     }
@@ -1793,7 +1807,11 @@ class SyncManager extends Emitter {
       sessions: this.#sessions,
       revoked: this.#revocations,
       scopeOf: (id, data) => (typeof this.#options.scope === 'function' ? this.#options.scope(id, data) : GLOBAL_SCOPE),
-      landed: (digest) => this.#blobLanded(digest),
+      // Bytes a peer uploaded here go on to the hosts this node dials; a follower, which dials none, tells its writer.
+      landed: (digest) => {
+        this.#blobLanded(digest);
+        if (this.#shared !== null) this.#shared.landed(digest);
+      },
     });
   }
 

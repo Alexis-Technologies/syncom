@@ -85,14 +85,18 @@ production):
 there is no broker to run. A follower answers hello with the vector as the log moved it and serves
 its clients' feeds from the log. A push it receives is checked as a writer would check it (forged or
 unsigned ops stop there) and forwarded to an inbox topic; the writer lands it under its
-`authorizeWrite` rule and appends it to the topic, where the follower sees it come back.
+`authorizeWrite` rule and appends it to the topic, where the follower sees it come back. The bytes of
+an [attachment](./attachments#limits) go to the follower as well: once the writer has landed the
+record, the follower stores them in the database's blob store, which the writer and every other
+follower read.
 
 A follower serves no snapshot, because its view can run ahead of what its engine has read, so a
 fresh client must bootstrap from a hub that writes (403 `READ_ONLY` otherwise). That is the load
 balancer's rule here: a client with no cursor goes to the writer, and follows on any hub after.
 Without an inbox (`sharedLog: { log, inbox: false }`) a follower refuses pushes with 503. A writer
-whose lease is lost becomes read-only and hosts the same way. `docs/examples/server-scaling.mjs` runs
-this arrangement over the memory engine, which is shared within one process.
+whose lease is lost becomes read-only and hosts the same way, except that it takes no attachment
+bytes: it is fenced from the database, so it refuses them for good. `docs/examples/server-scaling.mjs`
+runs this arrangement over the memory engine, which is shared within one process.
 
 ## Split the data into buckets
 

@@ -556,7 +556,10 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
   (a cursor's writes), `guard` (a local write), `revert` (the sync manager's: a host's reading laid back through the
   kinds' patches) — every member a `#run` of the queue or a refusal of it; a new member goes through the queue the
-  same way. `[CURSOR](entity, query, { source, sealed })` leaves sealed records out unless `sealed`: the facade's
+  same way. One member is outside it, as a blob is outside every write set: `blobStore()`, the engine's own blobs
+  store a sync host keeps a peer's upload in (src/sync/hosting.js `blobPut`) — a follower's too, past the read-only
+  wrapper, since its engine is `shared` and the store is its writer's; undefined where the engine keeps none, NULL
+  once this instance lost its lease, which writes nothing more. `[CURSOR](entity, query, { source, sealed })` leaves sealed records out unless `sealed`: the facade's
   collections ask, a host's query, an agent's tools and a connector read the seam as it is (SEC-7).
 - **`createDatabase()` is exclusive by default (`lock: 'fail'`).** A test that opens
   the same directory twice must `close()` the first storage or pass
@@ -573,7 +576,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A batch of records is
   ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions — the chain's block and tail ride in
   it as kv puts, the pieces a record drops with its row, the tags' copies ahead of the records; a lost lease swaps the stores and the log's medium for the read-only ones
-  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine, never dials and hosts over a shared log alone (`sync.sharedLog`, src/sync/shared.js: its feed from the log, its pushes forwarded to the inbox) (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
+  (`OpLog.readOnly`) and every landing after it is held; a follower opens only over a `shared` engine, never dials and hosts over a shared log alone (`sync.sharedLog`, src/sync/shared.js: its feed from the log, its pushes forwarded to the inbox, a peer's upload kept in the engine's blobs store) (`chain.block(data)` → `{ hash, puts }`, then `chain.committed(hash)`); `addBlock` is for a chain of its own.
 - **Hooks run inside the operation; events never do.** `src/hooks.js` (it
   requires errors.js only — it ships to the browser) is the whole mechanism. Database hooks
   go through `#hook()` inside the mutation queue, and `#run` refuses a write
