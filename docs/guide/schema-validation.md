@@ -113,7 +113,47 @@ web app and the server. To refuse a write and tell the writer why, use a host ru
 (`authorizeWrite`, see [Server](./server)). A peer on another schema version is a different case, covered by
 [Schema migration](./migration-schema).
 
+## Check a rule that spans two fields
+
+A task has a `starts` day and a `due` day, and it must not start after it is due. Put that rule in the validator
+and two people can break the board without either of them writing anything invalid. The setup is a server and two
+nodes, and a helper that edits one task on both nodes while they are offline:
+
+<<< @/examples/schema-validation-order.mjs#nodes
+
+With the rule in every node's validator, the three nodes end up with two different tasks:
+
+<<< @/examples/schema-validation-order.mjs#split
+
+Each edit was valid where it was made: `5..10` on the laptop, `1..3` on the phone. Together they would read
+`5..3`, so whichever edit a node receives second is the one its validator skips. The server and the laptop got the
+phone's edit second and skipped it. The phone got the laptop's edit second and skipped that one instead. Every
+node reported `OP_INVALID`, and every node runs the same schema, so sharing the schema does not help here. The
+nodes stay apart until someone writes both fields again.
+
+This happens only with a rule whose verdict depends on more than the field being written. A rule about one field
+(a type, a length, a range, a pattern) gives the same verdict on every node, because an edit that was valid where
+it was made is valid wherever it arrives. So keep validators to rules of that kind, and ask a rule that spans
+fields once, at the node every write passes through:
+
+<<< @/examples/schema-validation-order.mjs#rule
+
+The server's `authorizeWrite` sees each pushed op with the record as the op would leave it. It refused the phone's
+edit, no node applied it, and the phone was told (`WRITE_REFUSED`) and took its `due` back from the server, so all
+three nodes read `5..10`. Leave the rule out of the nodes' validators when you do this: a node whose validator
+skips the other edit before the server's answer arrives would keep its own `starts`.
+
+Two other ways avoid the problem without a server rule. Write the fields that belong together as one field, such
+as `window: { starts, due }`: it is then one [register](./glossary#register), and the later write wins whole
+([Fields that merge](./fields)). Or check the rule only on the user's own writes, in a `beforeWrite`
+[hook](./hooks), which peers' ops never pass through; the nodes then always agree, but a record two people edited
+at once can break the rule, and your app has to show that.
+
 ## Limitations
+
+- **A rule over several fields can leave nodes apart.** Two edits that are each valid can be invalid together, and
+  each node skips the one it received second. Keep such rules out of validators
+  ([above](#check-a-rule-that-spans-two-fields)).
 
 - **Every write pays for the validator.** It runs inside the write path and sees the whole record, for every edit
   of a text field of a validated record too. Keep validators of collections that hold long texts cheap.

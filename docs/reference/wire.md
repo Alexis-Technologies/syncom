@@ -1181,7 +1181,11 @@ hold.
 - **Convergence.** Two nodes that have applied the same set of ops hold the
   same records, whatever the order — except the counter and reset case
   below, and a list or text field where a bound refused an op on one node
-  and not on the other.
+  and not on the other. An op a node skips (its validator, a `beforeApply`
+  returning `false`) is one it has not applied: nodes whose rules skip
+  different ops — a validator whose verdict depends on what else the record
+  holds, met by two concurrent ops in two orders — do not hold the same set,
+  and stay apart until a newer write of those fields.
 - **Clocks.** `ts` is `Date.now()` in UTC, from a clock that never runs
   backwards and never falls behind a stamp the node has seen — a peer's op,
   a joined snapshot, its own log at open. Ops apply in `seq` order per

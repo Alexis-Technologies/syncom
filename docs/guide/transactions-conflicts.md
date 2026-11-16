@@ -168,6 +168,10 @@ the collection's events, [Sync engine](./replication#watch-replication) the sync
 - **Transactions do not span nodes.** There is no distributed lock or consensus; `swap()` and `ifMatch`
   guard one node's writes. For a rule every write must pass, enforce it where the writes meet: the host's
   `authorizeWrite` ([syncom server replication](./replication-server)) or a [hook](./hooks).
+- **A validator rule over several fields does not merge.** Two concurrent edits can each pass a rule such as
+  "starts before it is due" and fail it together. Each node then skips the edit it received second, and the
+  nodes keep different records. Keep validators to one field at a time and ask the wider rule at the host
+  ([Schema validation](./schema-validation#check-a-rule-that-spans-two-fields)).
 
 ## Coming from RxDB
 

@@ -1000,7 +1000,12 @@ filled into a peer's write — and one that would leave the record invalid is sk
 `beforeApply` returning `false` (logged, relayed, replay-safe), reported through the
 `error` event (`OP_INVALID`, `error.entity`, `error.issues`) and the `syncom.ops.rejected` metric with
 reason `validation`. The writer's record and this node's then differ in those fields until a newer write of
-them. `merge`, `delete` and `purge` are not validated. `delete()` and `purge()` are never validated locally
+them. The verdict is this node's, over the record as it holds it when the op arrives: a validator whose
+verdict for a field depends on other fields can pass two concurrent ops where each was made and fail them
+together, each node then skips the one it applies second, and the nodes hold different records — such a rule
+is the host's (`authorizeWrite`, asked once and told to the writer), see
+[Schema validation](../guide/schema-validation#check-a-rule-that-spans-two-fields). `merge`, `delete` and
+`purge` are not validated. `delete()` and `purge()` are never validated locally
 either.
 
 ## Query (subpath)
