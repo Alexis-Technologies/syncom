@@ -633,7 +633,7 @@ test('Attachments', async (t) => {
       await a.sync.awaitInitialReplication();
       await h1.sync.awaitInitialReplication();
       await b.sync.awaitInitialReplication();
-      // 17 pieces of 64 KiB, the last a short one: a pump waits for the link's drain on the way.
+      // 17 pieces of 64 KiB, the last a short one: writeAll waits for the link's drain on the way.
       const bytes = new Uint8Array(1024 * 1024 + 7);
       for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 31) % 251;
       const id = await a.insert({ title: 'a film' });
@@ -645,7 +645,11 @@ test('Attachments', async (t) => {
       const got = await b.attachments.get(id, 'film.bin');
       assert.strictEqual(got.bytes.length, bytes.length);
       assert.strictEqual(await hashBytes(got.bytes), entry.digest);
-      assert.strictEqual((await b.attachments.get(id, 'empty.bin')).bytes.length, 0, 'an empty blob is no stream');
+      assert.strictEqual(
+        (await b.attachments.get(id, 'empty.bin')).bytes.length,
+        0,
+        'an empty blob is a stream of no bytes',
+      );
       assert.deepStrictEqual(errors, []);
       for (const dialed of mesh.links.values()) assert.strictEqual(dialed.down, false, 'no message was too big');
 
@@ -713,7 +717,7 @@ test('Attachments', async (t) => {
   );
 
   await t.test(
-    'syncom/blobPut over a stream: the pieces are read to the size announced and no further; a stream missing, short, long, forged, unnamed or past the limit is refused and let go',
+    'syncom/blobPut over a stream: the pieces are read to the size announced and no further; a stream missing, short, long, forged, unnamed or past the limit is refused and let go, its writer told',
     async (t2) => {
       const scope = (id, data) => data.$type ?? '*';
       const host = await createStorage(t2, 'H', { sync: { scope } });
@@ -746,22 +750,22 @@ test('Attachments', async (t) => {
       const bad = { code: 400, reason: 'BAD_BLOB' };
       // No such stream; a size that is none; the bytes both ways at once.
       await assert.rejects(peer.call('syncom/blobPut', { ...named, stream: 'nope', size }), bad);
-      await assert.rejects(send(peer, { ...named, size: 0 }, []), bad);
+      await assert.rejects(send(peer, { ...named, size: -1 }, []), bad);
       await assert.rejects(send(peer, { ...named, size: 1.5 }, [bytes]), bad);
       await assert.rejects(send(peer, { ...named, size, base64: 'AA==' }, [bytes]), bad);
       // Fewer bytes than announced, then more: never waited for, never read past.
       await assert.rejects(send(peer, { ...named, size: size + 1 }, [bytes]), bad);
       await assert.rejects(send(peer, { ...named, size: size - 1 }, [bytes]), bad);
-      // The size right, the bytes not the digest.
-      await assert.rejects(send(peer, { ...named, size }, [bytesOf('forged!!!')]), {
-        code: 400,
-        reason: 'BLOB_MISMATCH',
-      });
-      // No record of the peer's names it: refused before a byte is read, and what the writer still sends is dropped.
+      // The size right, the bytes not the digest; a stream of no bytes is a stream too, and no digest of these.
+      const mismatch = { code: 400, reason: 'BLOB_MISMATCH' };
+      await assert.rejects(send(peer, { ...named, size }, [bytesOf('forged!!!')]), mismatch);
+      await assert.rejects(send(peer, { ...named, size: 0 }, []), mismatch);
+      // No record of the peer's names it: refused before a byte is read, and the writer is told to stop (wrpc 2.1).
       const unnamed = send(peer, { ...named, name: 'g', size }, [], { end: false });
       await assert.rejects(unnamed, { code: 404, reason: 'NOT_NAMED' });
-      assert.strictEqual(unnamed.stream.write(bytes), true, 'taken by the transport, read by no one');
-      unnamed.stream.terminate();
+      assert.strictEqual(unnamed.stream.closed, true, 'the host let go of the stream');
+      assert.strictEqual(unnamed.stream.error.code, 499);
+      assert.strictEqual(unnamed.stream.write(bytes), false, 'nothing more is taken');
       const outsider = await open(['B']);
       await assert.rejects(send(outsider, { ...named, size }, [bytes]), { code: 404, reason: 'NOT_NAMED' });
       // Past the unit's limit by the size announced.

@@ -446,10 +446,11 @@ expectType<AsyncIterable<Uint8Array | string> | undefined>(someLink.stream?.('s1
 const upload = someLink.createStream?.('syncom/blobPut', 3);
 expectType<syncom.SyncLinkWritable | undefined>(upload);
 if (upload !== undefined) {
-  expectType<boolean>(upload.write(new Uint8Array(3)));
+  expectType<Promise<boolean>>(upload.writeAll(new Uint8Array(3)));
+  expectType<Promise<boolean>>(upload.writeAll(new Uint8Array(3), 1024));
   expectType<boolean>(upload.closed);
   expectType<string>(upload.id);
-  upload.once('drain', () => {});
+  expectError(upload.write(new Uint8Array(3)));
   upload.end();
   upload.terminate();
 }

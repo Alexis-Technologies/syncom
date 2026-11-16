@@ -102,7 +102,9 @@ not need a wrpc codec: ops already travel as compact positional arrays.
 
 ## Limitations
 
-- **wrpc is a separate install.** syncom does not pull it in; keep it at version 2 on both ends.
+- **wrpc is a separate install.** syncom does not pull it in; keep it at 2.1 or later on both ends. An
+  attachment's bytes are written with wrpc 2.1's `writeAll`, and a host that refuses an upload stops the sender
+  through it.
 - **Plain HTTP cannot replicate.** wrpc's `transport: 'http'` has no subscriptions, so it serves only the
   thin client's reads. Use the WebSocket or SSE for a node that replicates.
 - **Timeouts are wrpc's.** syncom adds no timer of its own around a call; set `callTimeout` on the client.

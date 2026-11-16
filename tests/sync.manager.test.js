@@ -159,7 +159,7 @@ test('SyncManager edges', async (t) => {
       constructor(u) {
         super(u);
         this.client.binary = true;
-        this.client.createStream = (name, size) => ({ id: 's1', size, write() {}, end() {} });
+        this.client.createStream = (name, size) => ({ id: 's1', size, writeAll: async () => true, end() {} });
       }
     }
     const errors = [];

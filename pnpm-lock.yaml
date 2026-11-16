@@ -12,8 +12,8 @@ importers:
         specifier: ^3.4.0
         version: 3.4.0
       '@alexify/wrpc':
-        specifier: 2.0.1
-        version: 2.0.1
+        specifier: 2.1.0
+        version: 2.1.0
       '@codemirror/state':
         specifier: ^6.7.6
         version: 6.7.6
@@ -105,8 +105,8 @@ packages:
     resolution: {integrity: sha512-SMZZEVW+zzNlGjSQNw+qcOhG+YKVnGfKC7JzCxFbO5qCl0ha9Y43v/rTrYiFEpvuRHZEZEs7P9lYHGwJzBpKiw==}
     engines: {node: '>=18.0.0'}
 
-  '@alexify/wrpc@2.0.1':
-    resolution: {integrity: sha512-XRCrt8PgjTXzf4Utu9pMPGccTNNs5NylyiYCiCvGTEYlHPnszfgi9oJQ/ge6KZ00aMyo+K57J1x2V5L4bp+soA==}
+  '@alexify/wrpc@2.1.0':
+    resolution: {integrity: sha512-ar7IxZRe1TrB8ql0KxBD0jwKc0kaTD/A3cBufecAYtbeIQmsagaGTNSDY9ptlL4FkiqkTnEdL+s+begnuqoosw==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -2794,7 +2794,7 @@ snapshots:
 
   '@alexify/metaschema@3.4.0': {}
 
-  '@alexify/wrpc@2.0.1': {}
+  '@alexify/wrpc@2.1.0': {}
 
   '@algolia/abtesting@1.23.0':
     dependencies:

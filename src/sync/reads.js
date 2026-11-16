@@ -14,7 +14,7 @@ const { inScope } = require('../scope.js');
 const { isPlainObject, own } = require('../shape.js');
 const { CURSOR, DB, SOURCE } = require('../symbols.js');
 const { toBase64 } = require('../crypto/pem.js');
-const { streams, pump } = require('./chunks.js');
+const { streams, sendAll } = require('./chunks.js');
 const { isDigest } = require('../blobs.js');
 
 // `unit({ query })`: false (the default: no `query`, no `count` mounted), true, or `{ regex }` — whether a `$regex`
@@ -185,9 +185,9 @@ const query = (host) => async (context, args) => {
 };
 
 // An attachment's bytes (`syncom/blob { digest, id, name }`): a wrpc stream of the bytes where the transport carries
-// one — written in pieces (`pump`, src/sync/chunks.js), each as the transport takes it: one message of the whole was
-// what a transport's message limit refused — the bytes as base64 otherwise, and for an empty blob. Under `allow.blob` 'named' (the default) the call names the record and the
-// attachment: served only where a live record in the peer's scopes names the digest under that name — a record
+// one — written in pieces (`sendAll`, src/sync/chunks.js), each as the transport takes it: one message of the whole
+// was what a transport's message limit refused — the bytes as base64 otherwise. Under `allow.blob` 'named' (the
+// default) the call names the record and the attachment: served only where a live record in the peer's scopes names the digest under that name — a record
 // forgotten, purged, sealed, out of scope, or naming another digest is one answer, 404 `BLOB_NOT_FOUND`, so nothing
 // of what this host holds is told; a revoke, a purge, a forget follow the record for free. Under 'any' the digest
 // alone serves (a capability: a trusted mesh's). 403 `NOT_SERVED` where `allow.blob` is off, 400 `BAD_DIGEST` for
@@ -233,11 +233,10 @@ const blob = (host) => async (context, args) => {
   if (bytes === null) throw notFound();
   host.otel.recordBlob('served', 'ok', bytes.length);
   const client = context?.client;
-  // An empty blob is no stream (a transport announces none of no size): inline, as where no stream goes.
-  if (bytes.length > 0 && streams(client)) {
+  if (streams(client)) {
     const stream = client.createStream('syncom/blob', bytes.length);
     // The opening packet is out; a piece written in this tick would race the caller's chance to attach a consumer.
-    queueMicrotask(() => void pump(stream, bytes));
+    queueMicrotask(() => void sendAll(stream, bytes));
     return { id: stream.id, size: bytes.length, digest };
   }
   return { digest, size: bytes.length, base64: toBase64(bytes) };

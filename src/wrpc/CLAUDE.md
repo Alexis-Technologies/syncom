@@ -18,9 +18,11 @@ src/wrpc/wrpc.js          the @alexify/syncom/wrpc subpath
   by hand. Anything WebRTC-shaped that seems missing belongs in wrpc.
 - **Streams are wrpc's.** The link's `stream(id)` and `createStream(name, size)` are the client's `getStream` and
   `createStream`, handed over as they are: a WrpcReadable the engine iterates (a snapshot page, a blob), a
-  WrpcWritable it pumps a blob's bytes into in pieces (src/sync/chunks.js: `write`, `drain`, `closed`, `end`,
-  `terminate`). Chunking, pacing and the frames are wrpc's (its WebRTC framing splits a 64 KiB chunk by itself);
-  nothing here buffers, encodes or re-frames, and bytes never go as base64 where wrpc carries a stream.
+  WrpcWritable it writes a blob's bytes into with the writable's own `writeAll` (src/sync/chunks.js `sendAll`:
+  `writeAll`, `end`, `closed`), which takes wrpc 2.1 or later. Chunking, pacing, the frames and the stop are wrpc's:
+  `writeAll` writes 64 KiB at a time as the transport takes it (its WebRTC framing splits a chunk further by itself),
+  and a reader that lets go — `readable.terminate()` — stops its writer across the wire. Nothing here buffers,
+  encodes, re-frames or keeps a stop of its own, and bytes never go as base64 where wrpc carries a stream.
 - **wrpc is injected, never required.** Nothing under `src/` may
   `require('@alexify/wrpc')`; `scripts/size.js` fails on any bare import in a
   browser bundle anyway. `src/wrpc/wrpc.js` duck-types the client it is handed, and

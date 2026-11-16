@@ -25,7 +25,7 @@ const { isKeyId, isPlainObject, isStreamName, VERDICT } = require('../shape.js')
 const { DB, SIGNER, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
-const { streams, collect } = require('./chunks.js');
+const { streams, sendAll, collect } = require('./chunks.js');
 const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 const {
   refuse,
@@ -114,11 +114,8 @@ const streamed = (client, page, pageBytes) => {
   if (bytes.length > pageBytes) return page;
   const stream = client.createStream('syncom/snapshot', bytes.length);
   // The opening packet is already out; writing in this tick would race the
-  // caller's chance to attach a consumer.
-  queueMicrotask(() => {
-    stream.write(bytes);
-    stream.end();
-  });
+  // caller's chance to attach a consumer. In pieces, as a blob goes.
+  queueMicrotask(() => void sendAll(stream, bytes));
   return { id: stream.id, size: bytes.length, cursor: page.cursor, eventId: page.eventId, vector: page.vector };
 };
 
@@ -328,8 +325,8 @@ const push = (host) => async (context, args) => {
 // `syncom/blobPut { digest, id, name }` and the bytes of an attachment whose register the peer pushed — the dialer
 // uploads them after a push this host took (src/sync/manager.js #upload), so a node behind this host reads them
 // here. The bytes come as a stream of the transport's, announced before the call (`stream` its id, `size` its
-// bytes; read in the pieces the dialer pumps, src/sync/chunks.js, no further than `size`, and let go of whatever
-// the answer — its end is never waited for), or as `base64` in the call where the link carries no stream. Taken
+// bytes; read in the pieces the dialer writes, src/sync/chunks.js, no further than `size`, and let go of whatever
+// the answer — wrpc then tells the dialer to stop), or as `base64` in the call where the link carries no stream. Taken
 // only where a live record in the peer's scopes names the digest under that name (`blobNamed`: one 404 `NOT_NAMED`
 // for every miss, so nothing is told), within `limits.bytesPerBlob` and MAX_BLOB_BYTES (413, told by the size
 // announced before a byte is read), and when their SHA-256 is the digest (400 `BLOB_MISMATCH`); a stream that is
@@ -350,7 +347,7 @@ const blobPut = (host) => async (context, args) => {
   const client = context?.client;
   const streamed = stream !== undefined;
   const shaped = streamed
-    ? base64 === undefined && typeof stream === 'string' && Number.isSafeInteger(size) && size > 0 && streams(client)
+    ? base64 === undefined && typeof stream === 'string' && Number.isSafeInteger(size) && size >= 0 && streams(client)
     : base64 === undefined || typeof base64 === 'string';
   if (!shaped) throw no('blobPut takes the bytes as a stream of its size, or as base64', 400, 'BAD_BLOB');
   let readable = null;
@@ -382,7 +379,7 @@ const blobPut = (host) => async (context, args) => {
     host.landed(digest);
     return { digest, have: true };
   } finally {
-    // Read or not, the stream is let go of: what is still on its way is dropped, its end is not waited for.
+    // Read or not, the stream is let go of: the dialer is told to stop, what is still on its way is dropped.
     if (readable !== null) await readable.terminate();
   }
 };

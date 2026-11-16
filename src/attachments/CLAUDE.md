@@ -32,8 +32,8 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   alone only under `allow.blob: 'any'`), hashes what it got and keeps it only when the
   hash is the digest (`sync.blob.mismatch` otherwise, the next peer asked); the host answers a wrpc stream where
   the connection carries one — the bytes as bytes, in pieces of 64 KiB each written as the transport takes it
-  (src/sync/chunks.js; the rule is src/sync/CLAUDE.md's) — base64 on a text transport and for an empty blob
-  (`toBase64` of crypto/pem.js — the one base64), and 404 `BLOB_NOT_FOUND` for what it lacks; a peer's answer past MAX_BLOB_BYTES (64 MiB, `src/blobs.js` — the one cap, every
+  (src/sync/chunks.js; the rule is src/sync/CLAUDE.md's), an empty blob a stream of no bytes — base64 on a text
+  transport (`toBase64` of crypto/pem.js — the one base64), and 404 `BLOB_NOT_FOUND` for what it lacks; a peer's answer past MAX_BLOB_BYTES (64 MiB, `src/blobs.js` — the one cap, every
   store's `put` and `attachments.put` refuse past it as `BLOB_TOO_LARGE`) is refused. A register is a peer's word:
   `#entry` takes it only where `validEntry` holds (`isDigest` — 64 lowercase hex, never a path: a digest is the files
   engine's file name — a `type`, a safe `length` within the cap, a known `encoding`), `ATTACHMENT_INVALID` from

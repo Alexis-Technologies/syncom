@@ -37,7 +37,7 @@ const { withholdOp } = require('../header.js');
 const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64, toBase64 } = require('../crypto/pem.js');
-const { pump, collect } = require('./chunks.js');
+const { sendAll, collect } = require('./chunks.js');
 const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
 
 // A page that fails this many times in a row leaves its peer `stuck`.
@@ -1160,7 +1160,7 @@ class SyncManager extends Emitter {
 
   // The bytes this node holds of the attachments the peer waits for, uploaded (`syncom/blobPut`): a probe first,
   // so bytes the host holds never cross, then the bytes — as a stream of the link's where the host reads one
-  // (#streamUp), as base64 in the call where no stream goes (and for an empty blob). Bytes this node lacks (a relay
+  // (#streamUp), as base64 in the call where no stream goes. Bytes this node lacks (a relay
   // that never read them) wait — asked after no push again — until they land here (#blobLanded hands their
   // digest). A refusal is final and a transport's failure tried again at the next push; both are reported
   // (`BLOB_UPLOAD_FAILED`), never thrown — the push stands. Runs on the push chain.
@@ -1182,7 +1182,7 @@ class SyncManager extends Emitter {
           const bytes = await store.get(digest);
           if (bytes === null) continue;
           size = bytes.length;
-          if (size > 0 && probe?.stream === true && typeof peer.link.createStream === 'function') {
+          if (probe?.stream === true && typeof peer.link.createStream === 'function') {
             await this.#streamUp(peer.link, args, bytes);
           } else await peer.link.call('syncom/blobPut', { digest, id, name, base64: toBase64(bytes) });
         }
@@ -1200,18 +1200,16 @@ class SyncManager extends Emitter {
   }
 
   // A blob as bytes: the stream announced, the call that names it sent at once — the host reads the pieces as they
-  // land and answers when it has them all — and the bytes pumped in pieces, each as the link takes it (`pump`,
-  // src/sync/chunks.js). The call settling first is the host's answer already (a refusal, the bytes landed there
-  // another way): the rest is not sent. A link that went with bytes on their way fails the call (503).
+  // land and answers when it has them all — and the bytes written in pieces, each as the link takes it (`sendAll`,
+  // src/sync/chunks.js). A host that answers before the last piece (a refusal, the bytes landed there another way)
+  // lets go of the stream, and the transport stops the writer: the rest is not sent. A link that went with bytes on
+  // their way fails the call (503).
   async #streamUp(link, args, bytes) {
     const stream = link.createStream('syncom/blobPut', bytes.length);
-    let answered = false;
-    const settle = () => {
-      answered = true;
-    };
     const taking = link.call('syncom/blobPut', { ...args, stream: stream.id, size: bytes.length });
-    taking.then(settle, settle);
-    await pump(stream, bytes, () => answered);
+    // Awaited once the bytes went: a refusal that comes first is no unhandled rejection meanwhile.
+    taking.catch(() => {});
+    await sendAll(stream, bytes);
     await taking;
   }
 
@@ -1601,7 +1599,7 @@ class SyncManager extends Emitter {
     if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BLOB_BYTES) {
       throw new SyncomError('BAD_PAGE', 'A streamed blob of no size, or past MAX_BLOB_BYTES');
     }
-    // The size announced, and not a byte further: the pieces as the host pumped them.
+    // The size announced, and not a byte further: the pieces as the host wrote them.
     const bytes = await collect(link.stream(answer.id), size);
     if (bytes === null || bytes.length !== size) {
       throw new SyncomError('BAD_PAGE', 'A streamed blob that is not the size it announced');

@@ -89,7 +89,8 @@ Over a connection that carries binary streams, the bytes cross as bytes. That is
 [WebRTC](./replication-webrtc) data channel, a worker port. An upload and a download are each a stream of 64 KiB
 chunks, and a chunk is written only when the connection has taken the one before, so a slow peer slows the sender
 instead of filling its memory. Nothing is base64-encoded, and no single message holds the file: a server that
-refuses messages past 16 MiB still takes a 64 MiB attachment.
+refuses messages past 16 MiB still takes a 64 MiB attachment. When the host refuses an upload, or already holds
+the bytes, it lets go of the stream and the sender stops; the pieces and the stop are wrpc's (2.1 or later).
 
 Over a text-only link the bytes travel as base64 inside one call, a third larger, and the transport's message
 limit bounds the attachment. See [Limits](#limits). You choose neither form: the node and the host settle it per

@@ -19,15 +19,18 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let nextClientId = 1;
 
-// What a writable holds unread before `write` answers false, in chunks: small, so every pump of a few chunks waits
+// What a writable holds unread before `write` answers false, in chunks: small, so every write of a few chunks waits
 // for a `drain` at least once.
 const HIGH = 4;
+// What wrpc's `writeAll` writes at a time.
+const CHUNK = 64 * 1024;
 const closedError = () => Object.assign(new Error('Connection closed'), { code: 503 });
 
 // wrpc's pair of one binary stream, in process: what `write` takes — a copy — the readable's iteration hands on. A
-// writable is an emitter (`drain`, `close`) with `closed`, `end()` and `terminate()`; a readable is async-iterable
-// with `terminate()`, after which the writer's chunks are still taken, and dropped — nothing tells a wrpc writer
-// that its reader let go. `tooBig(length)` is the link's `maxMessage`: true once it took the link down.
+// writable is an emitter (`drain`, `close`) with `closed`, `error`, `write`, `writeAll`, `end()` and `terminate()`;
+// a readable is async-iterable with `terminate()`, which stops its writer as wrpc 2.1 does: `closed`, `close`
+// announced, `error` with code 499, `write` false. `tooBig(length)` is the link's `maxMessage`: true once it took the
+// link down.
 const pipe = (id, tooBig) => {
   const queue = [];
   let wake = null;
@@ -46,13 +49,23 @@ const pipe = (id, tooBig) => {
   const writable = Object.assign(new Emitter(), {
     id,
     closed: false,
+    error: null,
     write(chunk) {
       if (writable.closed || ended || tooBig(chunk.length)) return false;
-      if (cut) return true;
       queue.push(new Uint8Array(chunk));
       wakeUp();
       full = queue.length >= HIGH;
       return !full;
+    },
+    // wrpc's: every byte in pieces, each when the writable takes it; false once it closed or was ended under it.
+    async writeAll(bytes, size = CHUNK) {
+      for (let at = 0; at < bytes.length; at += size) {
+        if (writable.write(bytes.subarray(at, at + size))) continue;
+        if (writable.closed || ended) return false;
+        await new Promise((resolve) => writable.once('drain', resolve));
+        if (writable.closed) return false;
+      }
+      return true;
     },
     end() {
       ended = true;
@@ -72,6 +85,13 @@ const pipe = (id, tooBig) => {
       drained();
       void writable.emit('close');
     },
+    // Its reader let go (wrpc's cancel): the writer stops as for a lost connection, `error` saying why — unless it
+    // had sent everything already.
+    cancel() {
+      if (writable.closed || ended) return;
+      writable.error = Object.assign(new Error(`Stream ${id} is no longer read`), { code: 499 });
+      writable.close();
+    },
   });
   const readable = {
     id,
@@ -79,7 +99,7 @@ const pipe = (id, tooBig) => {
       cut = true;
       queue.length = 0;
       wakeUp();
-      if (full) drained();
+      writable.cancel();
     },
     async *[Symbol.asyncIterator]() {
       for (;;) {

@@ -36,9 +36,10 @@ src/testing/mesh.js       createMesh(names, edges, { createStorage, link, sync, 
   the host answered or refused: nothing arrives over a closed socket. Under `streams` the link is a binary transport
   as wrpc's are: the host's client and the link each announce a stream (`createStream`) the other end reads once
   (`getStream`, `stream`) — `pipe`: a copy of every chunk, `write` answering false past `HIGH` chunks unread with a
-  `drain` after, a writer's `end`/`terminate`, a reader's `terminate` after which the writer's chunks are taken and
-  dropped (nothing tells a wrpc writer that its reader let go), every stream closed with the socket — so a snapshot
-  page and an attachment's bytes cross as they do over a WebSocket. `maxMessage` is the socket's limit: a call
+  `drain` after, wrpc 2.1's `writeAll` (pieces of 64 KiB, each when the writable takes it, false once it closed), a
+  writer's `end`/`terminate`, a reader's `terminate` that stops its writer as wrpc 2.1 does (`closed`, `close`
+  announced, `error` with code 499), every stream closed with the socket — so a snapshot page and an attachment's
+  bytes cross as they do over a WebSocket. `maxMessage` is the socket's limit: a call
   whose arguments are longer as JSON, or a chunk past it, takes the link down — what makes a test prove that bytes
   cross in pieces and never as one message.
 - **Quiet is vectors AND nothing in flight, three polls in a row.** A peer's page moves the vector at the log append

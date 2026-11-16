@@ -154,7 +154,7 @@ test('@alexify/syncom/testing', async (t) => {
   );
 
   await t.test(
-    'streams: the link is a binary transport — each end announces a stream the other reads, a full writer waits for drain, a reader that lets go drops the rest; maxMessage takes the link down',
+    'streams: the link is a binary transport — each end announces a stream the other reads, a full writer waits for drain, writeAll writes in pieces, a reader that lets go stops its writer; maxMessage takes the link down',
     async () => {
       const unit = { echo: { handler: async (context, args) => ({ size: args.text.length }) } };
       // Without the option: no stream on either end, as over a text-only transport.
@@ -209,16 +209,35 @@ test('@alexify/syncom/testing', async (t) => {
       const first = await read(readable, 2);
       assert.deepStrictEqual(first, [Uint8Array.of(0), Uint8Array.of(1)]);
       await drained;
-      // The reader lets go: what the writer still sends is taken and dropped — nothing tells a writer.
+      // The reader lets go and its writer hears it, as over wrpc 2.1: closed, `close` once, a 499, nothing more taken.
+      let heard = 0;
+      paced.once('close', () => heard++);
       readable.terminate();
-      assert.strictEqual(paced.write(Uint8Array.of(7)), true);
+      assert.strictEqual(paced.closed, true);
+      assert.strictEqual(heard, 1);
+      assert.strictEqual(paced.error.code, 499);
+      assert.strictEqual(paced.write(Uint8Array.of(7)), false);
       assert.deepStrictEqual(await read(readable), []);
-      // A reader that lets go of a full writer lets it go on.
-      const stuck = link.createStream('stuck', 100);
-      while (stuck.write(Uint8Array.of(1)));
-      const released = new Promise((resolve) => stuck.once('drain', resolve));
+      // writeAll: pieces of 64 KiB, the last a short one, then the writer ends it.
+      const whole = link.createStream('whole', 150_000);
+      const reader = read(link.client.getStream(whole.id));
+      assert.strictEqual(await whole.writeAll(new Uint8Array(150_000).fill(3)), true);
+      whole.end();
+      const sizes = [];
+      for (const chunk of await reader) sizes.push(chunk.length);
+      assert.deepStrictEqual(sizes, [65_536, 65_536, 18_928]);
+      // A writeAll waiting for its drain is let go by a reader that lets go: false, the rest unsent.
+      const stuck = link.createStream('stuck', 400_000);
+      const writing = stuck.writeAll(new Uint8Array(400_000));
       link.client.getStream(stuck.id).terminate();
-      await released;
+      assert.strictEqual(await writing, false);
+      assert.strictEqual(stuck.error.code, 499);
+      // A writer that sent everything is not told: there was nothing left to stop.
+      const done = link.createStream('done', 1);
+      done.write(Uint8Array.of(1));
+      done.end();
+      link.client.getStream(done.id).terminate();
+      assert.deepStrictEqual([done.closed, done.error], [false, null]);
       // The socket goes: every writer is told and takes no more, every reader ends, a new stream is refused.
       const open = link.createStream('open', 10);
       const waiting = read(link.client.getStream(open.id));

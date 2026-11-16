@@ -19,9 +19,9 @@ src/sync/reads.js         the thin client's reads: query/count (normalizeQuery, 
                           walkScoped, greeted/ungreet for a hello carried by the call) and blob (blobNamed: served by the record that names
                           it; blobPut's door too) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js,
                           chunks.js, blobs.js only
-src/sync/chunks.js        a blob's bytes over a link's stream: CHUNK_BYTES, streams (a host's client that carries binary streams), pump
-                          (the bytes written in pieces, each as the transport takes it) and collect (the pieces read to the size
-                          announced, no further) — both halves use both — no requires
+src/sync/chunks.js        a blob's bytes over a link's stream: streams (a host's client that carries binary streams), sendAll (the
+                          transport's own writeAll, wrpc ≥ 2.1, then the end) and collect (the pieces read to the size announced, no
+                          further) — both halves use both — no requires
 src/sync/protocol.js      PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf, proveMessage — what both halves of the sync protocol
                           agree on — no requires
 src/sync/wire.js          packOps / unpackOps and the type codes — the ops as they cross between peers; the core's ops.js re-exports
@@ -153,19 +153,19 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   the cap, the digest hashed over the bytes) and hands what it kept to `landed` — the manager uploads it on to the
   hosts that wait for it (`#blobLanded`); the dialer uploads what a page the host took names after the page, on the
   push chain (`#noteUploads`, `#upload`), never as a push of its own. A blob's bytes cross as BYTES, IN PIECES, where
-  the transport carries a stream (src/sync/chunks.js; wrpc's binary streams, which wrpc already has — nothing of a
-  transport is written here): a download is the host's `client.createStream` pumped in pieces of `CHUNK_BYTES`, each
-  as the transport takes it (`pump`: `write` answering false is waited for by its `drain`, a closed transport ends
-  it), and an upload the link's `createStream` — announced, then the `blobPut` call naming it (`stream`, `size`),
-  then the pieces, the rest unsent once the call settled (`#streamUp`) — which the probe's answer allows (`stream:
-true`: a persistent, binary connection — `streams(client)`). The reader takes the size announced and no further
-  (`collect`) and the host lets go of the stream whatever it answers (`terminate()` in a `finally`): wrpc's readable
-  waits for the size it was told and keeps what is pushed into it, so a stream short, long or abandoned must never
-  be waited for or left to fill. Base64 in the call is what remains where no stream goes (a text-only transport —
-  SSE — a `MemoryLink` without `streams`) and for an empty blob (a transport announces no stream of no size). One
-  message of the whole blob — the base64 call, or the download as one chunk — was what a transport's message limit
-  refused (16 MiB on wrpc's uWebSockets.js engine, under permessage-deflate and over WebTransport and WebRTC; a blob
-  may be 64 MiB) and what nothing paced. A `beforeSend`
+  the transport carries a stream (src/sync/chunks.js over wrpc's binary streams — nothing of a transport is written
+  here; the pieces, the pacing and the stop are wrpc's, 2.1 or later): a download is the host's `client.createStream`
+  written through the writable's own `writeAll` (`sendAll`: 64 KiB pieces, each as the transport takes it, false once
+  the transport closed or the reader let go), and an upload the link's `createStream` — announced, then the `blobPut`
+  call naming it (`stream`, `size`), then the pieces (`#streamUp`) — which the probe's answer allows (`stream: true`:
+  a persistent, binary connection — `streams(client)`); an empty blob is a stream of no bytes like any other. The
+  reader takes the size announced and no further (`collect`: a sender that sends more is stopped there, never held),
+  and the host lets go of the stream whatever it answers (`terminate()` in a `finally`), which wrpc tells the dialer:
+  its writer stops, so a refusal or bytes the host holds already leave the rest unsent — syncom keeps no stop of its
+  own. Base64 in the call is what remains where no stream goes (a text-only transport — SSE — a `MemoryLink` without
+  `streams`). One message of the whole blob — the base64 call, or the download as one chunk — was what a transport's
+  message limit refused (16 MiB on wrpc's uWebSockets.js engine, under permessage-deflate and over WebTransport and
+  WebRTC; a blob may be 64 MiB) and what nothing paced. A `beforeSend`
   rules a hosted page too (`manager.sendable(ops, ref)` in `changes` and `sharedChanges`), never a snapshot page or
   a query row (records: the scopes'). An op flagged `scrubbed` that carries a payload is scrubbed before it is
   logged (`applyOne`): the flag is the peer's word, the payload goes all the same. `sync.revoke(node, scopes)` lives on the manager, never on the unit

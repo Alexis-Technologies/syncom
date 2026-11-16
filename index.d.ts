@@ -2058,14 +2058,16 @@ export interface SyncLink {
 export type SyncLinkEvent = 'open' | 'close' | 'reconnect' | 'syncom/presence' | 'syncom/revoke';
 
 /**
- * The writing end of a link's stream — a wrpc writable's shape. `write` answers false while the transport is full:
- * `drain` follows, or `closed` is true and none will. `end()` closes it, `terminate()` cuts it short.
+ * The writing end of a link's stream — a wrpc (2.1 or later) writable's shape. `writeAll` writes every byte in
+ * pieces, each when the transport takes it, and resolves false once the transport closed or the reader let go of
+ * the stream (`closed` is then true, and `error` says why where the reader did). `end()` closes it, `terminate()`
+ * cuts it short.
  */
 export interface SyncLinkWritable {
   readonly id: string;
   readonly closed: boolean;
-  write(chunk: Uint8Array): boolean;
-  once(event: 'drain' | 'close', listener: () => void): unknown;
+  readonly error?: { readonly code?: number; readonly message: string } | null;
+  writeAll(bytes: Uint8Array, chunkSize?: number): Promise<boolean>;
   end(): void;
   terminate(): void;
 }

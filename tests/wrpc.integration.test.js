@@ -190,7 +190,7 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
   });
 
   await t.test(
-    'an attachment larger than one wrpc message crosses a hub as bytes: uploaded and downloaded as a stream in chunks; an empty one inline',
+    'an attachment larger than one wrpc message crosses a hub as bytes: uploaded and downloaded as a stream in chunks; an empty one a stream of no bytes',
     async (t2) => {
       const plugins = [attachments()];
       const h = await openTemp(t2, { plugins });
