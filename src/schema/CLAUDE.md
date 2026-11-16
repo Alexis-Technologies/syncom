@@ -53,8 +53,7 @@ src/schema/entity.js      project / unproject / foldSet — the record as its va
   node's version is above 1 (`opOf` in src/commit.js; a record no op gave a version reads as 1). A `version` op is
   `{ v, value?, data? }`: the names it removes (an `unset`'s rule), then the registers it sets (a `set`'s), at
   ONE stamp, nothing else reset; it reports the `unset`s and `put`s it made, is `VALIDATED` on both paths like a
-  `set` (never a door around a validator), is not among `WHOLE`, and has no one-character code on the wire (its
-  name travels). Do not add a third op that says a version, nor a rule that reads one off the order of arrival.
+  `set` (never a door around a validator), is not among `WHOLE`, and travels as code `v` (src/sync/wire.js). Do not add a third op that says a version, nor a rule that reads one off the order of arrival.
 - **A migration writes what the lens changed, never the record.** `migrateRecord` compares the record as it reads,
   name by name (a top-level name with everything under it: `compose` of the entry against `core.view`), and makes
   ONE `version` op (src/CLAUDE.md: the record's version is a register of its own, moved by a `write` or a

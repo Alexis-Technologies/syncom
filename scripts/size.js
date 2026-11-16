@@ -651,7 +651,9 @@ const ENTRIES = [
   // 34.1 with a follower hub taking a peer's upload into the engine's store — blobPut's "not yet" (425) and the
   // lost lease's 403, SharedHub's expect/expects and the inbox's `landed` entry, the dialer's retry at the feed's
   // lull (2026-11-16). 34.1, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 34.1 },
+  // 34.1 (over by bytes) with the `version` op's wire code and the fields a refused one touched (wire.js, manager.js
+  // touchedBy; 2026-11-16). 34.2, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 34.2 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

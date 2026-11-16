@@ -907,6 +907,20 @@ test('ops module', async (t) => {
       assert.strictEqual(withMessage[17], 'why');
       assert.strictEqual(unpackOps([withMessage])[0].msg, 'why');
       assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify(packed))), ops);
+      // A migration's op travels as one character like every other type, with what it removes and writes.
+      const migration = {
+        origin: 'A',
+        seq: 4,
+        ts: 9,
+        type: 'version',
+        id: 'r',
+        value: ['title'],
+        data: { name: 'a' },
+        v: 2,
+      };
+      const [asCode] = packOps([migration]);
+      assert.strictEqual(asCode[3], 'v');
+      assert.deepStrictEqual(unpackOps(JSON.parse(JSON.stringify([asCode])))[0], migration);
       // Rows of the previous shapes (14, 13 and 12 slots) and a short one.
       assert.deepStrictEqual(
         unpackOps([packed[0].slice(0, 14)]),

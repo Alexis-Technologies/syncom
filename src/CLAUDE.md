@@ -191,7 +191,7 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   were appended; a reader of fewer slots ignores the rest, a reader of more takes an absent slot as null. Append,
   never reorder — the shape is on the wire between every pair of peers (the log itself stores keyed
   `{ seq, op, fp }` JSON; `packOps` — src/sync/wire.js — is for `push` and `changes` only). An op type is one
-  character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set ops; `version` has none: its name travels). Once the
+  character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set ops, `v` the `version` op). Once the
   package is published, an older reader counts an unknown type as malformed and its stream stalls there — a new
   type, or a slot an older reader cannot take as null, is then a `PROTOCOL` bump (`src/sync/protocol.js`).
 - **A field may be a path; the op model keeps every path apart.** `profile/city`

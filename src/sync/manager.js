@@ -83,6 +83,11 @@ const REVOKED_VERSION = 1;
 const touchedBy = (op) => {
   if (op.type === 'set') return isPlainObject(op.data) ? Object.keys(op.data) : null;
   if (op.type === 'unset') return Array.isArray(op.value) ? op.value.slice() : null;
+  // A migration's op: the names it removed, then the registers it wrote (either may be absent).
+  if (op.type === 'version') {
+    const fields = Array.isArray(op.value) ? op.value.slice() : [];
+    return isPlainObject(op.data) ? fields.concat(Object.keys(op.data)) : fields;
+  }
   if (op.type === 'write' || op.type === 'delete' || op.type === 'merge') return null;
   return typeof op.key === 'string' ? [op.key] : null;
 };

@@ -167,6 +167,38 @@ test('Rules on the host and on the dialer', async (t) => {
   );
 
   await t.test(
+    'a refused migration names the fields it removed and wrote: the revert touches those and nothing else',
+    async (t2) => {
+      // The host is of the older version and takes no migration of its records.
+      const authorizeWrite = ({ op }) => op.type !== 'version';
+      const rename = { 2: { Task: { up: ({ title, ...rest }) => ({ ...rest, name: title }) } } };
+      const mesh = await createMesh(t2, ['H', 'A'], [['A', 'H']], createStorage, {
+        unit: { access: 'public', authorizeWrite },
+        nodes: {
+          H: { schema: { entities: { Task: {} } } },
+          A: { schema: { version: 2, entities: { Task: {} }, migrations: rename } },
+        },
+      });
+      const [h, a] = ['H', 'A'].map((name) => mesh.get(name));
+      await a.sync.awaitInitialReplication();
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      const { id } = await h.Task.insert({ title: 'old', n: 1 });
+      await settle([h, a]);
+      // A's first write to the record migrates it first: a `version` op (title out, name in), then the update.
+      await a.Task.update(id, { n: 2 });
+      await waitUntil(() => errors.some((error) => error.code === 'WRITE_REFUSED'));
+      await settle([h, a]);
+      const [refusal] = errors.filter((error) => error.code === 'WRITE_REFUSED');
+      assert.deepStrictEqual(refusal.touched, ['title', 'name'], 'what the migration removed, then what it wrote');
+      // The update the host accepted stands on both; the host never took the rename.
+      assert.deepStrictEqual(await h.get(id), { title: 'old', n: 2, $type: 'Task' });
+      assert.strictEqual((await a.get(id)).n, 2);
+      assert.strictEqual(errors.filter((error) => error.code === 'WRITE_REFUSED').length, 1, 'no revert of a revert');
+    },
+  );
+
+  await t.test(
     'a refused op on a counter, a set or a text is reverted through the kinds’ patches, not a register write',
     async (t2) => {
       let admin = null;

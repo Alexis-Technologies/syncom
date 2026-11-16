@@ -64,7 +64,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `write` | `w` | `data` | The whole record; fields not written are gone |
 | `set` | `s` | `data` | The fields to set; last writer wins per field by `(ts, origin)` |
 | `unset` | `u` | `value` | `string[]` — the fields to remove, as names or paths |
-| `version` | — | `value?`, `data?` | The record is of the op's `v` from its stamp on: last writer wins among the `write`s and the `version`s of a record, by stamp alone (see `v` under [The record file](#the-record-file)). With it, at the same stamp: `value`, the fields removed as an `unset` removes them, then `data`, the registers set as a `set` sets them — nothing else of the record is reset. What a migration makes: the names the lens removed, the registers it wrote |
+| `version` | `v` | `value?`, `data?` | The record is of the op's `v` from its stamp on: last writer wins among the `write`s and the `version`s of a record, by stamp alone (see `v` under [The record file](#the-record-file)). With it, at the same stamp: `value`, the fields removed as an `unset` removes them, then `data`, the registers set as a `set` sets them — nothing else of the record is reset. What a migration makes: the names the lens removed, the registers it wrote |
 | `inc` | `i` | `key`, `value` | A finite number to add to the counter |
 | `add` | `+` | `key`, `value` | `unknown[]` — the elements to add to the set |
 | `remove` | `-` | `key`, `value` | `[element, { origin: addStamp }][]` — each element with the add stamps this node had seen for it |
@@ -140,7 +140,7 @@ of the `add` this node had seen, per origin.
 ### Packed: the twenty slots
 
 A push and a `changes` page carry ops packed — one positional array per
-op, the type as its code (its name where it has none: `version`), `null`
+op, the type as its code, `null`
 for an absent field, no key names repeated per op:
 
 | Slot | Field | Slot | Field | Slot | Field |
