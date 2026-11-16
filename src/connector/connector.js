@@ -210,9 +210,16 @@ class Replication extends Emitter {
   // wait or run on it.
   #queue = Promise.resolve();
   #queued = 0;
-  // One judgement at a time: a page landing and a push (the rows read, the answer judged, the conflicts landed) take
-  // turns, so neither judges a record against a state the other is changing under it.
+  // One turn at a time: a page (read from the backend AND judged) and a push (the rows read, the handler asked, the
+  // answer judged, the conflicts landed) take turns, so neither judges a record against a state the other is changing
+  // under it — and no push is answered between a page's read and its judgement.
   #turn = Promise.resolve();
+  // A page of the stream is read by the backend, not in a turn of this connector: while one waits to be judged
+  // (`#streaming`), the ids a turn learned of afresh — a push's rows, a pull page's documents — each with the count of
+  // such turns (`#turns`). A document of the stream handed over before that count may be the older: not judged.
+  #streaming = 0;
+  #turns = 0;
+  #touched = new Map();
   // The backend's state of each record as this node last knew it, as the canonical text of the backend's shape
   // (null: it holds nothing) — what a push says it assumed, what a pull is judged against; at most KNOWN_MAX, the
   // oldest not pending forgotten first. Durably, the digest of that text per id (`#digests`, saved with the
@@ -671,52 +678,54 @@ class Replication extends Emitter {
     }
   }
 
-  // The pages of one run. Answers whether it came to the end; a failure is told, tried again from the checkpoint.
+  // The pages of one run. Answers whether it came to the end; a failure — the handler's, a page that is none, a
+  // landing that fails whole (the engine, the database closing under it) — is the pull's: told, tried again from the
+  // checkpoint as it stands.
   async #pullPages() {
     let stalls = 0;
     for (;;) {
       if (this.#canceled) return false;
       let page;
       try {
-        page = await this.#pull.handler(this.#checkpoint.pull, this.#batchSize);
-        this.#stats.pulls++;
-        this.#attempts.pull = 0;
+        page = await this.#exclusive(() => this.#pullPage());
       } catch (error) {
         this.#failed('pull', error, () => this.#pullAll());
         return false;
       }
-      // `reread`, where the handler looks back: how many of the documents, the first ones, it read again.
-      const reread = page?.reread;
-      if (
-        !isPlainObject(page) ||
-        !Array.isArray(page.documents) ||
-        (reread !== undefined && !(Number.isInteger(reread) && reread >= 0))
-      ) {
-        this.#failed('pull', new TypeError('pull.handler must answer { documents, checkpoint, reread? }'), () =>
-          this.#pullAll(),
-        );
-        return false;
-      }
-      // The page landed and the checkpoint moved past it, or neither: a landing that fails whole (the engine, the
-      // database closing under it) is the pull's failure — told, tried again from the checkpoint as it stands.
-      try {
-        const moved = !same(page.checkpoint ?? null, this.#checkpoint.pull);
-        await this.#land(page.documents, reread);
-        this.#checkpoint.pull = page.checkpoint ?? null;
-        // Saved coalesced behind the pages (the run's end writes at once): a crash between lands the page again.
-        this.#save().catch(NOOP);
-        if (page.documents.length < this.#batchSize) return true;
-        // A full page at a position that does not move: asked a few times more, then left to the stream.
-        if (moved) stalls = 0;
-        else if (++stalls >= MAX_STALLS) return true;
-      } catch (error) {
-        this.#failed('pull', error, () => this.#pullAll());
-        return false;
-      }
+      // Saved coalesced behind the pages (the run's end writes at once): a crash between lands the page again.
+      this.#save().catch(NOOP);
+      if (page.length < this.#batchSize) return true;
+      // A full page at a position that does not move: asked a few times more, then left to the stream.
+      if (page.moved) stalls = 0;
+      else if (++stalls >= MAX_STALLS) return true;
     }
   }
 
-  // `task` run after the judgement in flight, if any, and before the next.
+  // One page, read and judged in ONE turn: the page landed and the checkpoint moved past it, or neither. No push is
+  // answered between the read and the judgement, so a document is judged against what this connector knew of its
+  // record when the backend was read — never a state a push learned since, which made the page's the older one: landed
+  // over the newer record, or a conflict the stale state won over an edit still waiting. Answers the page's length
+  // and whether the checkpoint moved.
+  async #pullPage() {
+    const page = await this.#pull.handler(this.#checkpoint.pull, this.#batchSize);
+    this.#stats.pulls++;
+    this.#attempts.pull = 0;
+    // `reread`, where the handler looks back: how many of the documents, the first ones, it read again.
+    const reread = page?.reread;
+    if (
+      !isPlainObject(page) ||
+      !Array.isArray(page.documents) ||
+      (reread !== undefined && !(Number.isInteger(reread) && reread >= 0))
+    ) {
+      throw new TypeError('pull.handler must answer { documents, checkpoint, reread? }');
+    }
+    const moved = !same(page.checkpoint ?? null, this.#checkpoint.pull);
+    await this.#judge(page.documents, reread);
+    this.#checkpoint.pull = page.checkpoint ?? null;
+    return { length: page.documents.length, moved };
+  }
+
+  // `task` run after the turn in flight, if any, and before the next.
   #exclusive(task) {
     const run = this.#turn.then(task);
     this.#turn = run.catch(NOOP);
@@ -739,11 +748,16 @@ class Replication extends Emitter {
   // refuses): one refused is said and left out, the rest of the page lands and the checkpoint moves. The first
   // `reread` documents are a lookback's — read again from at or behind the checkpoint: one that holds the state
   // known, or is refused as it was told before, is passed over — nothing but the read: not judged, not counted, not
-  // said again; the rest (a late arrival, another state) are judged as any document.
-  async #land(documents, reread) {
+  // said again; the rest (a late arrival, another state) are judged as any document. INSIDE a turn (`#exclusive`):
+  // the caller's, where it read the backend in it (a pull's page, a probe), or one of its own (`#land`). `since` is a
+  // stream page's: the count of turns when it was handed over — a document whose record a turn learned of after
+  // that, and which does not hold the state then learned, is left out, uncounted, and a pull asked for: read in a
+  // turn, the record is judged as it stands.
+  async #judge(documents, reread, since) {
     const docs = [];
     const refusals = [];
     let passed = 0;
+    let overtaken = false;
     for (let i = 0; i < documents.length; i++) {
       const doc = documentOf(documents[i]);
       const again = i < reread;
@@ -784,6 +798,13 @@ class Replication extends Emitter {
         passed++;
         continue;
       }
+      // A page of the stream: a turn learned of this record after the page was handed over, and the page says
+      // otherwise — the older word, or a newer one; which, nothing here can tell. Not judged: pulled.
+      if (this.#touched.get(id) > since && !this.#assumedText(id, doc.text)) {
+        passed++;
+        overtaken = true;
+        continue;
+      }
       // The application's shape, through the modifier, which must be JSON.
       const why = this.#shaped(doc);
       if (why !== null) {
@@ -811,46 +832,44 @@ class Replication extends Emitter {
       // parked row is an edit waiting to go like a pending one — the backend has not taken it: never landed over in
       // silence, by an echo or by a newer state. A state the database refuses to land is not learned (nobody wins:
       // `#unlanded`), and an edit of such a record counts as pending though nothing else remembers it (a restart).
-      await this.#exclusive(() =>
-        this.#db.transact(
-          async (tx) => {
-            for (let i = 0; i < docs.length; i++) {
-              const { id, deleted, data, text } = docs[i];
-              try {
-                const local = await tx.get(id);
-                const waiting = this.#pending.has(id) || this.#parked.has(id);
-                const pending = waiting || (this.#unlanded.has(id) && this.#quiet(id, local) === null);
-                const reads = deleted ? local === null : local !== null && same(plain(local), plain(data));
-                const echo = this.#assumedText(id, text);
-                if (echo && (pending || reads)) {
-                  // The backend holds what this node knows: a state refused before is gone from it.
-                  this.#unlanded.delete(id);
-                  continue;
-                }
-                if (!echo && pending && !reads) {
-                  const decided = await this.#decide(id, plain(local), { data, deleted });
-                  await this.#landResolution(tx, decided);
-                  learned.push(id, text);
-                  conflicts.push(decided.event);
-                  // The backend won: the record reads as it holds it.
-                  if (decided.event.resolved === decided.event.remote) settled.push(id);
-                  continue;
-                }
-                // The backend's newer state, landed; a pending edit that reads as it has nothing to resolve.
-                if (!reads) {
-                  if (deleted) await tx.delete(id);
-                  else await tx.set(id, { ...data, $type: collection });
-                  applied++;
-                }
-                learned.push(id, text);
-                settled.push(id);
-              } catch (error) {
-                refusals.push([id, error?.code ?? error?.name ?? 'error', error, text]);
+      await this.#db.transact(
+        async (tx) => {
+          for (let i = 0; i < docs.length; i++) {
+            const { id, deleted, data, text } = docs[i];
+            try {
+              const local = await tx.get(id);
+              const waiting = this.#pending.has(id) || this.#parked.has(id);
+              const pending = waiting || (this.#unlanded.has(id) && this.#quiet(id, local) === null);
+              const reads = deleted ? local === null : local !== null && same(plain(local), plain(data));
+              const echo = this.#assumedText(id, text);
+              if (echo && (pending || reads)) {
+                // The backend holds what this node knows: a state refused before is gone from it.
+                this.#unlanded.delete(id);
+                continue;
               }
+              if (!echo && pending && !reads) {
+                const decided = await this.#decide(id, plain(local), { data, deleted });
+                await this.#landResolution(tx, decided);
+                learned.push(id, text);
+                conflicts.push(decided.event);
+                // The backend won: the record reads as it holds it.
+                if (decided.event.resolved === decided.event.remote) settled.push(id);
+                continue;
+              }
+              // The backend's newer state, landed; a pending edit that reads as it has nothing to resolve.
+              if (!reads) {
+                if (deleted) await tx.delete(id);
+                else await tx.set(id, { ...data, $type: collection });
+                applied++;
+              }
+              learned.push(id, text);
+              settled.push(id);
+            } catch (error) {
+              refusals.push([id, error?.code ?? error?.name ?? 'error', error, text]);
             }
-          },
-          { source: this.#source, actor: this.#actor },
-        ),
+          }
+        },
+        { source: this.#source, actor: this.#actor },
       );
     }
     for (let i = 0; i < learned.length; i += 2) this.#learn(learned[i], learned[i + 1]);
@@ -866,10 +885,27 @@ class Replication extends Emitter {
     }
     this.#count('pull', 'conflict', conflicts.length);
     for (let i = 0; i < conflicts.length; i++) notify(this, this.#logger, 'conflict', conflicts[i]);
+    // Read in this turn, the documents are the newest word on their records: a stream page handed over before is
+    // the older. What a turn overtook of a stream page is pulled instead.
+    if (since === undefined) this.#touch(documents);
+    else if (overtaken) this.#pullAll().catch(NOOP);
     if (docs.length === 0) return;
     this.#stats.applied += applied;
     this.#count('pull', 'applied', applied);
     notify(this, this.#logger, 'received', { documents: docs.length, applied });
+  }
+
+  // Documents the connector did not read in a turn of its own — a page of the stream — judged in one.
+  #land(documents, since) {
+    return this.#exclusive(() => this.#judge(documents, undefined, since));
+  }
+
+  // The records a turn learned of afresh (`list`: a push's rows, a page's documents), noted while a page of the stream
+  // waits: its documents of them are not judged.
+  #touch(list) {
+    if (this.#streaming === 0) return;
+    this.#turns++;
+    for (let i = 0; i < list.length; i++) this.#touched.set(list[i]?.id, this.#turns);
   }
 
   // Whether `text` is the backend's state as this node knows it: the text in memory, or its digest from the checkpoint.
@@ -941,11 +977,17 @@ class Replication extends Emitter {
           if (rows.length === 0) continue;
           this.#stats.probed += rows.length;
           this.#count('push', 'probed', rows.length);
-          const answers = await this.#exclusive(() => this.#push.handler(rows));
-          const docs = [];
-          const list = Array.isArray(answers) ? answers : [];
-          for (let i = 0; i < list.length; i++) if (isPlainObject(list[i]) && list[i].error == null) docs.push(list[i]);
-          await this.#land(docs);
+          // Asked and judged in one turn, as a page is.
+          await this.#exclusive(async () => {
+            const answers = await this.#push.handler(rows);
+            const docs = [];
+            const list = Array.isArray(answers) ? answers : [];
+            for (let i = 0; i < list.length; i++) {
+              const answer = list[i];
+              if (isPlainObject(answer) && answer.error == null) docs.push(answer);
+            }
+            await this.#judge(docs);
+          });
         }
         await this.#save(true);
       } catch (error) {
@@ -1074,14 +1116,20 @@ class Replication extends Emitter {
       return;
     }
     // On the queue, behind the pages before it. The checkpoint stays where the last pull run left it: a page that
-    // fails to land is pulled again from there (told, a run after the backoff), never passed over.
+    // fails to land is pulled again from there (told, a run after the backoff), never passed over. What the backend
+    // read for this page it read before now: a record a push is answered for, or a pull reads, while the page waits
+    // is judged by them — the page's document of it may be the older, and is left for a pull.
+    const since = this.#turns;
+    this.#streaming++;
     this.#enqueue(async () => {
-      if (this.#canceled) return;
       try {
-        await this.#land(signal.documents);
+        if (this.#canceled) return;
+        await this.#land(signal.documents, since);
         await this.#save(true);
       } catch (error) {
         this.#failed('pull', error, () => this.#pullAll());
+      } finally {
+        if (--this.#streaming === 0) this.#touched.clear();
       }
     }).catch(NOOP);
   }
@@ -1305,6 +1353,7 @@ class Replication extends Emitter {
     const answers = await this.#push.handler(rows);
     this.#stats.pushes++;
     this.#attempts.push = 0;
+    this.#touch(rows);
     await this.#answered(rows, texts, answers);
     this.#stats.pushed += rows.length;
     this.#count('push', 'pushed', rows.length);

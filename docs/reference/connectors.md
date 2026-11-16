@@ -222,9 +222,24 @@ conflicts, records the backend lacks are created.
 ## Live, retries and waiting
 
 The live side begins once the first pull run is through. Everything the pull side lands, the pages of a pull run and
-the pages of the stream, goes through one queue in order, and a landing and a push take turns, so neither judges a
-record against a state the other is changing. A `RESYNC` while a pull runs makes that run go once more after its
-pages. A page of the stream delivered out of order is judged again by the next pull.
+the pages of the stream, goes through one queue in order. A `RESYNC` while a pull runs makes that run go once more
+after its pages.
+
+A pull's page and a push take turns, and a turn is the whole exchange: the pull handler is called and its page judged
+in one turn, and a push reads its rows, calls the push handler and judges the answer in one. No push is answered
+between a page's read and its judgement, so a document is always judged against what the connector knew of its
+record when the backend was read. (Judged later, a page read before a push was answered held the older state: it
+landed over the newer record, or won a conflict over an edit made since.) A pull handler and a push handler are
+therefore never in flight together: a slow page delays a push by that page, and the other way round, and a handler
+that never settles holds the other side with it, so give a handler's requests a timeout. The probe `reSync()` sends
+for a refused document is asked and judged in one turn the same way.
+
+A page of the stream is read by the backend, not in a turn of the connector, and it waits on the queue. If a push is
+answered for a record, or a pull's page reads it, while the stream's page waits, the page's document of that record
+may be the older: where it does not hold the state the connector now knows, it is not judged and not counted, and a
+pull is asked for instead, which reads the record as it stands. A stream page never moves the checkpoint, so nothing
+is skipped. What this cannot see is a page that crossed a push on the wire and was handed over after the push's
+answer: that document is judged as it arrives, and the backend's next word on the record corrects it.
 
 A failure in either direction is kept (`errors`, the newest twenty), logged as `connector.failed`, and retried after
 `retryTime · 2^n` ms (n the failures in a row in that direction), capped at `maxRetryTime`, times a random factor

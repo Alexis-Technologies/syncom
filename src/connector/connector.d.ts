@@ -48,7 +48,8 @@ export interface PullHandlers<T = RecordData, C = unknown> {
   handler: (checkpoint: C | null, batchSize: number) => PullResult<T, C> | Promise<PullResult<T, C>>;
   /**
    * The backend's live changes, from `checkpoint` (the position the last pull left): call `emit({ documents })` for a
-   * page (landed; the checkpoint stays where the pulls move it), `emit('RESYNC')` to have the connector pull again
+   * page (landed; the checkpoint stays where the pulls move it, and a document a push or a pull overtook while the
+   * page waited is left to a pull), `emit('RESYNC')` to have the connector pull again
    * from its checkpoint, `emit('END')` when the stream is over (followed again after a backoff, and pulled). Returns
    * what stops the stream. Without it a live connector pulls every `retryTime` ms; with it, every `safetyTime` ms too.
    */

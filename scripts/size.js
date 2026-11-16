@@ -784,11 +784,13 @@ const ENTRIES = [
   // that forgets nothing (feature/leftovers, 2026-11-16). 10.2, raised by name.
   // 10.43 with what a handler that looks back read again (`reread`) passed over where its state is known or it is
   // refused as it was told — `#reread`, `#told` (feature/leftovers, 2026-11-16). 10.5, raised by name.
+  // 10.58 with a page read and judged in one turn and a stream page's overtaken documents left for a pull —
+  // `#pullPage`, `#judge`, `#touch` (feature/leftovers, 2026-11-16). 10.6, raised by name.
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 10.5,
+    budget: 10.6,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },

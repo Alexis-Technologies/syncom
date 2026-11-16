@@ -62,7 +62,7 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   every peer like a local one, and the backend never sees an op or a meta — under `source: 'connector:<name>'`,
   which the connector's own `transaction` listener passes (never pushed back). A document is judged against
   `#known` (the backend's state as the canonical text of ITS shape, before `modifier.pull`), never against the
-  record alone (`#land`, in one `#exclusive` turn with the push so neither judges under the other): the text known
+  record alone (`#judge`, inside a turn, so a push never judges under it — the rule on turns below): the text known
   is an echo (`#assumedText`) — this node's own write come back — and makes no op; over a pending edit it changes
   nothing (the push compares the edit against it), and over a record that reads otherwise with nothing pending it
   lands after all (a landing that never happened); another text over a pending edit is a conflict (`#decide`: the
@@ -72,7 +72,7 @@ src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetc
   version did) overwrote an unpushed edit with the backend's older state. `$type` never leaves (`plain`) and is
   laid back on what comes in. A pulled document that is no document (`documentOf`: an id, an object or `deleted`) is
   said (`connector.document.malformed`) and left out, never the page. A document is judged one by one, before
-  the transaction and inside it (`#land`): another collection's record (`seam.row(id).type`, a tombstone's too —
+  the transaction and inside it (`#judge`): another collection's record (`seam.row(id).type`, a tombstone's too —
   a backend's tombstone never deletes a record of another collection), a sealed one (`row.encrypted`: a connector
   never reads it through the decrypting `get`), a value with no JSON text (`textOf` throws: a BigInt — the known
   text is the canonical of the RAW value, `same.js`'s canonical reading an object through its `toJSON()` as JSON
@@ -88,9 +88,9 @@ cause)` — the `refused` event, `connector.document.refused`,
   resolution once `#landResolution` did — and a document refused for what it holds (every reason but `collection`
   and `sealed`) is NOT learned: NOBODY WINS (the user's decision). Its id joins `#unlanded` (saved with the
   checkpoint as `refused`), so a later local edit goes with the state known assumed and meets the backend's version as
-  a conflict `resolve` decides, and an edit of it counts as pending in `#land` though nothing else remembers it
+  a conflict `resolve` decides, and an edit of it counts as pending in `#judge` though nothing else remembers it
   (`#quiet`: the record against the state known — a parked row, a restart); `reSync()` asks first (`#reask`, on the
-  pull queue): a record still as last landed is PROBED through the push handler and the answer judged by `#land`
+  pull queue): a record still as last landed is PROBED through the push handler and the answer judged by `#judge`, in the probe's own turn
   (landed, or refused again), one edited since goes pending. `#learn` clears the id, and so does an echo. Learning
   before `tx.set` (as the first version did) made a refused state the backend's: never pulled again, and a local
   edit pushed over the backend with no conflict.
@@ -154,12 +154,12 @@ cause)` — the `refused` event, `connector.document.refused`,
   (as it once was), a restart left the row neither pending nor parked — the edit never reached the backend,
   `stats().parked` said 0 and `reSync()` had nothing to try. An id leaves `#parked` only where its edit is settled
   or the log remembers it: the backend took the row (`#answered`), the row has nothing to say (`#rowsOf`), the
-  backend's state landed over the record (`#land`'s `settled`: a state the record reads as, or a conflict the
+  backend's state landed over the record (`#judge`'s `settled`: a state the record reads as, or a conflict the
   backend won), a turn of the record made it pending (`#heard`, a redo, `#collectPending` — the log read at start,
   a rebuild's records). `reSync()` (`#retryParked`) makes a parked id pending WITHOUT taking it out: the position
   it then waits since names no turn of its record, so a retry cut short by a failing push or a crash must find it
   parked at the next start — never `#parked.clear()` before the answer; `stats().parked` and the `parked` getter
-  count the ids not pending. `#land` judges a parked row as an edit waiting to go (`waiting`): the state known is
+  count the ids not pending. `#judge` judges a parked row as an edit waiting to go (`waiting`): the state known is
   skipped over it and another state is a conflict — `echo && !pending && !reads` once landed "a landing that never
   happened" over a parked edit, and a restart's pull (or a re-read) made that a silent loss. `#parkable` says what
   is still a row, at `#load` and `#retryParked`: the collection's record, or what is left of one (a tombstone, a
@@ -181,7 +181,7 @@ cause)` — the `refused` event, `connector.document.refused`,
   run rewinds again. The handler is stateless — it once kept what it had handed over and left it out, which a landing
   that failed whole turned into a lost document (the retry was handed nothing). What the connector needs it is told:
   `reread`, how many of the page's documents, the first ones, are at or behind the checkpoint (`#pullPages` holds it
-  to a non-negative integer, a TypeError as a failed pull). `#land(documents, reread)` passes over such a document
+  to a non-negative integer, a TypeError as a failed pull). `#judge(documents, reread)` passes over such a document
   where its state is known (`#reread`: `#assumedText`, the text then kept in `#known` so the next reading compares
   texts, not digests; a deletion where nothing is known of the id — a record gone on both sides leaves no digest, and
   an old tombstone read again must never delete, nor conflict with, a record made here since) or where it is refused
@@ -208,6 +208,24 @@ cause)` — the `refused` event, `connector.document.refused`,
   the push awaited, what is dirty saved, the waiters rejected); `reSync()` pulls and pushes again. Under `/shared`
   the leader runs the connector (`leader` is the plan's; not here yet). On a mesh, one connector per backend: two
   nodes each pushing what the other pulled make a conflict of every write.
+- **A turn is the read AND the judgement.** `#exclusive` chains one turn after another: a pull's page (`#pullPage`:
+  the handler called, the page held to its shape, `#judge`, the checkpoint moved), a push's batch (`#pushBatch`: the
+  rows read, the handler called, the answer judged, the conflicts landed), a probe of `#reask` (asked, judged). The
+  handler's call is INSIDE the turn on both sides, so a pull and a push are never in flight together and no push is
+  answered between a page's read and its judgement — the page is judged against what the connector knew of each
+  record when the backend was read. The pull's handler once ran outside the turn and only `#land` inside: a page
+  read before a push was answered and judged after it held the older state, which landed over the newer record
+  (`!echo`, nothing pending) or, over an edit made since, was a conflict the stale state won — the edit lost. Never
+  call a handler outside a turn, and never `#exclusive` from inside one (`#judge` runs its transaction directly: a
+  nested turn waits for the one it is in). A page of the STREAM is not read in a turn — the backend read it before
+  `emit` — so it cannot be held to that: `#streamed` notes the count of turns (`#turns`) when the page is handed
+  over, and while one waits (`#streaming`) every turn that learns of records afresh notes them (`#touch`: a push's
+  rows, a page's or a probe's documents; the Map is cleared when no stream page waits). `#judge(documents, undefined,
+since)` leaves out a stream document whose record a turn learned of after `since`, unless it holds exactly the
+  state now known (an echo, judged as one): not counted, and `#pullAll()` asked — a stream page never moves the
+  checkpoint, so the pull reads the record as it stands and nothing is skipped. What no count can see is a page that
+  crossed a push on the wire and was handed over after its answer: judged as it comes, corrected by the backend's
+  next word. No clock of the backend's is compared anywhere, and there is no option.
 - **An adapter is the two handlers over an injected client, and nothing of the backend's.** No SDK, no HTTP client
   and no protocol of the backend's ships with syncom: an adapter takes `fetch`, the driver's collection or the
   vendor's client as it is given, answers `{ pull, push }` to spread into `replicate()`'s options, and requires

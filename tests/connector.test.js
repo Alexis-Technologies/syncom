@@ -1906,6 +1906,115 @@ test('Connectors', async (t) => {
   );
 
   await t.test(
+    'a page is judged against what the connector knew when it was read: a push is never answered between a page’s read and its judgement — no stale landing, no conflict over a newer edit — and a page of the stream that a push or a pull overtook is left for the pull',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const handlers = backend.handlers();
+      const pull = handlers.pull.handler;
+      // A pull that can be held: before it reads the backend, or with the page read and on its way back.
+      const gate = () => {
+        const held = {};
+        held.reached = new Promise((resolve) => (held.reach = resolve));
+        held.released = new Promise((resolve) => (held.release = resolve));
+        return held;
+      };
+      const hold = { before: null, after: null };
+      const wait = async (where) => {
+        const held = hold[where];
+        if (held === null) return;
+        hold[where] = null;
+        held.reach();
+        await held.released;
+      };
+      handlers.pull.handler = async (checkpoint, batchSize) => {
+        await wait('before');
+        const page = await pull(checkpoint, batchSize);
+        await wait('after');
+        return page;
+      };
+      // The stream is the test's: a RESYNC, or a page, when it says so.
+      let emit = null;
+      handlers.pull.stream = (fn) => {
+        emit = fn;
+        return () => {};
+      };
+      const replication = replicate(a, {
+        name: 'main',
+        collection: 'Task',
+        ...handlers,
+        retryTime: 50,
+        safetyTime: 0,
+      });
+      t2.after(() => replication.cancel().catch(() => {}));
+      const conflicts = [];
+      const errors = [];
+      replication.on('conflict', (event) => conflicts.push(event));
+      replication.on('error', (error) => errors.push(error.direction));
+      await replication.awaitInitialReplication();
+      const id = await a.insert({ $type: 'Task', title: 'v1' });
+      await replication.awaitInSync();
+      // A pull reads the record as the backend holds it (v1, this node's own) and its answer is held on the way
+      // back. Two edits meanwhile: once the first was pushed and answered while the page was in flight — the page's
+      // v1 then met another state known, and the second edit, still waiting, as a conflict the stale v1 won.
+      hold.after = gate();
+      const first = hold.after;
+      emit('RESYNC');
+      await first.reached;
+      await a.Task.update(id, { title: 'v2' });
+      await sleep(40);
+      backend.fail('push', 1);
+      await a.Task.update(id, { title: 'v3' });
+      await sleep(20);
+      first.release();
+      await waitUntil(() => backend.read(id)?.title === 'v3', { timeout: 5000 });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(conflicts, [], 'the page was judged as it was read: an echo of what was known');
+      assert.deepStrictEqual(await a.get(id), { title: 'v3', $type: 'Task' });
+      assert.deepStrictEqual(errors, ['push']);
+      // A page of the stream waits behind a pull in flight; a push answered meanwhile makes it the older. It is not
+      // judged — landed, it laid v3 over v4 — and not counted: a pull is asked for instead, and reads what is there.
+      const before = replication.stats();
+      const length = a.log.length;
+      hold.after = gate();
+      const second = hold.after;
+      emit('RESYNC');
+      await second.reached;
+      emit({ documents: [{ id, data: { title: 'v3' } }] });
+      await a.Task.update(id, { title: 'v4' });
+      second.release();
+      await waitUntil(() => backend.read(id)?.title === 'v4');
+      await waitUntil(() => replication.stats().pulls >= before.pulls + 2);
+      await replication.awaitInSync();
+      assert.deepStrictEqual(await a.get(id), { title: 'v4', $type: 'Task' });
+      assert.strictEqual(a.log.length, length + 1, 'the edit alone: nothing of the stream’s page landed');
+      const after = replication.stats();
+      assert.strictEqual(after.pulled - before.pulled, 2, 'the pull’s page and the pull asked for: the stream’s not');
+      assert.strictEqual(after.applied, before.applied);
+      // The same where a pull overtook it: the stream hands a page, another client writes again, and a pull that was
+      // waiting reads the newer state and lands it first. The page's older state is left alone.
+      hold.before = gate();
+      const third = hold.before;
+      emit('RESYNC');
+      await third.reached;
+      backend.set(id, { title: 'theirs 1' });
+      emit({ documents: [{ id, data: { title: 'theirs 1' } }] });
+      backend.set(id, { title: 'theirs 2' });
+      third.release();
+      await waitUntil(async () => (await a.get(id))?.title === 'theirs 2');
+      await replication.awaitInSync();
+      await sleep(30);
+      assert.deepStrictEqual(await a.get(id), { title: 'theirs 2', $type: 'Task' }, 'never back to the older state');
+      assert.deepStrictEqual(conflicts, []);
+      // A page of the stream nothing overtook lands as it always did.
+      backend.set(id, { title: 'theirs 3' });
+      emit({ documents: [{ id, data: { title: 'theirs 3' } }] });
+      await waitUntil(async () => (await a.get(id))?.title === 'theirs 3');
+      assert.deepStrictEqual(errors, ['push']);
+    },
+  );
+
+  await t.test(
     'awaitInitialReplication resolves on success alone: a first pull that fails keeps it waiting until the retry lands',
     async (t2) => {
       const backend = createFakeBackend();

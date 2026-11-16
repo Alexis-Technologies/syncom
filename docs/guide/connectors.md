@@ -143,7 +143,8 @@ again under the same `name`, which resumes from the checkpoint the first one sav
 The connector subscribes once its first pull is through and hands the stream the checkpoint it left. The stream calls
 `emit()` with one of three things. `emit('RESYNC')` asks for a pull from the checkpoint, which is all most streams
 need. `emit({ documents })` hands over a page directly; it lands like a pulled page but never moves the checkpoint,
-so a page that fails to land is pulled again rather than lost. `emit('END')` says the backend closed the stream: the
+so a page that fails to land is pulled again rather than lost, and a document that a push or a pull overtook while the
+page waited is left to a pull rather than judged as the older state it may be. `emit('END')` says the backend closed the stream: the
 connector subscribes again after a backoff and pulls what it missed.
 
 A stream can go quiet without saying so, so a connector with a stream still pulls every `safetyTime` (60 seconds;
