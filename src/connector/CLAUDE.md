@@ -124,7 +124,10 @@ cause)` — the `refused` event, `connector.document.refused`,
   never rejects (`.catch(NOOP)` where it is not awaited). `pushed` is a FRONTIER (`#frontier`): before the oldest
   turn still pending, or the newest turn heard (`#last`, never `log.lastEventId` — a position reserved but not yet
   announced would be claimed) where nothing is pending — a restart pushes `log.since(pushed)` (each id pending since
-  before its first entry there, `formatId(seq - 1)`) or every record of the collection once where the log cannot
+  before its first entry there, `formatId(seq - 1)`; a tombstone's row keeps its collection, a PURGE's names none —
+  `#purged`: such an id is this connector's where the checkpoint still holds the backend's state of it, a digest, and
+  goes as a deletion; skipped by its row alone, as it once was, a purge made while no connector ran never reached the
+  backend) or every record of the collection once where the log cannot
   resume (`connector.rebuild`: each a probe, `#probing`; tombstones not among them). Durably, `#digests` names the
   backend's state per id (DIGEST_LENGTH of the seam's `digest` of the text; `[SOURCE].digest` is `hashText` so the
   connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known, refused, parked }`

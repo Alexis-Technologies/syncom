@@ -1152,8 +1152,9 @@ class Replication extends Emitter {
     if (any) this.#flush().catch(NOOP);
   }
 
-  // What the log holds of the collection since the position pushed through, pending since that position; every
-  // record once where the log cannot resume there (`connector.rebuild`), pending since the start.
+  // What the log holds of the collection since the position pushed through, pending since that position — a record
+  // deleted meanwhile, and one purged, among them: each goes as a deletion; every record once where the log cannot
+  // resume there (`connector.rebuild`), pending since the start.
   #collectPending() {
     const pushed = this.#checkpoint.pushed;
     const entries = pushed === null ? null : this.#db.log.since(pushed);
@@ -1174,7 +1175,7 @@ class Replication extends Emitter {
       const { op, seq } = entries[i];
       // This connector's own pulls are the backend's already.
       if (op.actor === this.#actor || typeof op.id !== 'string' || this.#pending.has(op.id)) continue;
-      if (!this.#mine(op.id)) continue;
+      if (!this.#mine(op.id) && !this.#purged(op.id)) continue;
       // Pending since before its first op here: the frontier moves past the records pushed, not past these. A parked
       // row with a turn here is the log's to remember.
       this.#pending.set(op.id, this.#db.log.formatId(seq - 1));
@@ -1186,6 +1187,15 @@ class Replication extends Emitter {
   #mine(id) {
     const row = this.#seam.row(id);
     return row !== null && row.type === this.#collection && row.encrypted !== true;
+  }
+
+  // Whether `id` is a record of this connector's purged since: a purge erases the collection with the record — its
+  // row names none, and the log's ops of it are scrubbed — so what still says the record was this connector's is the
+  // backend's state it is known to hold, the digest kept with the checkpoint. A purged record the backend never held
+  // (no digest) has nothing to take away there.
+  #purged(id) {
+    const row = this.#seam.row(id);
+    return row !== null && row.gone === true && row.type === null && this.#digests.has(id);
   }
 
   // Whether a parked id is still a row to push: the collection's record, or what is left of one — a tombstone, a

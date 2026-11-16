@@ -238,7 +238,8 @@ state the backend already had is skipped, and a newer one is a conflict, decided
 
 The checkpoint lives in the database, so a connector created again with the same `name` resumes, after a restart of
 the app as after a `cancel()`. The backend is pulled from the saved position, and every change the
-[operation log](./operation-log) holds since the last push goes out:
+[operation log](./operation-log) holds since the last push goes out, a deletion and a [purge](./purge) as a
+deletion:
 
 <<< @/examples/connectors.mjs#restart
 

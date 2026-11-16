@@ -172,8 +172,9 @@ none of them by itself, counts and lists them, and tries each again as before th
 - **A row leaves** when the backend takes it, when it has nothing left to say (the record reads as the backend is
   known to hold it), or when a pull lands the backend's state over the record (the backend won a conflict).
 
-A parked row whose record was deleted or purged meanwhile goes as a deletion: a deletion made while no connector
-ran is in the log and the restart pushes it, and a purge, which the log's resume passes by, waits for `reSync()`. A
+A parked row whose record was deleted or purged meanwhile goes as a deletion. A deletion made while no connector
+ran is in the log and the restart pushes it; so is a purge, where the backend is known to hold a state of the record,
+and a purge of a record the backend never took anything of waits for `reSync()`. A
 parked id that has since become an encrypted record or a record of another collection is forgotten. Where the log
 cannot resume from `pushed`, every live record of the collection is checked against the backend once, a parked one
 with the rest. Because `pushed` never passes a change still waiting to go, a restart can push a parked row once more
@@ -211,10 +212,12 @@ between a landing and its save lands that page again.
 In memory the connector keeps the backend's state as text for up to 10 000 records (the oldest not pending forgotten
 first); a push of a record known only by digest is a probe. `start()` reads the checkpoint, pulls from `pull` (judging
 a document by its digest where the text is not in memory, so this node's own echo over an offline edit is skipped),
-then pushes what the log holds since `pushed`; the parked rows stay parked. Where the log cannot resume there
-(compacted past it, another epoch, a connector never run) every live record of the collection is probed once
-(`connector.rebuild` in the log): equal records say nothing, differing ones are conflicts, records the backend lacks
-are created.
+then pushes what the log holds since `pushed`; the parked rows stay parked. A record deleted while no connector ran
+goes as a deletion, and so does one purged: a purge erases the record's collection with it, so the connector tells a
+purged record of its own by the backend's state it still knows (`known`), and one the backend never held is not
+sent. Where the log cannot resume there (compacted past it, another epoch, a connector never run) every live record
+of the collection is probed once (`connector.rebuild` in the log): equal records say nothing, differing ones are
+conflicts, records the backend lacks are created.
 
 ## Live, retries and waiting
 

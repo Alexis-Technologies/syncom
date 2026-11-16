@@ -864,6 +864,87 @@ test('Connectors', async (t) => {
   );
 
   await t.test(
+    'a purge made while no connector ran reaches the backend as a deletion at the next start, as a deletion made meanwhile does; a purged record the backend never held is not sent; a purge whose push failed before the stop goes too',
+    async (t2) => {
+      const backend = createFakeBackend();
+      let a = await open(t2, 'A');
+      const rows = [];
+      const start = (options = {}) => {
+        const handlers = backend.handlers();
+        const push = handlers.push.handler;
+        handlers.push.handler = async (batch) => {
+          const answer = await push(batch);
+          for (const row of batch) rows.push([row.id, row.deleted, row.assumed === undefined ? 'probe' : 'row']);
+          return answer;
+        };
+        const replication = replicate(a, {
+          name: 'main',
+          collection: 'Task',
+          ...handlers,
+          live: false,
+          retryTime: 50,
+          ...options,
+        });
+        t2.after(() => replication.cancel().catch(() => {}));
+        return replication;
+      };
+      const known = async () => JSON.parse(await kvNamespace(a[DB].kv, 'connector').get('main')).known;
+      let replication = start();
+      await replication.awaitInitialReplication();
+      await a.transact(async (tx) => {
+        await tx.set('purged', { $type: 'Task', title: 'purged while away' });
+        await tx.set('deleted', { $type: 'Task', title: 'deleted while away' });
+        await tx.set('failing', { $type: 'Task', title: 'purged while the backend was down' });
+      });
+      await replication.awaitInSync();
+      await replication.cancel();
+      assert.deepStrictEqual(Object.keys(await known()).sort(), ['deleted', 'failing', 'purged']);
+      // While no connector runs: one record purged, one deleted, one made and purged before any push.
+      await a.purge('purged');
+      await a.Task.delete('deleted');
+      await a.Task.set('never', { title: 'never pushed' });
+      await a.purge('never');
+      // The database reopened, the connector started anew: the purge goes as the deletion does — the backend asked
+      // what it holds first (a probe: its state is known by digest alone), then told of the deletion.
+      await a.close();
+      a = await open(t2, 'A');
+      rows.length = 0;
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.awaitInSync();
+      assert.strictEqual(backend.docs.get('deleted').deleted, true);
+      assert.strictEqual(backend.docs.get('purged').deleted, true, 'the purge reached the backend as a deletion');
+      const sent = (id) => rows.filter((row) => row[0] === id).map(([, deleted, kind]) => [deleted, kind]);
+      assert.deepStrictEqual(sent('purged'), [
+        [true, 'probe'],
+        [true, 'row'],
+      ]);
+      assert.deepStrictEqual(sent('purged'), sent('deleted'), 'exactly as the deletion goes');
+      assert.strictEqual(backend.docs.has('never'), false, 'nothing of a record the backend never held');
+      assert.ok(rows.every(([id]) => id !== 'never'));
+      // Gone on both sides: no digest is kept of either.
+      await replication.cancel();
+      assert.deepStrictEqual(Object.keys(await known()), ['failing']);
+      // A purge heard while the backend was down, the connector stopped before the retry: the next start sends it.
+      replication = start({ retryTime: 5000 });
+      await replication.awaitInitialReplication();
+      const errors = [];
+      replication.on('error', (error) => errors.push(error));
+      backend.fail('push', 1);
+      await a.purge('failing');
+      await waitUntil(() => errors.length === 1);
+      await replication.cancel();
+      assert.strictEqual(backend.docs.get('failing').deleted, false);
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.awaitInSync();
+      assert.strictEqual(backend.docs.get('failing').deleted, true);
+      await replication.cancel();
+      assert.deepStrictEqual(await known(), {});
+    },
+  );
+
+  await t.test(
     'a record modifier.push throws on is parked — said (refused, direction push, reason modifier), listed, kept with the checkpoint — the rest of its batch goes, a pull never lands the backend’s state over it, and reSync() or a change to the record tries it again',
     async (t2) => {
       const backend = createFakeBackend();
