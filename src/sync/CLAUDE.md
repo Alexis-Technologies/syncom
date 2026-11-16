@@ -139,9 +139,12 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   push's answer (`refused`, `reason: 'rule'` with the record as it holds it; `'scope'` without it) and the
   dialer sets itself straight (`#refused`: the fields the op touched — `touchedBy`: a set's keys, an unset's names,
   a kind's op's `key`, the whole record for a write, a delete, a merge or an op the log compacted — brought to the
-  host's through the seam's `revert(id, current, fields, { actor: 'revert' })`, which diffs the reading by kind
-  (`diffViews`: a counter by an inc, a set by adds and removes, a text by its splices — never a register over
-  another kind) so what the host accepted since stands; `forget` where the host holds nothing; a revert refused is
+  host's through the seam's `revert(id, current, fields, { actor: 'revert', kinds })`, which diffs the reading by kind
+  (`diffViews`: a counter by an inc, a set by adds and removes, a text by its splices) so what the host accepted
+  since stands — `kinds`, the refusal's, says which of the host's fields are no registers (`refuse` in
+  src/apply.js: a reading does not tell a counter's sum from a number), and a field of another kind here is unset
+  and made again as the host's: left a counter over the host's register, or a register over its set, it would take
+  none of what the host's kind makes next; `forget` where the host holds nothing; a revert refused is
   reported, never reverted again — the answer's `actor` tells one, the log compacted or not; a purge refused is
   reported alone). A sealed record at the host is skipped before the rule is asked: a sealed entry has no meta an op
   could be tried over.

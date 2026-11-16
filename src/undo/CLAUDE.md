@@ -31,3 +31,11 @@ true`; conflicts are read from `log.entriesOf(id)` after the step's
   lives in ops.js (it needs the predicates) and `deepEqual` in shape.js, so
   patch.js and the subpath ship without the op model — keep it that way. The
   stack is memory only; a `purge` forgets the record on every step.
+- **A step's two sides have each their own kinds.** `Kept` reads `kindsBefore` off the step's first commit (its
+  `kinds`, with `was` where that op changed a kind) and `kindsAfter` off its last (`kinds`): a step may leave a
+  field of another kind than it found it — an `unset`, then the field made again — and one map merged over the
+  step read a register's value as a counter's sum (a TypeError from `realize`) or brought a counter back as a
+  register. The way back of such a field is an `unset` and the field made again (src/patch.js), with no looser
+  form: where others touched the field since, its patches are skipped TOGETHER (`reset` in `#apply`) — the
+  made-again kind taken alone as the "loose" alternative lands on a field of the other kind and refuses the whole
+  undo (`FIELD_KIND`).

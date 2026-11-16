@@ -95,9 +95,10 @@ const tracked = (field, paths) => {
 // adds alone (`own`), so a concurrent add of it elsewhere survives. Under
 // `paths`, the tracked fields alone: a whole-record way back is none of
 // the manager's business.
-const invert = ({ before, after, kinds, embeds }, exact, plugins, paths) => {
+const invert = ({ before, after, kindsBefore, kindsAfter, embeds }, exact, plugins, paths) => {
   const context = { from: { embeds: embeds?.after ?? null }, to: { embeds: embeds?.before ?? null } };
-  const patches = diffViews(after, kindsIn(after, kinds), before, kindsIn(before, kinds), { exact, plugins, context });
+  const from = kindsIn(after, kindsAfter);
+  const patches = diffViews(after, from, before, kindsIn(before, kindsBefore), { exact, plugins, context });
   const out = [];
   for (let i = 0; i < patches.length; i++) {
     const patch = patches[i];
@@ -149,14 +150,16 @@ const stepView = (step) => ({
 });
 
 // What a step keeps of one record: how the first commit found it, how the
-// last left it, the kinds of every field seen, its own seqs. The commits'
-// events hold the copies, taken when the step is inverted — never one per
-// keystroke (a large record was copied twice for every commit).
+// last left it, its own seqs. The commits' events hold the copies, taken
+// when the step is inverted — never one per keystroke (a large record was
+// copied twice for every commit) — and the kinds of each side's fields: a
+// step may leave a field of another kind than it found it (an unset, then
+// the field made again), so one map for both sides read a counter's sum as
+// a register's value, or a register's as a counter's.
 class Kept {
   constructor(event) {
     this.first = event;
     this.last = event;
-    this.kinds = { ...event.kinds };
     this.seqs = new Set([event.seq]);
   }
 
@@ -166,6 +169,17 @@ class Kept {
 
   get after() {
     return this.last.after;
+  }
+
+  // As the first commit found the fields: its `kinds`, less what it changed the kind of (`was`).
+  get kindsBefore() {
+    const { kinds, was } = this.first;
+    return was === undefined ? kinds : { ...kinds, ...was };
+  }
+
+  // As the last commit left them.
+  get kindsAfter() {
+    return this.last.kinds;
   }
 
   // A text's embed markers, each side: the inverse of a cut lays them again.
@@ -297,10 +311,10 @@ class UndoManager extends Emitter {
 
   // One commit into a step: per record the step keeps how it found the
   // record (the first commit's before), how it left it (the last commit's
-  // after), the kinds of every field seen — the inverse is made of those
-  // when the step is taken back — and the seqs of its own ops on it.
+  // after) — the inverse is made of those, each with its own kinds, when
+  // the step is taken back — and the seqs of its own ops on it.
   #record(step, event) {
-    const { op, seq, kinds } = event;
+    const { op, seq } = event;
     step.lastSeq = Math.max(step.lastSeq, seq);
     step.seqs.add(seq);
     const record = step.records.get(op.id);
@@ -308,7 +322,6 @@ class UndoManager extends Emitter {
     else {
       record.last = event;
       record.seqs.add(seq);
-      Object.assign(record.kinds, kinds);
     }
   }
 
@@ -398,9 +411,18 @@ class UndoManager extends Emitter {
             if (list === undefined) byField.set(alt.field, [alt]);
             else list.push(alt);
           }
+          // A field the way back resets either way — one that changed kind, a register that was not there — has
+          // no looser way: its patches go together or not at all. The made-again kind taken without its `unset`
+          // lands on a field of the other kind (FIELD_KIND, the whole undo refused), the `unset` alone leaves none.
+          const reset = new Set();
+          for (let i = 0; i < loose.length; i++) if (loose[i].action === 'unset') reset.add(loose[i].field);
           kept = [];
           for (const patch of patches) {
             const types = typesAround(conflicts, patch.field);
+            if (types !== undefined && reset.has(patch.field)) {
+              skipped++;
+              continue;
+            }
             if (!conflicting(patch, types)) {
               kept.push(patch);
               continue;
@@ -440,7 +462,8 @@ class UndoManager extends Emitter {
           before: record.before,
           after: partial.after,
           embeds: { before: record.embeds.before, after: partial.embeds.after },
-          kinds: { ...record.kinds, ...partial.kinds },
+          kindsBefore: record.kindsBefore,
+          kindsAfter: partial.kindsAfter,
           seqs: record.seqs,
         });
       }

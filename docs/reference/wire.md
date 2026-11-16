@@ -627,16 +627,19 @@ that answers 428 to five fresh hellos in a row is reported once as
 ```
 
 `refused` names the ops the host refused and took — `{ origin, seq, scope,
-id, actor, reason, current? }`, `actor` the op's own (null for none) and
+id, actor, reason, current?, kinds? }`, `actor` the op's own (null for none) and
 `reason` why: `'rule'` for its `authorizeWrite`, with `current` the record as
-the host holds it (null for none); `'scope'` for a record the host reads as
+the host holds it (null for none) and `kinds`, `{ field: kind }` for its fields
+that are no registers (absent where every field is one: a reading does not
+tell a counter's sum from a number); `'scope'` for a record the host reads as
 outside the pusher's scopes, without `current` (handing the record over would
 be a read outside the grant). Each is logged there as a withheld scrub
 (skipped, scrubbed, slot 20 `2`) and relayed as a no-op, so the stream has no
 gap. The pusher reports each (`WRITE_REFUSED`, with the `reason`) and sets
 itself straight after a rule's refusal of its own op: the fields the op
-touched brought back to `current` through the kinds' own ops, or the record
-forgotten where the host holds nothing; an op whose `actor` is `revert` is
+touched brought back to `current` through the kinds' own ops — each made the
+kind `kinds` says, a field of another kind here unset and made again — or the
+record forgotten where the host holds nothing; an op whose `actor` is `revert` is
 reported and reverted no further. A refusal of scope is reported alone.
 
 `vector` carries the keys the page touched, not the host's whole vector.

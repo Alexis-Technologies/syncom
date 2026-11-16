@@ -215,7 +215,10 @@ const ENTRIES = [
   // what a migration changed (ops.js moveVersion), a set that makes a record made as one (2026-11-16). 78.6, raised by name.
   // 78.6 (over by bytes) with that and the seam a follower hub's upload reaches the engine's blobs store through
   // (database.js blobStore; 2026-11-16) together. 78.7, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.7 },
+  // 78.8 with a field that changes kind made again as what it is — a register by its put, the unsets first — the
+  // commit event's `was` and a refusal's `kinds` for the revert (patch.js, commit.js, apply.js; 2026-11-16). 78.8,
+  // raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.8 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -275,7 +278,9 @@ const ENTRIES = [
   // 8.0 with the canonical JSON in shape.js.
   // 9.0 (over by bytes) once the docs found-bugs fixes met — delete wins, the CREATE symbol of createState's first
   // write and the withheld scrub each add to what undo bundles of the core (2026-11-15). 9.1, raised by name.
-  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9.1 },
+  // 9.2 with a step's two sides read by their own kinds and a kind-changing field's patches kept together
+  // (2026-11-16). 9.2, raised by name.
+  { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9.2 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
   {
@@ -501,7 +506,9 @@ const ENTRIES = [
   // 184.4 with a migration that writes what the lens changed and nothing else — the `version` op, the version a
   // register of its own, a record compared name by name, a renamed or rewritten field laid again by its kind, a
   // renamed text with its marks and embeds (2026-11-16). 184.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 184.5 },
+  // 184.6 with a field that changes kind made again as what it is, on a restore and on a host's revert
+  // (2026-11-16). 184.6, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 184.6 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -736,7 +743,9 @@ const ENTRIES = [
     // (review №7, E9; 2026-11-07). 41.5, raised by name.
     // 41.7 with the op model's `version` op and the version's stamp (`meta.vs`) it bundles with the write path
     // (2026-11-16). 41.7, raised by name.
-    budget: 41.7,
+    // 41.8 (over by bytes) with a kind change in a diff and the refusal's kinds it bundles (2026-11-16). 41.8,
+    // raised by name.
+    budget: 41.8,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.

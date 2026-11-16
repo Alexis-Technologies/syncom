@@ -76,3 +76,15 @@ true` keeps this node's tags alone (`ownTags`): an undo revokes this node's
   the undo manager keeps the events (`Kept`: a step's first `before`, last
   `after`) and copies only when it inverts. A peer's op raises `change`,
   never `commit`.
+- **A field that changes kind is an `unset` and the field made again — a register too — and every `unset` comes
+  first.** `recreate` in src/patch.js makes each kind from nothing: an `inc` of the sum (of 0 too: the field stays
+  a counter), an `add`, the plugin's `recreate`, and for a register its `put` — an `unset` alone left the value
+  unwritten, so a restore, an undo or a revert to a version where a counter, a set, a list, a text or a tree had
+  been a plain value read `undefined` there. The `unset` cannot go: a register outranks every kind on the op path
+  (`yieldTo`), but `kindClash` refuses a local op on a field of another kind before it is stamped, and
+  `applyPatches` makes local ops. `diffViews` puts the `unset`s ahead of everything it makes, whatever the order
+  of the fields — a text at `profile` must be gone before `profile/city` is put (it was FIELD_KIND, the restore
+  refused whole). The kinds of each side are the caller's to give, and they must be that side's: the `commit`
+  event's `kinds` names one kind a field (what `after` holds), `was` the kind `before` held where the op changed
+  it, and the seam's `revert` takes the host's (`kinds` of the refusal). What no patch makes — an empty set,
+  list, text or tree — is left out, as `compact()` leaves it.

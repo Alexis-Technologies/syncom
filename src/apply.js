@@ -10,7 +10,7 @@
 // what Storage lends its write paths — see Storage#open.
 
 const { assignData } = require('./lazy.js');
-const { applyOp, isAlive, latestClock, settleMeta } = require('./ops.js');
+const { applyOp, isAlive, latestClock, settleMeta, kindsOf } = require('./ops.js');
 const { keyScope, opKey } = require('./vector.js');
 const { headerText, scrubOp, withholdOp } = require('./header.js');
 const { hashText } = require('./crypto/digest.js');
@@ -467,14 +467,24 @@ const visibleOf = (entry) => (entry && isAlive(entry) ? entry.data : null);
 // a withheld scrub — skipped, its payload gone, applied nowhere it is relayed, a purge included — so its stream goes
 // on, and named in the answer for the pusher. The actor rides along: a revert the rule refuses too is told by it,
 // never reverted again (the pusher's log may have compacted the op by then). `current` — the record as it is here —
-// for a rule's refusal alone: a record outside the grant is one the pusher may not read.
+// for a rule's refusal alone: a record outside the grant is one the pusher may not read. With it `kinds`, its
+// fields that are no registers: a reading does not tell a counter's sum from a number, and the pusher's revert
+// makes each field what it is here.
 const refuse = (batch, op, reason, current) => {
   withholdOp(op);
   (batch.stripped ??= new Set()).add(op);
   skip(batch, op);
   const actor = typeof op.actor === 'string' ? op.actor : null;
   const refusal = { origin: op.origin, seq: op.seq, scope: op.scope ?? null, id: op.id, actor, reason };
-  if (current !== undefined) refusal.current = visibleOf(current);
+  if (current !== undefined) {
+    refusal.current = visibleOf(current);
+    if (refusal.current !== null) {
+      const kinds = kindsOf(current, batch.core.plugins);
+      for (const field of Object.keys(kinds)) {
+        if (kinds[field] !== 'register') (refusal.kinds ??= {})[field] = kinds[field];
+      }
+    }
+  }
   (batch.refused ??= []).push(refusal);
 };
 

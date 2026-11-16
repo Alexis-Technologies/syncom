@@ -1282,7 +1282,7 @@ class SyncManager extends Emitter {
   async #refused(peer, refused) {
     const storage = this.#storage;
     for (let i = 0; i < refused.length; i++) {
-      const { origin, seq, scope, id, current, actor } = refused[i];
+      const { origin, seq, scope, id, current, actor, kinds } = refused[i];
       const reason = refused[i].reason === 'scope' ? 'scope' : 'rule';
       const own = origin === storage.nodeId && typeof id === 'string';
       const held = own
@@ -1304,7 +1304,8 @@ class SyncManager extends Emitter {
       this.#fail(peer, new SyncomError('WRITE_REFUSED', message, fields));
       if (!revert) continue;
       try {
-        await storage[SOURCE].revert(id, current ?? null, touched, { actor: 'revert' });
+        const options = { actor: 'revert', kinds: isPlainObject(kinds) ? kinds : {} };
+        await storage[SOURCE].revert(id, current ?? null, touched, options);
       } catch (error) {
         storage.logger.warn({ event: 'sync.revert.failed', url: peer.node.url, id, err: error });
       }

@@ -100,7 +100,9 @@ delete, and the task returns on the laptop.
 
 The revert is made of new ops stamped after the refused one, through each field's own kind (a counter
 by an increment, a set by adds and removes), so whatever the host accepted from others in the meantime
-stays. The error carries `id`, `current` (the record as the host holds it) and `touched` (the fields
+stays. The host tells the kind of each field with the record, so a field the refused write turned into
+another kind (a counter unset and written as a plain value) is that kind again on the client, and what
+the host's own kind does next still lands there. The error carries `id`, `current` (the record as the host holds it) and `touched` (the fields
 put back, or `null` for the whole record). A revert that the host refuses again is reported and left
 alone.
 

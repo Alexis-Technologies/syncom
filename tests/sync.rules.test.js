@@ -257,6 +257,77 @@ test('Rules on the host and on the dialer', async (t) => {
   );
 
   await t.test(
+    'a refused change of a field’s kind is reverted to the kind the host holds: a register again, a counter, a set — and what the host’s kind makes next lands',
+    async (t2) => {
+      let admin = null;
+      // Only the admin writes this record at all.
+      const authorizeWrite = ({ peer }) => peer?.node === admin;
+      const edges = [
+        ['A', 'H'],
+        ['B', 'H'],
+      ];
+      // A's logger: a revert that fails is a warning there (`sync.revert.failed`).
+      const failed = [];
+      const warn = (entry) => entry.event === 'sync.revert.failed' && failed.push(entry.err.message);
+      const logger = { warn, error: () => {}, info: () => {}, debug: () => {} };
+      const mesh = await createMesh(t2, ['H', 'A', 'B'], edges, createStorage, {
+        unit: { access: 'public', authorizeWrite },
+        nodes: { A: { logger } },
+      });
+      const [h, a, b] = ['H', 'A', 'B'].map((name) => mesh.get(name));
+      admin = b.nodeId;
+      await a.sync.awaitInitialReplication();
+      await b.sync.awaitInitialReplication();
+      const errors = [];
+      a.sync.on('error', (error) => errors.push(error));
+      // What a field is: its kind by the meta — a reading does not tell a counter's 5 from a 5 — and its reading.
+      const fieldOf = async (storage, id, field) => {
+        const { meta, data } = (await storage.snapshot()).records.find((record) => record.id === id);
+        let kind = Object.hasOwn(data, field) ? 'register' : 'absent';
+        if (meta.counters[field] !== undefined) kind = 'counter';
+        else if (meta.sets[field] !== undefined) kind = 'set';
+        return [kind, storage.getCachedData(id)[field]];
+      };
+      // At the host: two registers (a number, a string), a counter and a set.
+      const id = await b.insert({ title: 't', n: 5, label: 'five' });
+      await b.inc(id, 'hits', 5);
+      await b.add(id, 'tags', ['x']);
+      await settle([h, a, b]);
+      const held = { title: 't', n: 5, label: 'five', hits: 5, tags: ['x'] };
+      assert.deepStrictEqual(await a.get(id), held);
+      // A changes the kind of each, every op refused: the registers become counters, the counter a register, and
+      // the set is unset.
+      await a.unset(id, ['n', 'label', 'hits', 'tags']);
+      await a.inc(id, 'n', 1);
+      await a.inc(id, 'label', 1);
+      await a.update(id, { hits: 'many' });
+      await waitUntil(() => errors.filter((error) => error.code === 'WRITE_REFUSED').length >= 4, { timeout: 5000 });
+      await settle([h, a, b]);
+      // A reads as the host again, and each field is the kind the host holds it as: a register over the counter A
+      // made of it — one that read as a number too (it was left a counter that read 5) and one that could not
+      // (its revert threw: a counter moved by the difference to a string) — a counter over A's register (it was a
+      // register 5, which a later inc of the host's never reached), a set where A had unset it (it was a register
+      // `['x']`).
+      assert.deepStrictEqual(await h.get(id), held);
+      assert.deepStrictEqual(await a.get(id), held);
+      assert.deepStrictEqual(failed, [], 'no revert failed');
+      assert.deepStrictEqual(await fieldOf(a, id, 'n'), ['register', 5]);
+      assert.deepStrictEqual(await fieldOf(a, id, 'label'), ['register', 'five']);
+      assert.deepStrictEqual(await fieldOf(a, id, 'hits'), ['counter', 5]);
+      assert.deepStrictEqual(await fieldOf(a, id, 'tags'), ['set', ['x']]);
+      // So what the admin does next, by each field's kind, lands on A as it lands on the host.
+      await sleep(5);
+      await b.update(id, { n: 6, label: 'six' });
+      await b.inc(id, 'hits', 1);
+      await b.add(id, 'tags', ['y']);
+      await settle([h, a, b]);
+      const next = { title: 't', n: 6, label: 'six', hits: 6, tags: ['x', 'y'] };
+      assert.deepStrictEqual(await h.get(id), next);
+      assert.deepStrictEqual(await a.get(id), next);
+    },
+  );
+
+  await t.test(
     'a revert refused is told by its actor in the answer, never reverted again, the log compacted or not',
     async (t2) => {
       // Nobody but the admin writes `n` at all — a revert of it included.

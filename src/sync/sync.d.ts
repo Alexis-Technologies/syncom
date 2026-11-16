@@ -113,8 +113,8 @@ export interface SyncUnitOptions {
    * The host's rule on what a peer may write, asked of every pushed op before it is applied, with the record as it
    * is here (`current`, null for none) and as the op would leave it (`after`): `false` refuses the op — logged as a
    * withheld scrub (skipped, scrubbed, `withheld`), relayed as a no-op that applies nowhere, a purge included, no gap
-   * in its stream — and names it in the push's answer (`refused`, `reason: 'rule'`), with `current`, for the pusher to
-   * set itself straight (`WRITE_REFUSED`, a revert of its own). A throw fails the page: the pusher offers it again.
+   * in its stream — and names it in the push's answer (`refused`, `reason: 'rule'`), with `current` and the kinds of
+   * its fields that are no registers, for the pusher to set itself straight (`WRITE_REFUSED`, a revert of its own). A throw fails the page: the pusher offers it again.
    */
   authorizeWrite?: (context: {
     op: SyncOp;

@@ -253,6 +253,85 @@ const runUndoTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'a step that changes a field’s kind is taken back and done again: the kind it was, the kind it became, each with its value',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      // What a field is: its kind by the meta (a reading does not tell a counter's 3 from a 3), and its reading.
+      const fieldOf = async (id, field) => {
+        const { meta, data } = (await storage.snapshot()).records.find((record) => record.id === id);
+        let kind = Object.hasOwn(data, field) ? 'register' : 'absent';
+        if (meta.counters[field] !== undefined) kind = 'counter';
+        else if (meta.sets[field] !== undefined) kind = 'set';
+        else if (meta.blocks[field] !== undefined) kind = { t: 'text', l: 'list', tree: 'tree' }[meta.blocks[field].k];
+        return [kind, storage.getCachedData(id)[field]];
+      };
+      const id = await storage.insert({ title: 't', plain: 'a value' });
+      await storage.inc(id, 'hits', 3);
+      await storage.splice(id, 'body', 0, 0, 'hello');
+      await storage.add(id, 'tags', ['x']);
+      const undo = createUndo(storage, { mergeInterval: 0 });
+      const before = await storage.get(id);
+      // One step, four fields changing kind: a register to a counter, a counter to a register, a text to a
+      // register, a set to a list. (One map of kinds for both sides read the register's value as a counter's sum
+      // — a TypeError — and brought the other three back as what they had become.)
+      await storage.transact(async (tx) => {
+        await tx.unset(id, ['plain', 'hits', 'body', 'tags']);
+        await tx.inc(id, 'plain', 7);
+        await tx.update(id, { hits: 'many', body: 'a plain string' });
+        await tx.push(id, 'tags', [1, 2]);
+      });
+      const after = await storage.get(id);
+      assert.deepStrictEqual(after, { title: 't', plain: 7, hits: 'many', body: 'a plain string', tags: [1, 2] });
+      const became = [];
+      for (const field of ['plain', 'hits', 'body', 'tags']) became.push((await fieldOf(id, field))[0]);
+      assert.deepStrictEqual(became, ['counter', 'register', 'register', 'list']);
+      for (let round = 0; round < 2; round++) {
+        assert.deepStrictEqual(
+          await undo.undo(),
+          { applied: 8, skipped: 0 },
+          'an unset and what is made again, per field',
+        );
+        assert.deepStrictEqual(await storage.get(id), before);
+        assert.deepStrictEqual(await fieldOf(id, 'plain'), ['register', 'a value']);
+        assert.deepStrictEqual(await fieldOf(id, 'hits'), ['counter', 3]);
+        assert.deepStrictEqual(await fieldOf(id, 'body'), ['text', 'hello']);
+        assert.deepStrictEqual(await fieldOf(id, 'tags'), ['set', ['x']]);
+        assert.deepStrictEqual(await undo.redo(), { applied: 8, skipped: 0 });
+        assert.deepStrictEqual(await storage.get(id), after);
+        assert.deepStrictEqual(await fieldOf(id, 'plain'), ['counter', 7]);
+        assert.deepStrictEqual(await fieldOf(id, 'hits'), ['register', 'many']);
+        assert.deepStrictEqual(await fieldOf(id, 'body'), ['register', 'a plain string']);
+        assert.deepStrictEqual(await fieldOf(id, 'tags'), ['list', [1, 2]]);
+      }
+      // Each is its kind after: the kind's own op lands, another kind's is refused.
+      await storage.inc(id, 'plain', 1);
+      await assert.rejects(() => storage.inc(id, 'hits', 1), { code: 'FIELD_KIND' });
+      // A delete whose data lies on the tombstone under a counter's name: taken back, the counter is a counter.
+      const other = await storage.insert({ title: 'o' });
+      await storage.inc(other, 'hits', 4);
+      await storage.delete(other, { data: { hits: 'gone' } });
+      assert.strictEqual(await storage.get(other), null);
+      await undo.undo();
+      assert.deepStrictEqual(await storage.get(other), { title: 'o', hits: 4 });
+      assert.deepStrictEqual(await fieldOf(other, 'hits'), ['counter', 4]);
+      // A peer's op on the field since the step that changed its kind: the step's patches of the field go
+      // together or not at all — never the made-again kind without its unset (FIELD_KIND, the undo refused).
+      const third = await storage.insert({ title: 'p' });
+      await storage.inc(third, 'f', 3);
+      await storage.transact(async (tx) => {
+        await tx.unset(third, 'f');
+        await tx.update(third, { f: 'plain', title: 'q' });
+      });
+      const peer = { origin: 'peer', seq: 1, ts: Date.now() + 5, type: 'inc', id: third, key: 'f', value: 1 };
+      storage.on('error', () => {});
+      await storage.applyRemote([peer]);
+      assert.deepStrictEqual(await undo.undo(), { applied: 1, skipped: 2 }, 'the title back; `f` left as it is');
+      assert.deepStrictEqual(await storage.get(third), { title: 'p', f: 'plain' });
+      undo.stop();
+    },
+  );
+
   await t.test('steps merge within the interval, split at mark(); a new edit clears the redo stack', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const undo = createUndo(storage, { mergeInterval: 60_000 });

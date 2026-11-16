@@ -815,6 +815,8 @@ storage.on('commit', (event) => {
   expectType<number>(event.seq);
   expectType<Record<string, unknown> | null>(event.before);
   expectType<{ [field: string]: syncom.FieldKind }>(event.kinds);
+  // The kind `before` held a field as, where the op changed it.
+  expectType<{ [field: string]: syncom.FieldKind } | undefined>(event.was);
 });
 expectType<() => void>(log.pin((entry) => entry.seq > 1));
 expectError(log.pin(null));

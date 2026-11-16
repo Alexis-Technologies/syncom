@@ -204,10 +204,12 @@ const sourceAt = (core, name) => {
  * The patches that turn record `id` as it was at `from` into how it is at
  * `to` (the present when omitted): per field by kind — a register's new
  * value, a counter's delta, a set's added and removed elements, a text's
- * or a list's splices, a tree's moves — and a whole-record `write` plus
- * the other kinds made again when a register is gone or a field changed
- * kind. In the terms the application writes (through the lens); a text's
- * marks are not diffed. Raw: no read hooks. Rejects as `get(id, { at })`
+ * or a list's splices, a tree's moves — a field gone as an `unset`, one
+ * that changed kind as an `unset` and the field made again as what it is
+ * (a register by its `put`), the `unset`s first; a record that was not
+ * there as a `write` of the registers plus the other kinds made again. In
+ * the terms the application writes (through the lens); a text's marks are
+ * not diffed. Raw: no read hooks. Rejects as `get(id, { at })`
  * would for either version; `ENCRYPTED` for an encrypted record.
  */
 const diff = async (core, id, from, to) => {

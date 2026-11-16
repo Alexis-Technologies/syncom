@@ -544,7 +544,13 @@ const announced = (core, op, entry, delta, source, via, committed, changes, refr
 const commitEvent = (core, op, entry, alive, committed, source, changes) => {
   const { seq, before, previous, txn } = committed;
   const data = alive ? entry.data : null;
-  const kinds = { ...kindsOf(previous, core.plugins), ...kindsOf(entry, core.plugins) };
+  const held = kindsOf(previous, core.plugins);
+  const kinds = { ...held, ...kindsOf(entry, core.plugins) };
+  // The kind `before` held a field as, where the op left it of another — a delete whose data lies on the tombstone
+  // under a counter's name, a migration (`version`) that made a counter a register; no other local op lands on a
+  // field of another kind (`kindClash`). `kinds` names one kind a field, the one after. Undefined otherwise.
+  let was;
+  for (const field of Object.keys(held)) if (held[field] !== kinds[field]) (was ??= {})[field] = held[field];
   let beforeCopy;
   let afterCopy;
   let embeds;
@@ -554,6 +560,7 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
     txn,
     source,
     kinds,
+    was,
     changes,
     get before() {
       if (beforeCopy === undefined) beforeCopy = asJson(before) ?? null;

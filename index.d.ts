@@ -1516,7 +1516,13 @@ export interface CommitEvent {
   source: unknown;
   before: Record<string, unknown> | null;
   after: Record<string, unknown> | null;
+  /** Every field's kind: as `after` holds it, and as `before` held a field that is gone. */
   kinds: { [field: string]: FieldKind };
+  /**
+   * Where the op left a field of another kind than it found it, the kind `before` held it as — a delete whose data
+   * lies under a counter's name, a schema migration that made a counter a register; undefined for every other op.
+   */
+  was?: { [field: string]: FieldKind };
   /** The log position of the first op of the transaction this op was made in — its own `seq` for a single write. */
   txn: number;
   /** What the reading shows of the op. */

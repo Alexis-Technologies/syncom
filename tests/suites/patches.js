@@ -97,12 +97,12 @@ const runPatchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), [{ action: 'delete' }]);
     await storage.set(id, { title: 'only' });
     const gone = await storage.diff(id, { tag: 'v1' });
-    assert.deepStrictEqual(gone[0], { action: 'put', field: 'title', value: 'only' });
     assert.deepStrictEqual(
-      gone.slice(1).sort((a, b) => a.field.localeCompare(b.field)),
+      gone.slice(0, -1).sort((a, b) => a.field.localeCompare(b.field)),
       ['body', 'hits', 'items', 'n', 'outline', 'tags'].map((field) => ({ action: 'unset', field })),
-      'every other field, of any kind, is unset',
+      'every other field, of any kind, is unset — the removals first',
     );
+    assert.deepStrictEqual(gone.at(-1), { action: 'put', field: 'title', value: 'only' }, 'then what is written');
     const way = await storage.diff(id, undefined, { tag: 'v1' });
     assert.strictEqual(await storage.restore(id, { tag: 'v1' }), way.length, 'the fields made again');
     assert.deepStrictEqual(await storage.diff(id, { tag: 'v1' }), []);
@@ -161,6 +161,142 @@ const runPatchTests = async (t, assert, createStorage) => {
     await assert.rejects(() => a.restore(id, { tag: 'nope' }), { code: 'TAG_NOT_FOUND' });
     assert.strictEqual(await a.restore(id, a.log.lastEventId), 0, 'nothing to do');
   });
+
+  // What field `f` of a record is: its kind by the record's meta — a reading does not tell a counter's 3 from a
+  // 3 — and what it reads as.
+  const fieldOf = async (storage, id, field = 'f') => {
+    const { meta, data } = (await storage.snapshot()).records.find((record) => record.id === id);
+    let kind = Object.hasOwn(data, field) ? 'register' : 'absent';
+    if (meta.counters[field] !== undefined) kind = 'counter';
+    else if (meta.sets[field] !== undefined) kind = 'set';
+    else if (meta.blocks[field] !== undefined) kind = { t: 'text', l: 'list', tree: 'tree' }[meta.blocks[field].k];
+    return [kind, storage.getCachedData(id)[field]];
+  };
+
+  await t.test(
+    'applyPatches(diff) brings a field back as the kind it was, whatever kind it is now: every pair of kinds',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const make = {
+        absent: async () => {},
+        register: (id) => storage.update(id, { f: 'plain' }),
+        counter: (id) => storage.inc(id, 'f', 3),
+        set: (id) => storage.add(id, 'f', ['a', 'b']),
+        list: (id) => storage.push(id, 'f', [1, 2]),
+        text: (id) => storage.splice(id, 'f', 0, 0, 'hello'),
+        tree: async (id) => {
+          await storage.treeMove(id, 'f', 'r');
+          await storage.treeMove(id, 'f', 'c', 'r');
+        },
+      };
+      const kinds = Object.keys(make);
+      let pairs = 0;
+      for (const a of kinds) {
+        for (const b of kinds) {
+          if (a === b) continue;
+          // The field is `a` at the first version and `b` at the second.
+          const id = await storage.insert({ title: `${a}, then ${b}` });
+          await make[a](id);
+          const first = storage.log.lastEventId;
+          const wasA = await fieldOf(storage, id);
+          assert.strictEqual(wasA[0], a);
+          if (a !== 'absent') await storage.unset(id, 'f');
+          await make[b](id);
+          const second = storage.log.lastEventId;
+          const wasB = await fieldOf(storage, id);
+          assert.strictEqual(wasB[0], b);
+          // Back to the first, forward to the second: diff() names the way, applyPatches() lands it — the kind
+          // and the value, each time.
+          const back = await storage.diff(id, undefined, first);
+          await storage.applyPatches(id, back);
+          assert.deepStrictEqual(await fieldOf(storage, id), wasA, `${b} back to ${a}`);
+          assert.deepStrictEqual(await storage.diff(id, undefined, first), [], `${b} back to ${a}: nothing left to do`);
+          await storage.applyPatches(id, await storage.diff(id, undefined, second));
+          assert.deepStrictEqual(await fieldOf(storage, id), wasB, `${a} forward to ${b}`);
+          // A register comes back by its value, after the unset that frees the name: an unset alone left it unwritten.
+          if (a === 'register' && b !== 'absent') {
+            assert.deepStrictEqual(back, [
+              { action: 'unset', field: 'f' },
+              { action: 'put', field: 'f', value: 'plain' },
+            ]);
+          }
+          pairs++;
+        }
+      }
+      assert.strictEqual(pairs, 42);
+    },
+  );
+
+  await t.test(
+    'restore() to a version where a field was a register writes its value, a falsy one too; a counter that read 0 comes back a counter',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      for (const value of ['plain', 0, '', false, null, { nested: [1] }]) {
+        const id = await storage.insert({ title: 't', f: value });
+        const version = storage.log.lastEventId;
+        await storage.unset(id, 'f');
+        await storage.splice(id, 'f', 0, 0, 'a text now');
+        assert.strictEqual(await storage.restore(id, version), 2, 'the unset, then the put');
+        assert.deepStrictEqual(await fieldOf(storage, id), ['register', value]);
+        assert.deepStrictEqual(await storage.get(id), { title: 't', f: value });
+        // A register again: an update lands, the text's op is refused.
+        await storage.update(id, { f: 'written' });
+        await assert.rejects(() => storage.splice(id, 'f', 0, 0, 'x'), { code: 'FIELD_KIND' });
+      }
+      // A counter made by an inc of 0 reads 0 and is a counter: restored where the field is gone, or a register.
+      const id = await storage.insert({ title: 't' });
+      await storage.inc(id, 'f', 0);
+      const zero = storage.log.lastEventId;
+      await storage.unset(id, 'f');
+      assert.deepStrictEqual(await storage.diff(id, undefined, zero), [{ action: 'inc', field: 'f', value: 0 }]);
+      await storage.restore(id, zero);
+      assert.deepStrictEqual(await fieldOf(storage, id), ['counter', 0]);
+      await storage.unset(id, 'f');
+      await storage.update(id, { f: 'a register now' });
+      await storage.restore(id, zero);
+      assert.deepStrictEqual(await fieldOf(storage, id), ['counter', 0]);
+    },
+  );
+
+  await t.test(
+    'a diff removes before it makes: a kind at a prefix against the paths under it, either way',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      // Registers under `profile` at the version; a text at `profile` now.
+      const under = await storage.insert({ title: 't' });
+      await storage.update(under, { 'profile/city': 'Kyiv', 'profile/zip': 1 });
+      const paths = storage.log.lastEventId;
+      await storage.unset(under, 'profile');
+      await storage.splice(under, 'profile', 0, 0, 'a text');
+      const text = storage.log.lastEventId;
+      // The text goes first: a path put under it while it stood was FIELD_KIND, and the whole restore refused.
+      assert.deepStrictEqual(await storage.diff(under, undefined, paths), [
+        { action: 'unset', field: 'profile' },
+        { action: 'put', field: 'profile/city', value: 'Kyiv' },
+        { action: 'put', field: 'profile/zip', value: 1 },
+      ]);
+      await storage.restore(under, paths);
+      assert.deepStrictEqual(await storage.get(under), { title: 't', profile: { city: 'Kyiv', zip: 1 } });
+      assert.strictEqual(
+        (await fieldOf(storage, under, 'profile'))[0],
+        'absent',
+        'no field at the prefix: two paths under it',
+      );
+      // And back to the text: the paths go, the text is laid.
+      await storage.restore(under, text);
+      assert.deepStrictEqual(await fieldOf(storage, under, 'profile'), ['text', 'a text']);
+      assert.deepStrictEqual(await storage.get(under), { title: 't', profile: 'a text' });
+      // A counter at a path, a register object at a prefix.
+      const id = await storage.insert({ title: 't', profile: { city: 'Kyiv' }, 'stats/n': 'many' });
+      const version = storage.log.lastEventId;
+      await storage.unset(id, ['profile', 'stats/n']);
+      await storage.inc(id, 'profile', 1);
+      await storage.inc(id, 'stats/n', 2);
+      await storage.restore(id, version);
+      assert.deepStrictEqual(await storage.get(id), { title: 't', profile: { city: 'Kyiv' }, stats: { n: 'many' } });
+      assert.deepStrictEqual(await fieldOf(storage, id, 'stats/n'), ['register', 'many']);
+    },
+  );
 
   await t.test('a remove of exactly the named tags revokes one add and leaves a concurrent one', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
@@ -321,6 +457,17 @@ const runPatchTests = async (t, assert, createStorage) => {
     await storage.set(id, { n: 2 });
     assert.deepStrictEqual(events.at(-1).kinds, { n: 'register', hits: 'counter' });
     assert.deepStrictEqual([events.at(-1).before, events.at(-1).after], [{ n: 1, hits: 1 }, { n: 2 }]);
+    // `kinds` names one kind a field — the one after; where the op changed it (a delete whose data lies on the
+    // tombstone under a counter's name), `was` says what `before` held it as. No other commit carries one.
+    assert.strictEqual(events.at(-1).was, undefined);
+    await storage.inc(id, 'hits', 4);
+    await storage.delete(id, { data: { hits: 'gone' } });
+    assert.deepStrictEqual(
+      [events.at(-1).kinds, events.at(-1).was, events.at(-1).before, events.at(-1).after],
+      [{ n: 'register', hits: 'register' }, { hits: 'counter' }, { n: 2, hits: 4 }, null],
+    );
+    assert.strictEqual(events.at(-2).was, undefined);
+    await storage.set(id, { n: 2 });
     // A no-op commit raises nothing; a peer's op raises nothing.
     const count = events.length;
     await storage.remove(id, 'tags', ['nope']);

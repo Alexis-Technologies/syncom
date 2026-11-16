@@ -28,10 +28,18 @@
 // `diff` says (a text's or a list's splices, a tree's moves; `context.from`
 // and `.to` hand it what the reading leaves out — the entries, or the
 // `embeds` a commit event carries — so a text's markers travel) — a field gone is an
-// `unset`, a field of another kind now an `unset` and the kind made again
-// whole, and a record that was not there a `write` of the registers with
-// the other kinds made again. A text's marks are not diffed; `compact()`
-// lays them again itself, through the plugin. Pure over plain data in the
+// `unset`, a field of another kind now an `unset` and the field made again
+// whole as what it is now — a register too: its `put` — and a record that
+// was not there a `write` of the registers with the other kinds made again.
+// The `unset`s come first, whatever the fields' order: a removal frees a
+// name for what is made under it or over it (a text at `profile` gone
+// before `profile/city` is put), and an op of another kind is refused on a
+// field until it is (`kindClash`: a register outranks every kind on the op
+// path, but no local op lands on a field of another kind). The kinds are
+// each side's own — a field may be a counter in `from` and a register in
+// `to` — so a caller that knows one map alone (a merged one) has it wrong.
+// A text's marks are not diffed; `compact()` lays them again itself,
+// through the plugin. Pure over plain data in the
 // op model's terms — flat, every path a field (src/paths.js `decompose`
 // takes a composed reading back to that); the kinds come from ops.js
 // (`kindsOf`) and the plugins from the storage's registry (src/plugin.js),
@@ -50,6 +58,7 @@ const asKeys = (elements) => {
 
 // A field's content made again from nothing, by kind.
 const recreate = (field, kind, value, plugins, context) => {
+  if (kind === 'register') return [{ action: 'put', field, value }];
   // An inc of 0 makes a counter that reads 0: the field stays a counter.
   if (kind === 'counter') return [{ action: 'inc', field, value }];
   if (kind === 'set') return value.length === 0 ? [] : [{ action: 'add', field, elements: value }];
@@ -95,19 +104,24 @@ const diffViews = (
   }
   const fields = new Set(Object.keys(toKinds));
   for (const field of Object.keys(fromKinds)) fields.add(field);
+  // The removals, ahead of everything made.
+  const unsets = [];
   for (const field of fields) {
     const was = fromKinds[field];
     const now = toKinds[field];
     const value = to[field];
     const previous = from[field];
-    // Gone: removed — or, loosely, emptied when the kind allows it. Another
-    // kind now: removed, then made again from nothing.
+    // Gone: removed — or, loosely, emptied when the kind allows it.
     if (now === undefined && (exact || was === 'register')) {
-      patches.push({ action: 'unset', field });
+      unsets.push({ action: 'unset', field });
       continue;
     }
-    if (was !== undefined && now !== undefined && was !== now) {
-      patches.push({ action: 'unset', field });
+    // Another kind now, or not there before: what it held is removed and the
+    // field made again from nothing, as the kind it is — a register by its
+    // `put` (an unset alone left the value unwritten), a counter that reads 0
+    // by an `inc` of 0.
+    if (now !== undefined && was !== now) {
+      if (was !== undefined) unsets.push({ action: 'unset', field });
       const made = recreate(field, now, value, plugins, context);
       for (let i = 0; i < made.length; i++) patches.push(made[i]);
       continue;
@@ -135,7 +149,7 @@ const diffViews = (
       }
     }
   }
-  return patches;
+  return unsets.length === 0 ? patches : unsets.concat(patches);
 };
 
 const isField = (value) => isPath(value);

@@ -1309,9 +1309,10 @@ class Database extends Emitter {
       // a hub that cannot write asks before it forwards a page to the inbox.
       checkOps: (ops) => checkPage({ core: this.#core, signatures: this.#signatures }, ops),
       // The record brought to what a host holds of it (the dialer's revert of a refused op): the fields named —
-      // every one for null — made to read as `target` (the host's data, flat) reads, through the kinds' patches, so
-      // a counter moves by an inc, a set by adds and removes, a text by its diff — never a register written over
-      // another kind, and nothing the host accepted since is touched; `target` null forgets the record.
+      // every one for null — made to read as `target` (the host's data, flat) reads AND to be the kind the host
+      // holds them as (`options.kinds`: its fields that are no registers), through the kinds' patches: a counter
+      // moves by an inc, a set by adds and removes, a text by its diff, and a field of another kind here is unset
+      // and made again as the host's — nothing the host accepted since is touched; `target` null forgets the record.
       revert: (id, target, fields, options) => this.#revert(id, target, fields, options),
       // SHA-256 of a text as base64url (src/crypto/digest.js hashText): what a connector names the backend's state
       // by in its checkpoint, so that it bundles no hasher of its own.
@@ -2830,8 +2831,11 @@ class Database extends Emitter {
    */
   // The seam's `revert` (src/sync/manager.js): the patches from the record as it reads here — flat, every path a
   // field, as `compact` reads it — to the same with the fields named read as `target` has them (gone where it
-  // lacks them), realized as ops of this node's own under `actor`.
-  async #revert(id, target, fields, { actor = 'revert' } = {}) {
+  // lacks them), realized as ops of this node's own under `actor`. `kinds` says what the target's fields are
+  // where they are no registers (the host's word, read by own keys): a reading alone does not tell a counter's
+  // sum from a number, and a field left a counter here over the host's register — or a register here over its
+  // set — takes none of what the host's kind makes next.
+  async #revert(id, target, fields, { actor = 'revert', kinds = {} } = {}) {
     if (target === null || target === undefined) return this.forget(id);
     const entry = await this.#entries.load(id);
     const plugins = this.#plugins;
@@ -2842,12 +2846,13 @@ class Database extends Emitter {
     if (from !== null) {
       for (const field of Object.keys(fromKinds)) if (!Object.hasOwn(from, field)) delete fromKinds[field];
     }
+    const kindThere = (field) => (Object.hasOwn(kinds, field) ? kinds[field] : 'register');
     const to = {};
     const toKinds = {};
     if (fields === null || from === null) {
       for (const field of Object.keys(target)) {
         to[field] = target[field];
-        toKinds[field] = fromKinds[field] ?? 'register';
+        toKinds[field] = kindThere(field);
       }
     } else {
       for (const field of Object.keys(from)) {
@@ -2858,7 +2863,7 @@ class Database extends Emitter {
         const field = fields[i];
         if (Object.hasOwn(target, field)) {
           to[field] = target[field];
-          toKinds[field] ??= 'register';
+          toKinds[field] = kindThere(field);
         } else {
           delete to[field];
           delete toKinds[field];

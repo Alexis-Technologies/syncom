@@ -157,9 +157,18 @@ terms of the write API, one per field by its kind:
 | `treeRemove` | `field`, `node` | A tree node removed with its subtree |
 | `delete`, `purge` | — | The record deleted, purged |
 
-A field that is gone is an `unset`; one that changed kind an `unset` and the kind made again whole. A text's marks
-are not diffed. The diff reads both versions through the schema lens, raw, without the read hooks, and rejects as
-`get(id, { at })` would for either version.
+A field that is gone is an `unset`. One that changed kind is an `unset` and then the field made again whole as
+what it is at `to`: a counter by an `inc` of its sum, a set by an `add`, a list or a text by a `splice`, a tree by
+its moves, and a register by a `put` of its value. The `unset` is not optional: on the op path a register outranks
+every other kind, but no local write lands on a field of another kind (`FIELD_KIND`), so the name is freed first.
+For the same reason every `unset` of a diff comes ahead of everything it makes, whatever the order of the fields:
+a text at `profile` is gone before `profile/city` is put under it. A field that was not there is made the same
+way, so a counter that reads `0` comes back as an `inc` of `0`. One thing a diff cannot make: a set, a list, a
+text or a tree that reads empty — no op makes an empty one — so where `to` holds such a field and `from` holds
+another kind, or none, the field is left out. And a list made again names its elements anew, so a diff that makes
+one again and also holds fields under its old elements is refused whole by `applyPatches()` (`NOT_FOUND`, nothing
+written): a diff does not rename them. A text's marks are not diffed. The diff reads both versions through the
+schema lens, raw, without the read hooks, and rejects as `get(id, { at })` would for either version.
 
 `applyPatches(id, patches, { actor, source, message })` realizes a list as one transaction and resolves to how
 many ops it took. A patch is checked as the method of its name checks its arguments — the wrong shape is a
@@ -175,7 +184,9 @@ the peers. A `restore()` whose diff is a reset makes texts again without their m
 Every local write — a call of the write API, a `Document`'s `save()`, `transact()`, `applyPatches()`,
 `restore()`, `compact()`, a schema migration — raises `commit` once its op is durable, with the op, its `seq`,
 `txn` (the seq of the first op of its transaction), `source`, the record `before` and `after` as copies in the op
-model's terms (every path a field of its own, no lens), every field's `kinds`, its
+model's terms (every path a field of its own, no lens), every field's `kinds` (one kind a field: what `after`
+holds it as, or what `before` held a field that is gone), `was` where the op left a field of another kind than it
+found it (the kind before, by field; absent otherwise), its
 [changes](./events#changes) and, where a text holds embed slots, `embeds` (the markers on each side). It is what
 an undo stack keeps; the copies are made at their first read, and the event only while something listens. A
 peer's op raises `change`, not `commit`, and so do the `merge` and `advance` ops a joined snapshot leaves; an
@@ -192,7 +203,10 @@ into it, a transaction's commits are one step whatever the interval, `group(fn)`
 redo stack, and `limit` (100) steps are kept, the oldest dropped first.
 
 An undo applies a step's patches through `applyPatches()` — new ops, so it merges like any write and a peer sees
-it as one — and what those ops commit is the redo step. The rule is Yjs's, refuse to overwrite: a field anything
+it as one — and what those ops commit is the redo step. A step may leave a field of another kind than it found it
+(an `unset`, then the field made again): the way back reads each side by its own kinds — how the step's first
+commit found the fields, how its last left them — so the field comes back as the kind it was with its value, and
+the redo makes it the kind it became. The rule is Yjs's, refuse to overwrite: a field anything
 but the step's own ops changed since — a peer's write, a write of this node's the stack does not hold — is left
 alone and counted in `skipped`, and a step whose way back is the whole record (an `insert()`, whose way back is a
 delete; a `delete()`, whose way back writes the record again) is skipped whole when anything else changed the
