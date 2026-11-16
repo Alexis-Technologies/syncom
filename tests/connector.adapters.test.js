@@ -462,10 +462,23 @@ test('Connector adapters', async (t) => {
           assert.deepStrictEqual(seen, ['t0', 't1', 't2', 't3', 't4', 'later'], 'every document once, in order');
           assert.deepStrictEqual(checkpoint, { at: at + 1, id: 'later' });
           assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, [], 'nothing repeated');
-          // The checkpoint of the first version, a stamp alone, still resumes: the documents at that stamp are read
-          // again (at least once, never skipped), and what came after.
-          const resumed = (await adapter.pull.handler(at, 10)).documents.map((doc) => doc.id);
-          assert.deepStrictEqual(resumed, ['t0', 't1', 't2', 't3', 't4', 'later']);
+          // A checkpoint that is not `{ at, id }` — a stamp alone, another adapter's — is no checkpoint: the pull
+          // starts from the beginning, and answers the shape it writes.
+          for (const alien of [at + 1, String(at + 1), { at: at + 1 }, { at: String(at + 1), id: 'later' }]) {
+            const page = await adapter.pull.handler(alien, 10);
+            assert.deepStrictEqual(
+              page.documents.map((doc) => doc.id),
+              ['t0', 't1', 't2', 't3', 't4', 'later'],
+            );
+            assert.deepStrictEqual(page.checkpoint, { at: at + 1, id: 'later' });
+          }
+          assert.deepStrictEqual(
+            await mongodb({ collection: client.db('app').collection('none') }).pull.handler(7, 10),
+            {
+              documents: [],
+              checkpoint: null,
+            },
+          );
         },
       );
       const looked = client.db('app').collection('looked');
@@ -616,9 +629,13 @@ test('Connector adapters', async (t) => {
           assert.deepStrictEqual(seen, ['t0', 't1', 't2', 't3', 't4'], 'every row once, in order');
           assert.deepStrictEqual(checkpoint, { at: shared, id: 't4' });
           assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, [], 'nothing repeated');
-          // The checkpoint of the first version, a stamp alone, still resumes: the rows at that stamp read again
-          // (at least once, never skipped).
-          assert.strictEqual((await adapter.pull.handler(shared, 10)).documents.length, 5);
+          // A checkpoint that is not `{ at, id }` — a stamp alone, later than every row here — is no checkpoint:
+          // the pull starts from the beginning.
+          for (const alien of [`${shared}z`, { at: `${shared}z` }, { at: 1, id: 't4' }]) {
+            const page = await adapter.pull.handler(alien, 10);
+            assert.strictEqual(page.documents.length, 5);
+            assert.deepStrictEqual(page.checkpoint, { at: shared, id: 't4' });
+          }
           // The modified column set by a trigger: the adapter keeps the stored stamp — not its own `now()` — so the
           // next update matches it; before, every second edit was a conflict the backend won.
           const tasks = supabase({ client: triggered, table: 'tasks' });
@@ -755,11 +772,18 @@ test('Connector adapters', async (t) => {
           assert.deepStrictEqual(Object.keys(checkpoint).sort(), ['id', 'nanoseconds', 'seconds']);
           assert.strictEqual(checkpoint.id, 'u4');
           assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, [], 'nothing repeated');
-          // The checkpoint of the first version, `{ at, id }` in milliseconds, still resumes.
+          // A checkpoint that is not `{ seconds, nanoseconds, id }` — milliseconds, a stamp without an id — is no
+          // checkpoint: the pull starts from the beginning.
           const at = micro.docs.get('u4').serverTimestamp.toMillis();
           micro.write('u5', { n: 5 });
-          const resumed = await adapter.pull.handler({ at, id: 'u4' }, 10);
-          assert.ok(resumed.documents.some((doc) => doc.id === 'u5'));
+          for (const alien of [{ at, id: 'u4' }, at, { seconds: checkpoint.seconds, nanoseconds: 0 }]) {
+            const page = await adapter.pull.handler(alien, 10);
+            assert.deepStrictEqual(
+              page.documents.map((doc) => doc.id),
+              ['u0', 'u1', 'u2', 'u3', 'u4', 'u5'],
+            );
+            assert.strictEqual(page.checkpoint.id, 'u5');
+          }
         },
       );
       await t2.test(

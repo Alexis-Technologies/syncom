@@ -78,7 +78,8 @@ seen is an `insert`, and a duplicate key is a conflict the same way.
 
 The adapter also answers `stampOf(id)`, the modified value it last saw for a row. The pull's checkpoint is
 `{ at, id }`: the rows modified after `at`, or at `at` with a greater key, so the rows of one transaction (which share
-one `now()`) are never skipped at a page's edge. Every Realtime change is a `RESYNC`; the channel's `CHANNEL_ERROR`,
+one `now()`) are never skipped at a page's edge. A checkpoint of any other shape is no checkpoint: the pull starts
+from the beginning. Every Realtime change is a `RESYNC`; the channel's `CHANNEL_ERROR`,
 `TIMED_OUT` or `CLOSED` is an `END`, and the connector subscribes again after a backoff.
 
 ## Pull rows that commit late

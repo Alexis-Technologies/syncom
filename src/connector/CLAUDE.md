@@ -219,6 +219,14 @@ cause)` — the `refused` event, `connector.document.refused`,
   Graph's faces over one file store) through one scenario in `tests/connector.adapters.test.js`: a local write out
   without `$type`, the backend's write in, a change behind the adapter's back a conflict the backend wins, a deletion
   both ways, a restart resumed.
+- **An adapter reads the one checkpoint shape it writes.** A position is a stored format (it sits in the connector's
+  checkpoint text), and nothing is published: `parse` in supabase.js, mongodb.js, firestore.js and appwrite.js takes
+  exactly what the adapter answers — `{ at, id }` (a string stamp, a number), `{ seconds, nanoseconds, id }`,
+  `{ updatedAt, id }` — and anything else is NO checkpoint (null: the pull starts from the beginning, the connector
+  passing over what it knows by its digests). No reader, upgrade or fallback for a shape an earlier build wrote: the
+  stamp alone that Supabase and MongoDB once read on, and Firestore's `{ at, id }` in milliseconds, are gone.
+  `tests/package/formats.test.js` hands each adapter the others' shapes and the old ones and holds it to that; CouchDB
+  (`last_seq`, CouchDB's own), a drive (`n`, a number) and GraphQL (the application's) have one shape each.
 - **A backend without a compare-and-set says so.** Where the backend writes conditionally (CouchDB's `_rev`, Mongo's
   `replaceOne` on `_rev`, PostgREST's match on the modified column, a Firestore transaction, a drive's `If-Match`) a
   conflict is decided by the backend itself. Appwrite has no such write: the adapter reads, compares and writes, and

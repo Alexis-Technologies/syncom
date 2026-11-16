@@ -58,7 +58,7 @@ generates on `insert()` are UUIDs, 36 characters long, so they fit; an id you ch
 | `lookback` | `0` | How far before its checkpoint each pull starts, in ms: [documents that appear late](#pull-documents-that-appear-late) |
 
 The pull's checkpoint is `{ updatedAt, id }`: the documents updated after `updatedAt`, or at it with a greater `$id`,
-in that order. A push lists the batch's documents in one query, then creates a document that is not there (a `409`
+in that order. A checkpoint of any other shape is no checkpoint: the pull starts from the beginning. A push lists the batch's documents in one query, then creates a document that is not there (a `409`
 meaning another client created it first: a conflict, read back), updates one that holds what the row assumed (a `404`
 meaning it was removed: a conflict), and answers any other as it stands. A `400` (an id Appwrite cannot carry, an
 attribute the collection lacks) parks that row. Every Realtime event of the collection's documents is a `RESYNC`.

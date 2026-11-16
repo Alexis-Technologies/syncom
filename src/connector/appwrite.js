@@ -6,7 +6,8 @@
 // the stream, `client` (its `subscribe`). A document's `$updatedAt` is the
 // position: a pull is the documents updated after the checkpoint
 // `{ updatedAt, id }` — those at the same instant by `$id` — ordered so,
-// `batchSize` at a time; a tombstone is a boolean attribute of the
+// `batchSize` at a time (a checkpoint of any other shape is no checkpoint:
+// the pull starts from the beginning); a tombstone is a boolean attribute of the
 // collection's (`deletedField`, `deleted`), so a pull sees a deletion. A push
 // reads the rows' documents in one query and compares each with what its row
 // assumed: a row never there is `createDocument` (a 409 the conflict, the
@@ -95,8 +96,9 @@ const appwrite = ({
     const result = await list(queries);
     return Array.isArray(result?.documents) ? result.documents : [];
   };
+  // A checkpoint's position, `{ updatedAt, id }` as this adapter writes it. Anything else is no checkpoint: the start.
   const parse = (value) =>
-    value !== null && typeof value === 'object' && typeof value.updatedAt === 'string'
+    value !== null && typeof value === 'object' && typeof value.updatedAt === 'string' && typeof value.id === 'string'
       ? { updatedAt: value.updatedAt, id: value.id }
       : null;
   const positionOf = (doc) => ({ updatedAt: doc.$updatedAt, id: doc.$id });

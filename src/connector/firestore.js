@@ -9,9 +9,11 @@
 // adapter's: the stamp the server sets on every write (`stampField`,
 // `serverTimestamp`) and a tombstone (`deletedField`, `_deleted`), so a pull
 // sees a deletion. A pull is the documents ordered by the stamp, then by id,
-// after the checkpoint `{ at, id }` — one cursor, no second query for the
-// ties; a document whose stamp is still pending (a write of the SDK's own
-// cache not yet on the server) is left to the next pull. A push is a
+// after the checkpoint `{ seconds, nanoseconds, id }` — one cursor, no second
+// query for the ties; a checkpoint of any other shape is no checkpoint, and
+// the pull starts from the beginning; a document whose stamp is still
+// pending (a write of the SDK's own cache not yet on the server) is left to
+// the next pull. A push is a
 // transaction per CHUNK rows (Firestore's limit on a transaction's writes):
 // every document read, compared with what its row assumed, written where it
 // is the same and answered as a conflict where it is not — the transaction's
@@ -103,14 +105,16 @@ const firestore = ({
     if (typeof value?.toMillis === 'function') return stampOf(sdk.Timestamp.fromMillis(value.toMillis()));
     return null;
   };
-  // A checkpoint's position: `{ seconds, nanoseconds, id }`, or the older `{ at, id }` in milliseconds.
-  const parse = (value) => {
-    if (value === null || typeof value !== 'object' || typeof value.id !== 'string') return null;
-    if (typeof value.seconds === 'number' && typeof value.nanoseconds === 'number') {
-      return { seconds: value.seconds, nanoseconds: value.nanoseconds, id: value.id };
-    }
-    return typeof value.at === 'number' ? { ...stampOf(sdk.Timestamp.fromMillis(value.at)), id: value.id } : null;
-  };
+  // A checkpoint's position, `{ seconds, nanoseconds, id }` as this adapter writes it. Anything else is no
+  // checkpoint: the start.
+  const parse = (value) =>
+    value !== null &&
+    typeof value === 'object' &&
+    typeof value.seconds === 'number' &&
+    typeof value.nanoseconds === 'number' &&
+    typeof value.id === 'string'
+      ? { seconds: value.seconds, nanoseconds: value.nanoseconds, id: value.id }
+      : null;
   // The documents after a position, in the cursor's order — by the stamp, then by id: one cursor, no second query
   // for the ties; a position with no id (a lookback's start) is the stamp alone.
   const read = async (after, limit) => {
@@ -144,10 +148,9 @@ const firestore = ({
           documentOf,
         })
       : async (checkpoint, batchSize) => {
-          const after = parse(checkpoint);
-          const snaps = await read(after, batchSize);
+          let last = parse(checkpoint);
+          const snaps = await read(last, batchSize);
           const documents = [];
-          let last = after === null ? null : checkpoint;
           for (let i = 0; i < snaps.length; i++) {
             const document = documentOf(snaps[i]);
             if (document === null) continue;

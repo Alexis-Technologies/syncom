@@ -6,8 +6,10 @@
 // The table has a primary key column (`id`), a `deleted` boolean and a
 // `modified` text column the database sets on every write (an `updated_at`
 // with a trigger, or the adapter's own stamp): a pull is the rows `modified`
-// after the checkpoint, in that order; a push is an `update` matched on the
-// primary key and the `modified` this adapter last saw (PostgREST's
+// after the checkpoint `{ at, id }`, in that order (a checkpoint of any other
+// shape is no checkpoint: the pull starts from the beginning); a push is an
+// `update` matched on the primary key and the `modified` this adapter last
+// saw (PostgREST's
 // compare-and-set: no row matched is a conflict), or an `insert` for a row
 // never seen (a duplicate key is a conflict); a conflict is answered as the
 // row stands; an error of the database's with a code (a constraint, a type)
@@ -105,13 +107,11 @@ const supabase = ({
     query = query.order(m, { ascending: true }).order(primaryKey, { ascending: true }).limit(limit);
     return answered(await query, 'select') ?? [];
   };
-  // A checkpoint's position: `{ at, id }`, or the first version's stamp alone.
-  const parse = (value) => {
-    if (typeof value === 'string') return { at: value, id: '' };
-    return value !== null && typeof value === 'object' && typeof value.at === 'string'
-      ? { at: value.at, id: String(value.id) }
+  // A checkpoint's position, `{ at, id }` as this adapter writes it. Anything else is no checkpoint: the start.
+  const parse = (value) =>
+    value !== null && typeof value === 'object' && typeof value.at === 'string' && typeof value.id === 'string'
+      ? { at: value.at, id: value.id }
       : null;
-  };
   const positionOf = (row) =>
     typeof row[modifiedColumn] === 'string' ? { at: row[modifiedColumn], id: String(row[primaryKey]) } : null;
 

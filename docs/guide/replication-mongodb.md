@@ -59,7 +59,8 @@ document back and the connector sets the record to the collection's version, unl
 
 The adapter also answers `revisionOf(id)`, the `_rev` it last saw for a document. The pull's checkpoint is
 `{ at, id }`: the documents stamped after `at`, or stamped at `at` with a greater `_id`, so a batch written within one
-millisecond is never skipped at a page's edge. Every change of the stream is a `RESYNC`, and the stream erring or
+millisecond is never skipped at a page's edge. A checkpoint of any other shape is no checkpoint: the pull starts from
+the beginning. Every change of the stream is a `RESYNC`, and the stream erring or
 closing is an `END`: the connector opens it again after a backoff.
 
 ## Pull writes stamped late

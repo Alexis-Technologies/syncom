@@ -66,7 +66,7 @@ connector still compares Firestore's own shape, so an edit's transaction checks 
 
 The pull's checkpoint is `{ seconds, nanoseconds, id }`: the last document's stamp, whole, and its id. A cursor of
 milliseconds would skip or repeat the rest of a commit's documents, so the adapter keeps the stamp as the server set
-it. A document whose stamp is still pending (a write of the SDK's own cache, not yet on the server) is left to the next
+it. A checkpoint of any other shape is no checkpoint: the pull starts from the beginning. A document whose stamp is still pending (a write of the SDK's own cache, not yet on the server) is left to the next
 pull, and `waitForPendingWrites` is awaited first where the SDK has it. A push writes at most 500 rows per transaction,
 Firestore's limit. `onSnapshot` watches the newest document, and each change the server confirmed is a `RESYNC`; the
 listener's error is an `END`, and the connector listens again after a backoff.

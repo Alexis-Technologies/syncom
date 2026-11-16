@@ -80,3 +80,63 @@ test('nothing is published: nothing is deprecated — a rename before the first 
   }
   assert.deepStrictEqual(deprecated, []);
 });
+
+// A connector adapter's position is a stored format too: it is kept in the connector's checkpoint text. Each of the
+// four that resume by a stamp reads the one shape it writes; handed any other — a stamp alone, another adapter's
+// position — it has no checkpoint and pulls from the start, exactly as when handed none. No shape an earlier build
+// wrote is read on.
+test('nothing is published: a connector adapter reads the one checkpoint shape it writes — any other is no checkpoint', async () => {
+  const { mongodb } = require('../../src/connector/mongodb.js');
+  const { supabase } = require('../../src/connector/supabase.js');
+  const { firestore } = require('../../src/connector/firestore.js');
+  const { appwrite } = require('../../src/connector/appwrite.js');
+  const { createFakeMongo } = require('../utils/fake-mongo.js');
+  const { createFakeSupabase } = require('../utils/fake-supabase.js');
+  const { createFakeFirestore, Timestamp } = require('../utils/fake-firestore.js');
+  const { createFakeAppwrite } = require('../utils/fake-appwrite.js');
+  // Two documents each, stamped one and two seconds in; every position below is five seconds in — past both.
+  const start = Date.UTC(2026, 0, 1);
+  const iso = (ms) => new Date(start + ms).toISOString();
+  const own = {
+    mongodb: { at: start + 5000, id: 'z' },
+    supabase: { at: iso(5000), id: 'z' },
+    appwrite: { updatedAt: iso(5000), id: 'z' },
+    firestore: { seconds: start / 1000 + 5, nanoseconds: 0, id: 'z' },
+  };
+  const mongo = createFakeMongo().db('app').collection('tasks');
+  const table = createFakeSupabase();
+  const store = createFakeFirestore();
+  const documents = createFakeAppwrite();
+  for (const [id, ms] of [
+    ['a', 1000],
+    ['b', 2000],
+  ]) {
+    await mongo.replaceOne({ _id: id }, { _id: id, _rev: 1, _updated: start + ms, n: ms }, { upsert: true });
+    table.write('tasks', { id, n: ms }, { at: iso(ms) });
+    store.write(id, { n: ms }, { at: Timestamp.fromMillis(start + ms) });
+    documents.write(id, { n: ms }, { at: iso(ms) });
+  }
+  const adapters = {
+    mongodb: mongodb({ collection: mongo, changes: false }),
+    supabase: supabase({ client: table, table: 'tasks', stream: false }),
+    firestore: firestore({ sdk: store.sdk, database: store.database, collection: store.collection, stream: false }),
+    appwrite: appwrite({
+      databases: documents.databases,
+      Query: documents.Query,
+      databaseId: 'db',
+      collectionId: 'tasks',
+    }),
+  };
+  for (const name of Object.keys(adapters)) {
+    const pull = adapters[name].pull.handler;
+    const fresh = await pull(null, 10);
+    assert.strictEqual(fresh.documents.length, 2, `${name} pulls both from the start`);
+    assert.deepStrictEqual((await pull(own[name], 10)).documents, [], `${name} resumes from the shape it writes`);
+    // What an earlier build wrote (a stamp alone, milliseconds for Firestore) and every other adapter's shape.
+    const aliens = [start + 5000, iso(5000), { at: start + 5000 }, { seconds: start / 1000 + 5, nanoseconds: 0 }];
+    for (const other of Object.keys(own)) if (other !== name) aliens.push(own[other]);
+    for (const alien of aliens) {
+      assert.deepStrictEqual(await pull(alien, 10), fresh, `${name} reads ${JSON.stringify(alien)} as no checkpoint`);
+    }
+  }
+});

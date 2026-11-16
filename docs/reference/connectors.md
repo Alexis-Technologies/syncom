@@ -97,7 +97,9 @@ that arrived late or whose state changed without its stamp passing the checkpoin
 document: counted, landed, refused, or a conflict over a local edit not yet pushed. `stats().pulls` counts every
 call of the handler.
 
-The checkpoint stays opaque to the connector; the handler keeps it from moving back. The adapters:
+The checkpoint stays opaque to the connector; the handler keeps it from moving back. An adapter reads the one
+position it writes: handed anything else (a stamp alone, another adapter's position) it has no checkpoint and pulls
+from the beginning, where the connector passes over what it already knows. The adapters:
 
 | Adapter | Cursor | `lookback` |
 | --- | --- | --- |

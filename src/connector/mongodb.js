@@ -6,11 +6,12 @@
 // with three fields of the adapter's: `_rev` (a count of its writes — the
 // compare-and-set a push checks against), `_deleted` (a tombstone, so a pull
 // sees a deletion) and `_updated` (the position: a pull is the documents
-// `_updated` after the checkpoint, in that order, the checkpoint the last
-// one's `_updated`; two writes in one millisecond are read again at the next
-// pull — an equal document makes no op). The stream is a change stream on
-// the collection, every change a `RESYNC`, its error or close an `END` (a
-// replica set; `changes: false` without one). A push is a `replaceOne` per
+// after the checkpoint `{ at, id }` — stamped later, or stamped the same with
+// a greater `_id` — in that order; a checkpoint of any other shape is no
+// checkpoint, and the pull starts from the beginning). The stream is a
+// change stream on the collection, every change a `RESYNC`, its error or
+// close an `END` (a replica set; `changes: false` without one). A push is a
+// `replaceOne` per
 // row matched on the `_rev` this adapter last saw — none matched, nothing
 // upserted, is a conflict, answered as the document stands; a server refusing
 // the document (a validator, a key too large) is that row's `{ id, error }`;
@@ -63,19 +64,17 @@ const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = 
   const read = (after, limit) => {
     let filter = {};
     if (after !== null && after.id === null) filter = { _updated: { $gt: after.at } };
-    else if (after !== null && (after.at !== 0 || after.id !== '')) {
+    else if (after !== null) {
       filter = { $or: [{ _updated: { $gt: after.at } }, { _updated: after.at, _id: { $gt: after.id } }] };
     }
     // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
     return collection.find(filter, { sort: { _updated: 1, _id: 1 }, limit }).toArray();
   };
-  // A checkpoint's position: `{ at, id }`, or the first version's stamp alone; the start for none.
-  const parse = (value) => {
-    if (value !== null && typeof value === 'object' && typeof value.at === 'number') {
-      return { at: value.at, id: String(value.id) };
-    }
-    return { at: typeof value === 'number' ? value : 0, id: '' };
-  };
+  // A checkpoint's position, `{ at, id }` as this adapter writes it. Anything else is no checkpoint: the start.
+  const parse = (value) =>
+    value !== null && typeof value === 'object' && typeof value.at === 'number' && typeof value.id === 'string'
+      ? { at: value.at, id: value.id }
+      : null;
   const positionOf = (doc) => (typeof doc._updated === 'number' ? { at: doc._updated, id: String(doc._id) } : null);
   // A document handed over, its revision remembered.
   const pulled = (doc) => {
@@ -89,7 +88,7 @@ const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = 
         lookback > 0
           ? lookbackPull({
               lookback,
-              parse: (value) => (value === null || value === undefined ? null : parse(value)),
+              parse,
               millis: (position) => position.at,
               since: (ms) => ({ at: ms, id: null }),
               read,
