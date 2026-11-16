@@ -142,8 +142,9 @@ The handler's answer is read row by row:
 - **Neither a document nor an error**: parked with the reason `answer`.
 
 A backend that refuses a row which assumed exactly what the backend says it holds, twice in a row, contradicts
-itself: the row is parked with the reason `conflict` rather than pushed in a loop. A `modifier.push` that throws parks
-nothing but leaves that row out (`refused`, reason `modifier`).
+itself: the row is parked with the reason `conflict` rather than pushed in a loop. A record `modifier.push` throws on
+has no row to send: it is parked with the reason `modifier` and the thrown error as the `cause`, and the rest of the
+batch goes.
 
 `modifier.pull` turns the backend's shape into the record's, `modifier.push` the record's into the backend's. What the
 connector remembers and compares is the backend's shape: a document as it came (before `modifier.pull`, its canonical
@@ -155,9 +156,9 @@ passes through `modifier.pull` and the same check (a conflict that fails it park
 ## Parked rows
 
 A parked row is an edit the backend did not take and the connector no longer pushes by itself: a row refused by name,
-a row answered with neither a document nor an error (`answer`), a conflict whose `remote` cannot be read (`value`,
-`modifier`), a backend contradicting itself (`conflict`), or a conflict whose resolution the engine refused (the
-engine's code). It is reported once, as its `refused` event. `stats().parked` counts the rows set aside, and `parked`
+a row answered with neither a document nor an error (`answer`), a record `modifier.push` throws on (`modifier`), a
+conflict whose `remote` cannot be read (`value`, `modifier`), a backend contradicting itself (`conflict`), or a
+conflict whose resolution the engine refused (the engine's code). It is reported once, as its `refused` event. `stats().parked` counts the rows set aside, and `parked`
 lists them as `{ id, reason }`, the reason being the event's (its first 64 characters).
 
 The parked rows are kept with the [checkpoint](#the-checkpoint), because nothing else remembers one: its change is

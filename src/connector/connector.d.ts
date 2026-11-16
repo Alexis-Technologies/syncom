@@ -130,8 +130,9 @@ export interface ConnectorEvents {
    * A document or a row left out, and why: on pull `'collection'` (another collection's record), `'sealed'`,
    * `'value'` (no JSON), `'modifier'` (it threw) or the code of the write the engine refused (a validator's
    * `VALIDATION_FAILED`, a `TypeError`); on push the backend's own code for a row refused by name (`'backend'`
-   * without one), `'modifier'`, `'answer'` (neither a document nor an error), `'conflict'` (a backend refusing a
-   * row that assumed exactly what it holds, twice), or the code of a resolution the engine refused.
+   * without one), `'modifier'` (`modifier.push` threw on the record, or `modifier.pull` on a conflict's document),
+   * `'answer'` (neither a document nor an error), `'conflict'` (a backend refusing a row that assumed exactly what
+   * it holds, twice), or the code of a resolution the engine refused. A row told on push is parked.
    */
   refused: (event: { direction: 'pull' | 'push'; id: string; reason: string; cause?: unknown }) => void;
   /**
@@ -165,9 +166,9 @@ export interface ConnectorStats {
   pushes: number;
   pending: number;
   /**
-   * Rows set aside until a turn of theirs or `reSync()`: refused by the backend by name, or met with a conflict whose
-   * resolution the database refused. Kept with the checkpoint, so a restart counts them still; one `reSync()` is
-   * trying again counts as pending.
+   * Rows set aside until a turn of theirs or `reSync()`: refused by the backend by name, met with a conflict whose
+   * resolution the database refused, or of a record `modifier.push` throws on. Kept with the checkpoint, so a restart
+   * counts them still; one `reSync()` is trying again counts as pending.
    */
   parked: number;
   active: boolean;

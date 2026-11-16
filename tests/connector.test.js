@@ -864,6 +864,88 @@ test('Connectors', async (t) => {
   );
 
   await t.test(
+    'a record modifier.push throws on is parked — said (refused, direction push, reason modifier), listed, kept with the checkpoint — the rest of its batch goes, a pull never lands the backend’s state over it, and reSync() or a change to the record tries it again',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const pushed = [];
+      const refused = [];
+      let broken = true;
+      const start = () => {
+        const replication = replicate(a, {
+          name: 'main',
+          collection: 'Task',
+          ...recording(backend, pushed),
+          modifier: {
+            // The application's own shaping, with a bug for one title.
+            push: (data) => {
+              if (broken && data.title === 'boom') throw new Error('cannot shape this one');
+              return data;
+            },
+          },
+          live: false,
+          retryTime: 50,
+        });
+        t2.after(() => replication.cancel().catch(() => {}));
+        replication.on('refused', (event) => refused.push([event.direction, event.id, event.reason, event.cause]));
+        return replication;
+      };
+      let replication = start();
+      await replication.awaitInitialReplication();
+      await a.transact(async (tx) => {
+        await tx.set('bad', { $type: 'Task', title: 'fine' });
+        await tx.set('ok', { $type: 'Task', title: 'v1' });
+      });
+      await replication.awaitInSync();
+      // One transaction, two rows: the modifier throws on one — parked, said — and the other goes.
+      await a.transact(async (tx) => {
+        await tx.set('bad', { $type: 'Task', title: 'boom' });
+        await tx.set('ok', { $type: 'Task', title: 'v2' });
+      });
+      await replication.awaitInSync();
+      assert.strictEqual(refused.length, 1);
+      assert.deepStrictEqual(refused[0].slice(0, 3), ['push', 'bad', 'modifier']);
+      assert.strictEqual(refused[0][3].message, 'cannot shape this one');
+      assert.deepStrictEqual(replication.parked, [{ id: 'bad', reason: 'modifier' }]);
+      assert.deepStrictEqual([replication.stats().parked, replication.stats().pending], [1, 0]);
+      assert.deepStrictEqual(backend.read('ok'), { title: 'v2' }, 'the rest of the batch went');
+      assert.deepStrictEqual(backend.read('bad'), { title: 'fine' });
+      // reSync(): the pull hands back the backend's state of the record — the state known, over an edit that waits:
+      // not landed — and the row is tried again: the modifier throws again, said again, parked still.
+      pushed.length = 0;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(await a.get('bad'), { title: 'boom', $type: 'Task' }, 'the edit stands');
+      assert.deepStrictEqual(pushed, [], 'no row of it could be made');
+      assert.strictEqual(refused.length, 2);
+      assert.deepStrictEqual(replication.parked, [{ id: 'bad', reason: 'modifier' }]);
+      // Kept with the checkpoint: a connector started anew holds it parked, and says nothing of it by itself.
+      await replication.cancel();
+      const text = JSON.parse(await kvNamespace(a[DB].kv, 'connector').get('main'));
+      assert.deepStrictEqual(text.parked, { bad: 'modifier' });
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(replication.parked, [{ id: 'bad', reason: 'modifier' }]);
+      assert.strictEqual(refused.length, 2);
+      // A change to the record tries it again; with the modifier mended, it goes and is parked no more.
+      await a.Task.update('bad', { n: 1 });
+      await replication.awaitInSync();
+      assert.strictEqual(refused.length, 3);
+      broken = false;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read('bad'), { title: 'boom', n: 1 });
+      assert.deepStrictEqual(replication.parked, []);
+      assert.deepStrictEqual(
+        pushed,
+        ['bad', 'bad'],
+        'asked what the backend holds (a probe after the restart), then sent',
+      );
+    },
+  );
+
+  await t.test(
     'a parked row whose retry is cut short stays parked; one deleted or purged goes as a deletion; a newer state of the backend over one is a conflict; an id that is another collection’s by now parks nothing',
     async (t2) => {
       const backend = createFakeBackend();

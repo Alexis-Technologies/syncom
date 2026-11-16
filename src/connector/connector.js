@@ -1304,7 +1304,7 @@ class Replication extends Emitter {
   // The rows of `ids` as the backend is to hold them — the data in the backend's shape (`modifier.push`), or
   // deleted — with what the backend was last known to hold of each (`assumed`); beside them the canonical text of
   // each. A row that reads as the backend is known to hold it has nothing to say and leaves pending here; a
-  // `modifier.push` that throws is that row's refusal.
+  // record `modifier.push` throws on cannot go: its row is parked (`modifier`), like one the backend refuses.
   async #rowsOf(ids) {
     const rows = [];
     const texts = [];
@@ -1315,8 +1315,7 @@ class Replication extends Emitter {
       try {
         out = this.#outgoing(id, local);
       } catch (error) {
-        this.#pending.delete(id);
-        this.#refuse('push', id, 'modifier', error);
+        this.#park(id, error, 'modifier');
         continue;
       }
       if (this.#known.has(id) && this.#known.get(id) === out.text) {
@@ -1410,10 +1409,10 @@ class Replication extends Emitter {
     if (conflicts.length > 0) await this.#resolveConflicts(conflicts);
   }
 
-  // A row the backend refuses by name (an id it cannot carry, a body too large): set aside — said (`refused`,
-  // `direction: 'push'`, the error's code), out of pending — until a turn of the record or `reSync()` tries it again.
-  #park(id, error) {
-    const reason = error?.code ?? 'backend';
+  // A row the backend refuses by name (an id it cannot carry, a body too large), or one that cannot be made at all
+  // (`modifier.push` threw: `reason`): set aside — said (`refused`, `direction: 'push'`, the error's code or the
+  // reason given), out of pending — until a turn of the record or `reSync()` tries it again.
+  #park(id, error, reason = error?.code ?? 'backend') {
     this.#pending.delete(id);
     this.#probing.delete(id);
     this.#parked.set(id, reasonOf(reason));

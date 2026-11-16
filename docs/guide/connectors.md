@@ -186,8 +186,10 @@ its own beside the first:
 
 The connector remembers and compares the backend's own shape, so `assumed` and a conflict's comparison use the
 document as the backend holds it. `modifier.pull` is also where a value of the backend's SDK becomes JSON (a `Date`
-an ISO string, a `Timestamp` a number), since what it answers must be JSON. A modifier that throws on a document
-leaves that document out (`refused` with the reason `modifier`).
+an ISO string, a `Timestamp` a number), since what it answers must be JSON. A `modifier.pull` that throws on a
+document leaves that document out (`refused` with the reason `modifier`). A `modifier.push` that throws on a record
+[parks its row](#rows-the-backend-refuses-outright) with the same reason: the edit stays here, listed in `parked`,
+until the record changes or you call `reSync()`.
 
 ## Know where a connector stands
 

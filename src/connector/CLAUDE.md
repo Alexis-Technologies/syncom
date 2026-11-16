@@ -104,7 +104,9 @@ cause)` — the `refused` event, `connector.document.refused`,
   the backend won, or a turn that leaves the record as the backend holds it, makes no second write. The handler's
   answer is judged row by row (`#answered`): a row not answered is the backend's now (`#learn`); `{ id, error }` is a
   row refused by name — parked (`#park`: out of pending, `#parked`, the `refused` event with the error's code),
-  tried again by a turn of the record or `reSync()`; a document is a conflict (`#resolveConflicts`), judged as a
+  tried again by a turn of the record or `reSync()`; a record `modifier.push` throws on (`#rowsOf`) is parked the same
+  way, reason `modifier` — it once left pending with no word kept: neither pending nor parked, forgotten by a
+  restart, reverted by the next echo of the backend's state; a document is a conflict (`#resolveConflicts`), judged as a
   pulled one first — its text (`textOf`), then `#shaped` (`modifier.pull` ONCE, `isJson` on its answer; a failure
   parks the row, reason `value` or `modifier`; `#decide` takes the application's shape and applies no modifier — the
   pull's conflict path once ran `modifier.pull` twice): the backend wins — the record set to its state under
