@@ -1,6 +1,6 @@
 // The Supabase page (docs/guide/replication-supabase.md) shows the regions of this file. The client here is a
 // stand-in in memory for `@supabase/supabase-js`: `from(table)` with the builder the adapter speaks (`select`, `or`,
-// `order`, `limit`, `eq`, `maybeSingle`, `insert`, `update`) and Realtime's `channel().on().subscribe()`.
+// `gt`, `order`, `limit`, `eq`, `maybeSingle`, `insert`, `update`) and Realtime's `channel().on().subscribe()`.
 // tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
 
@@ -55,6 +55,7 @@ const createClient = () => {
       insert: (values) => Object.assign(state, { op: 'insert', values }) && api,
       update: (values) => Object.assign(state, { op: 'update', values }) && api,
       eq: (column, value) => state.filters.push((row) => row[column] === value) && api,
+      gt: (column, value) => state.filters.push((row) => row[column] > value) && api,
       or: (text) => state.filters.push(orFilter(text)) && api,
       order: (column, { ascending = true } = {}) => state.orders.push({ column, ascending }) && api,
       limit: (n) => Object.assign(state, { limit: n }) && api,
@@ -157,6 +158,42 @@ await quiet.awaitInSync();
 assert.deepEqual(await board.Task.get('t2'), { title: 'Review the PR today', done: false, $type: 'Task' });
 assert.equal(quiet.stats().conflicts, 1);
 await quiet.cancel();
+
+// A transaction that began ten seconds ago commits now: its row carries the stamp of its start, behind the
+// checkpoint. Without a lookback the pull never sees it.
+const tenSecondsAgo = () => new Date(Date.now() - 10_000).toISOString();
+await client
+  .from('tasks')
+  .insert({ id: 't3', title: 'Committed late', done: false, deleted: false, updated_at: tenSecondsAgo() });
+const missing = replicate(board, {
+  name: 'supabase',
+  collection: 'Task',
+  live: false,
+  ...supabase({ client, table: 'tasks' }),
+});
+await missing.awaitInitialReplication();
+assert.equal(await board.Task.get('t3'), null, 'behind the checkpoint: missed');
+await missing.cancel();
+
+// #region lookback
+const careful = replicate(board, {
+  name: 'supabase',
+  collection: 'Task',
+  // Each pull starts 30 seconds before its checkpoint: a row committed late, with an older `updated_at`, is pulled.
+  ...supabase({ client, table: 'tasks', lookback: 30_000 }),
+});
+await careful.awaitInitialReplication();
+// #endregion lookback
+assert.deepEqual(await board.Task.get('t3'), { title: 'Committed late', done: false, $type: 'Task' });
+const counted = careful.stats();
+assert.equal(counted.applied, 1, 't3 alone: what the connector knew of the window made no write');
+await client
+  .from('tasks')
+  .insert({ id: 't4', title: 'Committed late too', done: false, deleted: false, updated_at: tenSecondsAgo() });
+await waitUntil(async () => (await board.Task.get('t4')) !== null);
+await careful.awaitInSync();
+assert.equal(careful.stats().pulled, counted.pulled + 1, 'a late row is counted once, the rows read again not at all');
+await careful.cancel();
 
 // #region columns
 const custom = supabase({

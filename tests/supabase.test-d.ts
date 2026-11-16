@@ -1,4 +1,4 @@
-import { expectType } from 'tsd';
+import { expectError, expectType } from 'tsd';
 import { supabase } from '../src/connector/supabase.js';
 import type { SupabaseHandlers, SupabaseLikeClient } from '../src/connector/supabase.js';
 import { replicate } from '../src/connector/connector.js';
@@ -10,3 +10,5 @@ const handlers = supabase({ client, table: 'tasks', primaryKey: 'id', modifiedCo
 expectType<SupabaseHandlers>(handlers);
 expectType<string | undefined>(handlers.stampOf('t1'));
 replicate(db, { name: 'supabase', collection: 'Task', ...handlers });
+expectType<SupabaseHandlers>(supabase({ client, table: 'tasks', lookback: 30_000 }));
+expectError(supabase({ client, table: 'tasks', lookback: '30s' }));

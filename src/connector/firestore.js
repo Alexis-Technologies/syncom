@@ -19,9 +19,13 @@
 // it again; a probe (`assumed` undefined) is the document as it stands,
 // nothing written; an id or a body the SDK refuses is that row's
 // `{ id, error }`. The stream is `onSnapshot` over the newest document, every
-// change the server confirmed a `RESYNC`, its error an `END`. Requires same.js only.
+// change the server confirmed a `RESYNC`, its error an `END`. With `lookback`
+// ms a pull run starts that far before its checkpoint — a document stamped
+// behind it by a writer that sets the stamp field itself is pulled after all
+// (lookback.js). Requires same.js, lookback.js only.
 
 const { same } = require('./same.js');
+const { checkLookback, lookbackPull } = require('./lookback.js');
 
 const CALLS = [
   'query',
@@ -50,7 +54,8 @@ const refused = (id, error) => ({
  * `{ pull, push }` for `replicate()`. `sdk` is `firebase/firestore`,
  * `database` its `Firestore`, `collection` a `CollectionReference`;
  * `stampField` (`serverTimestamp`) and `deletedField` (`_deleted`) name the
- * adapter's fields on every document; `stream: false` for no `onSnapshot`.
+ * adapter's fields on every document; `stream: false` for no `onSnapshot`;
+ * `lookback` the milliseconds a pull run starts before its checkpoint (0: none).
  */
 const firestore = ({
   sdk,
@@ -59,6 +64,7 @@ const firestore = ({
   stampField = 'serverTimestamp',
   deletedField = '_deleted',
   stream = true,
+  lookback = 0,
 } = {}) => {
   if (sdk === null || typeof sdk !== 'object') {
     throw new TypeError('firestore(): sdk must be the firebase/firestore module');
@@ -74,6 +80,7 @@ const firestore = ({
   field('stampField', stampField);
   field('deletedField', deletedField);
   if (typeof stream !== 'boolean') throw new TypeError('firestore(): stream must be a boolean');
+  checkLookback('firestore', lookback);
   if (stream && typeof sdk.onSnapshot !== 'function') throw new TypeError('firestore(): sdk.onSnapshot is required');
 
   const strip = (data) => {
@@ -96,15 +103,59 @@ const firestore = ({
     if (typeof value?.toMillis === 'function') return stampOf(sdk.Timestamp.fromMillis(value.toMillis()));
     return null;
   };
-  // The checkpoint's stamp as a Timestamp: `{ seconds, nanoseconds, id }`, or the older `{ at, id }` in milliseconds.
-  const cursorOf = (checkpoint) => {
-    if (checkpoint === null || typeof checkpoint !== 'object' || typeof checkpoint.id !== 'string') return null;
-    if (typeof checkpoint.seconds === 'number' && typeof checkpoint.nanoseconds === 'number') {
-      return sdk.startAfter(new sdk.Timestamp(checkpoint.seconds, checkpoint.nanoseconds), checkpoint.id);
+  // A checkpoint's position: `{ seconds, nanoseconds, id }`, or the older `{ at, id }` in milliseconds.
+  const parse = (value) => {
+    if (value === null || typeof value !== 'object' || typeof value.id !== 'string') return null;
+    if (typeof value.seconds === 'number' && typeof value.nanoseconds === 'number') {
+      return { seconds: value.seconds, nanoseconds: value.nanoseconds, id: value.id };
     }
-    if (typeof checkpoint.at !== 'number') return null;
-    return sdk.startAfter(sdk.Timestamp.fromMillis(checkpoint.at), checkpoint.id);
+    return typeof value.at === 'number' ? { ...stampOf(sdk.Timestamp.fromMillis(value.at)), id: value.id } : null;
   };
+  // The documents after a position, in the cursor's order — by the stamp, then by id: one cursor, no second query
+  // for the ties; a position with no id (a lookback's start) is the stamp alone.
+  const read = async (after, limit) => {
+    const byStamp = sdk.orderBy(stampField);
+    const byId = sdk.orderBy(sdk.documentId());
+    const page = sdk.limit(limit);
+    if (after === null) return (await sdk.getDocs(sdk.query(collection, byStamp, byId, page))).docs;
+    const stamp = new sdk.Timestamp(after.seconds, after.nanoseconds);
+    const cursor = after.id === null ? sdk.startAfter(stamp) : sdk.startAfter(stamp, after.id);
+    return (await sdk.getDocs(sdk.query(collection, byStamp, byId, cursor, page))).docs;
+  };
+  // A stamp the server has not set yet (the SDK's own pending write) has no position: left to the next pull.
+  const positionOf = (snap) => {
+    const stamp = stampOf(snap.data()[stampField]);
+    return stamp === null ? null : { ...stamp, id: snap.id };
+  };
+  const documentOf = (snap) => {
+    const data = snap.data();
+    if (stampOf(data[stampField]) === null) return null;
+    return data[deletedField] === true ? { id: snap.id, deleted: true } : { id: snap.id, data: strip(data) };
+  };
+  const pull =
+    lookback > 0
+      ? lookbackPull({
+          lookback,
+          parse,
+          millis: (position) => position.seconds * 1000 + position.nanoseconds / 1e6,
+          since: (ms) => ({ ...stampOf(sdk.Timestamp.fromMillis(Math.max(ms, 0))), id: null }),
+          read,
+          positionOf,
+          documentOf,
+        })
+      : async (checkpoint, batchSize) => {
+          const after = parse(checkpoint);
+          const snaps = await read(after, batchSize);
+          const documents = [];
+          let last = after === null ? null : checkpoint;
+          for (let i = 0; i < snaps.length; i++) {
+            const document = documentOf(snaps[i]);
+            if (document === null) continue;
+            documents.push(document);
+            last = positionOf(snaps[i]);
+          }
+          return { documents, checkpoint: last };
+        };
 
   // One transaction over `rows`: the answers for them (conflicts, refusals).
   const transact = async (rows) => {
@@ -153,29 +204,7 @@ const firestore = ({
     pull: {
       async handler(checkpoint, batchSize) {
         if (typeof sdk.waitForPendingWrites === 'function') await sdk.waitForPendingWrites(database);
-        const byStamp = sdk.orderBy(stampField);
-        const byId = sdk.orderBy(sdk.documentId());
-        const page = sdk.limit(batchSize);
-        const cursor = cursorOf(checkpoint);
-        const snapshot = await sdk.getDocs(
-          cursor === null
-            ? sdk.query(collection, byStamp, byId, page)
-            : sdk.query(collection, byStamp, byId, cursor, page),
-        );
-        const documents = [];
-        let last = cursor === null ? null : checkpoint;
-        for (let i = 0; i < snapshot.docs.length; i++) {
-          const snap = snapshot.docs[i];
-          const data = snap.data();
-          const stamp = stampOf(data[stampField]);
-          // A stamp the server has not set yet (the SDK's own pending write): left to the next pull.
-          if (stamp === null) continue;
-          documents.push(
-            data[deletedField] === true ? { id: snap.id, deleted: true } : { id: snap.id, data: strip(data) },
-          );
-          last = { seconds: stamp.seconds, nanoseconds: stamp.nanoseconds, id: snap.id };
-        }
-        return { documents, checkpoint: last };
+        return pull(checkpoint, batchSize);
       },
       ...(stream
         ? {

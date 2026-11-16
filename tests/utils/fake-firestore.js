@@ -187,11 +187,14 @@ const createFakeFirestore = ({ stampField = 'serverTimestamp', deletedField = '_
     failStreams(error = new Error('fake-firestore: listener failed')) {
       for (const listener of [...listeners]) listener.error?.(error);
     },
-    /** A write made on the collection itself (another client's), stamped by the server. */
-    write(id, data, { deleted = false, pending = false } = {}) {
+    /**
+     * A write made on the collection itself (another client's), stamped by the server — or with `at`, a Timestamp
+     * of the writer's own (a client that sets the stamp field itself).
+     */
+    write(id, data, { deleted = false, pending = false, at = SERVER } = {}) {
       const doc = deleted ? {} : copy(data);
       doc[deletedField] = deleted;
-      doc[stampField] = pending ? null : SERVER;
+      doc[stampField] = pending ? null : at;
       commit(id, doc);
       notify();
     },

@@ -16,7 +16,7 @@ running example; the members and the events are in the [API reference](./api#con
 | --- | --- | --- |
 | `name` | (required) | The checkpoint's key in the `connector` key-value namespace: letters, digits, `_`, `.`, `-` (up to 101 characters, not starting with `.`) |
 | `collection` | (required) | The collection replicated |
-| `pull.handler(checkpoint, batchSize)` | | Answers `{ documents: [{ id, data, deleted }], checkpoint }` |
+| `pull.handler(checkpoint, batchSize)` | | Answers `{ documents: [{ id, data, deleted }], checkpoint }`, with `reread` where it [looks back](#looking-back) |
 | `pull.stream(emit, { checkpoint })` | | Calls `emit({ documents })`, `emit('RESYNC')` or `emit('END')`; returns what stops it |
 | `push.handler(rows)` | | Takes `[{ id, data, deleted, assumed }]`; answers conflicts `[{ id, data, deleted }]` and rows refused by name `[{ id, error }]` |
 | `live` | `true` | Follow the backend after the first pull: its stream, or a pull every `retryTime` |
@@ -69,6 +69,55 @@ state learned later (a landing, a push the backend took, its echo) clears the id
 Pulled writes carry `source: 'connector:<name>'` on their `transaction` event and `actor: 'connector:<name>'` on their
 ops; a resolution's ops carry `actor: 'connector:<name>:resolve'`, and a resolution landed after a push carries
 `source: 'connector:<name>:resolve'`.
+
+## Looking back
+
+A pull that resumes after a timestamp misses a document that becomes visible later with an older stamp: a
+transaction that committed late, a replica that lagged, a writer whose clock runs behind. A handler that looks back
+asks its backend from before the checkpoint it was handed, and answers `reread`: how many of the page's documents,
+the first ones, are at or behind that checkpoint. `reread` is a non-negative integer; anything else fails the pull
+(`REPLICATION_FAILED`, a `TypeError` as its cause). A handler that does not look back leaves it out, and nothing
+below applies.
+
+A re-read document is passed over, before `modifier.pull` runs and without reading the record, when:
+
+- **it holds the state known** (by the text in memory or the checkpoint's digest; the text is then kept in memory,
+  so the next reading compares texts). Nothing lands, even over a record that reads otherwise.
+- **it is a deletion and nothing is known of its id.** A record gone on both sides leaves no digest, and an old
+  tombstone read again says nothing about a record made here since: it never deletes that record and is never a
+  conflict with it.
+- **it is refused as it was reported before**: the same document, or, where it was refused before it had a text
+  (`collection`, `sealed`, a value JSON has no text for), the same reason; a document that is no document, logged
+  as `connector.document.malformed`, is logged once the same way. `reSync()` forgets what was reported, so it judges
+  the window anew and reports again what is refused again; a connector started again does the same once.
+
+A passed-over document is not counted (`stats().pulled`, the `syncom.connector.rows` metric), is not part of a
+`received` event (a page of nothing else emits none) and is not a `refused` event. Every other re-read document, one
+that arrived late or whose state changed without its stamp passing the checkpoint, is judged as any pulled
+document: counted, landed, refused, or a conflict over a local edit not yet pushed. `stats().pulls` counts every
+call of the handler.
+
+The checkpoint stays opaque to the connector; the handler keeps it from moving back. The adapters:
+
+| Adapter | Cursor | `lookback` |
+| --- | --- | --- |
+| Supabase | the modified column, then the key | yes; the column must read as a date |
+| MongoDB | `_updated`, then `_id` | yes |
+| Firestore | the server stamp, then the id | yes |
+| Appwrite | `$updatedAt`, then `$id` | yes |
+| CouchDB | `last_seq`, a sequence | no: a sequence skips nothing |
+| Google Drive, OneDrive | `n`, a sequence inside one file under its ETag | no |
+| GraphQL | your schema's | yours: rewind in `pull.variables`, answer `reread` from `pull.read` |
+
+`lookback` is a number of milliseconds, `0` (none) by default; anything but a non-negative number is a `TypeError`.
+With it a pull run starts at the checkpoint's stamp minus `lookback`. The checkpoint stays the newest position
+pulled through: a document at or behind it moves nothing. A full page answers the checkpoint with `from`, the
+position the next page reads on after (`{ at, id, from: { at, id } }` for Supabase and MongoDB, the same fields as
+the position for the others), so every full page moves the checkpoint and a window wider than a page is read
+through; a run cut short goes on from `from`; the page that comes short carries none, and the next run looks back
+again. The adapter remembers nothing of what it handed over: every run reads the window, and a run after a restart
+reads as any other. A stamp that does not read as a time (a modified column that is not a date) leaves the plain
+cursor. A document that becomes visible more than `lookback` after its stamp is still missed.
 
 ## What goes out, and how the answer is read
 

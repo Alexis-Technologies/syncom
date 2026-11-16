@@ -1,4 +1,4 @@
-import { expectType } from 'tsd';
+import { expectError, expectType } from 'tsd';
 import { firestore } from '../src/connector/firestore.js';
 import type { FirestoreHandlers, FirestoreSdk } from '../src/connector/firestore.js';
 import { replicate } from '../src/connector/connector.js';
@@ -17,3 +17,5 @@ const handlers = firestore<{ title: string }>({
 });
 expectType<FirestoreHandlers<{ title: string }>>(handlers);
 replicate(db, { name: 'firestore', collection: 'Task', ...handlers });
+expectType<FirestoreHandlers>(firestore({ sdk, database, collection, lookback: 5000 }));
+expectError(firestore({ sdk, database, collection, lookback: null }));

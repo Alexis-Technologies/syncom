@@ -17,9 +17,12 @@
 // row's `{ id, error }`. Appwrite has no compare-and-set write, so a write
 // landing between the read and the update is overwritten — said in the docs,
 // as RxDB says it. The stream is Realtime's channel of the collection's
-// documents, every event a `RESYNC`. Requires same.js only.
+// documents, every event a `RESYNC`. With `lookback` ms a pull run starts
+// that far before its checkpoint — a document that became visible behind it
+// is pulled after all (lookback.js). Requires same.js, lookback.js only.
 
 const { same } = require('./same.js');
+const { checkLookback, lookbackPull } = require('./lookback.js');
 
 const CALLS = ['listDocuments', 'createDocument', 'updateDocument', 'getDocument'];
 const BUILDERS = ['equal', 'greaterThan', 'orderAsc', 'limit', 'or', 'and'];
@@ -32,7 +35,8 @@ const text = (name, value) => {
  * `{ pull, push }` for `replicate()`. `databases` and `Query` are the SDK's,
  * `databaseId`/`collectionId` the collection's; `deletedField` (`deleted`)
  * the boolean attribute of a tombstone; `client` the SDK's client for the
- * stream (`stream: false`, or no client, for none).
+ * stream (`stream: false`, or no client, for none); `lookback` the
+ * milliseconds a pull run starts before its checkpoint (0: none).
  */
 const appwrite = ({
   client = null,
@@ -42,6 +46,7 @@ const appwrite = ({
   collectionId,
   deletedField = 'deleted',
   stream = true,
+  lookback = 0,
 } = {}) => {
   if (databases === null || typeof databases !== 'object') {
     throw new TypeError('appwrite(): databases must be the Databases service');
@@ -61,6 +66,7 @@ const appwrite = ({
   text('collectionId', collectionId);
   text('deletedField', deletedField);
   if (typeof stream !== 'boolean') throw new TypeError('appwrite(): stream must be a boolean');
+  checkLookback('appwrite', lookback);
   if (client !== null && typeof client?.subscribe !== 'function') {
     throw new TypeError('appwrite(): client.subscribe must be a function');
   }
@@ -74,29 +80,50 @@ const appwrite = ({
     doc[deletedField] === true ? { id: doc.$id, deleted: true } : { id: doc.$id, data: strip(doc) };
   const list = (queries) => databases.listDocuments(databaseId, collectionId, queries);
 
+  // The documents after a position, in the cursor's order: updated after it, or at the same instant with a greater
+  // `$id`; a position with no id (a lookback's start) is the instant alone.
+  const read = async (after, limit) => {
+    const queries = [Query.orderAsc('$updatedAt'), Query.orderAsc('$id'), Query.limit(limit)];
+    if (after !== null) {
+      const later = Query.greaterThan('$updatedAt', after.updatedAt);
+      if (after.id === null) queries.push(later);
+      else {
+        const ties = Query.and([Query.equal('$updatedAt', after.updatedAt), Query.greaterThan('$id', after.id)]);
+        queries.push(Query.or([later, ties]));
+      }
+    }
+    const result = await list(queries);
+    return Array.isArray(result?.documents) ? result.documents : [];
+  };
+  const parse = (value) =>
+    value !== null && typeof value === 'object' && typeof value.updatedAt === 'string'
+      ? { updatedAt: value.updatedAt, id: value.id }
+      : null;
+  const positionOf = (doc) => ({ updatedAt: doc.$updatedAt, id: doc.$id });
+
   return {
     pull: {
-      async handler(checkpoint, batchSize) {
-        const queries = [Query.orderAsc('$updatedAt'), Query.orderAsc('$id'), Query.limit(batchSize)];
-        const after = checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.updatedAt === 'string';
-        if (after) {
-          const ties = Query.and([
-            Query.equal('$updatedAt', checkpoint.updatedAt),
-            Query.greaterThan('$id', checkpoint.id),
-          ]);
-          queries.push(Query.or([Query.greaterThan('$updatedAt', checkpoint.updatedAt), ties]));
-        }
-        const result = await list(queries);
-        const documents = [];
-        let last = after ? checkpoint : null;
-        const docs = Array.isArray(result?.documents) ? result.documents : [];
-        for (let i = 0; i < docs.length; i++) {
-          const doc = docs[i];
-          documents.push(documentOf(doc));
-          last = { updatedAt: doc.$updatedAt, id: doc.$id };
-        }
-        return { documents, checkpoint: last };
-      },
+      handler:
+        lookback > 0
+          ? lookbackPull({
+              lookback,
+              parse,
+              millis: (position) => Date.parse(position.updatedAt),
+              since: (ms) => ({ updatedAt: new Date(Math.max(ms, 0)).toISOString(), id: null }),
+              read,
+              positionOf,
+              documentOf,
+            })
+          : async (checkpoint, batchSize) => {
+              let last = parse(checkpoint);
+              const docs = await read(last, batchSize);
+              const documents = [];
+              for (let i = 0; i < docs.length; i++) {
+                documents.push(documentOf(docs[i]));
+                last = positionOf(docs[i]);
+              }
+              return { documents, checkpoint: last };
+            },
       ...(stream && client !== null
         ? {
             stream(emit) {

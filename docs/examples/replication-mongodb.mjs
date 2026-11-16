@@ -161,6 +161,38 @@ assert.deepEqual(await board.Task.get('t2'), { title: 'Review the PR today', don
 assert.equal(quiet.stats().conflicts, 1);
 await quiet.cancel();
 
+// A writer whose clock runs two seconds behind: its `_updated` is behind what this node pulled through, and
+// without a lookback the pull never sees its document.
+const late = (id, title) =>
+  tasks.updateOne(
+    { _id: id },
+    { $set: { title, done: false, _deleted: false, _updated: Date.now() - 2000 }, $inc: { _rev: 1 } },
+    { upsert: true },
+  );
+await late('t3', 'Stamped by a slow clock');
+const missing = replicate(board, { name: 'mongo', collection: 'Task', live: false, ...mongodb({ collection: tasks }) });
+await missing.awaitInitialReplication();
+assert.equal(await board.Task.get('t3'), null, 'behind the checkpoint: missed');
+await missing.cancel();
+
+// #region lookback
+const careful = replicate(board, {
+  name: 'mongo',
+  collection: 'Task',
+  // Each pull starts five seconds before its checkpoint: a document stamped by a clock that runs behind is pulled.
+  ...mongodb({ collection: tasks, lookback: 5000 }),
+});
+await careful.awaitInitialReplication();
+// #endregion lookback
+assert.deepEqual(await board.Task.get('t3'), { title: 'Stamped by a slow clock', done: false, $type: 'Task' });
+const counted = careful.stats();
+assert.equal(counted.applied, 1, 't3 alone: what the connector knew of the window made no write');
+await late('t4', 'Stamped late too');
+await waitUntil(async () => (await board.Task.get('t4')) !== null);
+await careful.awaitInSync();
+assert.equal(careful.stats().pulled, counted.pulled + 1, 'a late document is counted once');
+await careful.cancel();
+
 // #region standalone
 // A standalone server has no change streams: the connector pulls every `retryTime` instead.
 const polling = replicate(board, {

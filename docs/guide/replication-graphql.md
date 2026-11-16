@@ -101,6 +101,9 @@ Either side may be left out for a pull-only or push-only connector. The connecto
   `{ id, error: { code, message } }`, which needs a field for it in your schema, so the rest of the batch still lands.
 - **Tell an absent `assumed` from `null`.** `null` means "you held nothing" and the row should be written; absent
   means a probe. GraphQL keeps the two apart, but a resolver that fills defaults may not.
+- **The cursor is your schema's.** If it is a timestamp, a document that becomes visible late is missed: rewind the
+  checkpoint in `pull.variables` and answer `reread` from `pull.read`, as
+  [Connectors](./connectors#pull-by-a-timestamp-without-missing-late-writes) shows for a handler written by hand.
 - **No schema generation.** The adapter does not derive a schema or queries from your collection; it fits any schema
   because it writes none.
 

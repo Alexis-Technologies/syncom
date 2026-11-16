@@ -986,6 +986,168 @@ test('Connectors', async (t) => {
   );
 
   await t.test(
+    'a handler that looks back says what it read again (reread): a state known is passed over — not landed, not counted, no event — a late arrival lands, an old tombstone deletes nothing made here since, a document refused as it was told is not said again until reSync(), a wrong reread is a failure',
+    async (t2) => {
+      const rules = { strict: true };
+      const validated = {
+        '~standard': {
+          version: 1,
+          vendor: 'test',
+          validate: (value) =>
+            rules.strict && value.title === 'bad' ? { issues: [{ message: 'no', path: ['title'] }] } : { value },
+        },
+      };
+      const malformed = [];
+      const logger = {
+        debug() {},
+        info() {},
+        error() {},
+        warn: (entry) => entry.event === 'connector.document.malformed' && malformed.push(entry.id),
+      };
+      const a = await open(t2, 'A', { schema: { entities: { Task: { schema: validated }, Note: {} } }, logger });
+      await a.set('n1', { $type: 'Note', title: 'a note of this node’s' });
+      // A backend that resumes by a stamp, in memory, and a handler that looks back over it by hand: the rows stamped
+      // later than 5000 before the checkpoint, the checkpoint the newest stamp pulled through — never behind the one
+      // handed in — and `reread` the rows at or behind it.
+      const rows = new Map();
+      const put = (id, data, at) => rows.set(id, { id, data, at });
+      let answer = (page) => page;
+      const handler = async (checkpoint, batchSize) => {
+        const mark = checkpoint ?? 0;
+        const list = [...rows.values()]
+          .filter((row) => row.at > mark - 5000)
+          .sort((x, y) => x.at - y.at)
+          .slice(0, batchSize);
+        return answer({
+          documents: list.map(({ id, data }) => (data === null ? { id, deleted: true } : { id, data })),
+          checkpoint: Math.max(mark, list.at(-1)?.at ?? 0),
+          reread: list.filter((row) => row.at <= mark).length,
+        });
+      };
+      put('t1', { title: 'fine' }, 1000);
+      put('n1', { title: 'a task of the backend’s' }, 2000);
+      put('x1', null, 2900);
+      put('t2', { title: 'bad' }, 3000);
+      // An id this node cannot carry is no document at all: logged, and where it is read again, logged once.
+      put('no:id', { title: 'an id with a colon' }, 2950);
+      const replication = replicate(a, {
+        name: 'main',
+        collection: 'Task',
+        pull: { handler },
+        live: false,
+        retryTime: 5000,
+      });
+      t2.after(() => replication.cancel().catch(() => {}));
+      const refused = [];
+      const received = [];
+      const errors = [];
+      replication.on('refused', (event) => refused.push([event.id, event.reason]));
+      replication.on('received', (event) => received.push(event));
+      replication.on('error', (error) => errors.push(error));
+      await replication.awaitInitialReplication();
+      assert.deepStrictEqual(refused, [
+        ['n1', 'collection'],
+        ['t2', 'VALIDATION_FAILED'],
+      ]);
+      assert.deepStrictEqual(received, [{ documents: 3, applied: 1 }]);
+      const before = replication.stats();
+      assert.deepStrictEqual([before.pulled, before.applied, before.refused], [5, 1, 2]);
+      assert.deepStrictEqual(malformed, ['no:id']);
+      const length = a.log.length;
+      // An edit here that no push carries (a pull alone): the record reads otherwise than the state known. And a
+      // record made here under an id the backend holds a tombstone of — of which nothing is known any more.
+      await a.Task.update('t1', { title: 'edited here' });
+      await a.Task.set('x1', { title: 'made here since' });
+      // reSync() reads the four again and has them judged anew. The state known is passed over — even over a record
+      // that reads otherwise: nothing landed, nothing counted — and so is the old tombstone: no deletion of the
+      // record made since. What is refused again is said again, as reSync() asks.
+      await replication.reSync();
+      let stats = replication.stats();
+      assert.deepStrictEqual(refused.slice(2), [
+        ['n1', 'collection'],
+        ['t2', 'VALIDATION_FAILED'],
+      ]);
+      assert.deepStrictEqual([stats.pulled, stats.applied, stats.refused], [8, 1, 4]);
+      assert.deepStrictEqual(malformed, ['no:id', 'no:id']);
+      assert.deepStrictEqual(await a.get('t1'), { title: 'edited here', $type: 'Task' }, 'no landing over the edit');
+      assert.deepStrictEqual(await a.get('x1'), { title: 'made here since', $type: 'Task' });
+      assert.deepStrictEqual(received.slice(1), [{ documents: 1, applied: 0 }], 't2 alone was judged');
+      assert.strictEqual(a.log.length, length + 2, 'the two writes here, and nothing of the pull');
+      assert.deepStrictEqual(replication.checkpoint.pull, 3000);
+      // A document that arrives late — stamped behind the checkpoint — lands; one that arrives late and is refused
+      // is said.
+      put('t3', { title: 'late' }, 1500);
+      put('t4', { title: 'bad' }, 2500);
+      await replication.reSync();
+      stats = replication.stats();
+      assert.deepStrictEqual([stats.pulled, stats.applied], [13, 2], 'n1, no:id, t2 again, and the two late ones');
+      assert.deepStrictEqual(await a.get('t3'), { title: 'late', $type: 'Task' });
+      assert.ok(refused.some(([id]) => id === 't4'));
+      assert.deepStrictEqual(replication.checkpoint.pull, 3000, 'the checkpoint did not move back');
+      assert.deepStrictEqual(errors, []);
+      // A wrong `reread` is the handler's failure: told, the page not landed.
+      answer = (page) => ({ ...page, reread: -1 });
+      put('t5', { title: 'not yet' }, 4000);
+      await replication.reSync();
+      assert.strictEqual(errors.length, 1);
+      assert.strictEqual(errors[0].direction, 'pull');
+      assert.match(errors[0].cause.message, /reread/);
+      assert.strictEqual(await a.get('t5'), null);
+      await replication.cancel();
+      // Without reSync() — a connector whose pulls a stream asks for — what was told is not said again, pull after
+      // pull, and what is known moves no count.
+      answer = (page) => page;
+      let signal = null;
+      const live = replicate(a, {
+        name: 'main',
+        collection: 'Task',
+        pull: {
+          handler,
+          stream: (emit) => {
+            signal = emit;
+            return () => {};
+          },
+        },
+        retryTime: 5000,
+        safetyTime: 0,
+      });
+      t2.after(() => live.cancel().catch(() => {}));
+      const told = [];
+      const events = [];
+      live.on('refused', (event) => told.push([event.id, event.reason]));
+      live.on('received', (event) => events.push(event));
+      await live.awaitInitialReplication();
+      assert.deepStrictEqual(await a.get('t5'), { title: 'not yet', $type: 'Task' });
+      // A connector started anew is told once of what its window holds that cannot land.
+      assert.deepStrictEqual(told.sort(), [
+        ['n1', 'collection'],
+        ['t2', 'VALIDATION_FAILED'],
+        ['t4', 'VALIDATION_FAILED'],
+      ]);
+      const quiet = live.stats();
+      assert.deepStrictEqual(events, [{ documents: 3, applied: 1 }]);
+      for (let i = 0; i < 3; i++) {
+        signal('RESYNC');
+        await waitUntil(() => live.stats().pulls === quiet.pulls + i + 1);
+        await live.awaitInSync();
+      }
+      assert.deepStrictEqual(live.stats(), { ...quiet, pulls: quiet.pulls + 3 });
+      assert.strictEqual(told.length, 3);
+      assert.strictEqual(events.length, 1);
+      assert.strictEqual(malformed.length, 4, 'logged once by the connector started anew, not at every pull');
+      // A refused document that changes behind the checkpoint — the same stamp, another state — is judged again, and
+      // said for what it holds now; one the database takes lands.
+      put('t2', { title: 'bad', n: 2 }, 3000);
+      put('t4', { title: 'good now' }, 2500);
+      signal('RESYNC');
+      await waitUntil(async () => (await a.get('t4')) !== null);
+      await live.awaitInSync();
+      assert.deepStrictEqual(told.slice(3), [['t2', 'VALIDATION_FAILED']]);
+      assert.deepStrictEqual(await a.get('t4'), { title: 'good now', $type: 'Task' });
+    },
+  );
+
+  await t.test(
     'retries back off: doubling from retryTime to maxRetryTime with jitter, reset by a success',
     async (t2) => {
       const backend = createFakeBackend();

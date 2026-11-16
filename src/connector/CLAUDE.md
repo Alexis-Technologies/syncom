@@ -10,11 +10,15 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
                           connector:<name>`), a document that cannot land refused by name, the collection's turns pushed as rows
                           with what the backend was assumed to hold (the canonical text of the backend's shape per id), conflicts
                           the backend wins, rows refused by name parked (kept with the checkpoint, listed by `parked`), a state
-                          the database refused never learned, the checkpoint `{ pull, pushed }` in the `connector` kv namespace —
+                          the database refused never learned, what a handler that looks back read again (`reread`) passed over
+                          where it is known, the checkpoint `{ pull, pushed }` in the `connector` kv namespace —
                           requires symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only
 src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted, an object read through its toJSON() as JSON
                           reads it, a BigInt thrown), kept apart from shape.js's canonical so an adapter weighs nothing of the core —
                           no requires
+src/connector/lookback.js checkLookback, lookbackPull — what the four adapters whose cursor is a timestamp share: a pull run that starts
+                          `lookback` ms before its checkpoint, the checkpoint never behind (`from` while a run is under way), `reread`
+                          for the connector — no requires
 src/connector/jsonfile.js jsonFile(store, { poll }) — one JSON file as a backend, what the two drives share: `n` the position of a document's
                           newest write, the ETag the compare-and-set (412 or 409 read again and tried RETRIES times; an empty text an
                           empty collection), a probe for the stream; requester — the fetch with the common headers that throws with the
@@ -25,21 +29,22 @@ src/connector/couchdb.js  @alexify/syncom/connector/couchdb — couchdb({ url, f
                           `{ id, error }`; credentials in the url moved to the Authorization header — no requires
 src/connector/graphql.js  @alexify/syncom/connector/graphql — graphql({ url, fetch, headers, request, pull, push, stream }): the application's
                           queries posted and their answers read by its functions; one adapter for every schema — no requires
-src/connector/mongodb.js  @alexify/syncom/connector/mongodb — mongodb({ collection, changes, now }): the handlers over one collection of the
-                          injected driver — _rev, _deleted, _updated the adapter's fields, a change stream the signal (its error or close
-                          END), a server's code on a document the row's `{ id, error }` — no requires
+src/connector/mongodb.js  @alexify/syncom/connector/mongodb — mongodb({ collection, changes, lookback, now }): the handlers over one
+                          collection of the injected driver — _rev, _deleted, _updated the adapter's fields, a change stream the signal
+                          (its error or close END), a server's code on a document the row's `{ id, error }` — requires lookback.js only
 src/connector/supabase.js @alexify/syncom/connector/supabase — supabase({ client, table, primaryKey, modifiedColumn, deletedColumn, schema,
-                          channel, stream, now }): the handlers over one table through the injected client — PostgREST with the modified
-                          column as the compare-and-set, Realtime's postgres_changes the signal (the channel's error, timeout or close
-                          END), a code of the database's on a row the row's `{ id, error }` — no requires
-src/connector/firestore.js @alexify/syncom/connector/firestore — firestore({ sdk, database, collection, stampField, deletedField, stream }): the
-                          handlers over one collection through the injected modular SDK — the server stamp and a tombstone the adapter's
-                          fields, a cursor after the checkpoint, a transaction per 500 rows a push, onSnapshot the signal (its error END),
-                          an id or a body the SDK refuses the row's `{ id, error }` — requires same.js only
+                          channel, stream, lookback, now }): the handlers over one table through the injected client — PostgREST with the
+                          modified column as the compare-and-set, Realtime's postgres_changes the signal (the channel's error, timeout or
+                          close END), a code of the database's on a row the row's `{ id, error }` — requires lookback.js only
+src/connector/firestore.js @alexify/syncom/connector/firestore — firestore({ sdk, database, collection, stampField, deletedField, stream,
+                          lookback }): the handlers over one collection through the injected modular SDK — the server stamp and a
+                          tombstone the adapter's fields, a cursor after the checkpoint, a transaction per 500 rows a push, onSnapshot the
+                          signal (its error END), an id or a body the SDK refuses the row's `{ id, error }` — requires same.js,
+                          lookback.js only
 src/connector/appwrite.js @alexify/syncom/connector/appwrite — appwrite({ client, databases, Query, databaseId, collectionId, deletedField,
-                          stream }): the handlers over one collection through the injected SDK — $updatedAt the position, a boolean
-                          attribute the tombstone, a read then a write the push, a 400 the row's `{ id, error }`, Realtime the signal —
-                          requires same.js only
+                          stream, lookback }): the handlers over one collection through the injected SDK — $updatedAt the position, a
+                          boolean attribute the tombstone, a read then a write the push, a 400 the row's `{ id, error }`, Realtime the
+                          signal — requires same.js, lookback.js only
 src/connector/gdrive.js   @alexify/syncom/connector/gdrive — gdrive({ fetch, token, headers, name, fileId, folder, endpoint, poll }): one JSON
                           file of the collection in the user's Drive (the application data folder) through an injected fetch — the oldest
                           by createdTime, the v2 metadata's ETag, alt=media, the media upload under If-Match (never without: no ETag is
@@ -121,8 +126,9 @@ cause)` — the `refused` event, `connector.document.refused`,
   resume (`connector.rebuild`: each a probe, `#probing`; tombstones not among them). Durably, `#digests` names the
   backend's state per id (DIGEST_LENGTH of the seam's `digest` of the text; `[SOURCE].digest` is `hashText` so the
   connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known, refused, parked }`
-  (`#write`; `refused` the ids of `#unlanded`, `parked` the next rule's), loaded into `#digests` alone: a pulled document is judged by digest
-  where the text is not in memory (`#assumedText`), and a push of such a record is a PROBE (`#assumedOf` → `assumed: undefined`): the handler answers what the backend
+  (`#write`; `refused` the ids of `#unlanded`, `parked` the next rule's), loaded into `#digests` alone: a pulled
+  document is judged by digest where the text is not in memory (`#assumedText`), and a push of such a record is a
+  PROBE (`#assumedOf` → `assumed: undefined`): the handler answers what the backend
   holds without writing, and `#answered` learns it where the digest names it (or, knowing nothing durably, where the
   backend holds nothing or the row itself) and keeps the id pending for the next round — the row then goes with that
   state assumed or says nothing — or lands a conflict. `#known` is bounded (KNOWN_MAX, the oldest not pending
@@ -157,6 +163,31 @@ cause)` — the `refused` event, `connector.document.refused`,
   the Map: an entry is a record of the collection, as a digest is, and its reason is bounded. A restart may push a
   parked row once more where `pushed` stands before its turn (an older turn, or another row of its transaction,
   still pending at the save): at least once, as the frontier is.
+- **A lookback is the adapter's rewind and the connector's passing over; the checkpoint stays opaque.** A cursor
+  that is a timestamp misses a document that became visible later with an older stamp (a transaction that committed
+  late, a writer's slower clock) — inherent to the cursor, so the remedy lives where the cursor does: the four
+  adapters that resume by a stamp (supabase, mongodb, firestore, appwrite) take `lookback` ms (0 by default,
+  `checkLookback`: a TypeError otherwise) and hand their pull to `lookbackPull` (lookback.js) over six doors —
+  `parse`, `millis`, `since`, `read`, `positionOf`, `documentOf`. CouchDB's sequence, a drive's `n` under one ETag
+  and GraphQL (the application's own cursor, rewound in its `variables`) take none. A run starts `lookback` before the
+  checkpoint's stamp (`since`); the checkpoint is the newest position pulled through and NEVER moves back (a row at or
+  behind it moves nothing); a full page answers `{ ...mark, from }` — where the next page reads on — so the checkpoint
+  moves page by page (never `MAX_STALLS`), a run cut short goes on from `from`, and the short page drops it: the next
+  run rewinds again. The handler is stateless — it once kept what it had handed over and left it out, which a landing
+  that failed whole turned into a lost document (the retry was handed nothing). What the connector needs it is told:
+  `reread`, how many of the page's documents, the first ones, are at or behind the checkpoint (`#pullPages` holds it
+  to a non-negative integer, a TypeError as a failed pull). `#land(documents, reread)` passes over such a document
+  where its state is known (`#reread`: `#assumedText`, the text then kept in `#known` so the next reading compares
+  texts, not digests; a deletion where nothing is known of the id — a record gone on both sides leaves no digest, and
+  an old tombstone read again must never delete, nor conflict with, a record made here since) or where it is refused
+  as it was told (`#told`: id → the digest of the document refused, or the reason where it has no text; recorded for a
+  handler that says `reread` alone, dropped by `#learn`, cleared by `reSync()`, which judges the window anew): BEFORE
+  `#shaped` and the transaction — no modifier call, no read of the record, no "landing that never happened" over a
+  record that reads otherwise — and out of `pulled`, `received` and `refused`. Everything else of the window (a late
+  arrival, another state) is judged as any document: it lands, or is a conflict over an edit waiting to go. Never
+  count or say a passed-over document, and never make the checkpoint the handler's memory of what it handed over. A
+  hand-written handler does the same by hand (docs/guide/connectors.md): rewind its own cursor, answer `reread`, never
+  a checkpoint behind the one it was handed.
 - **Live is the backend's stream or a timer, never a hook on the peers; one queue lands everything.** The live half
   begins when the first pull run comes through (`#pullRun` → `#follow`, once: `#following`), never before.
   `pull.stream(emit, { checkpoint })` hands pages, `'RESYNC'` or `'END'`: a page is `#enqueue`d on the pull side's
@@ -174,10 +205,11 @@ cause)` — the `refused` event, `connector.document.refused`,
   nodes each pushing what the other pulled make a conflict of every write.
 - **An adapter is the two handlers over an injected client, and nothing of the backend's.** No SDK, no HTTP client
   and no protocol of the backend's ships with syncom: an adapter takes `fetch`, the driver's collection or the
-  vendor's client as it is given, answers `{ pull, push }` to spread into `replicate()`'s options, and requires nothing
-  (`scripts/size.js` holds each under 2 KB). What a compare-and-set needs — the revision or the stamp last seen for a
-  document — lives in the adapter's memory for the connector's life: a connector started anew learns it with its
-  first pull, a push of a document never seen lands as a new one and is a conflict where one exists. A row with
+  vendor's client as it is given, answers `{ pull, push }` to spread into `replicate()`'s options, and requires
+  nothing but the zone's own helpers (`scripts/size.js` holds each to a budget of about 2 KB). What a compare-and-set
+  needs — the revision or the stamp last seen for a document — lives in the adapter's memory for the connector's life:
+  a connector started anew learns it with its first pull, a push of a document never seen lands as a new one and is a
+  conflict where one exists. A row with
   `assumed: undefined` is a PROBE: the adapter reads the document and answers it among the refused as the backend
   holds it (a deletion for none), writing nothing. A conflict is answered as the backend holds the document (a
   deletion where it holds nothing), never guessed. A backend whose

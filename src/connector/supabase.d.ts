@@ -25,6 +25,13 @@ export interface SupabaseOptions {
   channel?: string | null;
   /** Follow the table through Realtime; default true (where the client has channels). */
   stream?: boolean;
+  /**
+   * How far before its checkpoint a pull run starts, in ms; 0 (none) by default. A pull that resumes after a stamp
+   * never sees a document that became visible later with an older one (a transaction that committed late); with a
+   * lookback the run reads that much again — what the connector knows of it is passed over, nothing landed or counted
+   * — and the late one is pulled. The window is read at every pull: keep it as short as the lateness expected.
+   */
+  lookback?: number;
   /** The stamp a push writes to the modified column; an ISO date by default. */
   now?: () => string;
 }
@@ -33,6 +40,8 @@ export interface SupabaseOptions {
 export interface SupabaseCheckpoint {
   at: string;
   id: string;
+  /** Under a `lookback`, while a run is under way: the position its next page reads on after. */
+  from?: { at: string; id: string };
 }
 
 export interface SupabaseHandlers<T = RecordData> {

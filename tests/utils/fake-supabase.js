@@ -167,10 +167,13 @@ const createFakeSupabase = ({ primaryKey = 'id', modifiedColumn = 'updated_at', 
     failChannels(status = 'CHANNEL_ERROR') {
       for (const channel of [...channels]) channel.status?.(status);
     },
-    /** A write on the table itself: another client's. `modified` is set by the "database" (a trigger). */
-    write(table, values, { deletedColumn = 'deleted', deleted = false } = {}) {
+    /**
+     * A write on the table itself: another client's. `modified` is set by the "database" (a trigger) — or is `at`,
+     * for a row that becomes visible with a stamp of its own (a transaction that committed late).
+     */
+    write(table, values, { deletedColumn = 'deleted', deleted = false, at = stamp() } = {}) {
       const held = rows(table);
-      const row = { ...clone(values), [deletedColumn]: deleted, [modifiedColumn]: stamp() };
+      const row = { ...clone(values), [deletedColumn]: deleted, [modifiedColumn]: at };
       held.set(values[primaryKey], row);
       changed(table);
       return clone(row);

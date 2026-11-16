@@ -12,11 +12,31 @@ import { createDatabase } from '../index.js';
 import type { MongodbCheckpoint } from '../src/connector/mongodb.js';
 import type { SupabaseCheckpoint } from '../src/connector/supabase.js';
 import type { FirestoreCheckpoint } from '../src/connector/firestore.js';
+import type { AppwriteCheckpoint } from '../src/connector/appwrite.js';
 
 expectAssignable<MongodbCheckpoint>({ at: 1, id: 'a' });
 expectAssignable<SupabaseCheckpoint>({ at: '2026-01-01T00:00:00Z', id: 'a' });
 expectAssignable<FirestoreCheckpoint>({ seconds: 1, nanoseconds: 500, id: 'a' });
 expectError<FirestoreCheckpoint>({ at: 1, id: 'a' });
+// Under a lookback a run under way carries where its next page reads on.
+expectAssignable<MongodbCheckpoint>({ at: 2, id: 'b', from: { at: 1, id: 'a' } });
+expectAssignable<SupabaseCheckpoint>({
+  at: '2026-01-01T00:00:01Z',
+  id: 'b',
+  from: { at: '2026-01-01T00:00:00Z', id: 'a' },
+});
+expectAssignable<FirestoreCheckpoint>({
+  seconds: 2,
+  nanoseconds: 0,
+  id: 'b',
+  from: { seconds: 1, nanoseconds: 500, id: 'a' },
+});
+expectAssignable<AppwriteCheckpoint>({
+  updatedAt: '2026-01-01T00:00:01.000+00:00',
+  id: 'b',
+  from: { updatedAt: '2026-01-01T00:00:00.000+00:00', id: 'a' },
+});
+expectError<MongodbCheckpoint>({ at: 2, id: 'b', from: { at: '1', id: 'a' } });
 
 const db = await createDatabase({ path: 'data' });
 
@@ -87,6 +107,18 @@ const parking: ReplicateOptions<Task> = {
 };
 expectAssignable<ReplicateOptions<Task>>(parking);
 expectAssignable<PullResult>({ documents: [], checkpoint: null });
+// A handler that looks back says how many of its documents it read again.
+expectAssignable<PullResult<Task, number>>({
+  documents: [{ id: 't1', data: { title: 'a' } }],
+  checkpoint: 1,
+  reread: 1,
+});
+expectError<PullResult>({ documents: [], checkpoint: null, reread: '1' });
+expectAssignable<ReplicateOptions<Task, number>>({
+  name: 'looking',
+  collection: 'Task',
+  pull: { handler: async (checkpoint) => ({ documents: [], checkpoint: checkpoint ?? 0, reread: 0 }) },
+});
 expectAssignable<ConnectorDocument>({ id: 'x', deleted: true });
 expectError(replicate(db, { collection: 'Task' }));
 expectError(replicate(db, { name: 'x', collection: 'Task', pull: { handler: 7 } }));

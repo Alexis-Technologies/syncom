@@ -7,7 +7,10 @@
 //
 //   pull.handler(checkpoint, batchSize) → { documents: [{ id, data, deleted }], checkpoint }
 //     the backend's documents changed since `checkpoint`, a page at a time, and
-//     the position after them; `pull.stream(emit, { checkpoint })` → stop, when
+//     the position after them — with `reread`, how many of them, the first
+//     ones, a handler that looks back read again from at or behind the
+//     checkpoint: one whose state is known is passed over, not counted;
+//     `pull.stream(emit, { checkpoint })` → stop, when
 //     the backend tells of changes: `emit({ documents })` (landed; the
 //     checkpoint moves with the pulls alone), `emit('RESYNC')` to pull again
 //     from the checkpoint, `emit('END')` when the stream is over (followed
@@ -222,6 +225,10 @@ class Replication extends Emitter {
   // nobody wins. A local edit of one goes with the state known assumed (a conflict `resolve` decides), `reSync()`
   // asks the backend for it again (`#reask`), and it is saved with the checkpoint (`refused`).
   #unlanded = new Set();
+  // What a pull refused of a handler that looks back (`reread`), until the id's state is learned — per id the digest
+  // of the document refused, or the reason where it has no text: one read again and refused the same is not said at
+  // every pull.
+  #told = new Map();
   // The checkpoint text's save in flight, whether it is behind what is held, whether the next write is wanted at
   // once, and what wakes a gap early.
   #saving = null;
@@ -432,6 +439,8 @@ class Replication extends Emitter {
     }
     // Behind a pull in flight: a pull again, from the checkpoint as it then stands.
     if (this.#pulling !== null) await this.#pulling.catch(NOOP);
+    // What a lookback reads again is judged anew, and said again where it is refused again.
+    this.#told.clear();
     // The documents the database refused, asked for again — before the pull, so one refused again is told once.
     if (this.#push !== null && this.#unlanded.size > 0) await this.#reask();
     if (this.#pull !== null) await this.#pullAll();
@@ -676,8 +685,14 @@ class Replication extends Emitter {
         this.#failed('pull', error, () => this.#pullAll());
         return false;
       }
-      if (!isPlainObject(page) || !Array.isArray(page.documents)) {
-        this.#failed('pull', new TypeError('pull.handler must answer { documents, checkpoint }'), () =>
+      // `reread`, where the handler looks back: how many of the documents, the first ones, it read again.
+      const reread = page?.reread;
+      if (
+        !isPlainObject(page) ||
+        !Array.isArray(page.documents) ||
+        (reread !== undefined && !(Number.isInteger(reread) && reread >= 0))
+      ) {
+        this.#failed('pull', new TypeError('pull.handler must answer { documents, checkpoint, reread? }'), () =>
           this.#pullAll(),
         );
         return false;
@@ -686,7 +701,7 @@ class Replication extends Emitter {
       // database closing under it) is the pull's failure — told, tried again from the checkpoint as it stands.
       try {
         const moved = !same(page.checkpoint ?? null, this.#checkpoint.pull);
-        await this.#land(page.documents);
+        await this.#land(page.documents, reread);
         this.#checkpoint.pull = page.checkpoint ?? null;
         // Saved coalesced behind the pages (the run's end writes at once): a crash between lands the page again.
         this.#save().catch(NOOP);
@@ -721,43 +736,64 @@ class Replication extends Emitter {
   // its own listener passes them — a document that reads as the record already does left alone. A document is
   // judged before the transaction (no document at all, another collection's record, a sealed one, a value with no
   // JSON text, a modifier that throws, what it answers no JSON) and inside it (a validator's no, a field the engine
-  // refuses): one refused is said and left out, the rest of the page lands and the checkpoint moves.
-  async #land(documents) {
+  // refuses): one refused is said and left out, the rest of the page lands and the checkpoint moves. The first
+  // `reread` documents are a lookback's — read again from at or behind the checkpoint: one that holds the state
+  // known, or is refused as it was told before, is passed over — nothing but the read: not judged, not counted, not
+  // said again; the rest (a late arrival, another state) are judged as any document.
+  async #land(documents, reread) {
     const docs = [];
     const refusals = [];
+    let passed = 0;
     for (let i = 0; i < documents.length; i++) {
       const doc = documentOf(documents[i]);
+      const again = i < reread;
       if (doc === null) {
-        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i, id: documents[i]?.id });
+        // No document at all — an id this node cannot carry: said, and where it is read again, said once.
+        const id = documents[i]?.id;
+        if (again && typeof id === 'string' && this.#told.get(id) === 'malformed') {
+          passed++;
+          continue;
+        }
+        if (reread !== undefined && typeof id === 'string') this.#told.set(id, 'malformed');
+        this.#logger.warn({ event: 'connector.document.malformed', name: this.#name, index: i, id });
         continue;
       }
       const { id } = doc;
       const row = this.#seam.row(id);
-      if (row !== null && row.type !== this.#collection) {
-        refusals.push([id, 'collection']);
+      // Why the document cannot land, where it has no text to tell it by: another collection's record, a sealed
+      // one, a value JSON has no text for. What the backend holds, in its own shape — before the modifier — is what
+      // a push compares against.
+      let reason = null;
+      let cause;
+      if (row !== null && row.type !== this.#collection) reason = 'collection';
+      else if (row?.encrypted === true) reason = 'sealed';
+      else {
+        try {
+          doc.text = textOf(doc);
+        } catch (error) {
+          reason = 'value';
+          cause = error;
+        }
+      }
+      if (reason !== null) {
+        if (again && this.#told.get(id) === reason) passed++;
+        else refusals.push([id, reason, cause]);
         continue;
       }
-      if (row?.encrypted === true) {
-        refusals.push([id, 'sealed']);
+      if (again && (this.#reread(id, doc.text) || this.#retold(id, doc.text))) {
+        passed++;
         continue;
       }
-      // What the backend holds, in its own shape — before the modifier: what a push compares against; then the
-      // application's shape, through the modifier, which must be JSON.
-      try {
-        doc.text = textOf(doc);
-      } catch (error) {
-        refusals.push([id, 'value', error]);
-        continue;
-      }
+      // The application's shape, through the modifier, which must be JSON.
       const why = this.#shaped(doc);
       if (why !== null) {
-        refusals.push([id, why.reason, why.cause]);
+        refusals.push([id, why.reason, why.cause, doc.text]);
         continue;
       }
       docs.push(doc);
     }
-    this.#stats.pulled += documents.length;
-    this.#count('pull', 'pulled', documents.length);
+    this.#stats.pulled += documents.length - passed;
+    this.#count('pull', 'pulled', documents.length - passed);
     const collection = this.#collection;
     const conflicts = [];
     // The backend's states landed, as id and text: learned once the transaction has (one that fails whole, nothing);
@@ -809,7 +845,7 @@ class Replication extends Emitter {
                 learned.push(id, text);
                 settled.push(id);
               } catch (error) {
-                refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
+                refusals.push([id, error?.code ?? error?.name ?? 'error', error, text]);
               }
             }
           },
@@ -823,9 +859,10 @@ class Replication extends Emitter {
     for (let i = 0; i < refusals.length; i++) {
       // Not learned: a later edit assumes the state known, `reSync()` asks again. Another collection's record and a
       // sealed one are this node's own: nothing to ask the backend again.
-      const reason = refusals[i][1];
-      if (reason !== 'collection' && reason !== 'sealed') this.#unlanded.add(refusals[i][0]);
-      this.#refuse('pull', refusals[i][0], reason, refusals[i][2]);
+      const [id, reason, cause, text] = refusals[i];
+      if (reason !== 'collection' && reason !== 'sealed') this.#unlanded.add(id);
+      if (reread !== undefined) this.#told.set(id, text === undefined ? reason : this.#digestOf(text));
+      this.#refuse('pull', id, reason, cause);
     }
     this.#count('pull', 'conflict', conflicts.length);
     for (let i = 0; i < conflicts.length; i++) notify(this, this.#logger, 'conflict', conflicts[i]);
@@ -839,6 +876,27 @@ class Replication extends Emitter {
   #assumedText(id, text) {
     if (this.#known.has(id)) return this.#known.get(id) === text;
     return this.#digests.has(id) && this.#digests.get(id) === this.#digestOf(text);
+  }
+
+  // Whether a document a lookback read again holds the state known. Then it is nothing but the read: a state refused
+  // before is gone from the backend, and its text is kept, so the next reading compares texts, not digests. Where
+  // nothing is known of the id a deletion is the state known — a record gone on both sides leaves no digest, and an
+  // old tombstone read again is no word on a record made here since: never a deletion of it, never a conflict.
+  #reread(id, text) {
+    if (!this.#known.has(id) && !this.#digests.has(id)) return text === null;
+    if (!this.#assumedText(id, text)) return false;
+    this.#unlanded.delete(id);
+    this.#told.delete(id);
+    if (!this.#known.has(id)) {
+      this.#known.set(id, text);
+      if (this.#known.size > KNOWN_MAX) this.#forget();
+    }
+    return true;
+  }
+
+  // Whether a document a lookback read again is the one this id was refused for, as it was told.
+  #retold(id, text) {
+    return this.#told.has(id) && this.#told.get(id) === this.#digestOf(text);
   }
 
   // A record as the backend is to hold it: `data` in the backend's shape (`modifier.push`; null for none) and its
@@ -1037,6 +1095,7 @@ class Replication extends Emitter {
   // no digest behind.
   #learn(id, text) {
     this.#unlanded.delete(id);
+    this.#told.delete(id);
     this.#known.delete(id);
     this.#known.set(id, text);
     if (this.#known.size > KNOWN_MAX) this.#forget();

@@ -773,18 +773,23 @@ const ENTRIES = [
   // 10.2 (10 444 bytes, at the line) with the parked rows kept with the checkpoint — `parked: { id: reason }`, restored
   // still parked, the `parked` list, a parked row an edit waiting to go when its document is pulled, a reSync() retry
   // that forgets nothing (feature/leftovers, 2026-11-16). 10.2, raised by name.
+  // 10.43 with what a handler that looks back read again (`reread`) passed over where its state is known or it is
+  // refused as it was told — `#reread`, `#told` (feature/leftovers, 2026-11-16). 10.5, raised by name.
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 10.2,
+    budget: 10.5,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
   { label: 'connector/graphql — browser', entry: 'src/connector/graphql.js', platform: 'browser', budget: 2 },
   { label: 'connector/mongodb — browser', entry: 'src/connector/mongodb.js', platform: 'browser', budget: 2 },
   { label: 'connector/supabase — browser', entry: 'src/connector/supabase.js', platform: 'browser', budget: 2 },
-  { label: 'connector/firestore — browser', entry: 'src/connector/firestore.js', platform: 'browser', budget: 2 },
+  // Firestore with lookback.js (the pull that starts before its checkpoint, shared by the four adapters whose cursor
+  // is a timestamp): 2.05 measured (feature/leftovers, 2026-11-16). 2.1, raised by name; supabase 1.8, mongodb 1.5
+  // and appwrite 1.85 with it, within theirs.
+  { label: 'connector/firestore — browser', entry: 'src/connector/firestore.js', platform: 'browser', budget: 2.1 },
   { label: 'connector/appwrite — browser', entry: 'src/connector/appwrite.js', platform: 'browser', budget: 2 },
   // Google Drive speaks four routes (the search by name, the v2 metadata for the ETag, the create, the media upload)
   // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).

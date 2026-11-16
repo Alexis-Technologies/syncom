@@ -83,6 +83,36 @@ and `resolve` decides; it never writes over the backend's version unseen. On a c
 `reSync()` asks the backend again for every document refused this way, even after a restart, so a document an older
 version of your schema refused lands once the database accepts it.
 
+## Pull by a timestamp without missing late writes
+
+A sequence number the backend assigns as it commits cannot skip a document. A timestamp can. A row is stamped when
+its transaction begins and becomes visible when it commits, a replica lags, two writers' clocks differ: a document
+appears with a stamp that is already behind your checkpoint, and a pull that asks for everything after the
+checkpoint never sees it.
+
+The remedy is a lookback: each pull asks from a little before the checkpoint and reads that window again. The
+adapters whose cursor is a timestamp ([Supabase](./replication-supabase), [MongoDB](./replication-mongodb),
+[Firestore](./replication-firestore) and [Appwrite](./replication-appwrite)) take it as an option, `lookback`, in
+milliseconds. In a handler of your own you write it yourself. Here `api.changedAfter(position, limit)` stands for a
+backend whose change feed is ordered by an `updatedAt` stamp and then by id, and `api.write()` for its own writers:
+
+<<< @/examples/connectors-lookback.mjs#lookback
+
+Three things make this handler correct. It asks from `LOOKBACK` before the checkpoint. It never answers a checkpoint
+behind the one it was handed, so the position only moves forward; when a page comes back full it adds `from`, where
+the next page reads on, so a window wider than a page is read through rather than asked for again. And it answers
+`reread`: how many of the page's documents, the first ones, are at or behind the checkpoint.
+
+`reread` keeps the window from costing more than the read. The connector passes over a re-read document whose state
+it already knows: no write, no conflict, no `received` event, nothing added to `stats().pulled`. A re-read document
+it does not know (the late one) is judged like any pulled document: it lands, or it is a conflict when an edit of
+that record is waiting to go out. A re-read document your database refused before is not reported again at every
+pull; `reSync()` judges the whole window anew.
+
+Choose `lookback` as the longest a write can stay invisible after it is stamped: your longest transaction, your
+replication lag, the drift between your writers' clocks. A document later than that is still missed, and every pull
+reads the whole window again, so a larger value costs a larger read each time.
+
 ## Write the push handler
 
 Every change to a record of the collection, made here or arriving from a peer, becomes a row for the push handler:
@@ -260,6 +290,10 @@ document exists.
 | [Google Drive](./replication-google-drive) | `@alexify/syncom/connector/gdrive` | the file's ETag (`If-Match`) | an ETag probe every `poll` ms |
 | [OneDrive](./replication-onedrive) | `@alexify/syncom/connector/onedrive` | the file's eTag (`If-Match`) | an eTag probe every `poll` ms |
 
+MongoDB, Supabase, Firestore and Appwrite pull by a timestamp and take
+[`lookback`](#pull-by-a-timestamp-without-missing-late-writes). CouchDB and the two drives pull by a sequence, which
+cannot skip a document, and GraphQL pulls by whatever your schema's cursor is.
+
 ## How the connector decides
 
 A pulled document is judged against the backend's state as this node last knew it, not against the record alone:
@@ -276,6 +310,9 @@ in the [connector reference](../reference/connectors).
   connector's collection ([see above](#counters-and-sets-stay-out-of-a-connector-s-collection)).
 - **One collection per connector.** A document lands in the connector's collection and never adopts or deletes a
   record of another one.
+- **A timestamp cursor needs a lookback.** A backend that orders its changes by a timestamp can show a document late;
+  without [`lookback`](#pull-by-a-timestamp-without-missing-late-writes) that document is never pulled, and with it
+  one later than the window still is not.
 - **JSON only.** A value the backend's SDK hands over that is not JSON (a `Date`, a `Timestamp`, a reference) is never
   flattened into a string: unless `modifier.pull` converts it, the document is refused with the reason `value`. A
   `BigInt` is refused even with a modifier, because the connector cannot remember the backend's state of it as JSON.

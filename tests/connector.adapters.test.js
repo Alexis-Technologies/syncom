@@ -104,6 +104,134 @@ const scenario = async (t, title, { handlers, write, read, stream = true }) => {
   });
 };
 
+// A pull under a lookback, over a backend whose stamps the test sets: `adapter(options)` makes a fresh adapter,
+// `put(id, data, at, { deleted })` writes a document stamped `at` ms, `mark(id, at)` is the checkpoint a pull leaves
+// after that document. The body of one test per adapter.
+const lookbackCase =
+  ({ adapter, put, mark }) =>
+  async (t2) => {
+    const T = Date.UTC(2026, 0, 1);
+    // A run as the connector makes one: pages of `size` until one comes short. `ids` are the documents handed over
+    // (`-id` a deletion), `reread` how many of each page's the handler says it read again.
+    const run = async (handlers, checkpoint, size = 10) => {
+      const ids = [];
+      const checkpoints = [];
+      const reread = [];
+      for (;;) {
+        const page = await handlers.pull.handler(checkpoint, size);
+        assert.ok(page.documents.length <= size, 'never more than a page');
+        for (const doc of page.documents) ids.push(doc.deleted === true ? `-${doc.id}` : doc.id);
+        // A full page moves the checkpoint — though its position may not: what the connector's stall guard reads.
+        if (page.documents.length >= size) assert.notDeepStrictEqual(page.checkpoint, checkpoint);
+        checkpoint = page.checkpoint;
+        checkpoints.push(checkpoint);
+        reread.push(page.reread);
+        if (page.documents.length < size) return { ids, checkpoint, checkpoints, reread };
+      }
+    };
+    for (const lookback of [-1, '1000', Number.NaN, Infinity]) {
+      assert.throws(() => adapter({ lookback }), { name: 'TypeError', message: /lookback/ });
+    }
+    await put('d1', { n: 1 }, T + 1000);
+    await put('d2', { n: 2 }, T + 2000);
+    await put('d3', { n: 3 }, T + 3000);
+    const plain = adapter({});
+    const looking = adapter({ lookback: 1500 });
+    const first = await run(plain, null);
+    assert.deepStrictEqual(first.ids, ['d1', 'd2', 'd3']);
+    assert.deepStrictEqual(first.checkpoint, mark('d3', T + 3000));
+    assert.deepStrictEqual(first.reread, [undefined], 'a plain pull says nothing of reading again');
+    const fresh = await run(looking, null);
+    assert.deepStrictEqual([fresh.ids, fresh.checkpoint, fresh.reread], [first.ids, first.checkpoint, [0]]);
+    // A document becomes visible with a stamp BEHIND the checkpoint: a transaction that committed late, a writer
+    // whose clock runs behind. Without a lookback it is never pulled; with one the pull starts 1500 ms before the
+    // checkpoint — d2, the late one and d3 are handed over, all three said to be read again — and the checkpoint
+    // does not move back.
+    await put('late', { n: 9 }, T + 2500);
+    assert.deepStrictEqual((await run(plain, first.checkpoint)).ids, []);
+    let seen = await run(looking, first.checkpoint);
+    assert.deepStrictEqual(seen.ids, ['d2', 'late', 'd3']);
+    assert.deepStrictEqual(seen.reread, [3]);
+    assert.deepStrictEqual(seen.checkpoint, first.checkpoint);
+    // What comes after the checkpoint moves it, and is not counted as read again.
+    await put('d4', { n: 4 }, T + 4000);
+    seen = await run(looking, seen.checkpoint);
+    assert.deepStrictEqual(seen.ids, ['d2', 'late', 'd3', 'd4']);
+    assert.deepStrictEqual(seen.reread, [3]);
+    assert.deepStrictEqual(seen.checkpoint, mark('d4', T + 4000));
+    // A deletion that arrives late is seen too. The window — wider than a page here — is read page by page: a full
+    // page carries where the next one reads on (`from`), so the checkpoint moves though its position does not, and
+    // the page that comes short carries none: the next run looks back again.
+    await put('d1', null, T + 3500, { deleted: true });
+    seen = await run(looking, seen.checkpoint, 2);
+    assert.deepStrictEqual(seen.ids, ['d3', '-d1', 'd4']);
+    assert.deepStrictEqual(seen.reread, [2, 1]);
+    assert.deepStrictEqual(seen.checkpoints, [
+      { ...mark('d4', T + 4000), from: mark('d1', T + 3500) },
+      mark('d4', T + 4000),
+    ]);
+    assert.deepStrictEqual((await run(looking, seen.checkpoint, 2)).ids, ['d3', '-d1', 'd4'], 'and again, each run');
+    // A run cut short after its first page goes on from where it was: no rewind, nothing skipped.
+    const resumed = await run(adapter({ lookback: 1500 }), seen.checkpoints[0], 2);
+    assert.deepStrictEqual(resumed.ids, ['d4']);
+    assert.deepStrictEqual(resumed.checkpoint, mark('d4', T + 4000));
+
+    // Through a connector: what it knows of the window is passed over — nothing landed, nothing counted, no event —
+    // and a late document lands once, counted once; a connector started anew reads the window again the same way.
+    const db = await syncom.createDatabase({ engine, path: `${t2.name}/A`, logger: false, defer: 0, schema });
+    t2.after(() => db.close().catch(() => {}));
+    const received = [];
+    const conflicts = [];
+    const connect = () => {
+      const replication = replicate(db, {
+        name: 'look',
+        collection: 'Task',
+        ...adapter({ lookback: 1500 }),
+        live: false,
+        retryTime: 50,
+      });
+      t2.after(() => replication.cancel().catch(() => {}));
+      replication.on('received', (event) => received.push(event));
+      replication.on('conflict', (event) => conflicts.push(event));
+      return replication;
+    };
+    let replication = connect();
+    await replication.awaitInitialReplication();
+    assert.deepStrictEqual(await db.get('late'), { n: 9, $type: 'Task' });
+    assert.strictEqual(await db.get('d1'), null);
+    const before = replication.stats();
+    const length = db.log.length;
+    received.length = 0;
+    await replication.reSync();
+    assert.deepStrictEqual(replication.stats(), { ...before, pulls: before.pulls + 1 }, 'a pull that only read again');
+    assert.deepStrictEqual(received, []);
+    await put('later', { n: 10 }, T + 3800);
+    await replication.reSync();
+    assert.deepStrictEqual(await db.get('later'), { n: 10, $type: 'Task' }, 'behind the checkpoint, and pulled');
+    assert.deepStrictEqual(replication.checkpoint.pull, mark('d4', T + 4000));
+    // A deletion stamped behind the checkpoint is seen the same way.
+    await put('d2', null, T + 3900, { deleted: true });
+    await replication.reSync();
+    assert.strictEqual(await db.get('d2'), null);
+    await replication.reSync();
+    const after = replication.stats();
+    assert.deepStrictEqual([after.pulled - before.pulled, after.applied - before.applied], [2, 2], 'each counted once');
+    assert.deepStrictEqual(received, [
+      { documents: 1, applied: 1 },
+      { documents: 1, applied: 1 },
+    ]);
+    assert.strictEqual(db.log.length, length + 2, 'two writes, whatever the pulls read again');
+    await replication.cancel();
+    replication = connect();
+    await replication.awaitInitialReplication();
+    const anew = replication.stats();
+    assert.deepStrictEqual([anew.pulled, anew.applied], [0, 0], 'known by the checkpoint’s digests: passed over');
+    assert.strictEqual(db.log.length, length + 2, 'nothing known is landed twice');
+    assert.strictEqual(received.length, 2);
+    assert.deepStrictEqual(conflicts, []);
+    assert.deepStrictEqual(replication.errors, []);
+  };
+
 test('Connector adapters', async (t) => {
   await t.test(
     'CouchDB: _changes with the documents pulled, a long poll streamed, _bulk_docs with the revisions seen pushed, a conflict read back',
@@ -340,6 +468,33 @@ test('Connector adapters', async (t) => {
           assert.deepStrictEqual(resumed, ['t0', 't1', 't2', 't3', 't4', 'later']);
         },
       );
+      const looked = client.db('app').collection('looked');
+      let rev = 0;
+      await t2.test(
+        'MongoDB: under a lookback a document stamped behind the checkpoint is pulled; what the connector knows of the window is passed over; the checkpoint moves forward alone',
+        async (t3) => {
+          await lookbackCase({
+            adapter: (options) => mongodb({ collection: looked, changes: false, ...options }),
+            put: (id, data, at, { deleted = false } = {}) =>
+              looked.replaceOne(
+                { _id: id },
+                { _id: id, _rev: ++rev, _updated: at, ...(deleted ? { _deleted: true } : data) },
+                { upsert: true },
+              ),
+            mark: (id, at) => ({ at, id }),
+          })(t3);
+          // A document another app wrote without the adapter's stamp has no position: handed over at the start, as
+          // without a lookback, and it moves nothing.
+          const bare = client.db('app').collection('bare');
+          await bare.replaceOne({ _id: 'old' }, { _id: 'old', n: 1 }, { upsert: true });
+          const adapter = mongodb({ collection: bare, changes: false, lookback: 1000 });
+          assert.deepStrictEqual(await adapter.pull.handler(null, 10), {
+            documents: [{ id: 'old', data: { n: 1 } }],
+            checkpoint: null,
+            reread: 0,
+          });
+        },
+      );
       await t2.test(
         'the options are checked; without change streams there is no stream; a collision on insert is a conflict; a probe reads the document back; a server code refuses the row by name; a change stream that errs says END',
         async () => {
@@ -483,6 +638,33 @@ test('Connector adapters', async (t) => {
         },
       );
       await t2.test(
+        'Supabase: under a lookback a row stamped behind the checkpoint is pulled; what the connector knows of the window is passed over; the checkpoint moves forward alone; a modified column that is no date is the plain cursor',
+        async (t3) => {
+          const iso = (at) => new Date(at).toISOString();
+          await lookbackCase({
+            adapter: (options) => supabase({ client, table: 'looked', stream: false, ...options }),
+            put: (id, data, at, { deleted = false } = {}) =>
+              client.write('looked', { id, ...data }, { deleted, at: iso(at) }),
+            mark: (id, at) => ({ at: iso(at), id }),
+          })(t3);
+          // Stamps `Date.parse` does not read (the fake's own counter): nothing to rewind by — every row once, in
+          // order, the checkpoint moving, as without a lookback.
+          for (let i = 0; i < 5; i++) client.write('plain', { id: `p${i}`, n: i });
+          const adapter = supabase({ client, table: 'plain', stream: false, lookback: 1000 });
+          const seen = [];
+          let checkpoint = null;
+          for (;;) {
+            const page = await adapter.pull.handler(checkpoint, 2);
+            for (const doc of page.documents) seen.push(doc.id);
+            checkpoint = page.checkpoint;
+            if (page.documents.length < 2) break;
+          }
+          assert.deepStrictEqual(seen, ['p0', 'p1', 'p2', 'p3', 'p4']);
+          assert.deepStrictEqual(checkpoint, { at: client.read('plain', 'p4').updated_at, id: 'p4' });
+          assert.deepStrictEqual((await adapter.pull.handler(checkpoint, 2)).documents, []);
+        },
+      );
+      await t2.test(
         'the options are checked; a client without channels has no stream; an error answer is a failure; a probe reads the row back; a code of the database refuses the row by name; the channel’s error says END',
         async () => {
           assert.throws(() => supabase({ table: 'x' }), { name: 'TypeError', message: /client/ });
@@ -578,6 +760,41 @@ test('Connector adapters', async (t) => {
           micro.write('u5', { n: 5 });
           const resumed = await adapter.pull.handler({ at, id: 'u4' }, 10);
           assert.ok(resumed.documents.some((doc) => doc.id === 'u5'));
+        },
+      );
+      await t2.test(
+        'Firestore: under a lookback a document stamped behind the checkpoint is pulled; what the connector knows of the window is passed over; the checkpoint moves forward alone; a pending stamp still waits',
+        async (t3) => {
+          const looked = createFakeFirestore();
+          const options = (extra) => ({
+            sdk: looked.sdk,
+            database: looked.database,
+            collection: looked.collection,
+            stream: false,
+            ...extra,
+          });
+          await lookbackCase({
+            adapter: (extra) => firestore(options(extra)),
+            put: (id, data, at, { deleted = false } = {}) =>
+              looked.write(id, data, { deleted, at: Timestamp.fromMillis(at) }),
+            mark: (id, at) => ({ seconds: Math.floor(at / 1000), nanoseconds: (at % 1000) * 1e6, id }),
+          })(t3);
+          // A write of the SDK's own cache, its stamp not set yet: left out, and nothing moves by it.
+          const pending = createFakeFirestore();
+          pending.write('p1', { n: 1 }, { pending: true });
+          pending.write('p2', { n: 2 }, { pending: true });
+          const adapter = firestore({
+            sdk: pending.sdk,
+            database: pending.database,
+            collection: pending.collection,
+            stream: false,
+            lookback: 1000,
+          });
+          assert.deepStrictEqual(await adapter.pull.handler(null, 2), { documents: [], checkpoint: null, reread: 0 });
+          pending.write('p1', { n: 1 });
+          const page = await adapter.pull.handler(null, 2);
+          assert.deepStrictEqual(page.documents, [{ id: 'p1', data: { n: 1 } }]);
+          assert.strictEqual(page.checkpoint.id, 'p1');
         },
       );
       await t2.test(
@@ -739,6 +956,25 @@ test('Connector adapters', async (t) => {
         write: (id, data, o) => fake.write(id, data, o),
         read: (id) => fake.read(id),
       });
+      await t2.test(
+        'Appwrite: under a lookback a document updated behind the checkpoint is pulled; what the connector knows of the window is passed over; the checkpoint moves forward alone',
+        async (t3) => {
+          const looked = createFakeAppwrite();
+          const iso = (at) => new Date(at).toISOString();
+          await lookbackCase({
+            adapter: (extra) =>
+              appwrite({
+                databases: looked.databases,
+                Query: looked.Query,
+                databaseId: 'db',
+                collectionId: 'tasks',
+                ...extra,
+              }),
+            put: (id, data, at, { deleted = false } = {}) => looked.write(id, data, { deleted, at: iso(at) }),
+            mark: (id, at) => ({ updatedAt: iso(at), id }),
+          })(t3);
+        },
+      );
       await t2.test(
         'the options are checked; without a client no stream; made or taken away between the read and the write is a conflict; another failure is thrown; a probe reads the document back; an id Appwrite cannot carry is refused by name',
         async () => {

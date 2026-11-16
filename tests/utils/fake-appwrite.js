@@ -121,9 +121,9 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
         return clone(held);
       },
     },
-    /** A write made on the collection itself (another client's). */
-    write(id, data, { deleted = false } = {}) {
-      const doc = { $id: id, $updatedAt: stamp(), ...(deleted ? {} : clone(data)), deleted };
+    /** A write made on the collection itself (another client's); `at` for one that carries a stamp of its own. */
+    write(id, data, { deleted = false, at = stamp() } = {}) {
+      const doc = { $id: id, $updatedAt: at, ...(deleted ? {} : clone(data)), deleted };
       docs.set(id, doc);
       notify(docs.has(id) ? 'update' : 'create', doc);
       return doc;

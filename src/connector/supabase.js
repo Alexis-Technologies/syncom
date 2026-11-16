@@ -14,7 +14,12 @@
 // is that row's `{ id, error }`; a probe (`assumed` undefined) is the row
 // read back, nothing written. The stream is Realtime's `postgres_changes` on
 // the table, every change a `RESYNC`, the channel's error, timeout or close
-// an `END`. No requires.
+// an `END`. With `lookback` ms a pull run starts that far before its
+// checkpoint — a row that became visible late, a transaction that committed
+// after a newer stamp was pulled, is pulled after all (lookback.js; the
+// modified column must read as a date). Requires lookback.js only.
+
+const { checkLookback, lookbackPull } = require('./lookback.js');
 
 const OVER = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']);
 
@@ -22,7 +27,8 @@ const OVER = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']);
  * `{ pull, push }` for `replicate()`. `client.from(table)` is the table;
  * `primaryKey` (`id`), `modifiedColumn` (`updated_at`) and `deletedColumn`
  * (`deleted`) name the columns; `channel` (`syncom:<table>`) the Realtime
- * channel, `stream: false` for none.
+ * channel, `stream: false` for none; `lookback` the milliseconds a pull run
+ * starts before its checkpoint (0: none).
  */
 const supabase = ({
   client,
@@ -33,6 +39,7 @@ const supabase = ({
   schema = 'public',
   channel = null,
   stream = true,
+  lookback = 0,
   now = () => new Date().toISOString(),
 } = {}) => {
   if (client === null || typeof client !== 'object' || typeof client.from !== 'function') {
@@ -49,6 +56,7 @@ const supabase = ({
     }
   }
   if (typeof stream !== 'boolean') throw new TypeError('supabase(): stream must be a boolean');
+  checkLookback('supabase', lookback);
   const stamps = new Map();
 
   const answered = (result, what) => {
@@ -84,34 +92,53 @@ const supabase = ({
     return documentOf(row);
   };
 
+  // The rows after a position, in the cursor's order. The cursor is (stamp, id): the rows modified after the
+  // position's stamp, and those modified at it with a greater key — a transaction's rows share one `now()`, and a
+  // page's edge never skips the rest of them; a position with no id (a lookback's start) is the stamp alone.
+  const read = async (after, limit) => {
+    const m = modifiedColumn;
+    let query = client.from(table).select('*');
+    if (after !== null && after.id === null) query = query.gt(m, after.at);
+    else if (after !== null) {
+      query = query.or(`${m}.gt."${after.at}",and(${m}.eq."${after.at}",${primaryKey}.gt."${after.id}")`);
+    }
+    query = query.order(m, { ascending: true }).order(primaryKey, { ascending: true }).limit(limit);
+    return answered(await query, 'select') ?? [];
+  };
+  // A checkpoint's position: `{ at, id }`, or the first version's stamp alone.
+  const parse = (value) => {
+    if (typeof value === 'string') return { at: value, id: '' };
+    return value !== null && typeof value === 'object' && typeof value.at === 'string'
+      ? { at: value.at, id: String(value.id) }
+      : null;
+  };
+  const positionOf = (row) =>
+    typeof row[modifiedColumn] === 'string' ? { at: row[modifiedColumn], id: String(row[primaryKey]) } : null;
+
   return {
     pull: {
-      async handler(checkpoint, batchSize) {
-        // The cursor is (stamp, id): the rows modified after the checkpoint's stamp, and those modified at it with
-        // a greater key — a transaction's rows share one `now()`, and a page's edge never skips the rest of them.
-        const after =
-          checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.at === 'string'
-            ? checkpoint
-            : { at: typeof checkpoint === 'string' ? checkpoint : null, id: '' };
-        let query = client.from(table).select('*');
-        if (after.at !== null) {
-          const m = modifiedColumn;
-          query = query.or(`${m}.gt."${after.at}",and(${m}.eq."${after.at}",${primaryKey}.gt."${after.id}")`);
-        }
-        query = query
-          .order(modifiedColumn, { ascending: true })
-          .order(primaryKey, { ascending: true })
-          .limit(batchSize);
-        const rows = answered(await query, 'select') ?? [];
-        const documents = [];
-        let last = after.at === null ? null : after;
-        for (let i = 0; i < rows.length; i++) {
-          documents.push(documentOf(rows[i]));
-          const stamp = rows[i][modifiedColumn];
-          if (typeof stamp === 'string') last = { at: stamp, id: String(rows[i][primaryKey]) };
-        }
-        return { documents, checkpoint: last };
-      },
+      handler:
+        lookback > 0
+          ? lookbackPull({
+              lookback,
+              parse,
+              millis: (position) => Date.parse(position.at),
+              since: (ms) => ({ at: new Date(Math.max(ms, 0)).toISOString(), id: null }),
+              read,
+              positionOf,
+              documentOf,
+            })
+          : async (checkpoint, batchSize) => {
+              const after = parse(checkpoint);
+              const rows = await read(after, batchSize);
+              const documents = [];
+              let last = after;
+              for (let i = 0; i < rows.length; i++) {
+                documents.push(documentOf(rows[i]));
+                last = positionOf(rows[i]) ?? last;
+              }
+              return { documents, checkpoint: last };
+            },
       ...(stream && typeof client.channel === 'function'
         ? {
             stream(emit) {

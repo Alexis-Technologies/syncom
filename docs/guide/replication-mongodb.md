@@ -54,6 +54,7 @@ document back and the connector sets the record to the collection's version, unl
 | --- | --- | --- |
 | `collection` | (required) | The driver's collection (`client.db(name).collection(name)`) |
 | `changes` | `true` | Follow a change stream; `false` on a standalone server, and the connector pulls every `retryTime` |
+| `lookback` | `0` | How far before its checkpoint each pull starts, in ms: [writes stamped late](#pull-writes-stamped-late) |
 | `now` | `Date.now` | The clock that stamps `_updated` on this node's pushes |
 
 The adapter also answers `revisionOf(id)`, the `_rev` it last saw for a document. The pull's checkpoint is
@@ -61,12 +62,26 @@ The adapter also answers `revisionOf(id)`, the `_rev` it last saw for a document
 millisecond is never skipped at a page's edge. Every change of the stream is a `RESYNC`, and the stream erring or
 closing is an `END`: the connector opens it again after a backoff.
 
+## Pull writes stamped late
+
+`_updated` comes from each writer's own clock, and the pull reads past a checkpoint. A writer whose clock runs two
+seconds behind stamps its documents two seconds into the past, behind what a client already pulled, and that client
+never sees them. Pass `lookback`, in milliseconds, and each pull starts that far before its checkpoint:
+
+<<< @/examples/replication-mongodb.mjs#lookback
+
+The documents of that window are read again at every pull. The connector passes over the ones it already knows (no
+write, nothing counted in `stats().pulled`) and lands the late one. The checkpoint never moves back. Set `lookback`
+to the largest drift you expect between writers plus a margin;
+[Connectors](./connectors#pull-by-a-timestamp-without-missing-late-writes) explains the rules and the cost.
+
 ## Limitations
 
 - **`_updated` comes from the writers' clocks.** The pull reads past a checkpoint `{ at, id }`, so a write that lands
-  after a client pulled with a stamp below `at`, or at `at` with a smaller `_id`, is never pulled by that client. A
-  writer whose clock runs behind does that, and so do two writers stamping the same millisecond. Keep the writers'
-  clocks in sync and stamp as late as you can, ideally from one place.
+  after a client pulled with a stamp below `at`, or at `at` with a smaller `_id`, is not pulled by that client unless
+  [`lookback`](#pull-writes-stamped-late) covers how far behind it was. A writer whose clock runs behind does that,
+  and so do two writers stamping the same millisecond. Keep the writers' clocks in sync and stamp as late as you
+  can, ideally from one place: a write later than the window is still missed.
 - **Deletions are documents.** A `deleteOne` by another app is never seen; mark the document `_deleted: true`.
 - **One document, one request.** A push is a `replaceOne` per row, not a transaction over the batch. A server error
   with a code on one document (a validator's refusal, a key too large) parks that row as `refused` with the code as

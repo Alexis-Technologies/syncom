@@ -23,6 +23,13 @@ export interface MongodbConnectorOptions {
   collection: MongoLikeCollection;
   /** Whether the deployment has change streams (a replica set): the stream. Default true. */
   changes?: boolean;
+  /**
+   * How far before its checkpoint a pull run starts, in ms; 0 (none) by default. A pull that resumes after a stamp
+   * never sees a document that became visible later with an older one (a writer whose clock runs behind); with a
+   * lookback the run reads that much again — what the connector knows of it is passed over, nothing landed or counted
+   * — and the late one is pulled. The window is read at every pull: keep it as short as the lateness expected.
+   */
+  lookback?: number;
   /** The clock `_updated` is stamped by; `Date.now` by default. */
   now?: () => number;
 }
@@ -31,6 +38,8 @@ export interface MongodbConnectorOptions {
 export interface MongodbCheckpoint {
   at: number;
   id: string;
+  /** Under a `lookback`, while a run is under way: the position its next page reads on after. */
+  from?: { at: number; id: string };
 }
 
 export interface MongodbHandlers<T = RecordData> {

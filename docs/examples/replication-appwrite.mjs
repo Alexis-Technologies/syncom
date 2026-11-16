@@ -163,4 +163,40 @@ await quiet.awaitInSync();
 assert.deepEqual(await board.Task.get('t2'), { title: 'Review the PR today', done: false, $type: 'Task' });
 assert.equal(quiet.stats().conflicts, 1);
 await quiet.cancel();
+
+// A document that becomes visible with an `$updatedAt` behind the checkpoint (a server whose clock runs behind):
+// without a lookback the pull never sees it.
+const late = (id, title) => {
+  const doc = { $id: id, $updatedAt: new Date(Date.now() - 2000).toISOString(), title, done: false, deleted: false };
+  server.docs.set(id, doc);
+  told(doc);
+};
+late('t3', 'Stamped late');
+const missing = replicate(board, {
+  name: 'appwrite',
+  collection: 'Task',
+  live: false,
+  ...appwrite({ client, databases, Query, databaseId: 'main', collectionId: 'tasks' }),
+});
+await missing.awaitInitialReplication();
+assert.equal(await board.Task.get('t3'), null, 'behind the checkpoint: missed');
+await missing.cancel();
+
+// #region lookback
+const careful = replicate(board, {
+  name: 'appwrite',
+  collection: 'Task',
+  // Each pull starts five seconds before its checkpoint: a document that became visible late is pulled.
+  ...appwrite({ client, databases, Query, databaseId: 'main', collectionId: 'tasks', lookback: 5000 }),
+});
+await careful.awaitInitialReplication();
+// #endregion lookback
+assert.deepEqual(await board.Task.get('t3'), { title: 'Stamped late', done: false, $type: 'Task' });
+const counted = careful.stats();
+assert.equal(counted.applied, 1, 't3 alone: what the connector knew of the window made no write');
+late('t4', 'Stamped late too');
+await waitUntil(async () => (await board.Task.get('t4')) !== null);
+await careful.awaitInSync();
+assert.equal(careful.stats().pulled, counted.pulled + 1, 'a late document is counted once');
+await careful.cancel();
 await board.close();

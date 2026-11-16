@@ -73,6 +73,7 @@ seen is an `insert`, and a duplicate key is a conflict the same way.
 | `schema` | `'public'` | The schema Realtime listens on |
 | `channel` | `'syncom:<table>'` | The Realtime channel's name |
 | `stream` | `true` | Follow Realtime (where the client has channels); `false` and the connector pulls every `retryTime` |
+| `lookback` | `0` | How far before its checkpoint each pull starts, in ms: [rows that commit late](#pull-rows-that-commit-late) |
 | `now` | an ISO date | The value the adapter writes to the modified column |
 
 The adapter also answers `stampOf(id)`, the modified value it last saw for a row. The pull's checkpoint is
@@ -80,11 +81,28 @@ The adapter also answers `stampOf(id)`, the modified value it last saw for a row
 one `now()`) are never skipped at a page's edge. Every Realtime change is a `RESYNC`; the channel's `CHANNEL_ERROR`,
 `TIMED_OUT` or `CLOSED` is an `END`, and the connector subscribes again after a backoff.
 
+## Pull rows that commit late
+
+The pull reads past a checkpoint, so a row that becomes visible with a stamp already behind it is never pulled.
+Postgres makes that easy to hit: `now()` is the time a transaction began, so a transaction that runs for ten seconds
+commits rows stamped ten seconds ago. Pass `lookback`, in milliseconds, and each pull starts that far before its
+checkpoint:
+
+<<< @/examples/replication-supabase.mjs#lookback
+
+The rows of that window are read again at every pull. The connector passes over the ones it already knows (no
+write, nothing counted in `stats().pulled`) and lands the late one. The checkpoint never moves back. Set `lookback`
+to your longest transaction plus a margin;
+[Connectors](./connectors#pull-by-a-timestamp-without-missing-late-writes) explains the rules and the cost.
+`lookback` needs a modified column that reads as a date (`timestamptz`, or text in ISO 8601, which is what the
+adapter's own `now` writes).
+
 ## Limitations
 
 - **The cursor follows the modified column.** A write that becomes visible after a client pulled past its stamp (a
   transaction that started earlier but committed later, or a row stamped at the same instant as one already pulled,
-  with a smaller key) is never pulled by that client. Stamp writes as late and as precisely as you can.
+  with a smaller key) is not pulled by that client unless [`lookback`](#pull-rows-that-commit-late) covers how late
+  it was. A row later than the window is still missed, so stamp writes as late and as precisely as you can.
 - **Deletions are rows.** A hard `delete` is never seen; set `deleted` instead.
 - **One row, one request.** A push is an `update` or `insert` per row. A database error with a code on one row (a
   check constraint, a type) parks that row as `refused` with the code as the reason; an error without a code (the

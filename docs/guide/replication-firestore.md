@@ -62,6 +62,7 @@ connector still compares Firestore's own shape, so an edit's transaction checks 
 | `stampField` | `'serverTimestamp'` | The field the server stamps on every write |
 | `deletedField` | `'_deleted'` | The boolean field of a deletion |
 | `stream` | `true` | Listen with `onSnapshot`; `false` and the connector pulls every `retryTime` |
+| `lookback` | `0` | How far before its checkpoint each pull starts, in ms |
 
 The pull's checkpoint is `{ seconds, nanoseconds, id }`: the last document's stamp, whole, and its id. A cursor of
 milliseconds would skip or repeat the rest of a commit's documents, so the adapter keeps the stamp as the server set
@@ -69,6 +70,12 @@ it. A document whose stamp is still pending (a write of the SDK's own cache, not
 pull, and `waitForPendingWrites` is awaited first where the SDK has it. A push writes at most 500 rows per transaction,
 Firestore's limit. `onSnapshot` watches the newest document, and each change the server confirmed is a `RESYNC`; the
 listener's error is an `END`, and the connector listens again after a backoff.
+
+A stamp the server sets with `serverTimestamp()` is the commit's own time, so it does not fall behind a checkpoint.
+A writer that sets the stamp field from its own clock can: its document appears behind the checkpoint and is never
+pulled. If your collection has such writers, pass `lookback` (milliseconds): each pull then starts that far before
+its checkpoint, the connector passes over the documents it already knows, and the late one lands.
+[Connectors](./connectors#pull-by-a-timestamp-without-missing-late-writes) explains the rules and the cost.
 
 ## Limitations
 

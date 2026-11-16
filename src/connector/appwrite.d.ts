@@ -32,6 +32,8 @@ export interface AppwriteCheckpoint {
   /** The `$updatedAt` of the last document pulled. */
   updatedAt: string;
   id: string;
+  /** Under a `lookback`, while a run is under way: the position its next page reads on after. */
+  from?: { updatedAt: string; id: string };
 }
 
 export interface AppwriteOptions {
@@ -45,6 +47,13 @@ export interface AppwriteOptions {
   deletedField?: string;
   /** Follow the collection through Realtime; default true. */
   stream?: boolean;
+  /**
+   * How far before its checkpoint a pull run starts, in ms; 0 (none) by default. A pull that resumes after a stamp
+   * never sees a document that became visible later with an older one (a write a slower server stamped); with a
+   * lookback the run reads that much again — what the connector knows of it is passed over, nothing landed or counted
+   * — and the late one is pulled. The window is read at every pull: keep it as short as the lateness expected.
+   */
+  lookback?: number;
 }
 
 export interface AppwriteHandlers<T = RecordData> {

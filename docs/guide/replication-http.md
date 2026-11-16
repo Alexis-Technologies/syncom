@@ -85,7 +85,8 @@ events and the restart.
 - **The change number must follow commit order.** The example keeps everything in memory, where the order of writes
   is obvious. In a database, a sequence number assigned when a transaction starts can become visible after a higher
   one, and a client that already pulled past it never sees it. Assign the number at commit, or pull by a timestamp
-  and an id the way the [Supabase](./replication-supabase) adapter does and accept rereading the latest instant.
+  and an id the way the [Supabase](./replication-supabase) adapter does and
+  [look back](./connectors#pull-by-a-timestamp-without-missing-late-writes) by as long as a write can stay invisible.
 - **The push must compare and write atomically.** Read the stored state and write the row in one transaction, or
   with a conditional update (`WHERE` on the stored state or a revision), so two clients cannot both pass the check.
 - **Deletions are rows.** Keep a deleted task as a tombstone the pull can report; removing the row loses the deletion

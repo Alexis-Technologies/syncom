@@ -1,4 +1,4 @@
-import { expectAssignable, expectType } from 'tsd';
+import { expectAssignable, expectError, expectType } from 'tsd';
 import { mongoEngine, mongoSharedLog } from '../src/mongodb/mongodb.js';
 import type {
   MongoEngine,
@@ -58,4 +58,6 @@ declare const collection: MongoLikeCollection;
 const handlers = mongodbConnector({ collection, changes: false });
 expectType<MongodbHandlers>(handlers);
 expectType<number | undefined>(handlers.revisionOf('t1'));
+expectType<MongodbHandlers>(mongodbConnector({ collection, lookback: 5000 }));
+expectError(mongodbConnector({ collection, lookback: true }));
 replicate(await createDatabase({ engine }), { name: 'mongo', collection: 'Task', ...handlers });

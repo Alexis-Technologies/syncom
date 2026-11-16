@@ -15,7 +15,11 @@
 // upserted, is a conflict, answered as the document stands; a server refusing
 // the document (a validator, a key too large) is that row's `{ id, error }`;
 // a probe (`assumed` undefined) is the document read back, nothing written.
-// No requires.
+// With `lookback` ms a pull run starts that far before its checkpoint — a
+// document a writer with a slower clock stamped behind it is pulled after
+// all (lookback.js). Requires lookback.js only.
+
+const { checkLookback, lookbackPull } = require('./lookback.js');
 
 const FIELDS = new Set(['_id', '_rev', '_deleted', '_updated']);
 
@@ -30,8 +34,8 @@ const documentOf = (doc) => {
   return doc._deleted === true ? { id, deleted: true } : { id, data: strip(doc) };
 };
 
-/** `{ pull, push }` for `replicate()`, over the driver's `collection`. */
-const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
+/** `{ pull, push }` for `replicate()`, over the driver's `collection`; `lookback` ms before the checkpoint (0: none). */
+const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = {}) => {
   const driver =
     collection !== null &&
     typeof collection === 'object' &&
@@ -39,6 +43,7 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
     typeof collection.findOne === 'function';
   if (!driver) throw new TypeError("mongodb(): collection must be the driver's collection (find, replaceOne, findOne)");
   if (typeof changes !== 'boolean') throw new TypeError('mongodb(): changes must be a boolean');
+  checkLookback('mongodb', lookback);
   const revs = new Map();
 
   // The document as the collection holds it now, the revision remembered: a deletion for none.
@@ -52,32 +57,55 @@ const mongodb = ({ collection, changes = true, now = Date.now } = {}) => {
     return documentOf(doc);
   };
 
+  // The documents after a position, in the cursor's order. The cursor is (stamp, id): the documents stamped after
+  // the position's, and those stamped the same with a greater id — a batch written within one millisecond is never
+  // skipped at a page's edge; a position with no id (a lookback's start) is the stamp alone, and none is the start.
+  const read = (after, limit) => {
+    let filter = {};
+    if (after !== null && after.id === null) filter = { _updated: { $gt: after.at } };
+    else if (after !== null && (after.at !== 0 || after.id !== '')) {
+      filter = { $or: [{ _updated: { $gt: after.at } }, { _updated: after.at, _id: { $gt: after.id } }] };
+    }
+    // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
+    return collection.find(filter, { sort: { _updated: 1, _id: 1 }, limit }).toArray();
+  };
+  // A checkpoint's position: `{ at, id }`, or the first version's stamp alone; the start for none.
+  const parse = (value) => {
+    if (value !== null && typeof value === 'object' && typeof value.at === 'number') {
+      return { at: value.at, id: String(value.id) };
+    }
+    return { at: typeof value === 'number' ? value : 0, id: '' };
+  };
+  const positionOf = (doc) => (typeof doc._updated === 'number' ? { at: doc._updated, id: String(doc._id) } : null);
+  // A document handed over, its revision remembered.
+  const pulled = (doc) => {
+    if (typeof doc._rev === 'number') revs.set(String(doc._id), doc._rev);
+    return documentOf(doc);
+  };
+
   return {
     pull: {
-      async handler(checkpoint, batchSize) {
-        // The cursor is (stamp, id): the documents stamped after the checkpoint's, and those stamped the same with a
-        // greater id — a batch written within one millisecond is never skipped at a page's edge.
-        const after =
-          checkpoint !== null && typeof checkpoint === 'object' && typeof checkpoint.at === 'number'
-            ? checkpoint
-            : { at: typeof checkpoint === 'number' ? checkpoint : 0, id: '' };
-        const filter =
-          after.at === 0 && after.id === ''
-            ? {}
-            : { $or: [{ _updated: { $gt: after.at } }, { _updated: after.at, _id: { $gt: after.id } }] };
-        // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
-        const cursor = collection.find(filter, { sort: { _updated: 1, _id: 1 }, limit: batchSize });
-        const docs = await cursor.toArray();
-        const documents = [];
-        let last = after;
-        for (let i = 0; i < docs.length; i++) {
-          const doc = docs[i];
-          if (typeof doc._rev === 'number') revs.set(String(doc._id), doc._rev);
-          if (typeof doc._updated === 'number') last = { at: doc._updated, id: String(doc._id) };
-          documents.push(documentOf(doc));
-        }
-        return { documents, checkpoint: last };
-      },
+      handler:
+        lookback > 0
+          ? lookbackPull({
+              lookback,
+              parse: (value) => (value === null || value === undefined ? null : parse(value)),
+              millis: (position) => position.at,
+              since: (ms) => ({ at: ms, id: null }),
+              read,
+              positionOf,
+              documentOf: pulled,
+            })
+          : async (checkpoint, batchSize) => {
+              let last = parse(checkpoint);
+              const docs = await read(last, batchSize);
+              const documents = [];
+              for (let i = 0; i < docs.length; i++) {
+                documents.push(pulled(docs[i]));
+                last = positionOf(docs[i]) ?? last;
+              }
+              return { documents, checkpoint: last };
+            },
       ...(changes
         ? {
             stream(emit) {

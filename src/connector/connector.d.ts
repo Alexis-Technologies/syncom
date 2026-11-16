@@ -19,6 +19,14 @@ export interface ConnectorDocument<T = RecordData> {
 export interface PullResult<T = RecordData, C = unknown> {
   documents: ConnectorDocument<T>[];
   checkpoint: C;
+  /**
+   * Where the handler looks back (it asked its backend from before the checkpoint it was handed, so a document
+   * that became visible late is not missed): how many of `documents`, the first ones, are at or behind that
+   * checkpoint — read again. The connector passes over the ones whose state it knows, or that it refused the same
+   * before: nothing landed, nothing counted (`stats().pulled`, `received`), nothing said again; the rest are judged
+   * as any document. A non-negative integer; a handler that does not look back leaves it out.
+   */
+  reread?: number;
 }
 
 /** What a push hands the backend: the record as this node reads it, and what the backend was last known to hold. */
