@@ -23,10 +23,13 @@ const exportTargets = (value, out = []) => {
   return out;
 };
 
+// The allowlist ships whole directories (src/) and named root files; an entry that begins with `!` takes files
+// back out of them (the notes: `!**/CLAUDE.md` — tests/package/pack.test.js holds the tarball to it).
+const included = pkg.files.filter((entry) => !entry.startsWith('!'));
+
 const shipped = (relative) => {
-  // The allowlist ships whole directories (src/) and named root files.
   const clean = relative.replace(/^\.\//, '');
-  return pkg.files.some((entry) => (entry.endsWith('/') ? clean.startsWith(entry) : clean === entry));
+  return included.some((entry) => (entry.endsWith('/') ? clean.startsWith(entry) : clean === entry));
 };
 
 test('every exports target exists and is in the files allowlist', () => {
@@ -90,10 +93,11 @@ test('the browser field maps to files that ship', () => {
   }
 });
 
-test('every files entry exists', () => {
-  for (const entry of pkg.files) {
+test('every files entry exists, and the notes are taken back out', () => {
+  for (const entry of included) {
     assert.ok(existsSync(path.join(ROOT, entry)), `files entry ${entry} does not exist`);
   }
+  assert.ok(pkg.files.includes('!**/CLAUDE.md'), 'files must exclude every CLAUDE.md: the notes never ship');
 });
 
 test('the docs keywords list mirrors package.json', () => {

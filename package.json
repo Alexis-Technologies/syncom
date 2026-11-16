@@ -377,6 +377,7 @@
     "browser.js",
     "browser.d.ts",
     "src/",
+    "!**/CLAUDE.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
     "README.md",

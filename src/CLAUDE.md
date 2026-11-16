@@ -84,7 +84,7 @@ src/wire-error.js         packError/unpackError — an error as JSON between two
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids
 src/log.js                OpLog — the persisted operation log over the store an engine hands it (a journal, rows; it builds none): seqs reserved at append
-src/                      ships as-is — no build step, CommonJS, 'use strict'
+src/                      ships as-is — no build step, CommonJS, 'use strict'; the CLAUDE.md files are left out of the package
 ```
 
 ## Rules that bite

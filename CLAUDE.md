@@ -123,6 +123,10 @@ hours after its last test). Coverage —
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
   after you add an entry point, update `exports`, `files`, the `browser` map,
   `scripts/size.js` `ENTRIES` and the docs keywords — the test is right.
+- **These notes never ship.** `src/` is published whole, and a CLAUDE.md lives in almost every folder of it:
+  `package.json#files` takes them back out (`!**/CLAUDE.md`), and `tests/package/pack.test.js` asks npm what the
+  tarball holds — no CLAUDE.md, nothing of `.claude/`, and under `src/` only `.js` and `.d.ts`. A notes file under
+  another name, or any other file that is not code or types, does not belong in `src/`.
 - **Constructors that return promises.** `Database`, `Blockchain` and
   `SyncManager` all `return this.#init()` from the constructor, so they are
   used as `await new Blockchain(path)`. The types model this; keep it that way.

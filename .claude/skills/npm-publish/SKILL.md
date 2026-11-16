@@ -173,7 +173,7 @@ Review the file list:
 
 - Source files (`src/`) and root entry points are included
 - Type definitions are included
-- Tests, docs, bench, examples, scripts, configs, `.claude/` and CI files are excluded
+- Tests, docs, bench, examples, scripts, configs, `.claude/` and CI files are excluded, and so is every `CLAUDE.md` (the root's and each folder's of `src/`: `files` has `!**/CLAUDE.md`, `tests/package/pack.test.js` checks the list npm packs)
 - No unexpected large files
 
 Then pack for real into a scratch directory and smoke the tarball: `require()` it from a scratch CJS file, and typecheck it with `npx tsc --moduleResolution bundler --module esnext --noEmit`.
