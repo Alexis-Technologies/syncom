@@ -29,16 +29,16 @@ Every write is one op, a plain JSON object:
 | `origin` | string | The node that made it — its Ed25519 public key (43 base64url characters, canonical last character; a point of small order or a y past the prime is no key — no one holds its private half — and an op signed under one is forged) when the node signs, else its `getId()` id; a stream name: 1 to 128 characters, no `@`, no control character |
 | `seq` | integer ≥ 1 | Its sequence number on that origin, per scope: the vector key is `origin@scope` (`origin` alone for the global scope `*`), and the ops born of a snapshot run in `origin@~` |
 | `ts` | integer ≥ 1 | `Date.now()` when made, never below a stamp the node had seen |
-| `type` | string | One of the fifteen below |
+| `type` | string | One of the sixteen below |
 | `id` | string | The record, `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}` — a file name on three platforms; every type but `advance` has one |
 | `scope` | string | The record's scope as the writer read it; absent in the global scope |
-| `data` | object | A `write`'s or `set`'s fields; a `merge`'s record data |
+| `data` | object | A `write`'s or `set`'s fields; the registers a `version` writes; a `merge`'s record data |
 | `meta` | object | A `merge`'s metadata (the shape under [The record file](#the-record-file)) |
 | `key` | string | A field op's field — a name, or a path of names joined by `/` (at most 16 segments, 512 characters) |
 | `value` | any | A field op's argument, by type |
 | `vector` | object | An `advance`'s version vector |
 | `from` | string | The node whose snapshot a `merge`/`advance` joined — a claim, carried as is |
-| `v` | integer ≥ 1 | The writer's schema version; absent without a schema and on `merge`/`advance` |
+| `v` | integer ≥ 1 | The writer's schema version; absent without a schema and on `merge`/`advance`. On a `write` and a `version` it is the version the record is of from the op's stamp on |
 | `actor` | string | Who made it, as the writer claims — signed, never verified |
 | `sig` | string | 86 base64url characters: the Ed25519 signature of the [header](#what-a-signature-covers) |
 | `digest` | string | 43 base64url characters (canonical last character): SHA-256 of the nonce and the canonical payload |
@@ -64,6 +64,7 @@ engine does not admit changes nothing, is reported as `OP_REFUSED` with
 | `write` | `w` | `data` | The whole record; fields not written are gone |
 | `set` | `s` | `data` | The fields to set; last writer wins per field by `(ts, origin)` |
 | `unset` | `u` | `value` | `string[]` — the fields to remove, as names or paths |
+| `version` | — | `value?`, `data?` | The record is of the op's `v` from its stamp on: last writer wins among the `write`s and the `version`s of a record, by stamp alone (see `v` under [The record file](#the-record-file)). With it, at the same stamp: `value`, the fields removed as an `unset` removes them, then `data`, the registers set as a `set` sets them — nothing else of the record is reset. What a migration makes: the names the lens removed, the registers it wrote |
 | `inc` | `i` | `key`, `value` | A finite number to add to the counter |
 | `add` | `+` | `key`, `value` | `unknown[]` — the elements to add to the set |
 | `remove` | `-` | `key`, `value` | `[element, { origin: addStamp }][]` — each element with the add stamps this node had seen for it |
@@ -85,11 +86,19 @@ an element this node never saw added makes no op); `splice()`, `push()` and
 `unmark()` and `unmarkById()` a `mark`; `treeMove()` and `treeRemove()` a
 `tree`; `delete()` a `delete`; `purge()` a `purge`; a snapshot page being
 joined a `merge` per record and an `advance`. `applyPatches()`, `restore()`,
-`compact()` and the undo stack write through these same ops.
+`compact()` and the undo stack write through these same ops. A `version` is
+no call's own: a write of a field to a record of an older schema version
+than the node's makes one first, in the write's transaction, and `migrate()`
+one per record — followed by an `inc`, an `add`, a `splice` or the `tree`
+moves of each counter, set, list, text or tree the lens renamed or rewrote —
+and a `set` that makes a record (a patch on a record that is not there, a
+state's first write) on a node whose schema version is above 1 goes as a
+`version` carrying its fields, so the record says which version it is of.
 
 The codes are the protocol's, not a plugin's: a node without the text or
-tree plugin still reads, logs and relays a `/` or a `~`. One op of each,
-as it reads back from the log as `{ seq, op, fp }` — the file holds it
+tree plugin still reads, logs and relays a `/` or a `~`. A `version` has no
+code: where an op travels packed, the slot of the type carries its name. One
+op of each but a `version`, as it reads back from the log as `{ seq, op, fp }` — the file holds it
 positional, see [The log](#the-log). The `write` and the `purge` of `p2` are
 scrubbed: the payload and the nonce gone, the header and its signature kept.
 
@@ -131,8 +140,8 @@ of the `add` this node had seen, per origin.
 ### Packed: the twenty slots
 
 A push and a `changes` page carry ops packed — one positional array per
-op, the type as its code, `null` for an absent field, no key names
-repeated per op:
+op, the type as its code (its name where it has none: `version`), `null`
+for an absent field, no key names repeated per op:
 
 | Slot | Field | Slot | Field | Slot | Field |
 | --- | --- | --- | --- | --- | --- |
@@ -419,7 +428,7 @@ milliseconds of it, 16 by default):
          "blocks":{"body":{"k":"t","ts":1792951855665,"runs":{"1792951855661:VTwt7hZ…":["^",["hello"]]},"marks":{"1792951855665:VTwt7hZ…":["<1792951855661:0:VTwt7hZ…","$","bold",true,0]}},
                    "items":{"k":"l","ts":1792951855664,"runs":{"1792951855662:VTwt7hZ…":["^",[1,[2]]],"1792951855664:VTwt7hZ…":[">1792951855662:1:VTwt7hZ…",[[9]],"1792951855662:0:VTwt7hZ…"]},"pos":{"1792951855662:0:VTwt7hZ…":[1792951855664,"VTwt7hZ…","1792951855664:VTwt7hZ…"]},"vals":{"1792951855662:0:VTwt7hZ…":[1792951855663,"VTwt7hZ…",9]}},
                    "outline":{"k":"tree","ts":1792951855666,"moves":{"n1":[[1792951855666,"VTwt7hZ…",null,"V"]]}}},
-         "gone":{"note":[1792951855657,"VTwt7hZ…"]},"v":1},
+         "gone":{"note":[1792951855657,"VTwt7hZ…"]},"v":1,"vs":[1792951855653,"VTwt7hZ…"]},
  "encrypted":false,"timestamp":1792951855665,"block":"16219399…"}
 ```
 
@@ -438,7 +447,8 @@ merge:
 | `sets` | Per field, per element (its canonical JSON as the key), per origin, `[added, removed]` stamps; live while `added > removed` |
 | `blocks` | Per list, text or tree field, the kind plugin's block under its code `k` — `t` text, `l` list, `tree` — with the block's `ts`; a text's or list's `runs` (`[anchor, content, extendedFrom?]` per `ts:origin`), `cuts`, `ext`, `pos`, `vals`, `marks`, `pending`; a tree's `moves` (`[ts, origin, parent, fi]` per node) |
 | `gone` | Per field removed by `unset`, the stamp of the removal — a register's tombstone an older `set` loses to |
-| `v` | The schema version of the last whole-record write — a field op leaves it; a node's local field op on a record of an older version than its own rewrites the record first (a `write` at its version, then the op, one transaction) |
+| `v` | The schema version the record is of: the `v` of the newest op that said one — a whole-record `write`, or a `version` — absent where none did (read as 1). A field op and a `delete` leave it; a `write` without a `v` says none. A node's local field op on a record of an older version than its own migrates the record first (a `version` at its version carrying what the lens changed, then the op, one transaction) |
+| `vs` | The stamp of the op that decided `v`, present with it. Last writer wins by this stamp alone, never by `base`, so the version is the same whatever order the ops arrive in: a `write` of an older version stamped above a migration makes the record that version again, one stamped below it does not. A snapshot join takes the pair with the newer `vs`; a `purge` takes both away |
 
 A list or text block of 1 024 runs or more (`PIECES_MIN`) is written in
 **pieces**: its `runs` leave the record file for files beside it,
@@ -1373,7 +1383,7 @@ a snapshot buys nothing an op could not:
 
 `hello` carries `version: 1` both ways, and a host answers another version
 with 400 `PROTOCOL`. Version 1 is the wire as the first publication will
-have it: the fifteen types and the twenty slots above, the header under
+have it: the sixteen types and the twenty slots above, the header under
 its version number `1` with `prev` in it, the log file with its hash, the
 index with every field it is written with, the `enc1:` ciphertext bound to
 its file name, the presence format `p: 1`, the catalog file's `format: 1`,

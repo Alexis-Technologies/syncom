@@ -322,6 +322,21 @@ storage.on('change', (op, via) => {
 declare const entry: syncom.Entry;
 const applied = syncom.applyOp(null, { origin: 'a', seq: 1, ts: 1, type: 'set', id: 'r', data: { x: 1 }, v: 2 });
 expectType<number | undefined>(applied.entry.meta.v);
+// The version is a register of its own: the stamp of the `write` or `version` op that decided it rides beside it.
+expectType<syncom.ClockStamp | undefined>(applied.entry.meta.vs);
+expectAssignable<syncom.SyncOp>({
+  origin: 'a',
+  seq: 2,
+  ts: 2,
+  type: 'version',
+  id: 'r',
+  v: 2,
+  value: ['title'],
+  data: { name: 'x' },
+});
+expectAssignable<syncom.SyncOp>({ origin: 'a', seq: 3, ts: 3, type: 'version', id: 'r', v: 2 });
+expectAssignable<syncom.SyncOpType>('version');
+expectError<syncom.SyncOpType>('migrate');
 expectType<syncom.Entry>(applied.entry);
 expectType<boolean>(applied.changed);
 expectType<syncom.Entry | null>(syncom.mergeEntry(entry, null));

@@ -7,7 +7,8 @@
 // here reaches the storage's state but through `core`.
 
 const { SyncomError } = require('../errors.js');
-const { isPlainObject } = require('../shape.js');
+const { isPlainObject, deepEqual } = require('../shape.js');
+const { compose } = require('../compose.js');
 const { project } = require('./entity.js');
 
 const SCHEMA_FILE = 'schema.json';
@@ -68,56 +69,115 @@ const entityNames = (entities) => {
   return names;
 };
 
-/**
- * One record of an older version rewritten as this one, through the lens: a
- * whole-record write of the view, then the counters and the sets added back
- * (a write resets them), a plugin's field as the ops its module lays — each
- * through `core.commit` with `options`. What migrate() does per record, and
- * what a local write to such a record runs first, inside its transaction
- * (src/commit.js `commitIn`, the core's `upgrade`: the view of a lens that
- * ran over the record AND the write would read the write's fields over).
- * Counts what it laid into `result`, when given.
- */
-const migrateRecord = async (core, id, entry, options, result = null) => {
-  const view = await core.view(id, entry);
-  const data = {};
-  const kinds = {};
-  for (const key of Object.keys(view)) {
-    const kind = core.kindOf(entry, key);
-    if (kind === undefined || kind === 'register') data[key] = view[key];
-    else kinds[key] = kind;
-  }
-  await core.commit('write', id, { data }, options);
-  for (const key of Object.keys(kinds)) {
-    const kind = kinds[key];
-    const value = entry.data[key];
-    if (kind === 'counter') {
-      await core.commit('inc', id, { key, value }, options);
-      if (result !== null) result.counters++;
-    } else if (kind === 'set') {
-      // A set with nothing live has nothing to add back: it is dropped.
-      if (value.length === 0) continue;
-      await core.commit('add', id, { key, value }, options);
-      if (result !== null) result.sets++;
-    } else {
-      // A plugin's field comes back as the ops its module lays — a list
-      // or a text as one run, a tree as one move per node, parents first
-      // — and one with nothing to read is dropped.
-      const ops = core.plugins.byName[kind].migrate(kind, key, value);
-      if (ops.length === 0) continue;
-      for (let i = 0; i < ops.length; i++) await core.commit(ops[i][0], id, ops[i][1], options);
-      if (result !== null) result[`${kind}s`] = (result[`${kind}s`] ?? 0) + 1;
-    }
-  }
+// Whether the lens left a value as it read.
+const same = (a, b) => a === b || deepEqual(a, b);
+
+// Whether `value` is what a field reading `held` could read as: a number where a counter was, a string a text,
+// an array a set, a list or a tree. A value of another type is laid as a register.
+const fits = (held, value) =>
+  typeof value === typeof held &&
+  Array.isArray(value) === Array.isArray(held) &&
+  (typeof value !== 'number' || Number.isFinite(value));
+
+// The ops that lay `value` under `key` as a field of `kind` made from nothing: a counter as one `inc`, a set as
+// one `add`, a plugin's kind as its module lays it (a list or a text as one run, a tree as one move per node,
+// parents first) — none for a set, a list, a text or a tree that reads empty, which no op makes. `from` is the
+// entry and the field the value was read from, for a rename: a text's marks and embeds come along.
+const layOf = (plugins, kind, key, value, from) => {
+  if (kind === 'counter') return [['inc', { key, value }]];
+  if (kind === 'set') return value.length === 0 ? [] : [['add', { key, value }]];
+  return plugins.byName[kind].migrate(kind, key, value, from);
 };
 
 /**
- * Rewrites every record of an older version as this one, through the lens
- * (`migrateRecord`, each op a commit of its own). One designated node runs
- * it; peers receive ordinary ops. Idempotent — a record already of this
- * version is left alone, and so is one a local write migrated first.
- * `entities` limits it to those collections; `batch` is how many records go
- * between turns of the event loop.
+ * One record of an older version moved to this one: ONE `version` op — the record is of this version from its
+ * stamp on — carrying what the lens changed of it, and nothing else: the names the lens removed (`value`), the
+ * registers it wrote (`data`). The record is compared as it reads, name by name (a name with everything under
+ * it), raw against lensed: a name the lens left as it read is not written at all, whatever its kind — a text
+ * keeps its runs, its marks and every stamp, a counter its slots, a set its tags, and a peer's concurrent edit of
+ * it lands as on any record. A counter, a set, a list, a text or a tree the lens DID change is laid again from
+ * its new reading, after the op and over an unset of its name in it (so two migrations do not lay it twice): as
+ * its kind where the value is still one of that kind, and under a new name where a name the lens removed read
+ * exactly so (a rename: a text's marks and embeds come along) — left out where that reading is empty, which no
+ * op makes; as a register otherwise, and where something hangs under the name (a path, a list's element's
+ * field). Each through `core.commit` with `options`. What migrate() does per record, and what a local write to
+ * such a record runs first, inside its transaction (src/commit.js `commitIn`, the core's `upgrade`: the view of
+ * a lens that ran over the record AND the write would read the write's fields over). Counts the fields of each
+ * kind it laid again into `result`, when given.
+ */
+const migrateRecord = async (core, id, entry, options, result = null) => {
+  const { plugins } = core;
+  const view = await core.view(id, entry);
+  const raw = compose(entry, plugins);
+  // The names something hangs under: such a field is one reading with what hangs there, laid as a register.
+  const parents = new Set();
+  const fields = Object.keys(entry.data);
+  for (let i = 0; i < fields.length; i++) {
+    const at = fields[i].indexOf('/');
+    if (at !== -1) parents.add(fields[i].slice(0, at));
+  }
+  const unset = [];
+  // The names the lens removed that held a field of another kind than a register: what a rename is told by.
+  const renamable = [];
+  const names = Object.keys(raw);
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (Object.hasOwn(view, name) && view[name] !== undefined) continue;
+    unset.push(name);
+    const kind = core.kindOf(entry, name);
+    if (kind !== undefined && kind !== 'register' && !parents.has(name)) renamable.push([name, kind]);
+  }
+  const data = {};
+  let wrote = false;
+  const laid = [];
+  const keys = Object.keys(view);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const value = view[key];
+    if (value === undefined) continue;
+    const held = Object.hasOwn(raw, key);
+    if (held && same(raw[key], value)) continue;
+    let kind = 'register';
+    let from = null;
+    if (held) {
+      const was = core.kindOf(entry, key);
+      if (was !== undefined && was !== 'register' && !parents.has(key) && fits(raw[key], value)) kind = was;
+    } else {
+      // A new name that reads exactly as a removed one did is that field renamed: its kind comes along.
+      for (let j = 0; j < renamable.length; j++) {
+        if (renamable[j] === null || !same(raw[renamable[j][0]], value)) continue;
+        kind = renamable[j][1];
+        from = { entry, field: renamable[j][0] };
+        renamable[j] = null;
+        break;
+      }
+    }
+    if (kind === 'register') {
+      data[key] = value;
+      wrote = true;
+      continue;
+    }
+    // A set, a list, a text or a tree that reads empty is laid by no op: the field is left out, as one never
+    // written (a register in its place would refuse the kind's next op on this record alone).
+    const ops = layOf(plugins, kind, key, value, from);
+    if (held || ops.length > 0) unset.push(key);
+    for (let j = 0; j < ops.length; j++) laid.push(ops[j]);
+    if (ops.length > 0 && result !== null) result[`${kind}s`] = (result[`${kind}s`] ?? 0) + 1;
+  }
+  const payload = {};
+  if (unset.length > 0) payload.value = unset;
+  if (wrote) payload.data = data;
+  await core.commit('version', id, payload, options);
+  for (let i = 0; i < laid.length; i++) await core.commit(laid[i][0], id, laid[i][1], options);
+};
+
+/**
+ * Moves every record of an older version to this one, through the lens (`migrateRecord`: what the lens changed
+ * and nothing else), each record a transaction of its own. One designated node runs it; peers receive ordinary
+ * ops. Idempotent — a record already of this version is left alone, and so is one a local write or a peer
+ * migrated meanwhile (read again inside the queue). `entities` limits it to those collections; `batch` is how
+ * many records go between turns of the event loop. Resolves to the records migrated and, per kind, the fields
+ * laid again.
  */
 const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
   if (core.version === null) throw new TypeError('migrate() needs createDatabase({ schema })');
@@ -125,12 +185,27 @@ const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
   if (names === undefined) throw new TypeError('migrate({ entities }) takes an array of entity names');
   if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
   const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 };
+  const due = (entry) =>
+    entry !== null &&
+    entry !== undefined &&
+    !entry.encrypted &&
+    core.alive(entry) &&
+    (entry.meta.v ?? 1) < core.version &&
+    (names === null || names.has(entry.data.$type));
   let since = 0;
   for (const id of core.catalog.ids()) {
-    const entry = await core.entries.load(id);
-    if (!entry || entry.encrypted || (entry.meta.v ?? 1) >= core.version) continue;
-    if (names !== null && !names.has(entry.data.$type)) continue;
-    await migrateRecord(core, id, entry, { actor }, result);
+    if (!due(await core.entries.load(id))) continue;
+    const { result: moved, done } = await core.transact(
+      async (tx) => {
+        const entry = await tx.current(id);
+        if (!due(entry)) return false;
+        await migrateRecord(tx, id, entry, { actor }, result);
+        return true;
+      },
+      { actor },
+    );
+    if (done !== null) await done;
+    if (!moved) continue;
     result.migrated++;
     if (++since >= batch) {
       since = 0;

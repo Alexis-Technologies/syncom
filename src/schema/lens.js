@@ -5,7 +5,7 @@
 // step 2, the entity's Standard Schema validator — its aliases and defaults
 // are a rename and a fill for free, and metaschema's own `validate` is the
 // lens of its evolution model. Neither step writes anything: the record
-// stays as it is until a local write to it or `migrate()` rewrites it
+// stays as it is until a local write to it or `migrate()` migrates it
 // (./api.js migrateRecord), and the view is cached on the entry. A
 // validator that refuses the record leaves step 1's result (logged at
 // debug); a migration that returns no object is a TypeError.

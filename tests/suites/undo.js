@@ -234,6 +234,25 @@ const runUndoTests = async (t, assert, createStorage) => {
     },
   );
 
+  await t.test(
+    'a migration made since stands in the way of a step on a field it names, and of no other',
+    async (t2) => {
+      const storage = await createStorage(t2, 'A');
+      const undo = createUndo(storage, { mergeInterval: 0 });
+      const id = await storage.insert({ title: 'a', done: false });
+      await storage.update(id, { title: 'b' });
+      await storage.update(id, { done: true });
+      // Another node's migration of the record (a `version` op): `title` removed, `name` written — not a reset.
+      const migration = { origin: 'peer', seq: 1, ts: Date.now() + 5, type: 'version', id, v: 2 };
+      await storage.applyRemote([{ ...migration, value: ['title'], data: { name: 'b' } }]);
+      assert.deepStrictEqual(await storage.get(id), { done: true, name: 'b' });
+      assert.deepStrictEqual(await undo.undo(), { applied: 1, skipped: 0 }, '`done` is none of the migration’s');
+      assert.deepStrictEqual(await undo.undo(), { applied: 0, skipped: 1 }, 'the migration removed `title` since');
+      assert.deepStrictEqual(await storage.get(id), { done: false, name: 'b' });
+      undo.stop();
+    },
+  );
+
   await t.test('steps merge within the interval, split at mark(); a new edit clears the redo stack', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const undo = createUndo(storage, { mergeInterval: 60_000 });

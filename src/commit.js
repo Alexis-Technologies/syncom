@@ -34,7 +34,7 @@ const MISMATCH = Symbol('syncom.mismatch');
 // `expect: ABSENT` — a named insert: a live record there already is EXISTS, decided inside the queue.
 const ABSENT = Symbol('syncom.absent');
 // An op of the migration a local write to a record of an older version runs first (`commitIn`): not validated
-// alone — the half state is read by no one — the write after it is, over the record as the two leave it.
+// alone — the half state is read by no one — the write after it is, over the record as they leave it.
 const UNCHECKED = Symbol('syncom.unchecked');
 // What the write after a migration came to when it makes nothing: the transaction thrown away whole.
 const NOTHING = Symbol('syncom.nothing');
@@ -180,10 +180,11 @@ const scopeData = (type, payload, current) => {
   const data = current?.data ?? {};
   if (type === 'write') return payload.data ?? data;
   if (type === 'set') return { ...data, ...payload.data };
-  if (type === 'unset') {
+  if (type === 'unset' || type === 'version') {
     const left = { ...data };
-    for (const field of payload.value) delete left[field];
-    return left;
+    const fields = payload.value ?? [];
+    for (let i = 0; i < fields.length; i++) delete left[fields[i]];
+    return type === 'unset' ? left : Object.assign(left, payload.data);
   }
   return data;
 };
@@ -274,6 +275,7 @@ const WHOLE = new Set(['write', 'delete', 'purge', 'merge']);
 // Whether a local field op on `current` migrates it first: a live record an older schema version wrote, which
 // this node reads through the lens. Left so, the op would leave it of that version, and the lens — run over the
 // record and the op's fields at once — would read the op's fields over (`name: title` over the new `name`).
+// (A `version` op is the migration itself: `commitIn` never migrates for one, nor twice.)
 const stale = (core, type, current) =>
   core.upgrade !== null &&
   !WHOLE.has(type) &&
@@ -334,7 +336,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
 };
 
 // The ops the core makes itself; every other type of the protocol is a plugin's.
-const CORE = new Set(['write', 'set', 'unset', 'inc', 'add', 'remove', 'delete', 'purge', 'merge']);
+const CORE = new Set(['write', 'set', 'unset', 'version', 'inc', 'add', 'remove', 'delete', 'purge', 'merge']);
 
 // A unique key another record holds: refused here, where one writer can be
 // told. Two concurrent writers on two nodes cannot be — see the `conflict`
@@ -368,7 +370,8 @@ const validateLocal = async (core, op, current, visible, ctx, unchecked = false)
     // Through the lens: a record of an older version is validated as it
     // reads, and a set is folded against how it read before the write.
     const output = await def.validator(project(def, id, await core.view(id, entry)));
-    if (type === 'write' || type === 'set') {
+    // A `version` op's registers are folded as a set's: a set that made the record (`opOf`), migrate()'s.
+    if (type === 'write' || type === 'set' || (type === 'version' && op.data !== undefined)) {
       const validated = unproject(def, output, entry.data.$type);
       if (type === 'write') op.data = validated;
       else op.data = foldSet(op.data, validated, visible ? project(def, id, await core.view(id, current)) : {});
@@ -712,10 +715,10 @@ const prepare = async (core, type, id, payload, options) => {
   // only where one of them is set; null otherwise.
   const { beforeWrite, afterWrite } = core.hooks;
   const hooked = beforeWrite !== null || afterWrite !== null;
-  const whole = type === 'write' || type === 'set';
+  const whole = type === 'write' || type === 'set' || type === 'version';
   // The record as the application reads it — its paths composed — for the
-  // hooks, a write's `$type` and a set's validator; the op model keeps the
-  // paths apart.
+  // hooks, a write's `$type` and a set's validator (a migration's registers
+  // are folded as a set's); the op model keeps the paths apart.
   const visible = visibleOf(core, current, hooked || whole);
   // An actor function is awaited; a given actor, or none, is read at once.
   let who = core.actorOf(actor);
@@ -743,6 +746,18 @@ const opOf = (core, type, id, payload, current, visible, who, from, msg, ctx) =>
     const data = sameType(type, id, payload.data, visible);
     if (ctx !== null) ctx.data = data;
     payload = { ...payload, data };
+    // A set that makes a record says what version the record is of, as the `version` op carrying its fields: a
+    // field op moves no version, and one read off "the first op the record saw" would differ with the order the
+    // ops arrived in (src/ops.js `moveVersion`). Version 1 is what a record of no version reads as.
+    if (type === 'set' && core.version !== null && core.version > 1 && (current === null || current === undefined)) {
+      type = 'version';
+    }
+  } else if (type === 'version') {
+    // A migration's: the registers the lens wrote, the names it removed or laid again — a lens's key that is no
+    // field name is the caller's, as a write's is.
+    for (const key of Object.keys(payload.data ?? {})) fieldName('migrate', key);
+    const names = payload.value ?? [];
+    for (let i = 0; i < names.length; i++) fieldName('migrate', names[i]);
   } else if (type === 'delete' && payload.data !== undefined) {
     // A tombstone that carries data keeps the record's collection: the tombstone stays the
     // collection's (a collection's export, its events), as a reset does.
@@ -770,7 +785,9 @@ const prepared = (core, op, applied, current, ctx, source, via) => {
   }
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
-  if (op.type === 'write' || op.type === 'set') assignScope(core, op, () => applied.entry.data);
+  if (op.type === 'write' || op.type === 'set' || op.type === 'version') {
+    assignScope(core, op, () => applied.entry.data);
+  }
   const previous = current && !current.encrypted ? current : null;
   // The commit event's `before` is the record in the op model's terms — the
   // paths apart, as the entry holds them — what an undo takes a step back by.
@@ -1044,6 +1061,10 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   // Per record: the index of its newest op here, and its ops' deltas laid
   // one over the other — what the live Record is refreshed by, once.
   const newestOf = new Map();
+  // The records a `version` op was made for here: migrated, whatever that op came to — never twice in one
+  // transaction (a record whose version a stamp past the skew horizon holds would be migrated by its own
+  // migration's ops, without end).
+  const versioned = new Set();
   const deltas = new Map();
   // An op a later op of its record follows keeps its op and its changes
   // until the landing; the record it left only for a `commit` listener, its
@@ -1134,9 +1155,13 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const given = { ...options, source, message: msg };
     if (given.actor === undefined) given.actor = actor;
     // A record an older schema version wrote is migrated first, here (migrate() for one record, the schema
-    // plugin's): its view as a whole-record write at this version — unchecked, the op after it is what the
-    // validator sees — then this op over it. The ops after it in the transaction find it of this version.
-    if (stale(core, type, current)) await core.upgrade(tx, id, current, { actor: given.actor, [UNCHECKED]: true });
+    // plugin's): a `version` op at this version carrying what the lens changed, the fields of another kind it
+    // rewrote laid after it — unchecked, the op after them is what the validator sees — then this op over it.
+    // The ops after it in the transaction find it of this version.
+    if (type === 'version') versioned.add(id);
+    else if (!versioned.has(id) && stale(core, type, current)) {
+      await core.upgrade(tx, id, current, { actor: given.actor, [UNCHECKED]: true });
+    }
     const made = await tracedPrepare(tx, type, id, payload, given);
     const { op } = made;
     if (op === null || op === undefined || op === MISMATCH) return op;

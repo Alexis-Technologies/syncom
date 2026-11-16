@@ -33,10 +33,13 @@ or a value that is not a function, is a `TypeError` at `createDatabase()`.
 expand?, many?, off?, node?, parent?, after?, before?, meta?, current, encrypted, source, via, from, v,
 actor }`:
 
-- `type` is the op type: `write`, `set`, `unset`, `inc`, `add`, `remove`, `splice`, `assign`, `move`,
-  `mark`, `tree`, `delete`, `purge`, `merge`.
-- `data` is the whole record for a `write` and the delta for a `set`; `value` holds an `unset`'s field
-  names; `key`/`value` belong to an `inc` (the amount), an `add` or a `remove` (the elements);
+- `type` is the op type: `write`, `set`, `unset`, `version`, `inc`, `add`, `remove`, `splice`, `assign`,
+  `move`, `mark`, `tree`, `delete`, `purge`, `merge`. A `version` is a schema migration's op (see
+  [Versions and the lens](./api#versions-and-the-lens)); a `set` that makes a record reaches the hooks as a
+  `set`, whatever op it becomes.
+- `data` is the whole record for a `write`, the delta for a `set` and the registers a migration writes for
+  a `version`; `value` holds an `unset`'s field names, and the names a `version` removes; `key`/`value`
+  belong to an `inc` (the amount), an `add` or a `remove` (the elements);
   `key`/`index`/`count`/`content` (and `vals`, the markers of the embed slots the content holds) to a
   `splice`; `key`/`index`/`value` to an `assign`; `key`/`index`/`to` to a `move`;
   `key`/`start`/`end`/`name`/`value`/`expand`/`many` (or `off`) to a `mark`; `key`/`node`/`parent`/`after`/`before`

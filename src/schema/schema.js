@@ -31,7 +31,7 @@ const schema = Object.freeze({
     const load = () => loadVersion(ctx, normalized);
     // A collection defined after the open (`addCollections`): normalized as the schema's were.
     const define = (name, def, names) => defineEntity(name, def, options.validator, names);
-    // A record of an older version that a local write is about to change, rewritten first (src/commit.js).
+    // A record of an older version that a local write is about to change, migrated first (src/commit.js).
     const upgrade = given === null ? null : migrateRecord;
     return { schema: { ...normalized, given, view, load, define, upgrade } };
   },

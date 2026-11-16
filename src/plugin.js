@@ -33,7 +33,8 @@
 //       recreate(field, kind, value, context)
 //                                           → the patches that make the field from nothing
 //       realize(action, patch, method)      → [type, payload] for one of its patch actions
-//       migrate(kind, key, value)           → [[type, payload]…] that lay the field again
+//       migrate(kind, key, value, from?)    → [[type, payload]…] that lay the field again; `from`, `{ entry, field }`,
+//                                             where it reads as that field did (a rename): what the reading leaves out
 //       compact(entry, field, kind)         → the patches a compaction lays after recreate
 //       pieces(block)                       → `{ head, slots }` — a large block as its file holds it: slots of
 //                                             `{ key, text() }` or null, `key` the same object while the piece

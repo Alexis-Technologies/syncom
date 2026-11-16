@@ -31,7 +31,8 @@ explains registers, counters, sets, lists, text and trees). The log keeps each o
 `origin` and `seq` name the op: the node that made it and its number on that node, counted from 1.
 `ts` is its stamp (below). `type` says what it does: `write` for `insert()` and `set()`, `set` for
 `update()`, `unset` for `unset()`, `inc`, `add` and `remove` for counters and sets, `splice`, `assign`, `move`, `mark` and
-`tree` for lists, text and trees, `delete` for a tombstone, `purge` for an erasure. `id` is the record,
+`tree` for lists, text and trees, `delete` for a tombstone, `purge` for an erasure, `version` for a
+[schema migration](./migration-schema#what-a-migration-writes). `id` is the record,
 `data` the fields a `write` or `set` carries, and a field op names its field in `key` and its argument in
 `value`. `v` is the [schema version](./migration-schema) of the writer, `actor` who made it when you
 pass one (`createDatabase({ actor })` or a write's `{ actor }`), and `msg` a transaction's message.

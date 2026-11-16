@@ -498,11 +498,34 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
       const count = Math.floor(random() * Math.min(3, length - at + 1));
       await storage.splice(id, key, at, count, content);
     };
+    // The ops that say a record's schema version, as a migrating node and a node of the older version make them
+    // (the schema plugin's; this mesh loads none): a `version` op — the record of version 2 from its stamp on, a
+    // field removed and a register written with it — and a whole-record write of version 1, each in a stream of
+    // its own handed to one node and relayed on. Every tenth step, beside the step's own op: the walk's rolls
+    // are what they were.
+    const migrators = new Map();
+    const said = { version: 0, write: 0 };
+    const migrate = async (storage, id, step) => {
+      const origin = `migrator${storages.indexOf(storage)}`;
+      const seq = (migrators.get(origin) ?? 0) + 1;
+      migrators.set(origin, seq);
+      const op = { origin, seq, ts: Date.now(), id };
+      // Two migrations, then a write of the older version, and again.
+      if ((said.version + said.write) % 3 !== 2) {
+        Object.assign(op, { type: 'version', v: 2, value: [`f${step % 3}`], data: { shape: step } });
+        said.version++;
+      } else {
+        Object.assign(op, { type: 'write', v: 1, data: { v: step, shape: 'old' } });
+        said.write++;
+      }
+      await storage.applyRemote([op]);
+    };
     let incs = 0;
     for (let step = 0; step < 80; step++) {
       const storage = storages[Math.floor(random() * storages.length)];
       const id = ids[Math.floor(random() * ids.length)];
       const roll = random();
+      if (step % 10 === 7) await migrate(storage, id, step);
       try {
         if (roll < 0.12) await storage.set(id, { v: step, by: storage.nodeId.slice(0, 4) });
         else if (roll < 0.18) await storage.update(id, { [`f${step % 3}`]: step });
@@ -589,16 +612,22 @@ const runSyncEngineTests = async (t, assert, createStorage) => {
         assert.deepStrictEqual(a, b, `${storage.nodeId.slice(0, 4)} ${id}: the shadow kept by the changes`);
       }
     }
-    // The sequence blocks and the move logs agree too, not only what they read as.
+    // The sequence blocks and the move logs agree too, not only what they read as — and the version each record
+    // is of, with the stamp that decided it: the newest write or version op, whatever order they came in.
     const blocks = async (storage) => {
       const out = {};
       for (const record of (await storage.snapshot()).records) {
-        out[record.id] = { blocks: record.meta.blocks ?? {} };
+        out[record.id] = { blocks: record.meta.blocks ?? {}, v: record.meta.v, vs: record.meta.vs };
       }
       return out;
     };
     const expected = await blocks(storages[0]);
     for (const other of storages.slice(1)) assert.deepStrictEqual(await blocks(other), expected);
+    assert.deepStrictEqual(said, { version: 6, write: 2 }, 'the walk said versions');
+    assert.ok(
+      ids.some((id) => expected[id].v !== undefined),
+      'a record took one',
+    );
     assert.strictEqual((await storages[0].get('c1')).count, incs, 'every inc counted once');
     // The past folds back to the present: every node, every record, at its own vector.
     for (const storage of storages) {

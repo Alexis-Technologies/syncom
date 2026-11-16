@@ -397,7 +397,7 @@ const dataAfter = (op, current) => {
   const data = current?.data ?? {};
   if (!isPlainObject(op.data)) return data;
   if (op.type === 'write' || op.type === 'merge') return op.data;
-  if (op.type === 'set') return { ...data, ...op.data };
+  if (op.type === 'set' || op.type === 'version') return { ...data, ...op.data };
   return data;
 };
 

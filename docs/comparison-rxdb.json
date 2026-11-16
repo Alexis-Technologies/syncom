@@ -1931,13 +1931,13 @@
         },
         "migration": {
           "mark": "✅",
-          "text": "lens on read (migrations, then the validator); the first local write to an old record rewrites it, `migrate()` rewrites the rest, idempotent",
-          "source": "src/schema/define.js; src/database.js:453-505; docs/guide/schema.md#rewriting-migrate",
-          "detail": "`migrate()` re-adds counters and sets after the whole-record write (checked by running: `{ migrated: 1, counters: 1 }`, then `{ migrated: 0 }`)."
+          "text": "lens on read (migrations, then the validator); the first local write to an old record migrates it, writing only the fields the lens changed; `migrate()` does the rest, idempotent",
+          "source": "src/schema/api.js migrateRecord; src/ops.js moveVersion; docs/guide/migration-schema.md#what-a-migration-writes",
+          "detail": "A field the lens leaves alone keeps its history: a text its runs and marks, a counter each node's count, so a concurrent edit still merges. `migrate()` counts the counters, sets, lists, texts and trees it had to lay again (checked by running: `{ migrated: 1, counters: 0, … }`, then `{ migrated: 0 }`)."
         },
         "readOld": {
           "mark": "✅",
-          "text": "read through the lens; a write allowed, which rewrites the record in the new shape first",
+          "text": "read through the lens; a write allowed, which migrates the record to the new shape first",
           "source": "docs/guide/migration-schema.md#write-to-a-record-not-yet-migrated; src/commit.js upgrading; src/schema/api.js migrateRecord"
         },
         "peerVersions": {

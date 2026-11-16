@@ -182,18 +182,6 @@ const realize = (action, patch, method) => {
   return ['mark', payload];
 };
 
-// A list or a text comes back as one run (a run per MAX_RUN elements); an
-// empty one is dropped.
-const migrate = (kind, key, value) => {
-  if (value.length === 0) return [];
-  const runs = inRuns([{ action: 'splice', field: key, index: 0, count: 0, content: value }]);
-  const out = [];
-  for (let i = 0; i < runs.length; i++) {
-    out.push(['splice', { key, index: runs[i].index, count: 0, content: runs[i].content }]);
-  }
-  return out;
-};
-
 // A text's marks laid again over the field `compact()` makes anew: the ones
 // in force, in stamp order, as `mark` patches (src/text/sequence.js marksIn).
 const compact = (entry, field, kind) => {
@@ -207,6 +195,25 @@ const compact = (entry, field, kind) => {
     patches.push(patch);
   }
   return patches;
+};
+
+// A list or a text comes back as one run (a run per MAX_RUN elements); an
+// empty one is dropped. `from` — `{ entry, field }`, where the content is a
+// text's that moves to another name as it reads (a schema migration's
+// rename) — brings what the reading leaves out: the markers of its embed
+// slots ride on the runs, and its marks are laid after them.
+const migrate = (kind, key, value, from = null) => {
+  if (value.length === 0) return [];
+  const moved = kind === 'text' && from !== null;
+  const context = moved ? { to: { embeds: { [key]: values(from.entry, from.field) ?? [] } } } : undefined;
+  const patches = recreate(key, kind, value, context);
+  if (moved) {
+    const marks = compact(from.entry, from.field, kind);
+    for (let i = 0; i < marks.length; i++) patches.push({ ...marks[i], field: key });
+  }
+  const out = [];
+  for (let i = 0; i < patches.length; i++) out.push(realize(patches[i].action, patches[i], 'migrate'));
+  return out;
 };
 
 // Who wrote the field: every run's, mark's and register's origin (the

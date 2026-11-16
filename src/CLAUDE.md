@@ -135,13 +135,11 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   it through `tests/utils/browser-env.js` — requiring `src/index.browser.js`
   alone does NOT redirect the nested requires; a browser twin calls its `prime()` right after requiring it and before its
   suite (a suite's mesh loads `src/utils.js`), and the priming throws if a shared module was loaded before it.
-- **A record id is checked where it enters, nowhere else.** `isRecordId` in
-  `src/shape.js` (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]`
-  (every local writer), `insert` (what `getId` minted), `admit` in
-  `src/apply.js` (the malformed check) and `mergeOne` in `src/bootstrap.js`;
-  `EntryStore.load` answers `null` for anything else. An id is a file name on
-  three platforms — do not widen the class, and do not add a writer that
-  reaches `EntryStore.write` without passing one of those.
+- **A record id is checked where it enters, nowhere else.** `isRecordId` in `src/shape.js`
+  (`[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`) guards `[COMMIT]` (every local writer), `insert` (what `getId` minted),
+  `admit` in `src/apply.js` (the malformed check) and `mergeOne` in `src/bootstrap.js`; `EntryStore.load` answers
+  `null` for anything else. An id is a file name on three platforms — do not widen the class, and do not add a writer
+  that reaches `EntryStore.write` without passing one of those.
 - **A peer's op is `wellFormed` or it is nothing.** `admit` (`src/apply.js`) checks
   `origin`/`scope` (no `@`, no control characters), `seq`/`ts` (positive safe
   integers), `type`, `v` and the id before reading anything else (`actor`
@@ -157,19 +155,16 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   `MAX_JSON_DEPTH` is a TypeError (`copyPayload` in src/commit.js); the 16
   levels between the bounds are what an op and a meta wrap around a value —
   keep them apart. Payload shape is `applyOp`'s business.
-- **`ops.js` walks own keys only.** `Object.keys` + `isKey` (`__proto__` is
-  never a field) + `own()` for every lookup into `meta.clock`/`meta.counters`;
-  `normalizeMeta` deep-copies a peer's meta into the trusted shape (under the
-  node's `pendingMax`), and `mergeEntry` joins a side alone with an empty
-  entry rather than copy it, so data its meta does not back never comes
-  along. A `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
-- **The chain is optional, the log is not.** Without the `chain` plugin, or under
-  `createDatabase({ chain: false })` with it, `core.chain` is null: `persistLocal`/`seal` in
-  `src/commit.js` and `#persistBatch` write `block: null`, `verify` is forced off,
-  `validate()` throws `NO_CHAIN` (the message says which of the two). A new place that reads
+- **`ops.js` walks own keys only.** `Object.keys` + `isKey` (`__proto__` is never a field) + `own()` for every lookup
+  into `meta.clock`/`meta.counters`; `normalizeMeta` deep-copies a peer's meta into the trusted shape (under the
+  node's `pendingMax`), and `mergeEntry` joins a side alone with an empty entry rather than copy it, so data its meta
+  does not back never comes along. A `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
+- **The chain is optional, the log is not.** Without the `chain` plugin, or under `createDatabase({ chain: false })`
+  with it, `core.chain` is null: `persistLocal`/`seal` in `src/commit.js` and `#persistBatch` write `block: null`,
+  `verify` is forced off, `validate()` throws `NO_CHAIN` (the message says which of the two). A new place that reads
   the chain must take null. A cold read is verified against its block (`validate(id, data, block)` through
-  `EntryStore`'s `verify`): the block read, parsed and hashed once and kept (`#blockOf`, `VERIFIED_BLOCKS`), so the
-  N records of a batch cost one hash each, never N parses of a block N long.
+  `EntryStore`'s `verify`): the block read, parsed and hashed once and kept (`#blockOf`, `VERIFIED_BLOCKS`), so the N
+  records of a batch cost one hash each, never N parses of a block N long.
 - **Live Records are weak.** `#records` holds `WeakRef`s (a
   `FinalizationRegistry` clears the slot); go through `#live(id)`, never
   `#records.get`. A Record the application still holds pins its cache entry;
@@ -196,9 +191,9 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   were appended; a reader of fewer slots ignores the rest, a reader of more takes an absent slot as null. Append,
   never reorder — the shape is on the wire between every pair of peers (the log itself stores keyed
   `{ seq, op, fp }` JSON; `packOps` — src/sync/wire.js — is for `push` and `changes` only). An op type is one
-  character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set ops). Once the package is published, an older reader
-  counts an unknown type as malformed and its stream stalls there — a new type, or a slot an older reader cannot
-  take as null, is then a `PROTOCOL` bump (`src/sync/protocol.js`).
+  character in `TYPE_CODES`/`CODE_TYPES` (`+`/`-` are the set ops; `version` has none: its name travels). Once the
+  package is published, an older reader counts an unknown type as malformed and its stream stalls there — a new
+  type, or a slot an older reader cannot take as null, is then a `PROTOCOL` bump (`src/sync/protocol.js`).
 - **A field may be a path; the op model keeps every path apart.** `profile/city`
   is a field of its own in every map of the meta (src/paths.js `isPath`:
   segments by `/`, at most MAX_PATH_DEPTH 16 and MAX_PATH 512, never
@@ -289,6 +284,9 @@ fi }` — what is the op's own origin's named short (a run by its stamp, an elem
   `MAX_RUN`, then a text's marks as `mark` patches (`marksIn` in
   src/text/sequence.js): a reset plus one op per field, one move per node —
   convergent through the reset rule.
+- **A record's schema version is a register of its own: `meta.v`, decided by the stamp `meta.vs`.** Last writer
+  wins by stamp alone, whatever the base, among a whole-record `write` and a `version` op; a field op says none.
+  The rule is `moveVersion` and the header of src/ops.js; what a `version` op carries, src/schema/CLAUDE.md.
 - **`applyOp` reports what the reading shows.** `changes` (src/ops.js) are
   in the write API's terms and the reading's indices: the path that applied
   the op pushes its own — `put`, `inc`, `add`/`remove` (the elements that

@@ -195,12 +195,12 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     const written = { name: 'Alioth', slug: 'alioth', orgId: 'org1', desc: 'A data modeler', $type: 'Project' };
     assert.deepStrictEqual(await b.get(project.id), written);
     assert.deepStrictEqual(await a.get(project.id), written, 'A (v1) applies the v2 ops as they are');
-    // migrate() rewrites the rest.
+    // migrate() migrates the rest.
     assert.deepStrictEqual(await b.migrate(), { migrated: 1, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 });
     await settle([a, b]);
     const migrated = { name: 'Mizar', slug: 'mizar', orgId: 'org1', desc: '', $type: 'Project' };
     assert.deepStrictEqual(await b.get(other.id), migrated);
-    assert.deepStrictEqual(await a.get(other.id), migrated, 'A (v1) applies the v2 write as it is');
+    assert.deepStrictEqual(await a.get(other.id), migrated, 'A (v1) applies the v2 op as it is');
     // What metaschema says of the change: a reader on v2 reads v1 data.
     assert.strictEqual(compatibility(diff(v1, model)), 'backward');
   });

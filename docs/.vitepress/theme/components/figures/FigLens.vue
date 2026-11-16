@@ -1,28 +1,30 @@
 <script setup lang="ts">
 // Schema versions: a record written under version 1 is read through the lens as version 2 (the migrations
-// from its version up, then the entity's validator) without being rewritten; a node on version 1 keeps
-// syncing and applies a newer op as written; migrate() rewrites the record as an ordinary op.
+// from its version up, then the entity's validator) without being written; a write to it migrates it first —
+// one `version` op carrying what the lens changed — and a node on version 1 keeps syncing and applies the newer
+// ops as written; migrate() does the same for the records nobody wrote to.
 // Depicts: src/schema/lens.js (the migrations from the record's version, then the validator; nothing
-// written), src/schema/api.js (migrate(): a whole-record write of the view under this version),
-// src/apply.js (an op from a newer version applied as it is, the `schema` event of kind `ahead`),
-// src/ops.js (the version a record was written under, in its meta).
+// written), src/schema/api.js (migrateRecord: the names the lens removed and the registers it wrote, as one
+// `version` op; migrate() per record), src/commit.js (a local field op on an older record migrates it first, in
+// one transaction), src/apply.js (an op from a newer version applied as it is, the `schema` event of kind
+// `ahead`), src/ops.js (the version a record is of, in its meta).
 import SyncFigure from './SyncFigure.vue';
 
 const steps = [
   'The phone runs schema version 1 and the server version 2, where a task’s title is called name. Both hold a task written under v1: { title }, with its version.',
   'On the server, get() reads it through the lens: the migration to 2 renames title to name, then the entity’s validator runs if it has one. The stored record does not change.',
-  'The server marks the task done. Its op carries v 2 and only that field, and the phone applies it as written, with a schema event of kind ahead.',
-  'migrate() on the server rewrites each record of an older version as a whole-record write of its view, under v2. The stored record now holds name.',
-  'The rewrite is an ordinary op, so it reaches the phone, which reads the record as written: name, not title. Run migrate() once the nodes that write have upgraded.',
+  'The server marks the task done. The write migrates the task first, in one transaction: an op that says the task is of v2 and carries what the lens changed (title removed, name written), then the op with the one field. The stored record now holds name.',
+  'Both are ordinary ops, so they reach the phone, which applies them as written, with a schema event of kind ahead, and reads name, not title. Nothing else of the task was written, so what the phone did to its other fields meanwhile still merges.',
+  'A task nobody writes to stays as it was stored. migrate() on the server migrates each of those the same way, one op per record. Run it on one node, once the nodes that write have upgraded.',
 ];
 
 const X = { server: 90, phone: 630 };
 const Y = 56;
-const serverField = (step: number) => (step >= 3 ? 'name' : 'title');
-const phoneField = (step: number) => (step >= 4 ? 'name' : 'title');
+const serverField = (step: number) => (step >= 2 ? 'name' : 'title');
+const phoneField = (step: number) => (step >= 3 ? 'name' : 'title');
 const MESSAGES = [
-  { step: 2, label: 'done · v 2' },
-  { step: 4, label: 'write · v 2' },
+  { step: 3, label: 'version · set' },
+  { step: 4, label: 'version · v 2' },
 ];
 </script>
 
@@ -41,18 +43,18 @@ const MESSAGES = [
       <text class="f-muted" x="20" y="102">stored</text>
       <rect class="f-card" x="20" y="110" width="230" height="56" rx="10" />
       <text class="f-muted" x="34" y="133">{{ serverField(step) }}</text>
-      <text :class="['f-text', { 'f-changed': step === 3 }]" x="84" y="133">Ship it</text>
+      <text :class="['f-text', { 'f-changed': step === 2 }]" x="84" y="133">Ship it</text>
       <g :class="{ 'f-hidden': step < 2 }">
         <text class="f-muted" x="34" y="155">done</text>
         <text :class="['f-text', 'f-mono', { 'f-changed': step === 2 }]" x="84" y="155">true</text>
       </g>
-      <text :class="['f-muted', 'f-mono', { 'f-changed': step === 3 }]" x="236" y="133" text-anchor="end">v {{ step >= 3 ? 2 : 1 }}</text>
+      <text :class="['f-muted', 'f-mono', { 'f-changed': step === 2 }]" x="236" y="133" text-anchor="end">v {{ step >= 2 ? 2 : 1 }}</text>
 
       <g :class="{ 'f-hidden': step < 1 }">
         <line class="f-link" x1="135" y1="168" x2="135" y2="178" />
         <rect class="f-cell" x="30" y="180" width="210" height="24" rx="12" />
         <text class="f-text" x="135" y="196" text-anchor="middle">
-          {{ step >= 3 ? 'already v 2: the validator only' : 'lens: migration 2, validator' }}
+          {{ step >= 2 ? 'already v 2: read as stored' : 'lens: migration 2, validator' }}
         </text>
         <line class="f-link" x1="135" y1="206" x2="135" y2="216" />
         <rect class="f-card" x="20" y="218" width="230" height="56" rx="10" />
@@ -69,13 +71,13 @@ const MESSAGES = [
       <text class="f-muted" x="470" y="102">stored, read as written</text>
       <rect class="f-card" x="470" y="110" width="230" height="56" rx="10" />
       <text class="f-muted" x="484" y="133">{{ phoneField(step) }}</text>
-      <text :class="['f-text', { 'f-changed': step === 4 }]" x="534" y="133">Ship it</text>
-      <g :class="{ 'f-hidden': step < 2 }">
+      <text :class="['f-text', { 'f-changed': step === 3 }]" x="534" y="133">Ship it</text>
+      <g :class="{ 'f-hidden': step < 3 }">
         <text class="f-muted" x="484" y="155">done</text>
-        <text :class="['f-text', 'f-mono', { 'f-changed': step === 2 }]" x="534" y="155">true</text>
+        <text :class="['f-text', 'f-mono', { 'f-changed': step === 3 }]" x="534" y="155">true</text>
       </g>
-      <text :class="['f-muted', 'f-mono', { 'f-changed': step === 4 }]" x="686" y="133" text-anchor="end">v {{ step >= 4 ? 2 : 1 }}</text>
-      <text :class="['f-muted', { 'f-hidden': step !== 2 }]" x="470" y="188">schema event: ahead</text>
+      <text :class="['f-muted', 'f-mono', { 'f-changed': step === 3 }]" x="686" y="133" text-anchor="end">v {{ step >= 3 ? 2 : 1 }}</text>
+      <text :class="['f-muted', { 'f-hidden': step !== 3 }]" x="470" y="188">schema event: ahead</text>
 
       <!-- the server's ops on their way -->
       <g
@@ -84,7 +86,7 @@ const MESSAGES = [
         :class="{ 'f-hidden': step !== m.step }"
         :style="{ transform: `translate(${step >= m.step ? 520 : 200}px, ${Y}px)` }"
       >
-        <rect class="f-peer-b" x="-46" y="-10" width="92" height="20" rx="10" />
+        <rect class="f-peer-b" x="-52" y="-10" width="104" height="20" rx="10" />
         <text class="f-packet-text" x="0" y="0">{{ m.label }}</text>
       </g>
     </template>

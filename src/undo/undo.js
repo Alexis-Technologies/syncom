@@ -38,6 +38,8 @@ const GLOBAL = '*';
 const touchedBy = (op) => {
   if (WHOLE.has(op.type)) return null;
   if (op.type === 'set') return Object.keys(op.data ?? {});
+  // A migration (`version`): the registers it wrote and the names it removed.
+  if (op.type === 'version') return Object.keys(op.data ?? {}).concat(op.value ?? []);
   return typeof op.key === 'string' ? [op.key] : [];
 };
 

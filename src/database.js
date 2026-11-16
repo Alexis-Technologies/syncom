@@ -628,7 +628,7 @@ class Database extends Emitter {
       catalog: this.#catalog,
       nodeId: this.#nodeId,
       version: this.#version,
-      // A record of an older version a local write is about to change: rewritten first, in the write's transaction
+      // A record of an older version a local write is about to change: migrated first, in the write's transaction
       // (the schema plugin's migrateRecord; null without a schema).
       upgrade: this.#upgrade,
       ahead: this.#ahead,

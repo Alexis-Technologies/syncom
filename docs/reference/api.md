@@ -100,7 +100,7 @@ naming the subpath; `@alexify/syncom/all` has both.
 | `has(id)` | `Promise<boolean>` | `false` for a tombstone |
 | `list()` | `Promise<string[]>` | Every live id, sorted — from the catalog, no I/O |
 | `check(entity, data)` | `Promise<unknown>` | Runs the entity's validator as a write would and returns its value; rejects with `ValidationError`; writes nothing. The `schema` plugin's: `PLUGIN_MISSING` without it, as is `migrate()` |
-| `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Rewrites records of an older schema version through the lens — a `write` of the view, then the counters and the sets added back, a list or a text as one run, a tree as one move per node (an empty one is dropped) — what a local write of a field to such a record does to it first; idempotent; `actor` rides on the ops it writes; a `TypeError` without `createDatabase({ schema })` (see [Reading across versions](../guide/migration-schema)) |
+| `migrate({ entities, batch = 100, actor }?)` | `Promise<{ migrated, counters, sets, lists, texts, trees }>` | Moves records of an older schema version to this one through the lens, each in a transaction of its own: one `version` op carrying what the lens changed — the names it removed, the registers it wrote — and nothing of what it left as it read (a text keeps its runs and marks, a counter its slots); a counter, a set, a list, a text or a tree the lens renamed or rewrote is laid again after it — what a local write of a field to such a record does to it first. Resolves to the records migrated and, per kind, the fields laid again; idempotent; `actor` rides on the ops it writes; a `TypeError` without `createDatabase({ schema })` (see [Versions and the lens](#versions-and-the-lens) and [Schema migration](../guide/migration-schema)) |
 | `set(id, data, options?)` | `Promise<void>` | Replaces the record (a `write` op); keeps `$type` — data naming another is a `TypeError` with `code: 'TYPE_IMMUTABLE'`; rejects with `FIELD_KIND` for a field held by another kind than a register. Every writer rejects an invalid id with `TypeError` `code: 'INVALID_ID'` |
 | `update(id, delta, { actor, ifMatch }?)` | `Promise<void>` (`Promise<boolean>` with `ifMatch`) | Sets the listed fields (a `set` op) — a key may be a path (`'profile/city'`, see [Paths](../guide/fields#edit-part-of-an-object)) — or, written in operators (`$set`, `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max`, `$rename`; every key one, or none: mixed is a `TypeError`), the ops each one means by the kind of its field, decided inside the queue and written as one transaction (see [Update operators](../guide/fields#update-operators-pick-the-kind-for-you)); with `ifMatch` (a Mango query, the `query` plugin's — `PLUGIN_MISSING` without it) the write is made only where the record matches it, inside the queue, and resolves to whether it was. Rejects with `NOT_FOUND` when absent, `FIELD_KIND` on a counter, set, list, text or tree field, or under a prefix one holds — an operator on a field of another kind the same (`$inc` on a register, `$addToSet` on a counter), nothing of the update written |
 | `unset(id, fields, { actor }?)` | `Promise<void>` | Removes fields of any kind — one name or an array of them (an `unset` op: the fields' own reset, which an older concurrent write of them loses to and a newer one makes them again); a field the record does not hold is no op, so an absent record is too, and a deleted one is `NOT_FOUND`; also on a collection and a `Document` |
@@ -892,7 +892,7 @@ carries for TypeScript: `Shapes`, `SchemaOutput<S>`, `SchemaInput<S>`,
 
 | Option | Where | Meaning |
 | --- | --- | --- |
-| `schema.version` | `createDatabase({ schema })` | A positive integer, default 1; on every op as `v`, on a record's last whole-record write as `meta.v` |
+| `schema.version` | `createDatabase({ schema })` | A positive integer, default 1; on every op as `v`, on a record as `meta.v` — what its newest whole-record write or migration said |
 | `schema.snapshot` | `createDatabase({ schema })` | Any JSON describing the schema (`model.toJSON()`); hashed into `schemaInfo.hash`, kept in `schema.json`, exchanged in hello — the same version with another hash on a peer is a `schema` event `{ kind: 'drift' }` |
 | `schema.entities[name]` | `createDatabase({ schema })`, `addCollections()` | `{ schema?, idField?, validate?, index?, unique?, fields?, search?, id?, refs?, methods?, statics? }`; `{}` is a bare collection; a plain object or a `Map`; any other key is a `TypeError` naming the keys it takes |
 | `schema.entities[name].schema` | | A Standard Schema (`~standard`: metaschema, zod, valibot, arktype), a function (returns the value, `true` or nothing for "as given", throws, or returns `false` with `fn.errors` as ajv does), or a plain object `validator.compile(schema, { entity })` turns into such a function; anything else is a `TypeError` |
@@ -911,7 +911,7 @@ carries for TypeScript: `Shapes`, `SchemaOutput<S>`, `SchemaInput<S>`,
 | `validator` | `createDatabase({ validator })` | `{ compile(schema, { entity }) }` for plain-object schemas; must return a function |
 | `db.check(entity, data)` | — | The validator's value, nothing written |
 | `db.schemaInfo` | — | `{ version, hash, previous, held }`; `null` without a schema — `previous` `{ version, hash }` of what the directory ran when it differs, `held` `{ replayed, lost }` under `ahead: 'hold'` (see [Versions and the lens](#versions-and-the-lens)) |
-| `db.migrate(options?)` | — | `{ migrated, counters, sets, lists, texts, trees }` — how many records, then how many fields of each kind made again |
+| `db.migrate(options?)` | — | `{ migrated, counters, sets, lists, texts, trees }` — how many records, then how many fields of each kind were laid again (none where the lens changed registers alone) |
 
 ### What a metaschema entity brings
 
@@ -931,8 +931,11 @@ zod's `shape` and valibot's `entries` are read for `idField` the way `fields` is
 
 ### Versions and the lens
 
-`schema.version` is stamped on every op this node makes as `v`, and a record remembers the version of its
-last whole-record write as `meta.v`, which tells a node on another version which shape the record is in.
+`schema.version` is stamped on every op this node makes as `v`, and a record remembers the version it is of as
+`meta.v`, which tells a node on another version which shape the record is in: the `v` of its newest whole-record
+`write` or `version` op (a migration), last writer wins by the op's stamp (`meta.vs`), so every node agrees on it
+whatever order the ops arrived in — a whole-record write of an older version stamped after a migration makes the
+record that version again.
 `schema.json` (the root kv namespace, `{ version, migrated, hash }`) remembers the version and the snapshot
 hash this directory last ran: when either differs at open, `schemaInfo.previous` is `{ version, hash }` of
 what it was — an upgrade to run `migrate()` after, a snapshot change of the same version (`schema.changed`,
@@ -955,18 +958,36 @@ as it was written. A write validates the record as it reads and carries only the
 
 A local op of a field — `set` (an `update()`, a `swap()`, `modify()`'s difference), `unset`, `inc`, `add`,
 `remove`, a list, text or tree op, in a transaction or alone — on a live record whose `meta.v` is below this
-version first rewrites the record as `migrate()` would: a whole-record `write` of its view at this version, its
-fields of other kinds made again, then the op — one transaction, one turn, so nothing reads the record in between
-(the lens, run over the record and the op's fields at once, would read them over). The rewrite is not validated
-alone: the op after it is, over the record as both leave it. An op made alone that makes nothing (a `swap()`
-mismatch, an `unset` of nothing) throws the transaction away, the rewrite with it; a whole-record write needs none; an editor's handle
-(`openText()`) edits the record as it is.
+version first migrates the record as `migrate()` would, then the op — one transaction, one turn, so nothing reads
+the record in between (the lens, run over the record and the op's fields at once, would read them over). The
+migration is not validated alone: the op after it is, over the record as they leave it. An op made alone that
+makes nothing (a `swap()` mismatch, an `unset` of nothing) throws the transaction away, the migration with it; a
+whole-record write needs none; an editor's handle (`openText()`) edits the record as it is.
 
-`migrate({ entities, batch, actor })` rewrites what the lens only reads: every record of an older version
-becomes a whole-record `write` of its view, at this version, then its fields of other kinds made again — an
-`inc` per counter, an `add` per set, one `splice` per list or text, one move per tree node. Run it on one
-node after an upgrade; the peers receive ordinary ops. It is idempotent (a record a local write rewrote first is
-current already), and `entities` keeps it to those collections.
+The migration of one record is one `version` op and, rarely, the ops that lay a field again. The record is
+compared as it reads, name by name (a top-level name with everything under it), stored against lensed:
+
+- A name the lens left as it read is not written, whatever its kind: a text keeps its runs, their authors and its
+  marks, a counter its slots, a set its tags, a list and a tree their elements and moves, every stamp as it was.
+  A peer's op on such a field — made before or after it heard of the migration — lands as on any record.
+- A name the lens removed is unset, and a register it wrote or added is set, both by the `version` op itself, at
+  its stamp.
+- A counter, a set, a list, a text or a tree the lens rewrote is unset by the `version` op and laid again after
+  it from what it reads as now — one `inc`, one `add`, one `splice` per list or text, one move per tree node —
+  where the new value is still one of that kind; a new name that reads exactly as a removed counter, set, list,
+  text or tree did is that field renamed, laid the same way under the new name — a renamed text with its marks
+  and the values of its embeds, a rewritten one without. Its earlier state is gone with the unset: who wrote
+  what, the cursors into it, a peer's op on the old field stamped below the migration. Two migrations of one record leave such a field laid once, the later one's — unless their stamps
+  interleave (two nodes migrating within the same milliseconds), where both lay it.
+- A value of another type than the kind reads as, and a name with paths (or a list's or a tree's members' fields)
+  under it that the lens changed, are written as registers. A set, a list, a text or a tree that reads empty after
+  the lens is left out — no op makes an empty one — so the record holds no such field until the kind's next op.
+
+`migrate({ entities, batch, actor })` migrates what the lens only reads: every live record of an older version,
+each in a transaction of its own, read again inside the queue (one a local write or a peer migrated meanwhile is
+left alone). It resolves to `{ migrated, counters, sets, lists, texts, trees }` — the records, then the fields of
+each kind laid again. Run it on one node after an upgrade; the peers receive ordinary ops. It is idempotent, and
+`entities` keeps it to those collections.
 
 An op from a **newer** version is `ahead`: `'apply'` applies it as it is, unvalidated (registers are
 forward-tolerant; the validator does not know its shape), with the `schema` event `{ kind: 'ahead', op,

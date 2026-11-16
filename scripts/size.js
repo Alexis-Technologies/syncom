@@ -211,7 +211,11 @@ const ENTRIES = [
   // a record outside the pusher's scopes logged as one (apply.js refuse, header.js withholdOp; 2026-11-15); with delete
   // wins (the guard on a field op of a deleted record) and a local write to a record of an older schema version
   // migrated first, in one transaction (2026-11-15), 78.2 together. 78.4, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.4 },
+  // 78.6 with a record's schema version a register of its own — `meta.vs`, the `version` op that says it and carries
+  // what a migration changed (ops.js moveVersion), a set that makes a record made as one (2026-11-16). 78.6, raised by name.
+  // 78.6 (over by bytes) with that and the seam a follower hub's upload reaches the engine's blobs store through
+  // (database.js blobStore; 2026-11-16) together. 78.7, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.7 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -494,7 +498,10 @@ const ENTRIES = [
   // 183.1 (over by bytes) with the uploads that wait kept on disk (src/sync/uploads.js; 2026-11-16). 183.2, raised
   // by name. 183.6 with a follower hub taking a peer's upload (blobPut's "not yet", the hub's memory of what it
   // forwarded, the inbox's `landed` entry; 2026-11-16), over by bytes. 183.7, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 183.7 },
+  // 184.4 with a migration that writes what the lens changed and nothing else — the `version` op, the version a
+  // register of its own, a record compared name by name, a renamed or rewritten field laid again by its kind, a
+  // renamed text with its marks and embeds (2026-11-16). 184.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 184.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -659,7 +666,10 @@ const ENTRIES = [
     // 6.6 with the id named by the data, a composite id and the declared references read off a schema's relations
     // (collections plan, C1.2–C1.8). 7, raised by name.
     // 7.0 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 7. 7.25, raised by name.
-    budget: 7.25,
+    // 8.6 with a migration that writes what the lens changed (migrateRecord: the record compared name by name, a
+    // rename told by its value) — src/compose.js rides along, which an app bundle shares with the core
+    // (2026-11-16). 8.6, raised by name.
+    budget: 8.6,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
@@ -722,7 +732,9 @@ const ENTRIES = [
     // raised by name.
     // 41.1 with the writer's methods for the sync blocks, the tabs and the blobs it bundles with the core's write path
     // (review №7, E9; 2026-11-07). 41.5, raised by name.
-    budget: 41.5,
+    // 41.7 with the op model's `version` op and the version's stamp (`meta.vs`) it bundles with the write path
+    // (2026-11-16). 41.7, raised by name.
+    budget: 41.7,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.

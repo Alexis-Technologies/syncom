@@ -47,28 +47,34 @@ console.log(rows.length); // 1
 // #endregion query
 assert.equal(rows.length, 1);
 
-const changes = [];
-board.on('change', (op) => changes.push([op.type, op.v]));
 // #region write-old
-// A write to a record still of version 1 rewrites the record at version 2 first, in the same transaction.
+// A write to a record still of version 1 migrates the record to version 2 first, in the same transaction.
+const logged = [];
+board.on('change', (op) => logged.push(op));
 await board.Task.update(release.id, { name: 'Plan the 2.0 release' });
-console.log(await board.Task.get(release.id)); // { done: false, name: 'Plan the 2.0 release', $type: 'Task' }
+
+console.log(logged.map((op) => op.type)); // [ 'version', 'set' ]: the migration, then your write
+console.log(logged[0].value, logged[0].data); // [ 'title' ] { name: 'Plan the release' }: what the lens changed
+console.log(await board.Task.get(release.id)); // { done: false, $type: 'Task', name: 'Plan the 2.0 release' }
 console.log(board.getCachedData(release.id)); // the same: stored at version 2 now
 // #endregion write-old
 const renamed = { done: false, name: 'Plan the 2.0 release', $type: 'Task' };
 assert.deepEqual(await board.Task.get(release.id), renamed);
 assert.deepEqual(board.getCachedData(release.id), renamed);
-assert.deepEqual(changes, [
-  ['write', 2],
-  ['set', 2],
-]);
+assert.deepEqual(
+  logged.map((op) => [op.type, op.v, op.value, op.data]),
+  [
+    ['version', 2, ['title'], { name: 'Plan the release' }],
+    ['set', 2, undefined, { name: 'Plan the 2.0 release' }],
+  ],
+);
 
 // #region migrate
 if (board.schemaInfo.previous) {
   const result = await board.migrate();
   console.log(result); // { migrated: 1, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 }
 }
-console.log(board.getCachedData(task.id)); // { done: false, name: 'Write the docs', $type: 'Task' }
+console.log(board.getCachedData(task.id)); // { done: false, $type: 'Task', name: 'Write the docs' }
 // #endregion migrate
 assert.deepEqual(board.getCachedData(task.id), { done: false, name: 'Write the docs', $type: 'Task' });
 assert.equal((await board.migrate()).migrated, 0, 'idempotent');
@@ -108,6 +114,29 @@ await server.Task.insert({ name: 'Another one' });
 await settle(mesh.storages);
 assert.equal(aheads.length, 1);
 assert.deepEqual([aheads[0].kind, aheads[0].held, aheads[0].op.v], ['ahead', false, 2]);
+
+// #region keep-text
+// The phone (version 1) wrote a task with notes, a text.
+const plan = await phone.Task.insert({ title: 'Plan the offsite' });
+await phone.splice(plan.id, 'notes', 0, 0, 'Book the venue');
+await settle(mesh.storages);
+
+// The phone goes offline and keeps typing.
+const link = mesh.links.get('mem://server');
+link.disconnect();
+await phone.splice(plan.id, 'notes', 14, 0, ' by Friday');
+
+// Meanwhile the server writes to the task, which migrates it: `title` becomes `name`, `notes` is not touched.
+await server.Task.update(plan.id, { done: true });
+
+await link.reconnect();
+await settle(mesh.storages);
+console.log(await server.Task.get(plan.id));
+// { $type: 'Task', notes: 'Book the venue by Friday', name: 'Plan the offsite', done: true }
+// #endregion keep-text
+const kept = { notes: 'Book the venue by Friday', name: 'Plan the offsite', done: true, $type: 'Task' };
+assert.deepEqual(await server.Task.get(plan.id), kept);
+assert.deepEqual(await phone.Task.get(plan.id), kept, 'the phone reads the record as version 2 wrote it');
 await mesh.close();
 
 // #region hold

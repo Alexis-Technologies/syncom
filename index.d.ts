@@ -251,6 +251,7 @@ export type SyncOpType =
   | 'set'
   | 'inc'
   | 'unset'
+  | 'version'
   | 'add'
   | 'remove'
   | 'splice'
@@ -441,13 +442,13 @@ export interface SyncOp {
   vector?: VersionVector;
   /** `merge`/`advance`: the node whose snapshot this came from. */
   from?: string;
-  /** `write`/`set`: the fields; `merge`: the joined entry's data. */
+  /** `write`/`set`: the fields; `version`: the registers a migration wrote; `merge`: the joined entry's data. */
   data?: Record<string, unknown>;
   /** `merge`: the joined entry's metadata. */
   meta?: EntryMeta;
   /** `inc`, `add`, `remove`: the field. */
   key?: string;
-  /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed. */
+  /** `inc`: the amount added; `add`: the elements; `remove`: the elements with the tags the remover observed; `unset`, `version`: the names removed. */
   value?:
     | number
     | readonly unknown[]
@@ -457,7 +458,11 @@ export interface SyncOp {
     | MovePayload
     | MarkPayload
     | TreePayload;
-  /** The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. */
+  /**
+   * The schema version of the node that made it; absent without a schema, and on `merge`/`advance`. On a `write`
+   * and a `version` it is the version the record is of from the op's stamp on (the newest stamp of the two kinds
+   * decides: `EntryMeta.v`).
+   */
   v?: number;
   /** Who made it — `open({ actor })` or the write's own; a claim the origin signed, not a proof of identity. Absent on `merge`/`advance`. */
   actor?: string;
@@ -500,8 +505,13 @@ export interface EntryMeta {
   sets: { [field: string]: { [elementKey: string]: { [origin: string]: readonly [number, number] } } };
   /** A field of a plugin's kind — a list or a text (SequenceBlock), a tree (TreeBlock) — by field; `k` names the kind, `ts` the newest stamp the block holds. */
   blocks: { [field: string]: SequenceBlock | TreeBlock };
-  /** The schema version of the last whole-record write (or of the `set` that created the entry). */
+  /**
+   * The schema version the record is of: what the newest `write` or `version` op said (a `version` op is a
+   * migration's — and a `set` that made the record, made as one); absent where none said one, read as 1.
+   */
   v?: number;
+  /** The stamp of the op that decided `v`: last writer wins, whatever order the ops arrived in. Present with `v`. */
+  vs?: ClockStamp;
   /** The stamp of a `purge`: the record is gone for good, whatever lands later. */
   purged?: ClockStamp | null;
 }
@@ -1368,7 +1378,7 @@ export interface SharedLogOptions {
 export interface WriteContext {
   type: Exclude<SyncOpType, 'advance'>;
   id: string;
-  /** The whole record for `write`, the delta for `set`, the joined data for `merge`. */
+  /** The whole record for `write`, the delta for `set`, the registers a migration writes for `version`, the joined data for `merge`. */
   data?: Record<string, unknown>;
   /** `inc`, `add`, `remove`, `splice`, `assign`, `move`, `mark`, `tree`: the field. */
   key?: string;
@@ -2710,10 +2720,12 @@ export interface Database {
    */
   check(entity: string, data: unknown): Promise<unknown>;
   /**
-   * Rewrites every record of an older schema version as this one, through
-   * the lens — a whole-record write of the view, the counters and the sets
-   * added back (a set with nothing live is dropped). Idempotent; `entities`
-   * limits it to those collections.
+   * Moves every record of an older schema version to this one, through the lens: per record one `version` op
+   * carrying what the lens changed — the names it removed, the registers it wrote — in a transaction of its own.
+   * What the lens left as it read is not written: a text keeps its runs and marks, a counter its slots. A
+   * counter, a set, a list, a text or a tree the lens renamed or rewrote is laid again by its kind. Resolves to
+   * the records migrated and, per kind, the fields laid again. Idempotent; `entities` limits it to those
+   * collections.
    */
   migrate(options?: {
     entities?: readonly string[];

@@ -46,14 +46,24 @@
 //                 block applies an op, joins with a peer's, prunes under a
 //                 reset and reads is the plugin's — why it converges is argued
 //                 there. data[f] is what the plugin renders.
-//   v           — the schema version of the last whole-record write (the op's
-//                 `v`, absent on a node without a schema): what a reader on
-//                 a newer schema lenses the record through. A `set` that
-//                 creates the entry takes its op's `v`; a later `set`, `inc`
-//                 or `delete` leaves it; a merge takes the higher one. (A
-//                 node's own field op on a record of an older version than
-//                 its own is preceded by a `write` that migrates it —
-//                 src/commit.js `upgrading` — so the op lands on that.)
+//   v, vs       — the schema version the record is of, and the stamp of the
+//                 op that said so: what a reader on a newer schema lenses
+//                 the record through (absent: no op said one — read as 1).
+//                 A register of its own, LAST WRITER WINS by `vs` among the
+//                 two ops that say a version — a whole-record `write` (the
+//                 record is in its writer's shape) and a `version` (a
+//                 migration: the record moved to its `v`, with the fields
+//                 the lens removed and the registers it wrote; and a `set`
+//                 that makes a record, made as one) — each by its own stamp
+//                 and its own `v`, whatever the base is, so the version is
+//                 the same whatever order they arrive in: a `write` of an
+//                 older version stamped above a migration makes the record
+//                 that older version again, one stamped below it does not. A
+//                 `set`, an `inc`, a `delete` leave it; a merge takes the
+//                 pair with the newer `vs`. (A node's own field op on a
+//                 record of an older version than its own is preceded by
+//                 the `version` op that migrates it — src/commit.js
+//                 `upgrading` — so the op lands on that.)
 //   purged      — the stamp of a `purge`: the record is gone for good. It
 //                 wins over every other op at any stamp (a purge is a right
 //                 to be forgotten, not a race), the entry holds no data, and
@@ -187,6 +197,7 @@ const cloneEntry = (entry) => {
     gone: { ...goneOf(entry.meta) },
   };
   if (entry.meta.v !== undefined) meta.v = entry.meta.v;
+  if (entry.meta.vs !== undefined) meta.vs = entry.meta.vs;
   if (entry.meta.purged !== undefined) meta.purged = entry.meta.purged;
   // Nothing a plugin cached on the entry comes along: a block read from a
   // file is hydrated once through the plugin's own cache, keyed by the plain
@@ -443,7 +454,12 @@ const normalizeOnce = (meta, bounds, dropped) => {
       for (const field of Object.keys(map)) if (!allowed.has(field)) delete map[field];
     }
   }
-  if (Number.isInteger(meta.v)) normalized.v = meta.v;
+  // The version and the stamp that decided it, both or neither: a version no stamp backs would win nowhere.
+  const vs = stampOf(meta.vs);
+  if (Number.isInteger(meta.v) && meta.v >= 1 && vs) {
+    normalized.v = meta.v;
+    normalized.vs = vs;
+  }
   const purged = stampOf(meta.purged);
   if (purged) normalized.purged = purged;
   return normalized;
@@ -457,10 +473,10 @@ const normalizeOnce = (meta, bounds, dropped) => {
 // holds); a peer's raw meta is rebuilt first, under `limits`.
 const latestClock = (meta, trusted = false, limits = null) => {
   if (!isPlainObject(meta)) return null;
-  const { clock, base, deleted, counters, sets, blocks, gone, purged } = trusted
+  const { clock, base, deleted, counters, sets, blocks, gone, purged, vs } = trusted
     ? { ...meta, sets: setsOf(meta), blocks: blocksOf(meta), gone: goneOf(meta) }
     : normalizeMeta(meta, limits);
-  let latest = maxClock(maxClock(base, deleted), purged ?? null);
+  let latest = maxClock(maxClock(maxClock(base, deleted), purged ?? null), vs ?? null);
   for (const field of Object.keys(gone)) latest = maxClock(latest, gone[field]);
   for (const field of Object.keys(blocks)) latest = maxClock(latest, [blocks[field].ts, '']);
   for (const field of Object.keys(clock)) latest = maxClock(latest, clock[field]);
@@ -973,6 +989,8 @@ const erase = (entry, stamp, delta) => {
   meta.sets = {};
   meta.blocks = {};
   meta.gone = {};
+  delete meta.v;
+  delete meta.vs;
   // Canonical: whatever came before, a purged entry looks the same, so two
   // nodes that saw the purge and a write in either order hold one meta.
   meta.purged = maxClock(meta.purged ?? null, stamp);
@@ -982,7 +1000,16 @@ const erase = (entry, stamp, delta) => {
 
 // The op types the core applies itself; every other type of the protocol
 // is a plugin's (or, with no plugin for it here, a refusal).
-const CORE_TYPES = new Set(['purge', 'set', 'unset', 'write', 'delete', 'merge', 'inc', 'add', 'remove']);
+const CORE_TYPES = new Set(['purge', 'set', 'unset', 'write', 'version', 'delete', 'merge', 'inc', 'add', 'remove']);
+
+// The version an op says the record is of (`write`, `version`), taken where its stamp is the newest that said
+// one: last writer wins by stamp alone — never by the base, which a `delete` moves too and a stale `write`
+// does not — so the pair is the same whatever order the ops arrive in. An op without a version says none.
+const moveVersion = (meta, op, stamp) => {
+  if (!Number.isInteger(op.v) || compareClock(stamp, meta.vs) <= 0) return;
+  meta.v = op.v;
+  meta.vs = stamp;
+};
 
 /**
  * Applies one op to an entry (null for a record this node has never seen).
@@ -1048,23 +1075,35 @@ const applyOp = (previous, op, limits = null, lost = null) => {
 
   if (op.type === 'set') {
     if (!isPlainObject(op.data)) malformed(null, rejected);
-    else {
-      if (!previous && Number.isInteger(op.v)) meta.v = op.v;
-      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes, lost);
-    }
+    else applyFields(entry, op.data, stamp, delta, rejected, plugins, changes, lost);
   } else if (op.type === 'unset') {
     if (!Array.isArray(op.value)) malformed(null, rejected);
     else applyUnset(entry, op.value, stamp, delta, plugins);
+  } else if (op.type === 'version') {
+    // The record is of the op's `v` from its stamp on, and what a migration changed lands with it, at that
+    // stamp: the fields the lens removed (`value`, as an `unset`), then the registers it wrote (`data`, as a
+    // `set`) — one op, so a reader, a validator and a peer see the record in the new shape or the old, never
+    // between. Nothing is reset: what the op does not name keeps its state.
+    const { data, value } = op;
+    if ((data !== undefined && !isPlainObject(data)) || (value !== undefined && !Array.isArray(value))) {
+      malformed(null, rejected);
+    } else {
+      moveVersion(meta, op, stamp);
+      if (value !== undefined) applyUnset(entry, value, stamp, delta, plugins);
+      if (data !== undefined) applyFields(entry, data, stamp, delta, rejected, plugins, changes, lost);
+    }
   } else if (op.type === 'write') {
     if (!isPlainObject(op.data)) malformed(null, rejected);
-    else if (compareClock(stamp, meta.base) > 0) {
-      meta.base = stamp;
-      // A write above the tombstone is a revival; dropping the stale stamp
-      // keeps the metadata identical whichever order the two arrived in.
-      if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
-      if (Number.isInteger(op.v)) meta.v = op.v;
-      applyBase(entry, delta, plugins);
-      applyFields(entry, op.data, stamp, delta, rejected, plugins, changes, lost);
+    else {
+      moveVersion(meta, op, stamp);
+      if (compareClock(stamp, meta.base) > 0) {
+        meta.base = stamp;
+        // A write above the tombstone is a revival; dropping the stale stamp
+        // keeps the metadata identical whichever order the two arrived in.
+        if (compareClock(meta.deleted, meta.base) < 0) meta.deleted = null;
+        applyBase(entry, delta, plugins);
+        applyFields(entry, op.data, stamp, delta, rejected, plugins, changes, lost);
+      }
     }
   } else if (op.type === 'delete') {
     if (compareClock(stamp, meta.base) > 0) {
@@ -1155,11 +1194,13 @@ const applyOp = (previous, op, limits = null, lost = null) => {
     }
   }
 
+  // The version's stamp moved: news to persist where the reading stays (a migration that changed no field).
   const before = previous ? previous.meta : null;
   const changed =
     Object.keys(delta).length > 0 ||
     meta.base !== (before ? before.base : null) ||
-    meta.deleted !== (before ? before.deleted : null);
+    meta.deleted !== (before ? before.deleted : null) ||
+    meta.vs !== (before ? before.vs : undefined);
   return outcome(changed);
 };
 
@@ -1229,7 +1270,12 @@ const mergeEntry = (a, b, limits = null) => {
       if (isKey(field)) meta.gone[field] = maxClock(own(meta.gone, field) ?? null, gone[field]);
     }
   }
-  if (a.meta.v !== undefined || b.meta.v !== undefined) meta.v = Math.max(a.meta.v ?? 0, b.meta.v ?? 0);
+  // The version of the side whose stamp for it is newer (`moveVersion`'s rule, joined).
+  const versioned = compareClock(a.meta.vs, b.meta.vs) >= 0 ? a.meta : b.meta;
+  if (versioned.vs !== undefined && versioned.v !== undefined) {
+    meta.v = versioned.v;
+    meta.vs = versioned.vs;
+  }
   // A purge on either side is the whole result: nothing to join.
   const purged = maxClock(a.meta.purged ?? null, b.meta.purged ?? null);
   if (purged) {

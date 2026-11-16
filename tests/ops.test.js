@@ -478,33 +478,197 @@ test('ops module', async (t) => {
     assert.deepStrictEqual(mergeEntry(cnt, reg).data, { n: 'text' });
   });
 
-  await t.test('meta.v is the schema version of the last whole-record write', () => {
+  await t.test('meta.v is the version the newest write or version op said, by that op’s own stamp', () => {
     const fresh = applyOp(null, op('set', 1, 'A', { data: { x: 1 }, v: 2 }));
-    assert.strictEqual(fresh.entry.meta.v, 2, 'a set that creates the entry takes its v');
-    const later = applyOp(fresh.entry, op('set', 2, 'B', { data: { x: 2 }, v: 3 }));
+    assert.strictEqual(fresh.entry.meta.v, undefined, 'a set says no version — the one that makes the record neither');
+    const made = applyOp(null, op('version', 1, 'A', { data: { x: 1 }, v: 2 }));
+    assert.deepStrictEqual(
+      [made.entry.meta.v, made.entry.meta.vs, made.entry.data, made.changed],
+      [2, [1, 'A'], { x: 1 }, true],
+      'a version op does, with the registers it carries',
+    );
+    const later = applyOp(made.entry, op('set', 2, 'B', { data: { x: 2 }, v: 3 }));
     assert.strictEqual(later.entry.meta.v, 2, 'a later set leaves it');
     const incremented = applyOp(later.entry, op('inc', 3, 'B', { seq: 3, key: 'n', value: 1, v: 3 }));
     assert.strictEqual(incremented.entry.meta.v, 2);
     const written = applyOp(incremented.entry, op('write', 4, 'B', { data: { x: 3 }, v: 3 }));
-    assert.strictEqual(written.entry.meta.v, 3, 'a write sets it');
+    assert.deepStrictEqual([written.entry.meta.v, written.entry.meta.vs], [3, [4, 'B']], 'a write sets it');
     const stale = applyOp(written.entry, op('write', 1, 'C', { data: { x: 0 }, v: 9 }));
-    assert.strictEqual(stale.entry.meta.v, 3, 'a stale write does not');
+    assert.deepStrictEqual([stale.entry.meta.v, stale.changed], [3, false], 'a stale write does not');
     const deleted = applyOp(written.entry, op('delete', 5, 'B', { v: 4 }));
-    assert.strictEqual(deleted.entry.meta.v, 3);
+    assert.strictEqual(deleted.entry.meta.v, 3, 'a delete leaves it');
     const unversioned = applyOp(written.entry, op('write', 6, 'D', { data: { x: 4 } }));
-    assert.strictEqual(unversioned.entry.meta.v, 3, 'a write without v keeps the last one');
+    assert.deepStrictEqual(
+      [unversioned.entry.meta.v, unversioned.entry.meta.vs],
+      [3, [4, 'B']],
+      'a write without v says none',
+    );
     assert.strictEqual(applyOp(null, op('write', 1, 'A', { data: { x: 1 } })).entry.meta.v, undefined);
     assert.strictEqual('v' in createEntry().meta, false);
-    // Merges take the higher one; a peer meta is normalized.
+    // A version op that names no field changes none and is news all the same; applied again it is nothing.
+    const moved = applyOp(written.entry, op('version', 7, 'C', { v: 4 }));
+    assert.deepStrictEqual([moved.changed, moved.delta, moved.changes, moved.entry.meta.v], [true, {}, [], 4]);
+    assert.strictEqual(applyOp(moved.entry, op('version', 7, 'C', { v: 4 })).changed, false, 'idempotent');
+    const bad = applyOp(written.entry, op('version', 8, 'C', { v: 4, value: 'title' }));
+    assert.deepStrictEqual(
+      [bad.changed, bad.rejected, bad.entry.meta.v],
+      [false, [{ field: null, reason: 'malformed' }], 3],
+    );
+    // A merge takes the pair of the newer stamp — an older version too; a peer's meta is normalized.
     const a = replay([op('write', 1, 'A', { data: { x: 1 }, v: 2 })]);
     const b = replay([op('write', 2, 'B', { data: { y: 1 }, v: 5 })]);
     assert.strictEqual(mergeEntry(a, b).meta.v, 5);
     assert.strictEqual(mergeEntry(b, a).meta.v, 5);
     assert.strictEqual(mergeEntry(a, replay([op('write', 3, 'C', { data: {} })])).meta.v, 2);
+    const older = replay([op('write', 9, 'C', { data: { z: 1 }, v: 1 })]);
+    assert.deepStrictEqual([mergeEntry(b, older).meta.v, mergeEntry(older, b).meta.vs], [1, [9, 'C']]);
     const merged = applyOp(null, op('merge', 1, 'A', { data: { x: 1 }, meta: { ...a.meta, v: '7' } }));
     assert.strictEqual(merged.entry.meta.v, undefined, 'a non-integer v is dropped');
+    const unbacked = applyOp(null, op('merge', 1, 'A', { data: { x: 1 }, meta: { ...a.meta, vs: [1.5, 'A'] } }));
+    assert.deepStrictEqual(
+      [unbacked.entry.meta.v, 'vs' in unbacked.entry.meta],
+      [undefined, false],
+      'and one no stamp backs',
+    );
     const joined = applyOp(a, op('merge', 1, 'A', { data: b.data, meta: b.meta }));
     assert.strictEqual(joined.entry.meta.v, 5);
+    // The stamp is one a node observes before it writes; a purge takes the pair with the rest.
+    assert.deepStrictEqual(latestClock(moved.entry.meta, true), [7, 'C']);
+    assert.deepStrictEqual(latestClock({ ...a.meta, vs: [99, 'Z'] }), [99, 'Z']);
+    const purged = applyOp(moved.entry, op('purge', 8, 'A')).entry;
+    assert.deepStrictEqual(['v' in purged.meta, 'vs' in purged.meta], [false, false]);
+    assert.deepStrictEqual(mergeEntry(moved.entry, purged).meta, purged.meta);
+  });
+
+  await t.test('the version is last writer wins among writes and version ops, in every order of arrival', () => {
+    const versionOf = (ops) => {
+      const { meta } = replay(ops);
+      return [meta.v, meta.vs];
+    };
+    // Version 2 renamed `title` to `name`. A (version 1) wrote the record; B (version 2) migrates it and edits it.
+    const made = op('write', 1, 'A', { seq: 1, data: { title: 'a' }, v: 1 });
+    const migrated = op('version', 5, 'B', { seq: 1, value: ['title'], data: { name: 'a' }, v: 2 });
+    const edited = op('set', 6, 'B', { seq: 2, data: { done: true }, v: 2 });
+    assertCommutes([made, migrated, edited], { name: 'a', done: true });
+    assert.deepStrictEqual(versionOf([made, migrated, edited]), [2, [5, 'B']]);
+    // A, not having heard, writes the record whole again — stamped above the migration: the record is A's
+    // again, in A's shape and of A's version.
+    const above = op('write', 9, 'A', { seq: 2, data: { title: 'b' }, v: 1 });
+    assertCommutes([made, migrated, edited, above], { title: 'b' });
+    assert.deepStrictEqual(versionOf([migrated, made, above, edited]), [1, [9, 'A']]);
+    // …stamped below it (a clock behind): the migration stands over that write, whichever came first.
+    const below = op('write', 3, 'A', { seq: 2, data: { title: 'b', note: 'n' }, v: 1 });
+    assertCommutes([made, migrated, edited, below], { name: 'a', done: true, note: 'n' });
+    assert.deepStrictEqual(versionOf([migrated, edited, made, below]), [2, [5, 'B']]);
+    // Two nodes that migrate at once: one reading, one version — the later stamp's, which says the same.
+    const twice = op('version', 6, 'C', { seq: 1, value: ['title'], data: { name: 'a' }, v: 2 });
+    assertCommutes([made, migrated, twice, edited], { name: 'a', done: true });
+    assert.deepStrictEqual(versionOf([twice, made, migrated]), [2, [6, 'C']]);
+    // A delete moves the base and no version, so a migration under a tombstone, or a stale write, still decides
+    // the version the same way wherever it lands.
+    const gone = op('delete', 7, 'A', { seq: 2, v: 1 });
+    assertCommutes([made, migrated, gone], {}, false);
+    assert.deepStrictEqual(versionOf([made, gone, migrated]), [2, [5, 'B']]);
+    const late = op('write', 6, 'C', { seq: 1, data: { x: 1 }, v: 3 });
+    assertCommutes([made, gone, late], {}, false);
+    assert.deepStrictEqual(versionOf([made, gone, late]), [3, [6, 'C']]);
+  });
+
+  await t.test('a version op resets nothing: a text keeps its block, a counter its slots, a set its tags', () => {
+    const ops = [
+      op('write', 1, 'A', { seq: 1, data: { title: 'a' }, v: 1 }),
+      op('splice', 2, 'A', { seq: 2, key: 'notes', value: { at: '^', content: 'hello' }, v: 1 }),
+      op('inc', 3, 'A', { seq: 3, key: 'votes', value: 2, v: 1 }),
+      op('inc', 3, 'B', { seq: 1, key: 'votes', value: 1, v: 1 }),
+      op('add', 4, 'B', { seq: 2, key: 'tags', value: ['x'], v: 1 }),
+    ];
+    const before = replay(ops);
+    const migrated = op('version', 9, 'C', { seq: 1, value: ['title'], data: { name: 'a' }, v: 2 });
+    const { entry, changes } = applyOp(before, migrated);
+    assert.strictEqual(entry.meta.blocks.notes, before.meta.blocks.notes, 'the very block');
+    assert.deepStrictEqual(entry.meta.counters, before.meta.counters);
+    assert.deepStrictEqual(entry.meta.sets, before.meta.sets);
+    assert.deepStrictEqual(entry.data, { name: 'a', notes: 'hello', votes: 3, tags: ['x'] });
+    assert.deepStrictEqual(changes, [
+      { action: 'put', field: 'name', value: 'a' },
+      { action: 'unset', field: 'title' },
+    ]);
+    // B typed into the text, voted and tagged before it heard of the migration — stamped below it — and all of
+    // it lands, in every order: a whole-record write at that stamp would have dropped the three.
+    const concurrent = [
+      op('splice', 6, 'B', { seq: 3, key: 'notes', value: { at: '>2:4:A', content: '!' }, v: 1 }),
+      op('inc', 7, 'B', { seq: 4, key: 'votes', value: 1, v: 1 }),
+      op('add', 8, 'B', { seq: 5, key: 'tags', value: ['y'], v: 1 }),
+    ];
+    assertCommutes([...ops.slice(3), migrated, ...concurrent].concat(ops.slice(0, 3)), {
+      name: 'a',
+      notes: 'hello!',
+      votes: 4,
+      tags: ['x', 'y'],
+    });
+    // A field the op removes and writes at once (a counter the lens made a register) is the register.
+    const retyped = applyOp(
+      before,
+      op('version', 9, 'C', { seq: 1, value: ['votes'], data: { votes: 'three' }, v: 2 }),
+    );
+    assert.deepStrictEqual([retyped.entry.data.votes, kindOf(retyped.entry, 'votes')], ['three', 'register']);
+  });
+
+  await t.test('writes, version ops and field ops of three versions shuffled: one meta in every order (seeded)', () => {
+    let seed = 20261116;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    };
+    const ORIGINS = ['A', 'B', 'C'];
+    let orders = 0;
+    for (let round = 0; round < 120; round++) {
+      const ops = [];
+      const taken = new Set();
+      const count = 5 + Math.floor(random() * 2);
+      for (let i = 0; i < count; i++) {
+        const origin = ORIGINS[Math.floor(random() * ORIGINS.length)];
+        let ts = 1 + Math.floor(random() * 12);
+        while (taken.has(`${ts}:${origin}`)) ts++;
+        taken.add(`${ts}:${origin}`);
+        // A writes as version 1, B as version 2, C has no schema.
+        const versioned = origin === 'A' ? { v: 1 } : origin === 'B' ? { v: 2 } : {};
+        const roll = random();
+        let made;
+        if (roll < 0.2) made = { type: 'write', data: { title: `t${i}`, n: i } };
+        else if (roll < 0.45) made = { type: 'version', value: ['title'], data: { name: `n${i}` } };
+        else if (roll < 0.55) made = { type: 'version' };
+        else if (roll < 0.65) made = { type: 'set', data: { title: `s${i}` } };
+        else if (roll < 0.75) made = { type: 'unset', value: ['name'] };
+        else if (roll < 0.85) made = { type: 'delete' };
+        else if (roll < 0.93) made = { type: 'add', key: 'tags', value: [`t${i % 2}`] };
+        else made = { type: 'splice', key: 'notes', value: { at: '^', content: `${origin}${i}` } };
+        ops.push({ ...made, ...versioned, ts, origin, id: 'r' });
+      }
+      // A node stamps its ops in the order it makes them.
+      for (const origin of ORIGINS) {
+        const own = ops.filter((item) => item.origin === origin).sort((x, y) => x.ts - y.ts);
+        own.forEach((item, index) => (item.seq = index + 1));
+      }
+      const results = permutations(ops).filter(orderedPerOrigin).map(replay);
+      for (const result of results) {
+        assert.deepStrictEqual(result.meta, results[0].meta, `round ${round}`);
+        assert.deepStrictEqual(result.data, results[0].data, `round ${round}`);
+      }
+      orders += results.length;
+      // A snapshot joins to the same version as the ops applied: two halves of the history, joined either way.
+      const inOrder = [...ops].sort((x, y) => x.ts - y.ts || (x.origin < y.origin ? -1 : 1));
+      const left = replay(inOrder.filter((_, index) => index % 2 === 0));
+      const right = replay(inOrder.filter((_, index) => index % 2 === 1));
+      for (const joined of [mergeEntry(left, right), mergeEntry(right, left)]) {
+        assert.deepStrictEqual(
+          [joined.meta.v, joined.meta.vs],
+          [results[0].meta.v, results[0].meta.vs],
+          `round ${round}`,
+        );
+      }
+    }
+    assert.ok(orders > 3000, `${orders} orders`);
   });
 
   await t.test('purge wins at any stamp, forever; a merge with a purged side is purged', () => {
