@@ -56,6 +56,12 @@ export interface PushRefusal {
   error: { code?: string; message?: string } | Error;
 }
 
+/** A row set aside: its record's id, and why — the `reason` its `refused` event told (its first 64 characters). */
+export interface ParkedRow {
+  id: string;
+  reason: string;
+}
+
 export interface PushHandlers<T = RecordData> {
   /**
    * Rows to land on the backend; answers the ones it refused — each as the backend holds it (a conflict, `{ id,
@@ -152,7 +158,8 @@ export interface ConnectorStats {
   pending: number;
   /**
    * Rows set aside until a turn of theirs or `reSync()`: refused by the backend by name, or met with a conflict whose
-   * resolution the database refused.
+   * resolution the database refused. Kept with the checkpoint, so a restart counts them still; one `reSync()` is
+   * trying again counts as pending.
    */
   parked: number;
   active: boolean;
@@ -168,6 +175,12 @@ export interface Replication {
   readonly checkpoint: { pull: unknown; pushed: string | null };
   /** The handlers' failures, the newest twenty. */
   readonly errors: Error[];
+  /**
+   * The rows set aside, each with why (a copy): what `stats().parked` counts. Kept with the checkpoint — a connector
+   * created again under the same `name` lists them still, pushes none of them by itself, and tries each again at a
+   * change to its record or `reSync()`.
+   */
+  readonly parked: ParkedRow[];
   stats(): ConnectorStats;
   /** Reads the checkpoint, pulls from it and pushes what the log holds since it, then follows; resolves with the initial replication. */
   start(): Promise<void>;

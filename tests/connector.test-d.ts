@@ -5,6 +5,7 @@ import type {
   ReplicateOptions,
   PullResult,
   PushRow,
+  ParkedRow,
   ConnectorDocument,
 } from '../src/connector/connector.js';
 import { createDatabase } from '../index.js';
@@ -76,6 +77,9 @@ replication.on('error', (error) => expectType<string>(error.connector));
 replication.on('refused', ({ direction, id, reason }) => expectType<string>(direction + id + reason));
 expectType<number>(replication.stats().refused);
 expectType<number>(replication.stats().parked);
+expectType<ParkedRow[]>(replication.parked);
+expectType<{ id: string; reason: string }>(replication.parked[0]);
+expectError((replication.parked = []));
 const parking: ReplicateOptions<Task> = {
   name: 'parking',
   collection: 'Task',

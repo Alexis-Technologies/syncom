@@ -652,12 +652,13 @@ test('Connectors', async (t) => {
       assert.strictEqual(replication.stats().parked, 1);
       assert.deepStrictEqual(backend.read(id), { title: 'bad' });
       assert.deepStrictEqual(await a.get(id), { title: 'mine', $type: 'Task' });
-      // A restart forgets the parked row, not the refusal: reSync() finds the record edited since the state known and
-      // pushes it with that state assumed — the same conflict, refused again, the row parked again.
+      // A restart keeps the parked row and the refusal: nothing is pushed by it, and reSync() pushes the row with the
+      // state known assumed — the same conflict, refused again, the row parked again.
       await replication.cancel();
       replication = start();
       await replication.awaitInitialReplication();
-      assert.strictEqual(replication.stats().parked, 0);
+      assert.strictEqual(replication.stats().parked, 1);
+      assert.deepStrictEqual(replication.parked, [{ id, reason: 'VALIDATION_FAILED' }]);
       const pushes = refused.length;
       await replication.reSync();
       await replication.awaitInSync();
@@ -723,6 +724,264 @@ test('Connectors', async (t) => {
       await replication.awaitInSync();
       assert.deepStrictEqual(backend.read('_bad'), { title: 'again' });
       assert.strictEqual(replication.stats().parked, 0);
+    },
+  );
+
+  // A backend whose pushes are recorded (`seen` called with each batch), and which contradicts itself on the ids of
+  // `contradicting`: a conflict answered with exactly what the row assumed.
+  const recording = (backend, pushed, contradicting = new Set(), seen = () => {}) => {
+    const handlers = backend.handlers();
+    const push = handlers.push.handler;
+    handlers.push.handler = async (batch) => {
+      seen(batch);
+      const answers = [];
+      const rest = [];
+      for (const row of batch) {
+        pushed.push(row.id);
+        if (contradicting.has(row.id) && row.assumed) answers.push({ id: row.id, data: row.assumed });
+        else rest.push(row);
+      }
+      return answers.concat(await push(rest));
+    };
+    return handlers;
+  };
+
+  await t.test(
+    'a parked row survives a restart — refused by name, or by a backend contradicting itself: kept with the checkpoint with why, still parked and listed, not pushed by the restart, pushed by reSync() and by a change to the record; one the backend takes leaves the checkpoint',
+    async (t2) => {
+      const backend = createFakeBackend();
+      let a = await open(t2, 'A');
+      const pushed = [];
+      const refused = [];
+      const contradicting = new Set();
+      // What stats() and the list say while a push is with the backend.
+      const during = [];
+      const start = () => {
+        const replication = replicate(a, {
+          name: 'main',
+          collection: 'Task',
+          ...recording(backend, pushed, contradicting, () =>
+            during.push([replication.stats().pending, replication.stats().parked, replication.parked.length]),
+          ),
+          live: false,
+          retryTime: 50,
+          // This node's edit stands: the row goes again, and a backend that answers the same again contradicts itself.
+          resolve: ({ local }) => local ?? undefined,
+        });
+        t2.after(() => replication.cancel().catch(() => {}));
+        replication.on('refused', (event) => refused.push([event.id, event.reason]));
+        return replication;
+      };
+      const saved = async () => JSON.parse(await kvNamespace(a[DB].kv, 'connector').get('main')).parked;
+      let replication = start();
+      await replication.awaitInitialReplication();
+      await a.Task.set('twice', { title: 'v1' });
+      await replication.awaitInSync();
+      // One row refused by name, one a conflict over exactly what it assumed, twice in a row: both parked.
+      backend.refuse('_bad', { code: 'bad_id', message: 'an id may not start with _' });
+      contradicting.add('twice');
+      await a.transact(async (tx) => {
+        await tx.set('_bad', { $type: 'Task', title: 'refused by name' });
+        await tx.set('twice', { $type: 'Task', title: 'v2' });
+        await tx.set('fine', { $type: 'Task', title: 'fine' });
+      });
+      await replication.awaitInSync();
+      const both = [
+        { id: '_bad', reason: 'bad_id' },
+        { id: 'twice', reason: 'conflict' },
+      ];
+      assert.deepStrictEqual(replication.parked, both);
+      assert.deepStrictEqual(refused, [
+        ['_bad', 'bad_id'],
+        ['twice', 'conflict'],
+      ]);
+      await replication.cancel();
+      assert.deepStrictEqual(await saved(), { _bad: 'bad_id', twice: 'conflict' });
+      // A restart, the database reopened: still parked, listed with why, nothing of them pushed, nothing told again.
+      await a.close();
+      a = await open(t2, 'A');
+      pushed.length = 0;
+      refused.length = 0;
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.awaitInSync();
+      assert.strictEqual(replication.stats().parked, 2);
+      assert.strictEqual(replication.stats().pending, 0);
+      assert.deepStrictEqual(replication.parked, both);
+      assert.deepStrictEqual(pushed, [], 'the restart pushes no parked row');
+      assert.deepStrictEqual(refused, []);
+      // The restart's pull brought the backend's v1 again — the state known: skipped over the parked edit.
+      assert.deepStrictEqual(await a.get('twice'), { title: 'v2', $type: 'Task' });
+      // reSync() pushes them: refused again, parked again — and counted as pending, not parked, while they go.
+      during.length = 0;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(during[0], [2, 0, 0]);
+      assert.ok(pushed.includes('_bad') && pushed.includes('twice'), pushed.join());
+      assert.deepStrictEqual(refused, [
+        ['_bad', 'bad_id'],
+        ['twice', 'conflict'],
+      ]);
+      assert.deepStrictEqual(replication.parked, both);
+      assert.deepStrictEqual(backend.read('twice'), { title: 'v1' });
+      // Another restart; a change to a parked record pushes it, the other stays parked and unpushed.
+      await replication.cancel();
+      replication = start();
+      await replication.awaitInitialReplication();
+      pushed.length = 0;
+      await a.Task.update('_bad', { title: 'again' });
+      await replication.awaitInSync();
+      assert.deepStrictEqual(pushed, ['_bad']);
+      assert.deepStrictEqual(replication.parked, [
+        { id: 'twice', reason: 'conflict' },
+        { id: '_bad', reason: 'bad_id' },
+      ]);
+      // A change made while no connector ran is a turn the log holds: the restart itself pushes that row.
+      await replication.cancel();
+      backend.refuse('_bad', { code: 'still_bad' });
+      await a.Task.update('_bad', { title: 'offline' });
+      pushed.length = 0;
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(pushed, ['_bad']);
+      assert.deepStrictEqual(replication.parked, [
+        { id: 'twice', reason: 'conflict' },
+        { id: '_bad', reason: 'still_bad' },
+      ]);
+      // The backend takes them: no longer parked, gone from the checkpoint.
+      backend.refuse('_bad', null);
+      contradicting.clear();
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(backend.read('_bad'), { title: 'offline' });
+      assert.deepStrictEqual(backend.read('twice'), { title: 'v2' });
+      assert.deepStrictEqual(replication.parked, []);
+      assert.strictEqual(replication.stats().parked, 0);
+      await replication.cancel();
+      assert.deepStrictEqual(await saved(), {});
+    },
+  );
+
+  await t.test(
+    'a parked row whose retry is cut short stays parked; one deleted or purged goes as a deletion; a newer state of the backend over one is a conflict; an id that is another collection’s by now parks nothing',
+    async (t2) => {
+      const backend = createFakeBackend();
+      const a = await open(t2, 'A');
+      const pushed = [];
+      const conflicts = [];
+      const start = (options = {}) => {
+        const replication = replicate(a, {
+          name: 'main',
+          collection: 'Task',
+          ...recording(backend, pushed),
+          live: false,
+          retryTime: 50,
+          ...options,
+        });
+        t2.after(() => replication.cancel().catch(() => {}));
+        replication.on('conflict', (event) => conflicts.push([event.id, event.local, event.resolved]));
+        return replication;
+      };
+      const saved = async () => JSON.parse(await kvNamespace(a[DB].kv, 'connector').get('main')).parked;
+      // No retry of a failed push within the test: the stop comes first.
+      let replication = start({ retryTime: 5000 });
+      await replication.awaitInitialReplication();
+      for (const id of ['cut', 'gone', 'purged', 'theirs', 'moved']) backend.refuse(id, { code: 'no' });
+      await a.transact(async (tx) => {
+        for (const id of ['cut', 'gone', 'purged', 'theirs', 'moved']) await tx.set(id, { $type: 'Task', title: id });
+      });
+      await replication.awaitInSync();
+      assert.strictEqual(replication.stats().parked, 5);
+      // A retry whose push fails, then a stop before the next try: the rows are still parked in the checkpoint — the
+      // position they wait since names no turn of theirs, so nothing else would remember them.
+      const errors = [];
+      replication.on('error', (error) => errors.push(error));
+      backend.fail('push', 1);
+      await replication.reSync();
+      await waitUntil(() => errors.length === 1);
+      assert.strictEqual(replication.stats().pending, 5);
+      await replication.cancel();
+      assert.deepStrictEqual(Object.keys(await saved()).sort(), ['cut', 'gone', 'moved', 'purged', 'theirs']);
+      // While no connector runs: one record deleted, one purged, one deleted and made again as another collection's,
+      // and the backend takes a state of its own for a fourth.
+      await a.Task.delete('gone');
+      await a.purge('purged');
+      await a.Task.delete('moved');
+      await a.set('moved', { $type: 'Note', title: 'a note now' });
+      backend.refuse('theirs', null);
+      backend.write('theirs', { title: 'the backend’s' });
+      pushed.length = 0;
+      replication = start();
+      await replication.awaitInitialReplication();
+      await replication.awaitInSync();
+      // The deletion is a turn the log holds — pushed by the restart, refused again; the backend's newer state over
+      // the parked edit is a conflict, which the backend wins here — told, and nothing is parked of it any more; the
+      // id that is a Note's is forgotten; the purge waits for reSync().
+      assert.deepStrictEqual(pushed, ['gone']);
+      assert.deepStrictEqual(conflicts, [['theirs', { title: 'theirs' }, { title: 'the backend’s' }]]);
+      assert.deepStrictEqual(await a.get('theirs'), { title: 'the backend’s', $type: 'Task' });
+      assert.deepStrictEqual(replication.parked, [
+        { id: 'cut', reason: 'no' },
+        { id: 'purged', reason: 'no' },
+        { id: 'gone', reason: 'no' },
+      ]);
+      // reSync(): each goes again — the two that are gone here as deletions — and the backend takes them now.
+      for (const id of ['cut', 'gone', 'purged']) backend.refuse(id, null);
+      pushed.length = 0;
+      const rows = [];
+      await replication.cancel();
+      const handlers = recording(backend, pushed);
+      const push = handlers.push.handler;
+      handlers.push.handler = async (batch) => {
+        for (const row of batch) rows.push([row.id, row.deleted]);
+        return push(batch);
+      };
+      replication = start({ ...handlers, pull: undefined });
+      await replication.awaitInitialReplication();
+      assert.strictEqual(replication.stats().parked, 3);
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(rows.sort(), [
+        ['cut', false],
+        ['gone', true],
+        ['purged', true],
+      ]);
+      assert.deepStrictEqual(backend.read('cut'), { title: 'cut' });
+      assert.strictEqual(backend.docs.get('purged').deleted, true, 'the purge reached the backend as a deletion');
+      assert.strictEqual(backend.docs.get('gone').deleted, true);
+      assert.deepStrictEqual(replication.parked, []);
+      // A parked id that becomes another collection's while the connector runs is forgotten by reSync().
+      backend.refuse('late', { code: 'no' });
+      await a.Task.set('late', { title: 'late' });
+      await replication.awaitInSync();
+      await a.Task.delete('late');
+      await waitUntil(() => pushed.filter((id) => id === 'late').length === 2);
+      await replication.awaitInSync();
+      assert.deepStrictEqual(replication.parked, [{ id: 'late', reason: 'no' }], 'the deletion, refused too');
+      await a.set('late', { $type: 'Note', title: 'a note now' });
+      pushed.length = 0;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(pushed, []);
+      assert.deepStrictEqual(replication.parked, []);
+      await replication.cancel();
+      assert.deepStrictEqual(await saved(), {});
+      // A checkpoint text whose parked rows do not all read: an entry that is no id, or has no reason, is left out;
+      // a reason is kept to 64 characters. The row that reads is the backend's already: reSync() asks, and it has
+      // nothing to say — no longer parked.
+      const store = kvNamespace(a[DB].kv, 'connector');
+      const text = JSON.parse(await store.get('main'));
+      text.parked = { 'not an id': 'no', gone: 7, cut: 'x'.repeat(100) };
+      await store.put('main', JSON.stringify(text));
+      replication = start({ pull: undefined });
+      await replication.awaitInitialReplication();
+      assert.deepStrictEqual(replication.parked, [{ id: 'cut', reason: 'x'.repeat(64) }]);
+      pushed.length = 0;
+      await replication.reSync();
+      await replication.awaitInSync();
+      assert.deepStrictEqual(pushed, ['cut'], 'asked what the backend holds: a probe, nothing written');
+      assert.deepStrictEqual(replication.parked, []);
     },
   );
 
@@ -1077,8 +1336,9 @@ test('Connectors', async (t) => {
       await first.awaitInSync();
       await first.cancel();
       const saved = JSON.parse(await store.get('main'));
-      assert.deepStrictEqual(Object.keys(saved).sort(), ['known', 'pull', 'pushed', 'refused']);
+      assert.deepStrictEqual(Object.keys(saved).sort(), ['known', 'parked', 'pull', 'pushed', 'refused']);
       assert.deepStrictEqual(saved.refused, []);
+      assert.deepStrictEqual(saved.parked, {});
       assert.match(saved.known[id], /^[A-Za-z0-9_-]{22}$/, 'the digest of what the backend holds, with the checkpoint');
       // An edit while no connector runs; the pull cursor is before this node's own echo. A restart: the echo is
       // skipped, the edit lands through the compare-and-set — no conflict, nothing lost.

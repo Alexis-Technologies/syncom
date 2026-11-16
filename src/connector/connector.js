@@ -31,14 +31,15 @@
 // rest of the page lands. What goes out follows
 // the `transaction` events of the collection — every turn but a pull of this
 // connector's — pages of `batchSize` rows, in order, one push in flight. The
-// checkpoint text (`{ pull, pushed, known, refused }`: the backend's
+// checkpoint text (`{ pull, pushed, known, refused, parked }`: the backend's
 // position, this node's log position pushed through — a frontier before the
-// oldest pending turn — the digest of the backend's state per record, and the
-// ids whose state the database refused to land, never learned) lives in the
-// `connector` kv namespace under the name: a restart pulls from `pull` and
-// pushes what the log holds since `pushed` — a record known by digest alone
-// as a probe — or every record of the collection once where the log cannot
-// resume.
+// oldest pending turn — the digest of the backend's state per record, the
+// ids whose state the database refused to land, never learned, and the ids
+// of the rows parked, each with why) lives in the `connector` kv namespace
+// under the name: a restart pulls from `pull` and pushes what the log holds
+// since `pushed` — a record known by digest alone as a probe — or every
+// record of the collection once where the log cannot resume; a parked row
+// stays parked across it.
 // A handler that fails is told (`error`, REPLICATION_FAILED with the direction
 // and `retryIn`) and tried again after a backoff; nothing is skipped. Requires
 // symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only.
@@ -70,6 +71,8 @@ const DIGEST_LENGTH = 22;
 const KNOWN_MAX = 10_000;
 // A pull whose checkpoint does not move while it answers full pages is asked this many times, then left.
 const MAX_STALLS = 3;
+// How much of a parked row's reason the checkpoint keeps.
+const REASON_MAX = 64;
 const NOOP = () => {};
 
 const isDatabase = (value) =>
@@ -120,6 +123,12 @@ const failed = (direction, message, cause, name, retryIn = null) =>
 
 // The canonical text parsed back — the backend's state as a push hands it over as `assumed`.
 const parsed = (text) => (text === null ? null : JSON.parse(text));
+
+// Why a row is parked, as it is kept and listed: the reason's text (`backend` for one that has none), bounded.
+const reasonOf = (reason) => {
+  const text = typeof reason === 'string' ? reason : typeof reason === 'number' ? String(reason) : 'backend';
+  return text.length > REASON_MAX ? text.slice(0, REASON_MAX) : text;
+};
 
 const checkHandlers = (name, side, value, methods) => {
   if (value === undefined) return null;
@@ -174,12 +183,15 @@ class Replication extends Emitter {
   // The ids whose state is to go to the backend, in the order they came, each with the log position BEFORE the
   // turn that made it pending (where a restart resumes the push from; null: the start); the ids of the push in
   // flight, and among them the ones a newer turn touched meanwhile (pending again after it, from that turn's
-  // position); the ids the backend refused by name (or whose resolution the database refused), set aside until a turn
-  // of theirs or `reSync()`.
+  // position); the ids the backend refused by name (or whose resolution the database refused), each with why, set
+  // aside until a turn of theirs or `reSync()` — saved with the checkpoint: its turn is behind `pushed`, so nothing
+  // the log holds remembers one. `reSync()` makes a parked id pending again WITHOUT taking it out (the retry's
+  // position names no turn of its record): it leaves when the backend takes the row or the row has nothing to say,
+  // when the backend's state lands over the record, or when a turn of the record makes it pending by the log.
   #pending = new Map();
   #inflight = new Set();
   #redo = new Map();
-  #parked = new Set();
+  #parked = new Map();
   // The ids of the push in flight whose rows the backend answered as conflicts: they stay pending for the next round.
   #conflicted = new Set();
   // Per id, the backend's state a conflict answered while the row assumed exactly it (the same data under a new
@@ -315,6 +327,13 @@ class Replication extends Emitter {
     return this.#errors.slice();
   }
 
+  /** The rows set aside until a turn of theirs or `reSync()`, each with why: across a restart too. */
+  get parked() {
+    const rows = [];
+    for (const [id, reason] of this.#parked) if (!this.#pending.has(id)) rows.push({ id, reason });
+    return rows;
+  }
+
   // What the connector counts through the seam's writer (the disabled one without the telemetry plugin), by direction.
   #count(direction, result, count = 1) {
     this.#seam.otel.recordConnector(direction, result, count);
@@ -322,10 +341,13 @@ class Replication extends Emitter {
 
   /** The counts: documents pulled and applied, rows pushed and probed, conflicts met, refused, pulls and pushes made, pending, parked. */
   stats() {
+    // A parked row `reSync()` is trying again counts as pending alone.
+    let parked = 0;
+    for (const id of this.#parked.keys()) if (!this.#pending.has(id)) parked++;
     return {
       ...this.#stats,
       pending: this.#pending.size,
-      parked: this.#parked.size,
+      parked,
       active: this.#active,
       canceled: this.#canceled,
     };
@@ -417,8 +439,7 @@ class Replication extends Emitter {
     if (this.#push === null) return;
     // The parked rows (refused by name, or a resolution the database refused) are tried again, with what the log holds
     // since `pushed`.
-    for (const id of this.#parked) this.#pending.set(id, this.#last);
-    this.#parked.clear();
+    this.#retryParked();
     this.#collectPending();
     await this.#flush();
   }
@@ -467,10 +488,11 @@ class Replication extends Emitter {
     }
   }
 
-  // The checkpoint text from the kv — `{ pull, pushed, known: { id: digest | null }, refused: [id] }`: the backend's
-  // position pulled through, this node's log position pushed through, per record the digest of the backend's state
-  // as last known (null: it holds nothing), and the ids whose state the database refused to land. A text that does
-  // not read is said and read as none (a pull from the start, a push of every record).
+  // The checkpoint text from the kv — `{ pull, pushed, known: { id: digest | null }, refused: [id], parked: { id:
+  // reason } }`: the backend's position pulled through, this node's log position pushed through, per record the
+  // digest of the backend's state as last known (null: it holds nothing), the ids whose state the database refused
+  // to land, and the rows parked with why — one whose id is a sealed record or another collection's by now forgotten
+  // here. A text that does not read is said and read as none (a pull from the start, a push of every record).
   async #load() {
     this.#loaded = true;
     let text = null;
@@ -487,6 +509,11 @@ class Replication extends Emitter {
     };
     const refused = Array.isArray(text.refused) ? text.refused : [];
     for (let i = 0; i < refused.length; i++) if (isRecordId(refused[i])) this.#unlanded.add(refused[i]);
+    const parked = isPlainObject(text.parked) ? text.parked : {};
+    for (const id of Object.keys(parked)) {
+      if (!isRecordId(id) || typeof parked[id] !== 'string' || !this.#parkable(id)) continue;
+      this.#parked.set(id, reasonOf(parked[id]));
+    }
     if (!isPlainObject(text.known)) return;
     for (const id of Object.keys(text.known)) {
       const digest = text.known[id];
@@ -550,8 +577,10 @@ class Replication extends Emitter {
   async #write() {
     const known = Object.create(null);
     for (const [id, digest] of this.#digests) known[id] = digest;
+    const parked = Object.create(null);
+    for (const [id, reason] of this.#parked) parked[id] = reason;
     const { pull, pushed } = this.#checkpoint;
-    const text = JSON.stringify({ pull, pushed, known, refused: [...this.#unlanded] });
+    const text = JSON.stringify({ pull, pushed, known, refused: [...this.#unlanded], parked });
     try {
       await this.#store.put(this.#name, text, { atomic: true });
     } catch (error) {
@@ -731,8 +760,10 @@ class Replication extends Emitter {
     this.#count('pull', 'pulled', documents.length);
     const collection = this.#collection;
     const conflicts = [];
-    // The backend's states landed, as id and text: learned once the transaction has (one that fails whole, nothing).
+    // The backend's states landed, as id and text: learned once the transaction has (one that fails whole, nothing);
+    // among them the ids whose record reads as the backend holds it now — what was parked of one is no more.
     const learned = [];
+    const settled = [];
     let applied = 0;
     if (docs.length > 0) {
       // Each document against what the backend was known to hold and whether an edit of the record waits to go:
@@ -741,8 +772,9 @@ class Replication extends Emitter {
       // that never happened), which lands; (2) another state over a pending edit is a conflict — the backend moved
       // under the edit: `resolve` or the backend wins, landed here under the resolve actor, told; (3) another state
       // over a record with nothing pending is the backend's newer state: landed unless the record reads so already. A
-      // state the database refuses to land is not learned (nobody wins: `#unlanded`), and an edit of such a record
-      // counts as pending though nothing else remembers it (a parked row, a restart): never landed over in silence.
+      // parked row is an edit waiting to go like a pending one — the backend has not taken it: never landed over in
+      // silence, by an echo or by a newer state. A state the database refuses to land is not learned (nobody wins:
+      // `#unlanded`), and an edit of such a record counts as pending though nothing else remembers it (a restart).
       await this.#exclusive(() =>
         this.#db.transact(
           async (tx) => {
@@ -750,7 +782,8 @@ class Replication extends Emitter {
               const { id, deleted, data, text } = docs[i];
               try {
                 const local = await tx.get(id);
-                const pending = this.#pending.has(id) || (this.#unlanded.has(id) && this.#quiet(id, local) === null);
+                const waiting = this.#pending.has(id) || this.#parked.has(id);
+                const pending = waiting || (this.#unlanded.has(id) && this.#quiet(id, local) === null);
                 const reads = deleted ? local === null : local !== null && same(plain(local), plain(data));
                 const echo = this.#assumedText(id, text);
                 if (echo && (pending || reads)) {
@@ -763,6 +796,8 @@ class Replication extends Emitter {
                   await this.#landResolution(tx, decided);
                   learned.push(id, text);
                   conflicts.push(decided.event);
+                  // The backend won: the record reads as it holds it.
+                  if (decided.event.resolved === decided.event.remote) settled.push(id);
                   continue;
                 }
                 // The backend's newer state, landed; a pending edit that reads as it has nothing to resolve.
@@ -772,6 +807,7 @@ class Replication extends Emitter {
                   applied++;
                 }
                 learned.push(id, text);
+                settled.push(id);
               } catch (error) {
                 refusals.push([id, error?.code ?? error?.name ?? 'error', error]);
               }
@@ -782,6 +818,8 @@ class Replication extends Emitter {
       );
     }
     for (let i = 0; i < learned.length; i += 2) this.#learn(learned[i], learned[i + 1]);
+    // A row `reSync()` is trying again leaves with its push.
+    for (let i = 0; i < settled.length; i++) if (!this.#pending.has(settled[i])) this.#parked.delete(settled[i]);
     for (let i = 0; i < refusals.length; i++) {
       // Not learned: a later edit assumes the state known, `reSync()` asks again. Another collection's record and a
       // sealed one are this node's own: nothing to ask the backend again.
@@ -1068,6 +1106,7 @@ class Replication extends Emitter {
         // A sealed record never goes; every other is asked about first (a probe) unless the backend's state is known.
         if (this.#seam.row(ids[i])?.encrypted === true || this.#pending.has(ids[i])) continue;
         this.#pending.set(ids[i], null);
+        this.#parked.delete(ids[i]);
         if (!this.#known.has(ids[i]) && !this.#digests.has(ids[i])) this.#probing.add(ids[i]);
       }
       return;
@@ -1076,11 +1115,40 @@ class Replication extends Emitter {
       const { op, seq } = entries[i];
       // This connector's own pulls are the backend's already.
       if (op.actor === this.#actor || typeof op.id !== 'string' || this.#pending.has(op.id)) continue;
-      const row = this.#seam.row(op.id);
-      if (row === null || row.type !== this.#collection || row.encrypted === true) continue;
-      // Pending since before its first op here: the frontier moves past the records pushed, not past these.
+      if (!this.#mine(op.id)) continue;
+      // Pending since before its first op here: the frontier moves past the records pushed, not past these. A parked
+      // row with a turn here is the log's to remember.
       this.#pending.set(op.id, this.#db.log.formatId(seq - 1));
+      this.#parked.delete(op.id);
     }
+  }
+
+  // Whether `id` is this connector's to push: a record or a tombstone of the collection, not sealed.
+  #mine(id) {
+    const row = this.#seam.row(id);
+    return row !== null && row.type === this.#collection && row.encrypted !== true;
+  }
+
+  // Whether a parked id is still a row to push: the collection's record, or what is left of one — a tombstone, a
+  // purge (its row names no collection), nothing — which goes as a deletion; never a record sealed since, nor an id
+  // that is another collection's by now.
+  #parkable(id) {
+    const row = this.#seam.row(id);
+    if (row === null) return true;
+    if (row.gone === true) return row.type === null || row.type === this.#collection;
+    return row.type === this.#collection && row.encrypted !== true;
+  }
+
+  // `reSync()`'s retry of the parked rows: each pending since the newest turn heard and still parked — kept with the
+  // checkpoint — until the backend takes it or refuses it again, so a retry cut short (a push that fails, a crash) is
+  // not forgotten. One whose id is a sealed record or another collection's by now is forgotten.
+  #retryParked() {
+    let dropped = false;
+    for (const id of this.#parked.keys()) {
+      if (!this.#parkable(id)) dropped = this.#parked.delete(id);
+      else if (!this.#pending.has(id)) this.#pending.set(id, this.#last);
+    }
+    if (dropped) this.#save().catch(NOOP);
   }
 
   // One push at a time; what comes meanwhile goes in the next. Never rejects: a failure is told and tried again.
@@ -1194,6 +1262,7 @@ class Replication extends Emitter {
       }
       if (this.#known.has(id) && this.#known.get(id) === out.text) {
         this.#pending.delete(id);
+        this.#parked.delete(id);
         continue;
       }
       const assumed = this.#assumedOf(id);
@@ -1232,6 +1301,7 @@ class Replication extends Emitter {
       if (answer === undefined) {
         this.#learn(row.id, texts[i]);
         this.#contradicted.delete(row.id);
+        this.#parked.delete(row.id);
         continue;
       }
       if (answer.error !== undefined && answer.error !== null) {
@@ -1284,11 +1354,12 @@ class Replication extends Emitter {
   // A row the backend refuses by name (an id it cannot carry, a body too large): set aside — said (`refused`,
   // `direction: 'push'`, the error's code), out of pending — until a turn of the record or `reSync()` tries it again.
   #park(id, error) {
+    const reason = error?.code ?? 'backend';
     this.#pending.delete(id);
     this.#probing.delete(id);
-    this.#parked.add(id);
+    this.#parked.set(id, reasonOf(reason));
     this.#count('push', 'parked');
-    this.#refuse('push', id, error?.code ?? 'backend', error);
+    this.#refuse('push', id, reason, error);
   }
 
   // Rows the backend refused as conflicts, each with the document as the backend holds it. The backend's state is
@@ -1338,7 +1409,7 @@ class Replication extends Emitter {
       const id = refusals[i][0];
       refused.add(id);
       this.#unlanded.add(id);
-      this.#parked.add(id);
+      this.#parked.set(id, reasonOf(refusals[i][1]));
       this.#count('push', 'parked');
       this.#refuse('push', id, refusals[i][1], refusals[i][2]);
     }

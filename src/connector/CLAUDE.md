@@ -9,9 +9,9 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
                           batchSize, modifier, resolve }): pulled documents landed as one transaction a page (`source:
                           connector:<name>`), a document that cannot land refused by name, the collection's turns pushed as rows
                           with what the backend was assumed to hold (the canonical text of the backend's shape per id), conflicts
-                          the backend wins, rows refused by name parked, a state the database refused never learned, the
-                          checkpoint `{ pull, pushed }` in the `connector` kv namespace — requires symbols.js, engine.js, shape.js,
-                          errors.js, hooks.js, emitter.js, same.js only
+                          the backend wins, rows refused by name parked (kept with the checkpoint, listed by `parked`), a state
+                          the database refused never learned, the checkpoint `{ pull, pushed }` in the `connector` kv namespace —
+                          requires symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only
 src/connector/same.js     canonical, same — the zone's one "the same reading" (keys sorted, an object read through its toJSON() as JSON
                           reads it, a BigInt thrown), kept apart from shape.js's canonical so an adapter weighs nothing of the core —
                           no requires
@@ -120,8 +120,8 @@ cause)` — the `refused` event, `connector.document.refused`,
   before its first entry there, `formatId(seq - 1)`) or every record of the collection once where the log cannot
   resume (`connector.rebuild`: each a probe, `#probing`; tombstones not among them). Durably, `#digests` names the
   backend's state per id (DIGEST_LENGTH of the seam's `digest` of the text; `[SOURCE].digest` is `hashText` so the
-  connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known, refused }`
-  (`#write`; `refused` the ids of `#unlanded`), loaded into `#digests` alone: a pulled document is judged by digest
+  connector bundles no hasher), saved with the checkpoint as one kv text `{ pull, pushed, known, refused, parked }`
+  (`#write`; `refused` the ids of `#unlanded`, `parked` the next rule's), loaded into `#digests` alone: a pulled document is judged by digest
   where the text is not in memory (`#assumedText`), and a push of such a record is a PROBE (`#assumedOf` → `assumed: undefined`): the handler answers what the backend
   holds without writing, and `#answered` learns it where the digest names it (or, knowing nothing durably, where the
   backend holds nothing or the row itself) and keeps the id pending for the next round — the row then goes with that
@@ -136,6 +136,27 @@ cause)` — the `refused` event, `connector.document.refused`,
   (`errors`, the newest twenty) and tried again after a backoff (`#failed`: `retryTime · 2^n` up to `maxRetryTime`,
   ±25 % jitter, `#attempts` per direction reset by a success); nothing is skipped and no checkpoint moves past it. A
   pull whose checkpoint does not move while it answers full pages is asked `MAX_STALLS` times, then left to the stream.
+- **A parked row is kept with the checkpoint, and stays an edit waiting to go.** `#parked` is a Map of id → why
+  (`reasonOf`: the `refused` event's reason as text, `REASON_MAX` characters) — every `#park`, and a resolution the
+  engine refused (`#resolveConflicts`) — saved in the checkpoint text as `parked: { id: reason }` and restored by
+  `#load`. The turn of a parked row is BEHIND `pushed`, so nothing the log holds remembers it: kept in memory alone
+  (as it once was), a restart left the row neither pending nor parked — the edit never reached the backend,
+  `stats().parked` said 0 and `reSync()` had nothing to try. An id leaves `#parked` only where its edit is settled
+  or the log remembers it: the backend took the row (`#answered`), the row has nothing to say (`#rowsOf`), the
+  backend's state landed over the record (`#land`'s `settled`: a state the record reads as, or a conflict the
+  backend won), a turn of the record made it pending (`#heard`, a redo, `#collectPending` — the log read at start,
+  a rebuild's records). `reSync()` (`#retryParked`) makes a parked id pending WITHOUT taking it out: the position
+  it then waits since names no turn of its record, so a retry cut short by a failing push or a crash must find it
+  parked at the next start — never `#parked.clear()` before the answer; `stats().parked` and the `parked` getter
+  count the ids not pending. `#land` judges a parked row as an edit waiting to go (`waiting`): the state known is
+  skipped over it and another state is a conflict — `echo && !pending && !reads` once landed "a landing that never
+  happened" over a parked edit, and a restart's pull (or a re-read) made that a silent loss. `#parkable` says what
+  is still a row, at `#load` and `#retryParked`: the collection's record, or what is left of one (a tombstone, a
+  purge's row naming no collection, no row) — pushed as a deletion — never a sealed record nor another
+  collection's (a tombstone revived by a `write` under another `$type`), which are forgotten. No constant bounds
+  the Map: an entry is a record of the collection, as a digest is, and its reason is bounded. A restart may push a
+  parked row once more where `pushed` stands before its turn (an older turn, or another row of its transaction,
+  still pending at the save): at least once, as the frontier is.
 - **Live is the backend's stream or a timer, never a hook on the peers; one queue lands everything.** The live half
   begins when the first pull run comes through (`#pullRun` → `#follow`, once: `#following`), never before.
   `pull.stream(emit, { checkpoint })` hands pages, `'RESYNC'` or `'END'`: a page is `#enqueue`d on the pull side's

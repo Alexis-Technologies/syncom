@@ -244,8 +244,10 @@ await board.Task.set('huge', { title: 'A task with a very long description', don
 await merging.awaitInSync();
 // push refused huge: too_large
 console.log(merging.stats().parked); // 1: set aside until the record changes again or reSync()
+console.log(merging.parked); // [ { id: 'huge', reason: 'too_large' } ]
 // #endregion refused
 assert.equal(merging.stats().parked, 1);
+assert.deepEqual(merging.parked, [{ id: 'huge', reason: 'too_large' }]);
 assert.deepEqual(
   seen.refused.map(({ direction, id, reason }) => [direction, id, reason]),
   [['push', 'huge', 'too_large']],
@@ -264,7 +266,11 @@ const resumed = replicate(reopened, { name: 'tasks-api', collection: 'Task', ...
 await resumed.awaitInitialReplication();
 console.log(await reopened.Task.get('t5')); // pulled from the saved checkpoint
 console.log(api.read(offline.id)); // pushed from the log: { title: 'Written offline', done: false }
+console.log(resumed.parked); // [ { id: 'huge', reason: 'too_large' } ]: still set aside, and not pushed again
 // #endregion restart
+assert.deepEqual(resumed.parked, [{ id: 'huge', reason: 'too_large' }]);
+assert.equal(resumed.stats().parked, 1);
+assert.equal(api.read('huge'), null);
 assert.deepEqual(await reopened.Task.get('t5'), {
   title: 'Written while the node was away',
   done: false,

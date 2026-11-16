@@ -41,6 +41,8 @@ conflict), not with the record alone:
   compares that edit against the same state. Over a record that reads otherwise with nothing pending, it lands.
 - **Another state over a local edit not yet pushed** is a conflict: `resolve` decides or the backend wins, the
   resolution lands in the page's transaction, and the `conflict` event follows.
+- **A [parked row](#parked-rows) is a local edit not yet pushed**: the state already known is skipped over it, and
+  another state is a conflict.
 - **Another state over a record with nothing pending** is the backend's newer state and lands, unless the record
   already reads that way.
 
@@ -78,8 +80,8 @@ record never goes. A change that arrives while its row is in flight is pushed ag
 The handler's answer is read row by row:
 
 - **Not in the answer**: written. Its state is what the next push assumes.
-- **`{ id, error }`**: refused by name. The row is parked (`refused` with `direction: 'push'` and `reason` the error's
-  `code`, or `backend` without one) until a change to the record or `reSync()`.
+- **`{ id, error }`**: refused by name. The row is [parked](#parked-rows) (`refused` with `direction: 'push'` and
+  `reason` the error's `code`, or `backend` without one) until a change to the record or `reSync()`.
 - **`{ id, data }` or `{ id, deleted: true }`**: a conflict. The record is set to the backend's state, or to what
   `resolve` returns, in one transaction; the `conflict` events follow once it has landed. The id stays pending: equal
   to the backend's state it says nothing more, different it goes again with that state assumed. A resolution the
@@ -99,13 +101,49 @@ JSON text, an object with `toJSON()` such as a `Date` read through it), a row as
 passes through `modifier.pull` and the same check (a conflict that fails it parks the row with the reason `value` or
 `modifier`, the record untouched), and a resolution goes back through `modifier.push`.
 
+## Parked rows
+
+A parked row is an edit the backend did not take and the connector no longer pushes by itself: a row refused by name,
+a row answered with neither a document nor an error (`answer`), a conflict whose `remote` cannot be read (`value`,
+`modifier`), a backend contradicting itself (`conflict`), or a conflict whose resolution the engine refused (the
+engine's code). It is reported once, as its `refused` event. `stats().parked` counts the rows set aside, and `parked`
+lists them as `{ id, reason }`, the reason being the event's (its first 64 characters).
+
+The parked rows are kept with the [checkpoint](#the-checkpoint), because nothing else remembers one: its change is
+behind `pushed` in the log. A connector started again under the same `name` restores them still parked: it pushes
+none of them by itself, counts and lists them, and tries each again as before the restart:
+
+- **A change to the record** makes the row pending and pushes it. A change made while no connector ran is in the log
+  since `pushed`, so the restart pushes that row.
+- **`reSync()`** pushes every parked row again. Until the backend answers, the row counts as pending and is still
+  kept as parked, so a retry cut short by a failing push or a crash leaves it parked.
+- **A row leaves** when the backend takes it, when it has nothing left to say (the record reads as the backend is
+  known to hold it), or when a pull lands the backend's state over the record (the backend won a conflict).
+
+A parked row whose record was deleted or purged meanwhile goes as a deletion: a deletion made while no connector
+ran is in the log and the restart pushes it, and a purge, which the log's resume passes by, waits for `reSync()`. A
+parked id that has since become an encrypted record or a record of another collection is forgotten. Where the log
+cannot resume from `pushed`, every live record of the collection is checked against the backend once, a parked one
+with the rest. Because `pushed` never passes a change still waiting to go, a restart can push a parked row once more
+where an older change, or another row of the same transaction, was still pending when the checkpoint was saved (at
+least once: it is refused and parked again).
+
+There is one entry per parked record, so the list cannot outgrow the collection: a backend that refuses every row
+holds an entry per record, as `known` does for a backend that takes them.
+
 ## The checkpoint
 
 One JSON text in the database's `connector` key-value namespace, under the connector's `name`, holds what a restart
 needs:
 
 ```json
-{ "pull": 42, "pushed": "mw6l.17", "known": { "t1": "b-SQXlGHTSadY8-j1RK7Vt", "t2": null }, "refused": ["t3"] }
+{
+  "pull": 42,
+  "pushed": "mw6l.17",
+  "known": { "t1": "b-SQXlGHTSadY8-j1RK7Vt", "t2": null },
+  "refused": ["t3"],
+  "parked": { "t4": "too_large" }
+}
 ```
 
 `pull` is the backend's position as the pull handler last returned it. `pushed` is this node's log position pushed
@@ -113,16 +151,18 @@ through; it never passes a change still waiting to go, so a restart pushes every
 never lost). `known` names the backend's state per record: 22 characters of the SHA-256 (base64url) of the canonical
 JSON of the backend's shape, `null` where the backend holds nothing, no entry for a record gone on both sides. That is
 about 50 bytes a record. `refused` lists the ids whose backend state the database refused to land, which `reSync()`
-asks about again. The text is saved coalesced (one write in flight, the next 200 ms later while pages keep
+asks about again. `parked` names the [parked rows](#parked-rows), each with its reason (at most 64 characters). The
+text is saved coalesced (one write in flight, the next 200 ms later while pages keep
 landing) and at once at the end of a pull run, after a push, after a page of the stream and on `cancel()`. A crash
 between a landing and its save lands that page again.
 
 In memory the connector keeps the backend's state as text for up to 10 000 records (the oldest not pending forgotten
 first); a push of a record known only by digest is a probe. `start()` reads the checkpoint, pulls from `pull` (judging
 a document by its digest where the text is not in memory, so this node's own echo over an offline edit is skipped),
-then pushes what the log holds since `pushed`. Where the log cannot resume there (compacted past it, another epoch, a
-connector never run) every live record of the collection is probed once (`connector.rebuild` in the log): equal
-records say nothing, differing ones are conflicts, records the backend lacks are created.
+then pushes what the log holds since `pushed`; the parked rows stay parked. Where the log cannot resume there
+(compacted past it, another epoch, a connector never run) every live record of the collection is probed once
+(`connector.rebuild` in the log): equal records say nothing, differing ones are conflicts, records the backend lacks
+are created.
 
 ## Live, retries and waiting
 

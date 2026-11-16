@@ -168,8 +168,9 @@ on `merging`, the connector the `resolve` example started:
 <<< @/examples/connectors.mjs#events
 
 `stats()` counts what went through: documents pulled and applied, rows pushed and probed, conflicts, refusals,
-and how many records are pending or parked. `checkpoint` is `{ pull, pushed }`, and `errors` keeps the newest twenty
-failures. With the [telemetry](./telemetry) plugin the same counts are the `syncom.connector.rows` metric.
+and how many records are pending or parked. `checkpoint` is `{ pull, pushed }`, `errors` keeps the newest twenty
+failures, and `parked` lists the rows set aside, each with its reason. With the [telemetry](./telemetry) plugin the
+same counts are the `syncom.connector.rows` metric.
 `awaitInSync()` resolves once nothing waits to go out and nothing is in flight in either direction.
 
 ## When the backend is down
@@ -190,7 +191,16 @@ Some rows can never be written: an id the backend cannot store, a body over its 
 
 A parked row is reported once as `refused` with `direction: 'push'` and the error's `code` as the `reason`, and the
 rest of the batch goes on. The next change to that record tries it again, and so does `reSync()`, which pulls and
-pushes again from the checkpoint. A restart does not retry a parked row by itself.
+pushes again from the checkpoint. `parked` lists the rows set aside as `{ id, reason }`, which is what you show a
+user whose change did not reach the backend.
+
+A restart does not retry a parked row by itself, and it does not forget it either. The parked rows are saved with the
+checkpoint, so a connector created again under the same `name` still counts them in `stats().parked`, still lists
+them in `parked`, and tries each again at the next change to its record or at `reSync()`. A change made to a parked
+record while no connector ran is in the [operation log](./operation-log), so the restart pushes that one.
+
+While a row is parked the record keeps your edit. A pull does not land the backend's version over it unseen: the
+state the backend already had is skipped, and a newer one is a conflict, decided like any other.
 
 ## Restart where you left off
 
@@ -199,6 +209,8 @@ the app as after a `cancel()`. The backend is pulled from the saved position, an
 [operation log](./operation-log) holds since the last push goes out:
 
 <<< @/examples/connectors.mjs#restart
+
+A row the backend refused before the restart, `huge` here, is still parked after it.
 
 After a restart the connector knows the backend's state of each record only by a short digest, so the first push of
 such a record asks the backend what it holds instead of writing (a probe: `assumed` is `undefined`), then writes on

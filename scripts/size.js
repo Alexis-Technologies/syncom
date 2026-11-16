@@ -770,11 +770,14 @@ const ENTRIES = [
   // 9.93 with a refused state never learned — nobody wins: `#unlanded` kept with the checkpoint, an edit of such a
   // record pending though nothing else remembers it (`#quiet`), reSync()'s probe of them (`#reask`), a refused
   // resolution parked (fix/docs-found-bugs, 2026-11-15). 10.1, raised by name.
+  // 10.2 (10 444 bytes, at the line) with the parked rows kept with the checkpoint — `parked: { id: reason }`, restored
+  // still parked, the `parked` list, a parked row an edit waiting to go when its document is pulled, a reSync() retry
+  // that forgets nothing (feature/leftovers, 2026-11-16). 10.2, raised by name.
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 10.1,
+    budget: 10.2,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
