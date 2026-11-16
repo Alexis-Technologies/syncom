@@ -491,7 +491,9 @@ const ENTRIES = [
   // 182.7 with a blob's bytes crossing as a stream in pieces (src/sync/chunks.js, blobPut's stream; 2026-11-15).
   // 182.9, raised by name. 182.6 with the pieces and the stop wrpc 2.1's own (writeAll, a reader's terminate;
   // 2026-11-16).
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 182.9 },
+  // 183.1 (over by bytes) with the uploads that wait kept on disk (src/sync/uploads.js; 2026-11-16). 183.2, raised
+  // by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 183.2 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -636,7 +638,9 @@ const ENTRIES = [
   // 33.2 with a blob's bytes crossing as a stream of the transport's in pieces, both ways (chunks.js collect and a
   // write loop of its own, blobPut reading a stream to its size, #streamUp; 2026-11-15). 33.3, raised by name. 33.1
   // with the write loop and the stop wrpc 2.1's own (the writable's writeAll, a reader's terminate; 2026-11-16).
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 33.3 },
+  // 33.6 (over by bytes) with the uploads that wait kept on disk — uploads.json of the root kv, read at the open,
+  // written as an entry is noted and as one goes (src/sync/uploads.js UploadQueue; 2026-11-16). 33.7, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 33.7 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   {

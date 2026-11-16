@@ -8,6 +8,8 @@ The dialing side and the host: scopes, the feed's cursor, failed pages, reconnec
 src/sync/sync.js          @alexify/syncom/sync — the sync plugin: `open(ctx)` after the replay hands the core its SyncManager
 src/sync/manager.js       SyncManager — the dialing side; `unit()` delegates to hosting.js
 src/sync/registry.js      NodeRegistry — the dialed nodes on disk (remote/<url>.json), saves coalesced per node — no requires
+src/sync/uploads.js       UploadQueue — the attachments each dialed node waits for the bytes of, on disk (`uploads.json` of the root
+                          kv: `[digest, id, name]` per node, oldest first, MAX_UPLOADS a node), saves coalesced — requires blobs.js only
 src/sync/hosting.js       createUnit — the hosting side: hello/greet, push and the bytes a push names (blobPut), snapshot, the two feeds
                           (changes, sharedChanges), the presence event and the unit itself; the rules and the reads below
 src/sync/rules.js         what the procedures stand on: a refusal on the wire (coded, refuse, refuseCall), the peer of a call (peerOf: greeted,
@@ -152,7 +154,15 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   bytes through the same door (404 `NOT_NAMED`; `allow.push`, a writing hub, a blobs store, `limits.bytesPerBlob` and
   the cap, the digest hashed over the bytes) and hands what it kept to `landed` — the manager uploads it on to the
   hosts that wait for it (`#blobLanded`); the dialer uploads what a page the host took names after the page, on the
-  push chain (`#noteUploads`, `#upload`), never as a push of its own. A blob's bytes cross as BYTES, IN PIECES, where
+  push chain (`#noteUploads`, `#upload`), never as a push of its own. What waits is the NODE's, not the peer's, and
+  on disk (src/sync/uploads.js: `uploads.json` of the root kv, written when an entry is noted and when one goes —
+  uploaded, refused for good, past `MAX_UPLOADS`, its node removed — coalesced, never awaited by a push, a failed
+  write logged): `peer.uploads` is the node's Map, so a peer dialed again — a reconnect, a restart — takes up what
+  the one before left, at its hello's push, empty or not (`#serializePush` stays the one door). Not a field of the
+  registry entry: that file is rewritten at every page received, and a relay holds a thousand of these for long.
+  `waiting` (this node lacks the bytes) is derived, never stored: `store.has` says it at the first pass after an
+  open, `#blobLanded` clears it on every node's entry — a link that is down takes the bytes up at its next push — and
+  an entry named again is looked at again (`note`). A blob's bytes cross as BYTES, IN PIECES, where
   the transport carries a stream (src/sync/chunks.js over wrpc's binary streams — nothing of a transport is written
   here; the pieces, the pacing and the stop are wrpc's, 2.1 or later): a download is the host's `client.createStream`
   written through the writable's own `writeAll` (`sendAll`: 64 KiB pieces, each as the transport takes it, false once

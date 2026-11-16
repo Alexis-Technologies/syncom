@@ -82,6 +82,17 @@ its own host once they arrive, so a chain of hubs carries them as well. An uploa
 `limits.bytesPerBlob`, say) is reported on the manager's `error` event as `BLOB_UPLOAD_FAILED` and never fails the
 push; one that failed on the way is tried again at the next push.
 
+### Finish an upload after a restart
+
+What a node still has to upload is saved with its database. If the app quits after the server took the record but
+before the bytes went up, the next start uploads them as soon as it connects, without a new write:
+
+<<< @/examples/attachments.mjs#restart
+
+`MemoryLink` from `@alexify/syncom/testing` stands in for a slow connection here, and one `memoryEngine()` for the
+tablet's disk; an app opens the same `path` over its real engine. An upload the host refused is not kept: a
+restart does not ask again.
+
 ## How the bytes travel
 
 Over a connection that carries binary streams, the bytes cross as bytes. That is every
@@ -139,10 +150,10 @@ attachments may be larger. A host still holds one attachment in memory while it 
 `limits.bytesPerBlob` on the [unit](./replication-server) lowers what it accepts.
 
 They go up only with the push of the entry that names them, from a node that holds them, and only to a host that
-writes: a follower of a [shared log](./replication-nats) takes no bytes. What a node still has to upload is kept in
-memory, so a node restarted before its upload ran does not send those bytes; a read on the host then fetches them
-from a peer the host dials, or rejects with `BLOB_NOT_FOUND`. A [JSON export](./import-export) carries the
-`_attachments` entries but not the bytes.
+writes: a follower of a [shared log](./replication-nats) takes no bytes. What a node still has to upload is saved
+with its database, 1,024 attachments per host at most. Past that the oldest is dropped; a read on the host then
+fetches those bytes from a peer the host dials, or rejects with `BLOB_NOT_FOUND`. A
+[JSON export](./import-export) carries the `_attachments` entries but not the bytes.
 
 A peer's entry is believed only as far as it is a valid entry. A digest that is not 64 lowercase hex characters, or
 a length past the limit, makes `get()` and `has()` reject with `ATTACHMENT_INVALID`, and bytes that do not match

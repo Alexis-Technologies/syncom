@@ -103,7 +103,7 @@ engine refuse anything else with a `TypeError` before a store sees it. The names
 
 | Namespace | Keys |
 | --- | --- |
-| `''` | `node.json`, `schema.json`, `tags.json` (and `tags.corrupt.json`), `branch.json`, `lock.json`, `revoked.json`, `moved.json`, `copy.json` |
+| `''` | `node.json`, `schema.json`, `tags.json` (and `tags.corrupt.json`), `branch.json`, `lock.json`, `revoked.json`, `uploads.json`, `moved.json`, `copy.json` |
 | `keys` | `public.pem`, `private.pem` (RSA, the encryption plugin), `sign-public.pem`, `sign-private.pem` (Ed25519, the signing plugin) |
 | `blockchain` | `<hash>.json` per block, `.blockchain.json` the tail |
 | `index` | `catalog.json` |
@@ -125,6 +125,7 @@ What the root namespace's keys hold:
 | `branch.json` | `{ format: 1, parent, forkedAt, createdAt }`, in a branch only (see [Branches](./versions#branches)) |
 | `lock.json` | `{ pid, id, since }` while an instance holds the database through the lock key outside a browser (see [One instance per database](#one-instance-per-database)) |
 | `revoked.json` | `{ v: 1, nodes: { [node]: scopes } }`: the scopes a host took back, per peer |
+| `uploads.json` | `{ v: 1, nodes: { [url]: [[digest, id, name], …] } }`: the attachments each dialed node still waits for the bytes of, oldest first, 1 024 a node (see [`blobPut`](./wire#blobput)) |
 | `moved.json` | `{ to: { path, engine }, at }`: where `rotateAtRest()` copied the database; the directory opens nowhere until `dropDatabase()` (`MOVED`) |
 | `copy.json` | `{ from, started }` while `copyEngine()` writes a target; a target that holds it without an identity is a copy cut short |
 

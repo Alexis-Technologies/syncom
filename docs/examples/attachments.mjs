@@ -1,7 +1,7 @@
 // The Attachments page (docs/guide/attachments.md) shows the regions of this file.
 // tests/package/docs-examples.test.js runs it from an empty temporary directory.
 import assert from 'node:assert/strict';
-import { createMesh, settle, memoryEngine } from '@alexify/syncom/testing';
+import { createMesh, settle, memoryEngine, MemoryLink } from '@alexify/syncom/testing';
 
 // #region open
 import { createDatabase } from '@alexify/syncom/all';
@@ -120,3 +120,35 @@ const sketch = await office.get('phone').attachments.get(note, 'sketch.png'); //
 assert.equal(await office.get('server').attachments.has(note, 'sketch.png'), true);
 assert.equal(sketch.bytes.length, 2048);
 await office.close();
+
+// #region restart
+const cloud = await createDatabase({ engine: memoryEngine(), path: 'cloud', plugins: [attachments()] });
+const unit = cloud.sync.unit({ access: 'public' });
+const disk = memoryEngine(); // the tablet's disk: it outlives the two opens below
+const openTablet = () =>
+  createDatabase({
+    engine: disk,
+    path: 'tablet',
+    plugins: [attachments()],
+    sync: { connect: () => new MemoryLink(unit, { latency: 20 }) }, // a slow connection
+  });
+
+let tablet = await openTablet();
+await tablet.sync.addNode({ url: 'mem://cloud' });
+await tablet.sync.awaitInitialReplication();
+const visit = await tablet.insert({ title: 'Site visit' });
+await tablet.attachments.put(visit, 'photo.jpg', new Uint8Array(4096), { type: 'image/jpeg' });
+await tablet.sync.awaitDocumentPushed(visit); // the server has the record…
+await tablet.close(); // …and the app quits before the photo went up
+const uploaded = await cloud.attachments.has(visit, 'photo.jpg');
+console.log(uploaded); // false
+
+tablet = await openTablet(); // the next start writes nothing
+await tablet.sync.awaitInSync(); // the photo goes up as soon as the tablet connects
+console.log(await cloud.attachments.has(visit, 'photo.jpg')); // true
+// #endregion restart
+assert.equal(uploaded, false);
+assert.equal(await cloud.attachments.has(visit, 'photo.jpg'), true);
+assert.equal((await cloud.attachments.get(visit, 'photo.jpg', { fetch: false })).bytes.length, 4096);
+await tablet.close();
+await cloud.close();

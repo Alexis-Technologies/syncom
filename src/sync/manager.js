@@ -30,6 +30,7 @@ const { GLOBAL_SCOPE, inScope, opInScope } = require('../scope.js');
 const { PROTOCOL, DEFAULT_PAGE_SIZE, ATTACHMENTS_FIELD, schemaOf, kindsOf, proveMessage } = require('./protocol.js');
 const { createUnit } = require('./hosting.js');
 const { NodeRegistry } = require('./registry.js');
+const { UploadQueue } = require('./uploads.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
 const { SyncomError } = require('../errors.js');
 const { wellFormed, VERDICT, isPlainObject } = require('../shape.js');
@@ -55,9 +56,6 @@ const DEFAULT_MAX_PAGE_BYTES = 256 * 1024 * 1024;
 // A failed recovery waits this long (doubling, by timestamp) before the next.
 const RECOVER_BACKOFF = 1000;
 const MAX_RECOVER_BACKOFF = 60_000;
-// The attachments a peer waits for the bytes of (`peer.uploads`) beyond this: the oldest let go — a reader of them
-// fetches them from a peer that holds them.
-const MAX_UPLOADS = 1024;
 // What a host's refusal of an upload is, rather than a failure of the transport: the same bytes would be refused
 // again (a digest that is none, bytes that are not it, a record that does not name them, past a limit).
 const FINAL_UPLOAD = new Set([400, 403, 404, 413]);
@@ -136,6 +134,8 @@ class SyncManager extends Emitter {
   #presences = new Set();
   // The nodes on disk (src/sync/registry.js).
   #registry;
+  // The attachments each node waits for the bytes of, on disk too (src/sync/uploads.js): a restart takes them up.
+  #uploads;
   #otel;
   #hooks;
   #maxOutbox = DEFAULT_MAX_OUTBOX;
@@ -183,11 +183,13 @@ class SyncManager extends Emitter {
     this.#sharedOptions = normalizeShared(this.#options.sharedLog);
     // The registry lives where the storage does: over its backend.
     this.#registry = new NodeRegistry(storage[DB].kv, storage.logger);
+    this.#uploads = new UploadQueue(storage[DB].kv, storage.logger, () => storage.readOnly);
     return this.#init();
   }
 
   async #init() {
     this.#nodes = await this.#registry.load();
+    await this.#uploads.load((url) => this.#nodes.has(url));
     await this.#loadRevoked();
     // One listener for both halves: the dialing side's fan-out to its
     // links, and the hosting side's wake-up of every live `changes` feed.
@@ -253,6 +255,7 @@ class SyncManager extends Emitter {
     if (!node) throw new SyncomError('NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
     this.#nodes.delete(url);
     this.#disconnect(url);
+    this.#uploads.forget(url);
     await this.#registry.remove(url);
     notify(this, this.#storage.logger, 'node', { url, action: 'remove' });
   }
@@ -446,6 +449,7 @@ class SyncManager extends Emitter {
     for (const url of [...this.#peers.keys()]) this.#disconnect(url);
     if (this.#shared !== null) await this.#shared.stop();
     await this.#registry.drain();
+    await this.#uploads.drain();
     await this.#savingRevoked;
     notify(this, this.#storage.logger, 'stop');
   }
@@ -609,8 +613,9 @@ class SyncManager extends Emitter {
       flushQueued: false,
       // The attachments this node pushed the registers of and the host may lack the bytes of, by digest (the record
       // and the name that named it, `waiting` while this node lacks the bytes): uploaded after a push (#upload), or
-      // once the bytes land here (#blobLanded).
-      uploads: new Map(),
+      // once the bytes land here (#blobLanded). The node's, kept on disk (src/sync/uploads.js): a peer dialed again —
+      // a reconnect, a restart — takes up what the one before left.
+      uploads: this.#uploads.of(node.url),
       // A relay that failed: what the host lacks is pushed from the vector
       // at the next sign of life on the link (see #recover), backed off by
       // timestamp after a failed recovery.
@@ -1117,7 +1122,7 @@ class SyncManager extends Emitter {
       sent += page.length;
     }
     // The bytes of the attachments the pages named, behind them: the host names them now. A handshake's push, empty
-    // or not, tries again what a transport's failure left.
+    // or not, takes up what waits — what a transport's failure left, what a restart found on disk.
     await this.#upload(peer);
     peer.backoff = 0;
     if (sent > 0 && !peer.closed) {
@@ -1129,10 +1134,11 @@ class SyncManager extends Emitter {
   }
 
   // The attachments a page the host took names — every register a pushed op sets — kept for #upload by digest
-  // (the first record and name naming it), MAX_UPLOADS at most, the oldest let go. An op the host refused names
-  // nothing it holds; a hub that forwarded the page cannot write the bytes; a withheld op names nothing.
+  // (the first record and name naming it), MAX_UPLOADS a node, the oldest let go, and saved (src/sync/uploads.js):
+  // noted here, an entry outlives the process. An op the host refused names nothing it holds; a hub that forwarded
+  // the page cannot write the bytes; a withheld op names nothing.
   #noteUploads(peer, page, answer) {
-    if (answer?.forwarded === true || this.#storage[DB]?.blobs === undefined) return;
+    if (peer.closed || answer?.forwarded === true || this.#storage[DB]?.blobs === undefined) return;
     let refused = null;
     if (Array.isArray(answer?.refused)) {
       refused = new Set();
@@ -1141,7 +1147,7 @@ class SyncManager extends Emitter {
         refused.add(`${origin}@${scope ?? ''}:${seq}`);
       }
     }
-    const { uploads } = peer;
+    const { url } = peer.node;
     const named = [];
     for (let i = 0; i < page.length; i++) {
       const op = page[i];
@@ -1149,12 +1155,7 @@ class SyncManager extends Emitter {
       if (refused !== null && refused.has(`${op.origin}@${op.scope ?? ''}:${op.seq}`)) continue;
       named.length = 0;
       namedBlobs(op.data, named);
-      for (let j = 0; j < named.length; j++) {
-        const [name, digest] = named[j];
-        if (uploads.has(digest)) continue;
-        uploads.set(digest, { id: op.id, name, waiting: false });
-        if (uploads.size > MAX_UPLOADS) uploads.delete(uploads.keys().next().value);
-      }
+      for (let j = 0; j < named.length; j++) this.#uploads.note(url, named[j][1], op.id, named[j][0]);
     }
   }
 
@@ -1163,13 +1164,17 @@ class SyncManager extends Emitter {
   // (#streamUp), as base64 in the call where no stream goes. Bytes this node lacks (a relay
   // that never read them) wait — asked after no push again — until they land here (#blobLanded hands their
   // digest). A refusal is final and a transport's failure tried again at the next push; both are reported
-  // (`BLOB_UPLOAD_FAILED`), never thrown — the push stands. Runs on the push chain.
+  // (`BLOB_UPLOAD_FAILED`), never thrown — the push stands. An entry goes from the node's queue, and from the disk,
+  // once its bytes went up or were refused for good — never asked again, a restart later neither. Runs on the
+  // push chain.
   async #upload(peer, landed = null) {
     const { uploads } = peer;
-    if (uploads.size === 0) return;
     const store = this.#storage[DB]?.blobs;
+    if (uploads.size === 0 || store === undefined) return;
+    const { url } = peer.node;
     for (const [digest, entry] of uploads) {
       if (peer.closed || !peer.connected || peer.link === null) return;
+      // The digest that landed whatever the flag says: a pass that asked the store before the bytes came set it since.
       if (entry.waiting && digest !== landed) continue;
       const { id, name } = entry;
       let size = 0;
@@ -1186,11 +1191,11 @@ class SyncManager extends Emitter {
             await this.#streamUp(peer.link, args, bytes);
           } else await peer.link.call('syncom/blobPut', { digest, id, name, base64: toBase64(bytes) });
         }
-        uploads.delete(digest);
+        this.#uploads.settle(url, digest);
         if (size > 0) this.#otel.recordBlob('uploaded', 'ok', size);
       } catch (error) {
         const final = FINAL_UPLOAD.has(error?.code);
-        if (final) uploads.delete(digest);
+        if (final) this.#uploads.settle(url, digest);
         this.#otel.recordBlob('uploaded', final ? 'refused' : 'failed', 0);
         const message = `${peer.node.url} did not take the bytes of ${id}/${name}`;
         const fields = { digest, id, attachment: name, cause: error, retry: !final };
@@ -1213,8 +1218,10 @@ class SyncManager extends Emitter {
     await taking;
   }
 
-  // Bytes that landed here — a peer's upload, a fetch — go on to every peer that waits for them, on its push chain.
+  // Bytes that landed here — a peer's upload, a fetch — go on to every peer that waits for them, on its push chain;
+  // a node whose link is down, or that is not dialed now, waits for them no more and takes them up at its next push.
   #blobLanded(digest) {
+    this.#uploads.landed(digest);
     for (const peer of this.#peers.values()) {
       if (peer.closed || !peer.connected || !peer.uploads.has(digest)) continue;
       this.#serializePush(peer, () => this.#upload(peer, digest)).catch(() => {});

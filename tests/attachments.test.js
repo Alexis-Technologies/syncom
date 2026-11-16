@@ -543,6 +543,238 @@ test('Attachments', async (t) => {
     },
   );
 
+  // What a node still has to upload, as the root kv holds it (src/sync/uploads.js).
+  const queued = async (db) => {
+    const text = await db[DB].kv.get('', 'uploads.json');
+    return text === null ? null : JSON.parse(text);
+  };
+
+  await t.test(
+    'what waits to go up survives a restart: a dialer closed before its bytes went up uploads them at the next hello, with no new write',
+    async (t2) => {
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const host = await createStorage(t2, 'H');
+      const unit = host.sync.unit({ access: 'public' });
+      // A text link that takes no message past 4 KiB: the push lands, and the bytes — base64 in one call — take the
+      // link down with them.
+      let dial = null;
+      const open = (hazards) =>
+        createStorage(t2, 'A', {
+          sync: { connect: () => (dial = new MemoryLink(unit, hazards)), autoStart: false },
+        });
+      const first = await open({ maxMessage: 4 * 1024 });
+      const failures = [];
+      first.sync.on('error', (error) => failures.push(error));
+      await first.sync.addNode({ url: 'mem://H' });
+      await first.sync.start();
+      await first.sync.awaitInitialReplication();
+      const id = await first.insert({ title: 'cut off' });
+      const bytes = new Uint8Array(20_000).fill(5);
+      const entry = await first.attachments.put(id, 'cut.bin', bytes, { type: 'x/y' });
+      await waitUntil(() => failures.some((error) => error.code === 'BLOB_UPLOAD_FAILED'));
+      const [failed] = failures.filter((error) => error.code === 'BLOB_UPLOAD_FAILED');
+      assert.strictEqual(failed.retry, true, 'a transport that failed: tried again');
+      assert.strictEqual(dial.down, true);
+      assert.deepStrictEqual((await host.get(id))[FIELD], { 'cut.bin': entry }, 'the push landed');
+      assert.strictEqual(await host.attachments.has(id, 'cut.bin'), false, 'the bytes did not');
+      // The process ends here: what waits is on disk, by node, the record and the name with the digest.
+      await first.close();
+      const again = await open({});
+      assert.deepStrictEqual(await queued(again), { v: 1, nodes: { 'mem://H': [[entry.digest, id, 'cut.bin']] } });
+      // Nothing is written: the hello alone takes the upload up again, behind its (empty) push.
+      await again.sync.start();
+      await waitUntil(() => host.attachments.has(id, 'cut.bin'));
+      same((await host.attachments.get(id, 'cut.bin', { fetch: false })).bytes, bytes);
+      assert.strictEqual(dial.calls.includes('syncom/push'), false, 'no page was pushed for it');
+      assert.deepStrictEqual(
+        dial.calls.filter((method) => method === 'syncom/blobPut'),
+        ['syncom/blobPut', 'syncom/blobPut'],
+        'a probe, then the bytes',
+      );
+      // Gone from the queue with the upload, and from the disk: a third open asks nothing.
+      await waitUntil(async () => (await queued(again)).nodes['mem://H'] === undefined);
+      await again.close();
+      const third = await open({});
+      await third.sync.start();
+      await third.sync.awaitInitialReplication();
+      assert.strictEqual(dial.calls.includes('syncom/blobPut'), false);
+    },
+  );
+
+  await t.test(
+    'an upload refused for good is not asked again after a restart, one whose record names it no more is refused once (404) and gone; the queue keeps 1024 entries a node, the oldest let go, and a node removed takes its entries',
+    async (t2) => {
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const strict = await createStorage(t2, 'S');
+      const unit = strict.sync.unit({ access: 'public', limits: { bytesPerBlob: 10 } });
+      let dial = null;
+      const open = () =>
+        createStorage(t2, 'C', { sync: { connect: () => (dial = new MemoryLink(unit)), autoStart: false } });
+      const first = await open();
+      const errors = [];
+      first.sync.on('error', (error) => errors.push(error));
+      await first.sync.addNode({ url: 'mem://S' });
+      await first.sync.start();
+      await first.sync.awaitInitialReplication();
+      const big = await first.insert({ title: 'too big for S' });
+      await first.attachments.put(big, 'big.bin', new Uint8Array(100).fill(1), { type: 'x/y' });
+      await waitUntil(() => errors.some((error) => error.code === 'BLOB_UPLOAD_FAILED'));
+      assert.strictEqual(errors.find((error) => error.code === 'BLOB_UPLOAD_FAILED').retry, false);
+      await first.sync.awaitInSync();
+      await first.close();
+      const again = await open();
+      assert.deepStrictEqual(await queued(again), { v: 1, nodes: {} }, 'refused for good: nothing waits');
+      const told = [];
+      again.sync.on('error', (error) => told.push(error));
+      await again.sync.start();
+      await again.sync.awaitInitialReplication();
+      assert.strictEqual(dial.calls.includes('syncom/blobPut'), false, 'never asked again');
+      assert.deepStrictEqual(told, []);
+      // An entry whose record names the digest no more: it waited for bytes this node lacked, the name was taken
+      // off the record, and the bytes came. The host's one answer for every miss (404) is final too — told once,
+      // gone from the disk, nothing loops.
+      const late = bytesOf('late');
+      const lateDigest = await hashBytes(late);
+      await again.update(big, { [`${FIELD}/late.bin`]: { digest: lateDigest, type: 'x/y', length: late.length } });
+      await again.sync.awaitInSync();
+      await again.unset(big, [`${FIELD}/late.bin`]);
+      await again.sync.awaitInSync();
+      await again[DB].blobs.put(lateDigest, late);
+      await again.close();
+      const unnamed = await open();
+      assert.deepStrictEqual(await queued(unnamed), { v: 1, nodes: { 'mem://S': [[lateDigest, big, 'late.bin']] } });
+      unnamed.sync.on('error', (error) => told.push(error));
+      await unnamed.sync.start();
+      await unnamed.sync.awaitInitialReplication();
+      assert.strictEqual(told.length, 1);
+      assert.deepStrictEqual(
+        [told[0].code, told[0].cause.code, told[0].cause.reason, told[0].retry, told[0].attachment],
+        ['BLOB_UPLOAD_FAILED', 404, 'NOT_NAMED', false, 'late.bin'],
+      );
+      assert.deepStrictEqual(
+        dial.calls.filter((method) => method === 'syncom/blobPut'),
+        ['syncom/blobPut'],
+        'one probe, never the bytes',
+      );
+      await waitUntil(async () => (await queued(unnamed)).nodes['mem://S'] === undefined);
+      await unnamed.close();
+      // The bound: 1030 registers whose bytes this node lacks (written by hand, as a relay holds them) leave the
+      // newest 1024 waiting — in memory and on disk — and nothing is asked of the host for them.
+      const digestOf = (n) => n.toString(16).padStart(64, '0');
+      const relay = await open();
+      await relay.sync.start();
+      await relay.sync.awaitInitialReplication();
+      assert.strictEqual(dial.calls.includes('syncom/blobPut'), false, 'nor after another restart');
+      const many = await relay.insert({ title: 'many' });
+      const delta = {};
+      for (let i = 0; i < 1030; i++) delta[`${FIELD}/f${i}`] = { digest: digestOf(i), type: 'x/y', length: 1 };
+      await relay.update(many, delta);
+      await relay.sync.awaitInSync();
+      await waitUntil(async () => (await queued(relay))?.nodes['mem://S']?.length === 1024);
+      const kept = (await queued(relay)).nodes['mem://S'];
+      assert.deepStrictEqual(kept[0], [digestOf(6), many, 'f6'], 'the six oldest were let go');
+      assert.deepStrictEqual(kept[1023], [digestOf(1029), many, 'f1029']);
+      assert.strictEqual(dial.calls.includes('syncom/blobPut'), false, 'bytes this node lacks are not offered');
+      await relay.close();
+      const third = await open();
+      await third.sync.start();
+      await third.sync.awaitInitialReplication();
+      assert.strictEqual((await queued(third)).nodes['mem://S'].length, 1024, 'the bound holds across a restart');
+      assert.strictEqual(dial.calls.includes('syncom/blobPut'), false);
+      // The bytes of one of them come by another way (a local put of the same bytes): named again, it is looked
+      // at again and goes up.
+      const landed = new Uint8Array([7, 7, 7]);
+      const digest = await hashBytes(landed);
+      await third.update(many, { [`${FIELD}/late`]: { digest, type: 'x/y', length: 3 } });
+      await third.sync.awaitInSync();
+      assert.strictEqual(await strict[DB].blobs.has(digest), false, 'named, not held: it waits');
+      await third[DB].blobs.put(digest, landed);
+      await third.update(many, { [`${FIELD}/again`]: { digest, type: 'x/y', length: 3 } });
+      await waitUntil(() => strict[DB].blobs.has(digest));
+      // A node removed takes what waited for it.
+      await third.sync.removeNode('mem://S');
+      await waitUntil(async () => (await queued(third)).nodes['mem://S'] === undefined);
+    },
+  );
+
+  await t.test(
+    'uploads.json that does not read is said and read as none, a row that is none is left out; a save that fails is logged and fails neither the push nor the upload',
+    async (t2) => {
+      const { MemoryLink } = require('./utils/memory-link.js');
+      const host = await createStorage(t2, 'H');
+      const unit = host.sync.unit({ access: 'public' });
+      const warnings = [];
+      const logger = { warn: (event) => warnings.push(event), error: () => {}, info: () => {}, debug: () => {} };
+      let dial = null;
+      const sync = { connect: () => (dial = new MemoryLink(unit)), autoStart: false };
+      const first = await createStorage(t2, 'A', { sync, logger });
+      await first.sync.addNode({ url: 'mem://H' });
+      await first.sync.start();
+      await first.sync.awaitInitialReplication();
+      // A register pushed by hand: the host names bytes this node holds and never offered.
+      const bytes = bytesOf('kept on disk');
+      const digest = await hashBytes(bytes);
+      const id = await first.insert({ title: 'by hand' });
+      await first.update(id, { [`${FIELD}/f`]: { digest, type: 'text/plain', length: bytes.length } });
+      await first.sync.awaitInSync();
+      await first[DB].blobs.put(digest, bytes);
+      await first.close();
+      // The file as a hand or another build could leave it: one row that is one, the rest none.
+      const raw = await engine.open(`${t2.name}/A`, { logger });
+      const write = (value) =>
+        raw.kv.put('', 'uploads.json', typeof value === 'string' ? value : JSON.stringify(value));
+      const rows = [[digest, id, 'f'], ['no digest', id, 'f'], 'no row', ['a'.repeat(64), 7, 'f'], [digest, id]];
+      await write({ v: 1, nodes: { 'mem://H': rows, 'mem://gone': [[digest, id, 'f']], 'mem://bad': 'no list' } });
+      const second = await createStorage(t2, 'A', { sync, logger });
+      await second.sync.start();
+      await waitUntil(() => host[DB].blobs.has(digest));
+      assert.deepStrictEqual(
+        dial.calls.filter((method) => method === 'syncom/blobPut'),
+        ['syncom/blobPut', 'syncom/blobPut'],
+        'the one row that is one went up',
+      );
+      await waitUntil(async () => (await queued(second)).nodes['mem://H'] === undefined);
+      assert.deepStrictEqual(await queued(second), { v: 1, nodes: {} }, 'a node that is not registered keeps none');
+      await second.close();
+      // A text that does not read, another version, no nodes: said where it does not parse, read as none.
+      for (const value of ['{nope', { v: 2, nodes: { 'mem://H': [[digest, id, 'f']] } }, { v: 1, nodes: [] }, 'null']) {
+        await write(value);
+        warnings.length = 0;
+        const opened = await createStorage(t2, 'A', { sync, logger });
+        const unreadable = warnings.filter((event) => event.event === 'sync.uploads.unreadable').length;
+        assert.strictEqual(unreadable, value === '{nope' ? 1 : 0);
+        await opened.sync.start();
+        await opened.sync.awaitInitialReplication();
+        assert.strictEqual(dial.calls.includes('syncom/blobPut'), false, 'nothing waits');
+        await opened.close();
+      }
+      await raw.close();
+      // A medium that refuses the file: logged, and the push and the upload go on without it.
+      const plain = syncom.memoryEngine();
+      const refusing = Object.freeze({
+        name: 'no-uploads-file',
+        capabilities: plain.capabilities,
+        open: async (path, options) => {
+          const db = await plain.open(path, options);
+          const put = (ns, key, value, hints) =>
+            key === 'uploads.json' ? Promise.reject(new Error('disk full')) : db.kv.put(ns, key, value, hints);
+          return Object.freeze({ ...db, kv: { ...db.kv, put } });
+        },
+        remove: (path) => plain.remove(path),
+      });
+      warnings.length = 0;
+      const poor = await createStorage(t2, 'P', { engine: refusing, sync, logger });
+      await poor.sync.addNode({ url: 'mem://H' });
+      await poor.sync.start();
+      await poor.sync.awaitInitialReplication();
+      const other = await poor.insert({ title: 'on a full disk' });
+      await poor.attachments.put(other, 'g', bytesOf('goes up all the same'), { type: 'text/plain' });
+      await waitUntil(() => host.attachments.has(other, 'g'));
+      await poor.sync.stop();
+      assert.ok(warnings.some((event) => event.event === 'sync.uploads.failed' && event.err.message === 'disk full'));
+    },
+  );
+
   await t.test(
     'syncom/blobPut takes the bytes a live record in the peer’s scopes names, checked against the digest and the limits; a probe without bytes answers whether the host holds them',
     async (t2) => {

@@ -47,9 +47,11 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   the registers a page the host took names (`syncom/blobPut`, src/sync/manager.js `#noteUploads`/`#upload`, a probe
   first so they cross once, then a stream of the link's in the same pieces — `#streamUp` — or base64 in the call
   where no stream goes; the host's door is `blobNamed` again, the digest checked over the bytes, `bytesPerBlob`
-  and the cap); bytes a relay lacks wait in `peer.uploads` until they land (`#blobLanded`: an upload taken, a fetch
+  and the cap); bytes a relay lacks wait in the node's queue until they land (`#blobLanded`: an upload taken, a fetch
   kept), so a chain of hubs carries them. A refused upload is final, a failed one retried at the next push, both
-  `BLOB_UPLOAD_FAILED`, never the push's failure; a follower takes no bytes, and what waits is in memory alone.
+  `BLOB_UPLOAD_FAILED`, never the push's failure; a follower takes no bytes. What waits is on disk
+  (src/sync/uploads.js, `uploads.json` of the root kv, 1024 a node): a restart uploads it at the next hello, with
+  no new write.
 - **The store is the engine's; the plugin refuses an engine without one.** Every shipped engine keeps `blobs` (memory: a Map;
   IndexedDB: a seventh store; files: `blobs/<digest>` as base64 text; SQLite: a table; MongoDB: a collection) and
   says so in `capabilities.blobs`; the read-only wrapper reads them, the at-rest wrapper seals them as text at the blob's

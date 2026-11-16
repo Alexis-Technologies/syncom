@@ -493,7 +493,8 @@ a folded tombstone lives whole in the `tombstones` kv namespace, see [cleanup](.
 local documents), `pipeline/` (the pipelines' checkpoints), `tags/`, `blobs/<digest>` (an attachment's bytes under
 their SHA-256, base64 text in the files engine), and the texts a block keeps in the root namespace or one of its own:
 `revoked.json` `{ v: 1, nodes: { "<node>": ["<scope>", …] } }` (the scopes a host took back from each node,
-[revoke](#the-revoke-event)), `shared/cursor.json` (a hub's cursors over the [shared log](#the-shared-log)),
+[revoke](#the-revoke-event)), `uploads.json` `{ v: 1, nodes: { "<url>": [["<digest>", "<id>", "<name>"], …] } }` (the
+attachments each dialed node still waits for the bytes of, oldest first — [`blobPut`](#blobput)), `shared/cursor.json` (a hub's cursors over the [shared log](#the-shared-log)),
 `connector/<name>` `{ pull, pushed, known: { "<id>": "<22 base64url characters of the SHA-256>" | null }, refused: ["<id>"] }`
 (a connector's checkpoint: the backend's position, this node's log position pushed through, the backend's state per
 record as a digest, the ids whose state the database refused to land — [connectors](../guide/connectors)), `moved.json` `{ to: { path, engine }, at }` (a
@@ -715,7 +716,16 @@ uploads the bytes it holds after the page, on the push chain: a probe, then the 
 that never read them — wait until they land here (an upload from a node behind it, a `fetchBlob`), then go up. A
 refusal (400, 403, 404, 413) is final; a failure on the way — a link that went down with chunks still to send
 fails the call (503) — is tried again at the next push, a reconnect's included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
-`retry`); neither fails the push. What waits is kept in memory: a restart forgets it.
+`retry`); neither fails the push.
+
+What waits is saved, so a restart takes it up: `uploads.json` of the root kv namespace holds, per dialed node, the
+`[digest, id, name]` of every entry in the order noted. It is written when an entry is noted and when one goes — its
+bytes went up, the host refused them for good, the bound let it go, its node was removed — one write in flight and
+the next after it, never awaited by the push; a write that fails is logged (`sync.uploads.failed`) and a file that
+does not read is read as none (`sync.uploads.unreadable`). The first hello after an open uploads what the file
+holds behind its push, empty or not: no new write is needed, and an entry refused for good is never asked again.
+Whether this node holds the bytes is not stored; the blobs store says it at the first upload after an open. A crash
+between a push's answer and the write of its entries loses those entries.
 
 ### `blob`
 
