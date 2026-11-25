@@ -26,17 +26,8 @@ const notes = () => {
   return out.sort();
 };
 
-const guides = () => {
-  const out = [...notes(), 'CONTRIBUTING.md'];
-  const skills = path.join(ROOT, '.claude', 'skills');
-  if (existsSync(skills)) {
-    for (const name of readdirSync(skills)) {
-      const file = path.join('.claude', 'skills', name, 'SKILL.md');
-      if (existsSync(path.join(ROOT, file))) out.push(file);
-    }
-  }
-  return out;
-};
+// The skills are alexiskills', linked from node_modules (CLAUDE.md, Skills): their paths are other projects'.
+const guides = () => [...notes(), 'CONTRIBUTING.md'];
 
 test('every src/ path the guides name exists', () => {
   const missing = [];

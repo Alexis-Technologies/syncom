@@ -244,7 +244,8 @@
     "docs:preview": "vitepress preview docs",
     "docs:comparison": "node scripts/comparison.js",
     "docs:examples:rxdb": "node scripts/docs-examples-rxdb.js",
-    "docs:llms": "node scripts/llms.js"
+    "docs:llms": "node scripts/llms.js",
+    "prepare": "alexiskills claude"
   },
   "tsd": {
     "directory": "tests"
@@ -334,6 +335,7 @@
   },
   "devDependencies": {
     "@alexify/metaschema": "^3.4.0",
+    "@alexify/metaskills": "^1.1.0",
     "@alexify/wrpc": "2.1.0",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",

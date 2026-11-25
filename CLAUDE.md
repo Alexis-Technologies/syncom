@@ -80,7 +80,7 @@ Before every commit: `pnpm lint`, `pnpm format:check`, `pnpm test:types`,
 and the whole suite with `node --test --test-timeout=120000 --test-force-exit` (never a run without
 both: a test once hung for hours, and a file whose failed test left a message port open sat for eight
 hours after its last test). Coverage —
-`npx c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000 --test-force-exit`
+`pnpm exec c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000 --test-force-exit`
 — is enforced in CI; see [tests/CLAUDE.md](./tests/CLAUDE.md).
 
 ## Rules for the whole repository
@@ -117,7 +117,7 @@ hours after its last test). Coverage —
   `SyncomCollection<R, I>` — and nothing at run time reads `shapes`; `RecordData` is the
   type wherever the schema says no more. A reader of a record takes `R` (`get<R>`,
   `record<R>`) rather than returning `unknown`; a new one does the same.
-- **`tests/package/docs-paths.test.js` guards the guides.** Every `src/…` path CLAUDE.md, CONTRIBUTING.md, a skill or a
+- **`tests/package/docs-paths.test.js` guards the guides.** Every `src/…` path CLAUDE.md, CONTRIBUTING.md or a
   comment in `src/` names exists, and every "no requires" / "requires X only" of a layout line above is what the
   file requires — move a file or add a require and the line moves with it.
 - **`tests/package/consistency.test.js` guards the metadata.** If it goes red
@@ -138,37 +138,83 @@ hours after its last test). Coverage —
   `src/` to 1 and the sources free of `@deprecated`; the rules for after the publication are "Compatibility" in
   `docs/reference/wire.md`.
 
+## Conventions
+
+The style is `js-conventions` of alexiskills, its Library profile (CommonJS, hand-written `.d.ts`, `node:test` with
+c8, no runtime dependency). This section is what syncom adds to it or does otherwise, and **this file wins** where the
+two differ; a folder's own CLAUDE.md wins over this one for the code of that folder.
+
+- **Formatting.** oxfmt: 2 spaces, single quotes, semicolons, trailing commas, LF, and **120 columns** (`printWidth`
+  in `.oxfmtrc.json`). Run `pnpm format` before committing; CI runs `format:check`.
+- **Lint.** oxlint over `src`, `tests`, `scripts`, `bench`, `examples` and `docs/examples` (`.oxlintrc.json`). Suppress
+  a rule only for an intentional construct, with a targeted `// oxlint-disable-next-line <rule>`.
+- **`'use strict'` in every file of `src/`.** alexiskills adds it only where a project already does; syncom does,
+  everywhere, and keeps it.
+- **No runtime dependencies, and no build.** The only bare `require` in `src/` is a `node:` built-in, and none at all
+  in a file that reaches a browser bundle; a helper goes in `src/utils.js`. `node:` prefix and `.js` in every relative
+  require.
+- **A platform split is a `*.browser.js` file** (dot, not dash), wired through `package.json#browser` and
+  `src/index.browser.js` (src/CLAUDE.md has the three edits it needs). `env.browser` stays on in the lint: the
+  shared modules run in both.
+- **Iteration in `src/` is stricter than alexiskills.** Besides every array iteration method, `Array.from` is banned
+  (a loop, or `[...iterable]` for a plain copy); `T.find` and `SL.find` are the rope's and the plist's own functions,
+  and the editor APIs named `map` (`RangeSet.map`, `DecorationSet.map`) carry a disable comment. One walk does what it
+  can (never `filter().map()`, a count pass then a build pass, or the same `Object.keys(o)` twice); a membership test
+  inside a loop is a `Set`, built once.
+- **Never spread a data array into arguments, never `new Array(n)`.** `push(...items)`, `Math.max(...values)` and
+  `fn(...array)` throw `RangeError` past ~130 000 elements, and a list run holds up to `MAX_RUN`. A new array is `[]`
+  and `push`: `new Array(n)` filled by index stays holey for good, and a list's chunks built that way cost a text
+  insert 8% (measured). A bulk copy stays native (`slice`, `concat`).
+- **Events leave through `notify()`** and never fail the operation they observe; a hook may fail it.
+- **`await` `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` in shared code**: synchronous in Node.js,
+  promise-returning in the browser.
+- **The hot path** — applying and merging ops, `OpLog.append`, vector clocks, `packOps` — creates no closure or
+  `RegExp` per call, keeps one object shape per kind of op and log entry, and has `try`/`catch` only around user code
+  (hooks, listeners) and I/O. Run `pnpm bench` before and after touching it; a number that moved is a finding.
+
+## Release process
+
+Manual, on purpose: no release workflow, no publish automation. The `npm-publish` skill of alexiskills walks through
+it step by step; it runs only as `/npm-publish` (`disable-model-invocation: true`), and never publishes. The commands
+are CONTRIBUTING.md's "Release checklist". What syncom adds to the steps of the skill:
+
+- **Gates (its step 1).** `prepublishOnly`, then `pnpm docs:build` (a dead link fails it), which CI runs and
+  `prepublishOnly` does not. A coverage threshold is never lowered and a size budget never raised to get green.
+  `pnpm outdated` and `pnpm audit` are about the devDependencies alone.
+- **Version (step 2).** The nav label of `docs/.vitepress/config.mts` (`text: 'v<version>'`) is hand-synced with
+  `package.json`; `tests/package/consistency.test.js` fails when they differ. **The first release:** `0.0.1` is the
+  placeholder the repository carries until the package meets its goals. The first version is picked with the user
+  (`0.1.0` is the usual choice for an API that may still change), and `package.json`, the nav label and the comparison
+  matrix move together.
+- **CHANGELOG (step 3).** On the first release the note that the package is unpublished leaves the top of the file,
+  all of `[Unreleased]` lands in the version, and its link points to `releases/tag/v<version>`.
+- **Typings (step 4).** `index.d.ts` is the Node surface; `browser.d.ts` re-exports it and overrides the crypto
+  functions that are async in the browser; every subpath has its `.d.ts` and `tests/<name>.test-d.ts`. The event maps
+  and the hook option types match what `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/database.js` and
+  `src/sync/manager.js` emit and run.
+- **Docs (step 5).** The README's bundle-size table comes from `pnpm size`; the replication pages agree with
+  `src/sync/manager.js` and `src/sync/hosting.js`, the hooks and events pages with the files above;
+  `docs/public/llms.txt` is regenerated (`pnpm docs:llms`, `tests/package/docs-map.test.js`); the docs keywords
+  mirror `package.json#keywords`; SECURITY.md's table changes on a major (or the first) release.
+- **Package (step 6).** `files` is the allowlist (no `.npmignore`, no `dependencies`), `!**/CLAUDE.md` keeps the notes
+  out and `tests/package/pack.test.js` holds it. `pnpm pack --dry-run`, then the tarball smoked from a scratch consumer
+  (the one place `npm` and `npx` are used): `require()` it from a CJS file, and typecheck it with
+  `npx tsc --moduleResolution bundler --module esnext --noEmit`.
+- **Publish.** `pnpm publish` from the tagged commit (`chore(release): X.Y.Z`, tag `vX.Y.Z`), by hand, gated by
+  `prepublishOnly`.
+
 ## Skills
 
-`.claude/skills/` holds six of the seven [metaskills](https://github.com/metarhia/metaskills)
-v1.0.5 skills that `metaschema` carries: `js-conventions`, `js-data-structures`,
-`data-structures`, `js-gof`, `error-handling` and `npm-publish`.
+The skills are [alexiskills](https://alexiskills.vercel.app), `@alexify/metaskills` 1.1, a devDependency: all 37
+skills of its seven packs. `.claude/skills` is one symlink to `node_modules/@alexify/metaskills/skills`, made by the
+`prepare` script (`alexiskills claude`) on every `pnpm install`, a worktree's included, and left out by `.gitignore`.
+Until 2026-11-25 the directory held six skills of metarhia/metaskills 1.0.5, `js-conventions` and `npm-publish` adapted
+to this repository; what they said of syncom alone is in "Conventions" and "Release process" above.
 
-- **`js-conventions` is adapted to this repo:** oxlint/oxfmt, pnpm, 120 columns, `'use strict'`
-  in every `src/` file, `node:` prefix and `.js` in relative requires, no runtime dependencies,
-  and the error and hot-path rules of this engine. In `src/` no array method takes a callback
-  and `Array.from` is not used — loops, enforced by oxlint's `no-restricted-properties` for
-  `src/**` (`.oxlintrc.json` `overrides`); a data array is never spread into arguments.
-- **`npm-publish` is adapted to the release checklist in CONTRIBUTING.md:** the CI gates, the
-  hand-synced docs nav version, the size table, and the first-release notes (nothing is
-  published yet). It never publishes.
-- **The other four are verbatim copies.** `metautil-data-structures` is left out on purpose: it
-  documents the `metautil` package, and this one takes no runtime dependencies.
+- **The skills are not edited here.** A change to one goes to `Alexis-Technologies/metaskills` and comes back with a
+  release of the package. A skill of this repository's own beside them would turn the symlink into a directory of
+  links, and one named like a skill of the package hides that skill.
+- **`js-conventions` and `npm-publish` are the Alexis ones, for every library.** What syncom does differently or adds
+  is here.
 
-Keep the two adapted skills in sync with these notes and CONTRIBUTING.md. **The nearest CLAUDE.md wins** if
-they ever disagree.
-
-## Formatting
-
-`oxlint` + `oxfmt`, not eslint/prettier. `printWidth` is 120. Run
-`pnpm format` before committing; CI runs `format:check`.
-
-`src/` is written in a procedural style, and the linter holds it there: no `map`, `filter`,
-`find`, `findIndex`, `findLast(Index)`, `some`, `every`, `flatMap`, `forEach`, `reduce(Right)`
-or `Array.from` — an indexed `for` over an array, `for...of` over a Map, a Set or an iterator.
-One walk does what it can (no `filter().map()`, no second pass for a count), a membership test
-inside a loop is a `Set`, and `push(...items)` / `fn(...array)` never takes a data array (it
-throws `RangeError` past ~130 000 elements; a list run holds up to `MAX_RUN`). A new array is
-`[]` + `push`, never `new Array(n)` filled by index (holey for good, slower to read), and a bulk
-copy stays native (`slice`, `concat`). The two editor APIs named `map` (`RangeSet.map`,
-`DecorationSet.map`) carry a disable comment.
+**This file wins** if a skill and this file ever disagree.

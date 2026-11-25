@@ -131,3 +131,6 @@ bench/compare/.cache
 
 # The database `createDatabase()` makes at its default path — what examples/main.js opens when run from the root
 /syncom/
+
+# The alexiskills skills: a symlink into node_modules that `prepare` makes (CLAUDE.md, Skills).
+.claude/skills
