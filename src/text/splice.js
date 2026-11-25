@@ -65,6 +65,9 @@ const {
 // only, so the key parses), else parsed — null when the key names no run.
 const nameOf = (doc, key) => doc.byKey.get(key) ?? parseRun(key);
 
+// Two bodies of one run joined, a text's or a list's.
+const joinedBody = (kind, a, b) => (isText(kind) ? a + b : a.concat(b));
+
 const insertAt = (list, at, item) => {
   list.push(item);
   for (let i = list.length - 1; i > at; i--) list[i] = list[i - 1];
@@ -168,12 +171,14 @@ const placeRun = (d, run) => {
       for (let i = 0; i < held.length; i++) {
         const c = held[i];
         if (c === run.id) continue;
-        if (cont && !contPlaced && byOrigin(parent.id, c) < 0) {
+        const contHere = cont && !contPlaced && byOrigin(parent.id, c) < 0;
+        if (contHere && !afterCont) {
           contPlaced = true;
-          if (!afterCont) {
-            succ = CONT;
-            break;
-          }
+          succ = CONT;
+          break;
+        }
+        if (contHere) {
+          contPlaced = true;
           pred = CONT;
         }
         if (byOrigin(c, run.id) < 0) pred = c;
@@ -229,7 +234,9 @@ const firstTailChild = (d, parent, offset) => {
     if (c !== found.c) i = chunk.length - 1;
     for (; i >= 0; i--) {
       const { ids } = chunk[i];
-      for (let k = 0; k < ids.length; k++) if (byOrigin(parent.id, ids[k]) < 0) return runById(d, ids[k]);
+      for (let k = 0; k < ids.length; k++) {
+        if (byOrigin(parent.id, ids[k]) < 0) return runById(d, ids[k]);
+      }
     }
   }
   return null;
@@ -292,7 +299,7 @@ const extendRun = (d, id, content) => {
       }
     } else if (follows) {
       // The common keystroke: the last span grows.
-      const body = last.body === null ? null : isText(d.kind) ? last.body + first.body : last.body.concat(first.body);
+      const body = last.body === null ? null : joinedBody(d.kind, last.body, first.body);
       const grown = new Span(id, last.off, last.len + first.len, last.vis, body, 0, d.owner);
       const all = [grown];
       for (let i = 1; i < items.length; i++) all.push(items[i]);
@@ -330,8 +337,7 @@ const sealText = (d, run, last, items) => {
   if (!joins) {
     seal(last.body);
     R.insertAfter(d, last, items);
-    setSpans(d, id, NONE, items);
-    return;
+    return void setSpans(d, id, NONE, items);
   }
   const joined = new Span(id, prev.off, prev.len + last.len, prev.vis, prev.body + last.body, 0, d.owner);
   seal(joined.body);
@@ -416,11 +422,11 @@ const settleRun = (d, id) => {
     const len = run.len;
     // The extension that continues the run, and what lies past it still; the rest — behind the run, a
     // second one at one offset, any of a position run's — is dropped, its slots counted no more.
-    let hit;
+    let hit = null;
     const rest = [];
     for (let i = 0; i < list.length; i++) {
       const from = list[i][0];
-      if (run.elem === null && from === len && hit === undefined) hit = list[i];
+      if (run.elem === null && from === len && hit === null) hit = list[i];
       else if (run.elem === null && from > len) rest.push(list[i]);
       else d.extSlots -= list[i][1].length;
     }
@@ -430,7 +436,7 @@ const settleRun = (d, id) => {
       delete d.ext[key];
       if (Object.keys(d.ext).length === 0) d.ext = null;
     }
-    if (hit === undefined) break;
+    if (hit === null) break;
     const content = hit[1];
     d.extSlots -= content.length;
     // A run never grows past MAX_RUN: an extension that would take it there is dropped, never landed.
@@ -451,7 +457,8 @@ const settleRun = (d, id) => {
     const len = run.len;
     const rest = [];
     for (let i = 0; i < cuts.length; i++) {
-      const [offset, length] = cuts[i];
+      const offset = cuts[i][0];
+      const length = cuts[i][1];
       if (offset < len) {
         if (run.placed) cutRun(d, id, offset, Math.min(length, len - offset));
         else {
@@ -474,7 +481,9 @@ const settleRun = (d, id) => {
 const hasRange = (cuts, key, offset, length) => {
   const held = cuts ? own(cuts, key) : undefined;
   if (held === undefined) return false;
-  for (let i = 0; i < held.length; i++) if (held[i][0] === offset && held[i][1] === length) return true;
+  for (let i = 0; i < held.length; i++) {
+    if (held[i][0] === offset && held[i][1] === length) return true;
+  }
   return false;
 };
 // The same over ranges an op plans to add (`[key, offset, length]` each).
@@ -489,7 +498,7 @@ const addRange = (d, key, offset, length) => {
   const held = d.cuts && own(d.cuts, key);
   const list = held ? held.slice() : [];
   list.push([offset, length]);
-  d.cuts = { ...(d.cuts ?? {}), [key]: list };
+  d.cuts = { ...d.cuts, [key]: list };
   d.oldest = minStamp(d.oldest, stampOfKey(key));
 };
 
@@ -507,7 +516,10 @@ const aliveIn = (st, run, offset, inside) => {
 // `cuts`, the rest is cut. Read first by `planCuts`, which says what they do and what they cost.
 const layCuts = (d, kind, cut, base) => {
   for (let c = 0; c < cut.length; c++) {
-    const [key, offset, length] = cut[c];
+    const range = cut[c];
+    const key = range[0];
+    const offset = range[1];
+    const length = range[2];
     const made = nameOf(d.doc, key);
     if (belowBase(made.ts, made.origin, base)) continue;
     const target = runOf(d, key);
@@ -543,7 +555,10 @@ const planCuts = (seq, st, cut, base, pendingMax, count) => {
   // A run not here yet whose content a range before cut (still unplaced, cut again): read from the draft.
   const after = new Map();
   for (let c = 0; c < cut.length; c++) {
-    const [key, offset, length] = cut[c];
+    const range = cut[c];
+    const key = range[0];
+    const offset = range[1];
+    const length = range[2];
     const made = nameOf(st.doc, key);
     if (belowBase(made.ts, made.origin, base)) continue;
     const target = runOf(st, key);
@@ -599,7 +614,8 @@ const setVal = (d, elem, ts, origin, value) => {
 // value when it is the newer, whichever arrived first. A function of the module, not a closure per splice.
 const assignVals = (d, vals, stamp, runKeyOf, start) => {
   if (vals === undefined || vals.length === 0) return;
-  const [ts, origin] = stamp;
+  const ts = stamp[0];
+  const origin = stamp[1];
   for (let i = 0; i < vals.length; i++) {
     const elem = elemKey(runKeyOf, start + vals[i][0]);
     if (newer(d.vals, elem, stamp)) setVal(d, elem, ts, origin, vals[i][1]);
@@ -640,10 +656,7 @@ const placeOf = (st, aId, aOff, base) => {
 };
 // A new run laid in a draft where `placeOf` says.
 const layRun = (d, record, where) => {
-  if (where === ROOTED || where === PLACED) {
-    placeRun(d, record);
-    return;
-  }
+  if (where === ROOTED || where === PLACED) return void placeRun(d, record);
   setRun(d, record);
   if (where === ATTACHED) attachChild(d, record);
   else {
@@ -660,12 +673,34 @@ const layRun = (d, record, where) => {
   settleRun(d, record.id);
 };
 
+// A new run whose anchor is not here waits for it, and the values riding on it with it (registers of
+// slots not here): the refusal past `pendingMax`, else null — a root's, or one anchored below the base,
+// waits for nothing.
+const waitingRunRefused = (seq, st, anchor, base, count, waits, vals, key, pendingMax) => {
+  const e = anchor.elem;
+  if (e === null || belowBase(e.ts, e.origin, base)) return null;
+  const parent = runOf(st, e.run);
+  if (parent !== undefined && e.offset < parent.len) return null;
+  const n = count() + waits + freshVals(st, vals, key, 0);
+  return n >= pendingMax ? refused(seq, 'pending', n, pendingMax) : null;
+};
+
+// Whether an extension of `run` waits at `from` already.
+const parkedAt = (ext, run, from) => {
+  const held = (ext && own(ext, run)) || NONE;
+  for (let i = 0; i < held.length; i++) {
+    if (held[i][0] === from) return true;
+  }
+  return false;
+};
+
 // One `splice`: cuts first, then the insertion — a new run anchored at `at`, or `{ run, from }` extending
 // a run of this origin. Returns the block it leaves and whether anything moved; `reason` names a refusal
 // ('bound') or a payload the rule does not admit ('malformed'), either leaving the block as it was — and
 // every one of them, with its count, is known before anything is written. `stamp` is `[ts, origin]`.
 const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
-  const [ts, origin] = stamp;
+  const ts = stamp[0];
+  const origin = stamp[1];
   const seq = asBlock(given, base);
   if (!payload || typeof payload !== 'object') return malformed(seq);
   const { cut, at, run, from, content, vals } = payload;
@@ -724,14 +759,8 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     if (at !== undefined) {
       key = runKey(ts, origin);
       if (runOf(st, key) === undefined) {
-        const e = anchor.elem;
-        const parent = e === null ? undefined : runOf(st, e.run);
-        const rooted = e === null || belowBase(e.ts, e.origin, base);
-        if (!rooted && !(parent !== undefined && e.offset < parent.len)) {
-          // The values riding on the run are registers of slots not here: they wait too.
-          const n = count() + waits + freshVals(st, vals, key, 0);
-          if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
-        }
+        const stop = waitingRunRefused(seq, st, anchor, base, count, waits, vals, key, pendingMax);
+        if (stop !== null) return stop;
         insert = 1;
         changed = true;
       }
@@ -742,24 +771,20 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
       // Neither a position run nor a run of no slots (none enters a block; hydrated by hand, it has no
       // last span to grow) is extended.
       if (target !== undefined && (target.elem !== null || target.len === 0)) return malformed(seq);
-      if (target !== undefined) {
-        const len = target.len;
-        if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
-        if (from === len) {
-          insert = 2;
+      // A run not here reads as of no slots: the bound below then refuses nothing the content's own did not.
+      const len = target === undefined ? 0 : target.len;
+      if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
+      if (target !== undefined && from === len) {
+        insert = 2;
+        changed = true;
+      } else if (target !== undefined && from > len) {
+        if (belowBase(target.id.ts, target.id.origin, base)) return unchanged(seq);
+        // The extension waits, and its markers with it: registers of slots not here.
+        const n = count() + waits + freshVals(st, vals, run, from);
+        if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
+        if (!parkedAt(seq.ext, run, from)) {
+          insert = 3;
           changed = true;
-        } else if (from > len) {
-          if (belowBase(target.id.ts, target.id.origin, base)) return unchanged(seq);
-          // The extension waits, and its markers with it: registers of slots not here.
-          const n = count() + waits + freshVals(st, vals, run, from);
-          if (n >= pendingMax) return refused(seq, 'pending', n, pendingMax);
-          const held = (seq.ext && own(seq.ext, run)) || NONE;
-          let known = false;
-          for (let i = 0; i < held.length && !known; i++) known = held[i][0] === from;
-          if (!known) {
-            insert = 3;
-            changed = true;
-          }
         }
       }
     }
@@ -799,7 +824,7 @@ const applySplice = (given, stamp, payload, base = null, pendingMax = PENDING_MA
     const held = (d.ext && own(d.ext, run)) || NONE;
     const list = held.slice();
     list.push([from, isText(d.kind) ? content : content.slice()]);
-    d.ext = { ...(d.ext ?? {}), [run]: list };
+    d.ext = { ...d.ext, [run]: list };
     d.extSlots += content.length;
     d.oldest = minStamp(d.oldest, stampOfKey(run));
     // The markers are registers of the slots the extension will lay (their names are known: the run,
@@ -848,7 +873,8 @@ const offsetShowing = (d, elem) => (C.get(d.pos, elem) === undefined ? parseElem
 // register says — another node may anchor on it) and points the position register at that run when the
 // stamp is newer.
 const applyMove = (given, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
-  const [ts, origin] = stamp;
+  const ts = stamp[0];
+  const origin = stamp[1];
   const seq = asBlock(given, base);
   if (seq.k !== 'l' || !payload || typeof payload !== 'object') return malformed(seq);
   const { elem, cut, at, value } = payload;

@@ -1,14 +1,11 @@
 'use strict';
 
-// The @alexify/syncom/search subpath: the trigram index behind `$text` — the
-// TextIndex contract (`put`, `remove`, `query`) the catalog feeds a record's
-// searchable text to. Fuzzy by construction: a word and a typo of it share
-// most of their trigrams. Ranking is TF-IDF over trigrams, normalized by the
-// record's length. Postings live in memory only — the catalog persists the
-// text and replays every row at open. The distances a vector field is searched
-// by (`cursor.nearest`) are ./distance.js, re-exported here. Requires distance.js
-// only: platform-neutral, and off the main entry, so a node that never searches
-// ships none of it.
+// The @alexify/syncom/search subpath: the trigram index behind `$text` — the TextIndex contract (`put`, `remove`,
+// `query`) the catalog feeds a record's searchable text to. Fuzzy by construction: a word and a typo of it share most
+// of their trigrams. Ranking is TF-IDF over trigrams, normalized by the record's length. Postings live in memory only —
+// the catalog persists the text and replays every row at open. The distances a vector field is searched by
+// (`cursor.nearest`) are ./distance.js, re-exported here. Requires distance.js and errors.js only: platform-neutral,
+// and off the main entry, so a node that never searches ships none of it.
 //
 // Normalization: NFD, combining marks stripped (`Crème` → `Creme`), lower
 // case, anything that is not a letter or a digit a word break. Trigrams: per
@@ -29,7 +26,7 @@ const WORD_BREAK = /[^\p{L}\p{N}]+/gu;
 
 const normalize = (text) => {
   if (text === null || text === undefined) return '';
-  return String(text).normalize('NFD').replace(MARKS, '').toLowerCase().replace(WORD_BREAK, ' ').trim();
+  return `${text}`.normalize('NFD').replace(MARKS, '').toLowerCase().replace(WORD_BREAK, ' ').trim();
 };
 
 const trigrams = (text) => {
@@ -140,11 +137,12 @@ class TrigramIndex {
 /** For `createDatabase({ search })`: a fresh trigram index per searchable entity. */
 const createSearch = ({ minOverlap = 0.3 } = {}) => {
   if (typeof minOverlap !== 'number' || !(minOverlap >= 0 && minOverlap <= 1)) {
-    throw new TypeError('createSearch({ minOverlap }): minOverlap must be a number between 0 and 1');
+    throw new ArgumentError('createSearch({ minOverlap }): minOverlap must be a number between 0 and 1');
   }
   return () => new TrigramIndex(minOverlap);
 };
 
 const { cosine, euclidean, manhattan, dot, isVector } = require('./distance.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 module.exports = { createSearch, normalize, trigrams, cosine, euclidean, manhattan, dot, isVector };

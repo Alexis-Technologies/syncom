@@ -19,7 +19,8 @@ const canonical = (input) => {
     for (let i = 0; i < value.length; i++) out += `${i > 0 ? ',' : ''}${canonical(value[i]) ?? 'null'}`;
     return `${out}]`;
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value);
+  keys.sort();
   let out = '{';
   for (let i = 0; i < keys.length; i++) {
     const item = canonical(value[keys[i]]);

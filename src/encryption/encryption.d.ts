@@ -1,12 +1,12 @@
 // Encryption as blocks (@alexify/syncom/encryption): the `encryption` plugin
 // is what `{ encrypted: true }` needs — a record sealed for this node's RSA
 // pair (`keys/public.pem`, `keys/private.pem`), written outside the op log,
-// never replicated; without it an encrypted write is `PLUGIN_MISSING`.
+// never replicated; without it an encrypted write is `ALX_ERR_PLUGIN_MISSING`.
 // `atRest(fsi | engine, …)` wraps a backend — or an engine — so that every file, or value, the storage writes
 // through it is AES-256-GCM encrypted under one key — given as 32 bytes, or
 // derived from a password and a salt the caller keeps (PBKDF2-SHA-256) —
 // and decrypted on the way back; a file that is not the key's is
-// `DECRYPT_FAILED`. Under the browser condition `encrypt` and `decrypt`
+// `ALX_ERR_DECRYPT_FAILED`. Under the browser condition `encrypt` and `decrypt`
 // return promises (encryption.browser.d.ts).
 
 import type { Plugin, Fsi, KeyPair, EngineDb, Engine } from '../../index.js';
@@ -43,7 +43,7 @@ export declare function atRest(engine: Engine, options: AtRestOptions): Engine;
  * on the same engine or backend, `{ engine }`, `{ fsi }`, or a path with either) sealed under `to` — the same node;
  * never in place. Over a backend (the files engine, wrapped at its backend) give `{ fsi, filesEngine }`: the files
  * engine's factory, `filesEngine` of the main entry. The source is then fenced (`moved.json`): `createDatabase` there
- * is `MOVED` until `dropDatabase` takes it. Answers what `copyEngine` answers.
+ * is `ALX_ERR_MOVED` until `dropDatabase` takes it. Answers what `copyEngine` answers.
  */
 export declare function rotateAtRest(
   engine: Engine,

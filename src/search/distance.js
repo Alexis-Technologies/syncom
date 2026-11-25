@@ -9,7 +9,9 @@
 
 const isVector = (value) => {
   if (!Array.isArray(value) || value.length === 0) return false;
-  for (let i = 0; i < value.length; i++) if (typeof value[i] !== 'number' || !Number.isFinite(value[i])) return false;
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] !== 'number' || !Number.isFinite(value[i])) return false;
+  }
   return true;
 };
 

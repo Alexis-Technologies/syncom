@@ -47,6 +47,7 @@ const {
   undoSteps,
   failureReporter,
 } = require('../editor/editor.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const marksOf = (marks) => {
   const out = {};
@@ -97,7 +98,7 @@ const build = (record) => {
 const textblocks = new WeakMap();
 const firstTextblockOf = (schema) => {
   if (textblocks.has(schema)) return textblocks.get(schema);
-  let found;
+  let found = null;
   const names = Object.keys(schema.nodes);
   for (let i = 0; i < names.length; i++) {
     const type = schema.nodes[names[i]];
@@ -110,6 +111,8 @@ const firstTextblockOf = (schema) => {
   return found;
 };
 
+const isContainer = (type) => type !== undefined && !type.isTextblock && !type.isLeaf && !type.isInline;
+
 /** Typed spans as a document of `schema`, the markers' parents opened as containers; what the schema cannot hold is left out. */
 const spansToDoc = (spans, schema) => {
   const firstTextblock = firstTextblockOf(schema);
@@ -120,7 +123,6 @@ const spansToDoc = (spans, schema) => {
   const root = { type: schema.topNodeType, attrs: null, children: [] };
   const stack = [{ name: null, record: root }];
   const top = () => stack[stack.length - 1].record;
-  const container = (type) => type !== undefined && !type.isTextblock && !type.isLeaf && !type.isInline;
   // Keeps the open containers the parents name, opens the ones they name that are not.
   const align = (parents) => {
     let depth = 0;
@@ -128,7 +130,7 @@ const spansToDoc = (spans, schema) => {
     stack.length = depth + 1;
     for (let i = depth; i < parents.length; i++) {
       const type = schema.nodes[parents[i]];
-      if (!container(type)) continue;
+      if (!isContainer(type)) continue;
       const record = { type, attrs: null, children: [] };
       top().children.push(record);
       stack.push({ name: parents[i], record });
@@ -169,7 +171,7 @@ const spansToDoc = (spans, schema) => {
       const record = { type, attrs, children: [] };
       top().children.push(record);
       block = type.isTextblock ? record : null;
-      if (container(type)) stack.push({ name, record });
+      if (isContainer(type)) stack.push({ name, record });
       continue;
     }
     if (span.type === 'text') {
@@ -268,8 +270,15 @@ const checkModules = (pm) => {
     typeof pm.state?.TextSelection !== 'function' ||
     typeof pm.transform?.ReplaceStep !== 'function'
   ) {
-    throw new TypeError('createProseMirror() takes { model, state, transform, view? }: the prosemirror-* modules');
+    throw new ArgumentError('createProseMirror() takes { model, state, transform, view? }: the prosemirror-* modules');
   }
+};
+
+const caret = (cursor) => {
+  const element = document.createElement('span');
+  element.className = 'syncom-caret';
+  element.dataset.node = cursor.node;
+  return element;
 };
 
 /**
@@ -451,10 +460,10 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
 
   const attach = (target) => {
     if (!target || typeof target.dispatch !== 'function' || !target.state) {
-      throw new TypeError('attach() takes an EditorView (state and dispatch)');
+      throw new ArgumentError('attach() takes an EditorView (state and dispatch)');
     }
-    if (text !== null) throw new TypeError('attach(): this binding is attached already');
-    if (key.get(target.state) === undefined) throw new TypeError('attach(): the view’s state has not the plugin');
+    if (text !== null) throw new ArgumentError('attach(): this binding is attached already');
+    if (key.get(target.state) === undefined) throw new ArgumentError('attach(): the view’s state has not the plugin');
     view = target;
     text = createTextBinding(storage, id, path, adapter, { ...options, source });
     return text;
@@ -467,16 +476,10 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
     { field = 'cursor', render = null, className = 'syncom-selection', onError } = {},
   ) => {
     if (typeof pm.view?.Decoration?.widget !== 'function') {
-      throw new TypeError('cursorPlugin() needs pm.view: the prosemirror-view module');
+      throw new ArgumentError('cursorPlugin() needs pm.view: the prosemirror-view module');
     }
     const { Decoration, DecorationSet } = pm.view;
     const cursorKey = new PluginKey('syncom-cursors');
-    const caret = (cursor) => {
-      const element = document.createElement('span');
-      element.className = 'syncom-caret';
-      element.dataset.node = cursor.node;
-      return element;
-    };
     return new Plugin({
       key: cursorKey,
       state: {
@@ -519,16 +522,16 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
           const next = JSON.stringify(tokens);
           if (stopped || tokens === null || next === published) return;
           published = next;
-          await presence.set({ ...(presence.local ?? {}), [field]: tokens });
+          await presence.set({ ...presence.local, [field]: tokens });
         };
-        const report = failed('editor.cursors', onError);
-        const changed = () => void refresh().catch(report);
+        const reportCursors = failed('editor.cursors', onError);
+        const changed = () => void refresh().catch(reportCursors);
         presence.on('change', changed);
         changed();
         return {
           update: (_editor, before) => {
             if (!before.selection.eq(editor.state.selection) || !before.doc.eq(editor.state.doc)) {
-              void publish().catch(report);
+              void publish().catch(reportCursors);
             }
             if (!before.doc.eq(editor.state.doc)) changed();
           },
@@ -552,7 +555,7 @@ const createProseMirror = (storage, id, path, pm, options = {}) => {
   };
 
   const attached = (name) => {
-    if (view === null) throw new TypeError(`${name}(): attach() first`);
+    if (view === null) throw new ArgumentError(`${name}(): attach() first`);
   };
 
   return Object.freeze({

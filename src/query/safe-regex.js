@@ -28,7 +28,9 @@ const safeRegex = (source) => {
     }
     if (c === '[') {
       // A class: to its closing bracket, an escape taken with its character.
-      for (i++; i < source.length && source[i] !== ']'; i++) if (source[i] === '\\') i++;
+      for (i++; i < source.length && source[i] !== ']'; i++) {
+        if (source[i] === '\\') i++;
+      }
       closedQuantified = false;
       continue;
     }

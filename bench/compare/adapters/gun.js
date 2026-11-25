@@ -27,7 +27,9 @@ const ACK_MS = 30_000;
 const plain = (node) => {
   if (!node) return null;
   const out = {};
-  for (const key of FIELDS) if (key in node) out[key] = node[key];
+  for (const key of FIELDS) {
+    if (key in node) out[key] = node[key];
+  }
   return out;
 };
 

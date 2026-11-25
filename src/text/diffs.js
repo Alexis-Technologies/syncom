@@ -11,11 +11,22 @@ const { spliceArgs, markArgs, jsonValue, EMBED } = require('../args.js');
 const { deepEqual } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { blockOf, markerAt, valsArgs } = require('./kind.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 // ---------------------------------------------------------------------------
 // Patches (src/patch.js diffViews / realize): a text's or a list's edits as
 // splices (Myers), laid in runs of at most MAX_RUN elements — one splice is
 // one run, and a run holds no more (src/text/rle.js).
+
+// The markers of a run's slots, at its own offsets: the run starts at `at` of the patch.
+const valsIn = (vals, at) => {
+  const part = [];
+  for (let i = 0; i < vals.length; i++) {
+    const offset = vals[i][0];
+    if (offset >= at && offset < at + MAX_RUN) part.push([offset - at, vals[i][1]]);
+  }
+  return part;
+};
 
 const inRuns = (patches) => {
   const out = [];
@@ -29,12 +40,7 @@ const inRuns = (patches) => {
     for (let at = 0; at < content.length; at += MAX_RUN) {
       const run = { ...patch, index: patch.index + at, content: content.slice(at, at + MAX_RUN) };
       if (vals !== undefined) {
-        // The markers of this run's slots, at its own offsets.
-        const part = [];
-        for (let i = 0; i < vals.length; i++) {
-          const [offset, marker] = vals[i];
-          if (offset >= at && offset < at + MAX_RUN) part.push([offset - at, marker]);
-        }
+        const part = valsIn(vals, at);
         if (part.length > 0) run.vals = part;
         else delete run.vals;
       }
@@ -48,8 +54,8 @@ const inRuns = (patches) => {
 // else a Map of the markers of the `embeds` list a commit event carries, by
 // index (the first one listed at an index); null when it has neither.
 const markersOf = (side, field) => {
-  if (side == null) return null;
-  if (side.entry != null) {
+  if (side === undefined || side === null) return null;
+  if (side.entry !== undefined && side.entry !== null) {
     const held = blockOf(side.entry, field);
     return held === undefined || held.k !== 't' ? null : S.indexOf(side.entry, field);
   }
@@ -57,8 +63,9 @@ const markersOf = (side, field) => {
   if (!Array.isArray(list)) return null;
   const byIndex = new Map();
   for (let i = 0; i < list.length; i++) {
-    const [at, marker] = list[i];
-    if (!byIndex.has(at)) byIndex.set(at, marker);
+    const embed = list[i];
+    const at = embed[0];
+    if (!byIndex.has(at)) byIndex.set(at, embed[1]);
   }
   return byIndex;
 };
@@ -77,7 +84,10 @@ const markerIn = (side, index) => {
 const embedPatches = (field, hunks, a, b, context) => {
   const patches = [];
   for (let i = 0; i < hunks.length; i++) {
-    const [index, count, content] = hunks[i];
+    const hunk = hunks[i];
+    const index = hunk[0];
+    const count = hunk[1];
+    const content = hunk[2];
     patches.push({ action: 'splice', field, index, count, content });
   }
   if (!a.includes(EMBED) && !b.includes(EMBED)) return patches;
@@ -138,7 +148,10 @@ const spliceList = (field, from, to) => {
   const hunks = myers(a, b);
   const out = [];
   for (let h = 0; h < hunks.length; h++) {
-    const [index, count, text] = hunks[h];
+    const hunk = hunks[h];
+    const index = hunk[0];
+    const count = hunk[1];
+    const text = hunk[2];
     // One private-use unit per element: no surrogate pairs to keep together.
     const content = [];
     for (let i = 0; i < text.length; i++) content.push(items[text.charCodeAt(i) - PRIVATE]);
@@ -171,8 +184,10 @@ const realize = (action, patch, method) => {
   }
   if (action === 'setAt') {
     const { index, value } = patch;
-    if (typeof field !== 'string') throw new TypeError(`${method}() takes a field name`);
-    if (!Number.isInteger(index) || index < 0) throw new TypeError(`${method}() takes a non-negative integer index`);
+    if (typeof field !== 'string') throw new ArgumentError(`${method}() takes a field name`);
+    if (!Number.isInteger(index) || index < 0) {
+      throw new ArgumentError(`${method}() takes a non-negative integer index`);
+    }
     return ['assign', { key: field, index, value: jsonValue(method, value) }];
   }
   const { start, end, name, value = null, expand = 'after' } = patch;
@@ -250,7 +265,9 @@ const values = (entry, field) => {
   if (held === undefined || held.k !== 't' || typeof text !== 'string' || !text.includes(EMBED)) return null;
   const idx = S.indexOf(entry, field);
   const out = [];
-  for (let i = 0; i < text.length; i++) if (text[i] === EMBED) out.push([i, markerAt(idx, i)]);
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === EMBED) out.push([i, markerAt(idx, i)]);
+  }
   return out;
 };
 

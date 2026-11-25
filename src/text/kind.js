@@ -9,7 +9,7 @@ const S = require('./sequence.js');
 const { isJsonValue, EMBED } = require('../args.js');
 const { isPlainObject, asJson, deepEqual, own } = require('../shape.js');
 const { floorOf } = require('../vector.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 
 const KINDS = Object.freeze({ list: 3, text: 4 });
 const CODES = Object.freeze({ l: 'list', t: 'text' });
@@ -39,7 +39,8 @@ const takes = (type, payload) =>
 const kindOfOp = (op) => {
   if (op.type === 'splice') {
     const { content } = op.value;
-    return typeof content === 'string' ? 'text' : Array.isArray(content) ? 'list' : null;
+    if (typeof content === 'string') return 'text';
+    return Array.isArray(content) ? 'list' : null;
   }
   if (op.type === 'mark') return 'text';
   // An assign names its kind: `k: 't'` for a text's embed slot, a list's
@@ -49,6 +50,14 @@ const kindOfOp = (op) => {
 };
 
 const normalize = (raw, base, limits) => S.normalizeSeq(raw, base, limits.pendingMax);
+
+// The engine's step for an op of the kinds over `block`.
+const applyToBlock = (type, block, stamp, payload, base, pendingMax) => {
+  if (type === 'splice') return S.applySplice(block, stamp, payload, base, pendingMax);
+  if (type === 'assign') return S.applyAssign(block, stamp, payload, base, pendingMax);
+  if (type === 'move') return S.applyMove(block, stamp, payload, base, pendingMax);
+  return S.applyMark(block, stamp, payload, base, pendingMax);
+};
 
 // A `splice` lands on the block (src/text/sequence.js), an `assign`, a `move` or
 // a `mark` on its registers; a register or a mark for a field with no block
@@ -70,15 +79,7 @@ const apply = (entry, field, held, op, stamp, limits) => {
   // editing trace's time went there). A move's index before it, the same way.
   const cuts = op.type === 'splice' && before !== undefined ? cutSpansOf(before, payload?.cut) : null;
   const from = op.type === 'move' && before !== undefined ? S.indexOfElem(before, payload?.elem) : -1;
-  const { pendingMax } = limits;
-  const result =
-    op.type === 'splice'
-      ? S.applySplice(block, stamp, payload, base, pendingMax)
-      : op.type === 'assign'
-        ? S.applyAssign(block, stamp, payload, base, pendingMax)
-        : op.type === 'move'
-          ? S.applyMove(block, stamp, payload, base, pendingMax)
-          : S.applyMark(block, stamp, payload, base, pendingMax);
+  const result = applyToBlock(op.type, block, stamp, payload, base, limits.pendingMax);
   const out = { block: held ?? null, changed: result.changed };
   if (result.reason !== undefined) {
     Object.assign(out, { reason: result.reason, detail: result.detail, count: result.count, max: result.max });
@@ -107,7 +108,9 @@ const cutSpansOf = (held, cut) => {
   const ranges = mergedRanges(cut);
   for (let i = 0; i < ranges.length; i++) {
     const spans = S.spansOf(held, ranges[i][0], ranges[i][1], ranges[i][2]);
-    if (spans !== null) for (let k = 0; k < spans.length; k++) cuts.push(spans[k]);
+    if (spans !== null) {
+      for (let k = 0; k < spans.length; k++) cuts.push(spans[k]);
+    }
   }
   cuts.sort((x, y) => y.index - x.index);
   return cuts;
@@ -132,7 +135,10 @@ const mergedRanges = (cut) => {
     if (list.length > 1) list.sort(byOffset);
     let last = null;
     for (let i = 0; i < list.length; i++) {
-      const [key, offset, length] = list[i];
+      const range = list[i];
+      const key = range[0];
+      const offset = range[1];
+      const length = range[2];
       if (last !== null && offset < last[1] + last[2]) last[2] = Math.max(last[2], offset + length - last[1]);
       else out.push((last = [key, offset, length]));
     }
@@ -153,7 +159,8 @@ const marksAt = (block, index, base) => S.styleAt(block, index, base) ?? {};
 // its anchors fall at. What the reading does not show — a slot born dead,
 // an element not placed here — is no change.
 const changeOf = (type, payload, stamp, held, block, base = null, cuts = null, from = -1) => {
-  const [ts, origin] = stamp;
+  const ts = stamp[0];
+  const origin = stamp[1];
   if (type === 'splice') {
     const out = [];
     // The cut stretches (read before the splice — `cutSpansOf`): one splice
@@ -174,30 +181,27 @@ const changeOf = (type, payload, stamp, held, block, base = null, cuts = null, f
       // between the run's slots; no splice of the run's own says them, so
       // the field reads as a reset (the caller reads it again).
       const shown = S.lengthOf(block) - ((held === undefined ? 0 : S.lengthOf(held)) - cut);
-      let own = 0;
-      for (const span of spans) own += span.count;
-      if (own !== shown || spans.length > 1) return undefined;
+      let ownSlots = 0;
+      for (const span of spans) ownSlots += span.count;
+      if (ownSlots !== shown || spans.length > 1) return undefined;
       const span = spans[0];
-      if (span !== undefined && span.count > 0) {
-        // Every slot of a text the op inserted shows: what it reads as is the
-        // content itself — never a slice of the whole reading, which a rope
-        // would flatten. A list's reads its values off the rope (a value an
-        // assign set before the slot arrived is the one it shows).
-        const inserted =
-          span.count === content.length && block.k === 't'
-            ? content.slice()
-            : S.valuesAt(block, span.index, span.count);
-        const last = out[out.length - 1];
-        // One cut at the insertion point and the insert: one splice, as the call made it.
-        if (out.length === 1 && last.index === span.index) last.content = inserted;
-        else out.push({ action: 'splice', index: span.index, count: 0, content: inserted });
-        const change = out[out.length - 1];
-        if (payload.vals !== undefined && span.count === content.length) change.vals = payload.vals;
-        // The marks the inserted run reads with — a mark it landed inside, one that grew over it.
-        if (block.k === 't') {
-          const marks = marksAt(block, span.index, base);
-          if (Object.keys(marks).length > 0) change.marks = marks;
-        }
+      if (span === undefined || span.count === 0) return out;
+      // Every slot of a text the op inserted shows: what it reads as is the
+      // content itself — never a slice of the whole reading, which a rope
+      // would flatten. A list's reads its values off the rope (a value an
+      // assign set before the slot arrived is the one it shows).
+      const inserted =
+        span.count === content.length && block.k === 't' ? content.slice() : S.valuesAt(block, span.index, span.count);
+      const last = out[out.length - 1];
+      // One cut at the insertion point and the insert: one splice, as the call made it.
+      if (out.length === 1 && last.index === span.index) last.content = inserted;
+      else out.push({ action: 'splice', index: span.index, count: 0, content: inserted });
+      const change = out[out.length - 1];
+      if (payload.vals !== undefined && span.count === content.length) change.vals = payload.vals;
+      // The marks the inserted run reads with — a mark it landed inside, one that grew over it.
+      if (block.k === 't') {
+        const marks = marksAt(block, span.index, base);
+        if (Object.keys(marks).length > 0) change.marks = marks;
       }
     }
     return out;
@@ -235,24 +239,28 @@ const changeOf = (type, payload, stamp, held, block, base = null, cuts = null, f
   if (start === null || end === null || start >= end) return [];
   const markId = S.runKey(ts, origin);
   const many = payload.many === true;
-  const piece = (from, to) => {
-    const change = { action: 'mark', start: from, end: to, name: payload.key, value: payload.value, markId };
-    if (many) change.many = true;
-    return change;
-  };
   // Where a newer mark of the key holds the text, the reading is that one's:
   // a peer's older mark arriving late changes the rest of its range alone.
   const out = [];
   let at = start;
-  for (const [from, to] of S.newerRanges(block, payload.key, stamp, many, base)) {
-    if (to <= at) continue;
-    if (from >= end) break;
-    if (from > at) out.push(piece(at, from));
-    at = Math.max(at, to);
+  for (const entry of S.newerRanges(block, payload.key, stamp, many, base)) {
+    const newerStart = entry[0];
+    const newerEnd = entry[1];
+    if (newerEnd <= at) continue;
+    if (newerStart >= end) break;
+    if (newerStart > at) out.push(markPiece(payload, markId, many, at, newerStart));
+    at = Math.max(at, newerEnd);
     if (at >= end) break;
   }
-  if (at < end) out.push(piece(at, end));
+  if (at < end) out.push(markPiece(payload, markId, many, at, end));
   return out;
+};
+
+// A mark's change over `start..end` of the reading.
+const markPiece = (payload, markId, many, start, end) => {
+  const change = { action: 'mark', start, end, name: payload.key, value: payload.value, markId };
+  if (many) change.many = true;
+  return change;
 };
 
 // The block the op made, as it is (src/ops.js renders it when it is read):
@@ -296,6 +304,12 @@ const revisionOf = (entry, field) => {
 // engine's MAX_CUTS on a cut. The two are of one stream: their own references
 // name one origin, compact or in full.
 const COALESCE_CUTS = 256;
+// The stamp of the run `a` typed into: the run it extends, or the one it made; -1 for neither.
+const typedRun = (a) => {
+  const x = a.value;
+  if (x.run !== undefined) return stampOf(x.run, a.origin);
+  return x.at !== undefined ? a.ts : -1;
+};
 const coalesce = (a, b) => {
   if (a.type !== 'splice' || b.type !== 'splice') return null;
   const x = a.value;
@@ -303,7 +317,7 @@ const coalesce = (a, b) => {
   if (typeof x.content !== 'string' || typeof y.content !== 'string' || y.vals !== undefined) return null;
   if (y.content.length > 0) {
     if (y.cut !== undefined || y.run === undefined || x.content.length === 0) return null;
-    const run = x.run !== undefined ? stampOf(x.run, a.origin) : x.at !== undefined ? a.ts : -1;
+    const run = typedRun(a);
     if (run === -1 || run !== stampOf(y.run, b.origin)) return null;
     if ((x.run !== undefined ? x.from : 0) + x.content.length !== y.from) return null;
     return { ...x, content: x.content + y.content };
@@ -351,8 +365,8 @@ const prepends = (a, b) => {
 const ownRun = (key, origin) => {
   if (typeof key !== 'string') return key;
   const colon = key.indexOf(':');
-  const own = colon > 0 && key.length === colon + 1 + origin.length && key.endsWith(origin);
-  return own ? Number(key.slice(0, colon)) : key;
+  const isOwn = colon > 0 && key.length === colon + 1 + origin.length && key.endsWith(origin);
+  return isOwn ? Number(key.slice(0, colon)) : key;
 };
 // An element `ts:off:origin`, or an anchor `<ts:off:origin`: the first two
 // colons are the stamp's and the offset's.
@@ -360,8 +374,8 @@ const ownElem = (key, origin) => {
   if (typeof key !== 'string') return key;
   const first = key.indexOf(':');
   const second = first === -1 ? -1 : key.indexOf(':', first + 1);
-  const own = second > 0 && key.length === second + 1 + origin.length && key.endsWith(origin);
-  return own ? key.slice(0, second) : key;
+  const isOwn = second > 0 && key.length === second + 1 + origin.length && key.endsWith(origin);
+  return isOwn ? key.slice(0, second) : key;
 };
 const ownRanges = (ranges, origin) => {
   for (let i = 0; i < ranges.length; i++) ranges[i][0] = ownRun(ranges[i][0], origin);
@@ -488,7 +502,7 @@ const wholeCharacters = (id, key, idx, ...indexes) => {
     if (index <= 0 || index >= length) continue;
     if (!isHigh(unitAt(idx, index - 1)) || !isLow(unitAt(idx, index))) continue;
     const message = `Index ${index} of field ${key} of record ${id} falls inside a surrogate pair`;
-    throw new SyncomError('SURROGATE', message, { id, field: key, index });
+    throw new SyncomError('ALX_ERR_SURROGATE', message, { id, field: key, index });
   }
 };
 
@@ -523,9 +537,9 @@ const resolveSplice = (core, id, payload, current) => {
   const length = idx === null ? 0 : S.lengthOf(idx);
   const at = index === null ? length : index;
   if (at > length || at + count > length) {
-    const span = count > 0 ? `${at}..${at + count}` : String(at);
+    const span = count > 0 ? `${at}..${at + count}` : `${at}`;
     const message = `Index ${span} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
+    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
   }
   wholeCharacters(id, key, idx, at, at + count);
   // joinBlock(): the one slot it cuts holds a block marker, or there is none to join.
@@ -551,11 +565,11 @@ const resolveSplice = (core, id, payload, current) => {
 // A text's slot that is no block marker and no embed: nothing to set or join there.
 const noMarker = (id, field, index) => {
   const message = `Index ${index} of text field ${field} of record ${id} holds no block marker or embed`;
-  return new SyncomError('NOT_FOUND', message, { id, field, index });
+  return new SyncomError('ALX_ERR_NOT_FOUND', message, { id, field, index });
 };
 
 // A list's element, by its index: the name it keeps across moves. A field
-// with no block has no elements (OUT_OF_RANGE); another kind under the field
+// with no block has no elements (ALX_ERR_OUT_OF_RANGE); another kind under the field
 // was refused before this is read (kindClash).
 const elementAt = (core, id, key, index, current) => {
   const held = current ? blockOf(current, key) : undefined;
@@ -563,7 +577,7 @@ const elementAt = (core, id, key, index, current) => {
   const length = idx === null ? 0 : S.lengthOf(idx);
   if (index >= length) {
     const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
+    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
   }
   return { idx, elem: S.elemAt(idx, index) };
 };
@@ -587,7 +601,7 @@ const resolveMove = (core, id, payload, current) => {
   const length = S.lengthOf(idx);
   if (to >= length) {
     const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length });
+    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length });
   }
   const origin = core.nodeId;
   const place = S.placeInsert(idx, to < from ? to : to + 1, origin);
@@ -609,10 +623,18 @@ const resolveMark = (core, id, payload, current) => {
   const length = idx === null ? 0 : S.lengthOf(idx);
   if (start > end || end > length) {
     const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, index: start, count: end - start, length });
+    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, {
+      id,
+      field: key,
+      index: start,
+      count: end - start,
+      length,
+    });
   }
   wholeCharacters(id, key, idx, start, end);
-  const [from, to] = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
+  const anchors = idx === null ? [S.HEAD, S.END] : S.markAnchors(idx, start, end, expand);
+  const from = anchors[0];
+  const to = anchors[1];
   const out = { start: ownElem(from, core.nodeId), end: ownElem(to, core.nodeId), key: name, value };
   if (many) out.many = true;
   return out;
@@ -634,7 +656,9 @@ const markerOf = (value) => {
   const { type, parents, attrs, isEmbed } = value;
   const strings = [];
   if (Array.isArray(parents)) {
-    for (let i = 0; i < parents.length; i++) if (typeof parents[i] === 'string') strings.push(parents[i]);
+    for (let i = 0; i < parents.length; i++) {
+      if (typeof parents[i] === 'string') strings.push(parents[i]);
+    }
   }
   return {
     type,
@@ -648,31 +672,33 @@ const markerOf = (value) => {
 // first), attrs (a JSON object); `embed` forces the flag, else the value's.
 const markerArgs = (method, given, embed) => {
   if (!isPlainObject(given) || typeof given.type !== 'string' || given.type.length === 0) {
-    throw new TypeError(`${method}() takes a block marker: { type, parents?, attrs?, isEmbed? } with a type`);
+    throw new ArgumentError(`${method}() takes a block marker: { type, parents?, attrs?, isEmbed? } with a type`);
   }
   const { type, parents = [], attrs = {}, isEmbed = false } = given;
-  if (!Array.isArray(parents)) throw new TypeError(`${method}() takes parents as a list of block types`);
+  if (!Array.isArray(parents)) throw new ArgumentError(`${method}() takes parents as a list of block types`);
   // Checked and copied in one pass; a hole is no block type.
   const copy = [];
   for (let i = 0; i < parents.length; i++) {
-    if (typeof parents[i] !== 'string') throw new TypeError(`${method}() takes parents as a list of block types`);
+    if (typeof parents[i] !== 'string') throw new ArgumentError(`${method}() takes parents as a list of block types`);
     copy.push(parents[i]);
   }
-  if (!isPlainObject(attrs) || !isJsonValue(attrs)) throw new TypeError(`${method}() takes attrs as a JSON object`);
-  if (typeof isEmbed !== 'boolean') throw new TypeError(`${method}() takes isEmbed as a boolean`);
+  if (!isPlainObject(attrs) || !isJsonValue(attrs)) throw new ArgumentError(`${method}() takes attrs as a JSON object`);
+  if (typeof isEmbed !== 'boolean') throw new ArgumentError(`${method}() takes isEmbed as a boolean`);
   return { type, parents: copy, attrs, isEmbed: embed ?? isEmbed };
 };
 
 // The markers riding on a splice patch: `[[offset, marker | null]]`, each
 // offset an embed slot of the content.
 const valsArgs = (method, vals, content) => {
-  if (!Array.isArray(vals)) throw new TypeError(`${method}() takes vals as [[offset, marker]]`);
+  if (!Array.isArray(vals)) throw new ArgumentError(`${method}() takes vals as [[offset, marker]]`);
   for (const pair of vals) {
-    const [offset, marker] = Array.isArray(pair) && pair.length === 2 ? pair : [];
+    const isPair = Array.isArray(pair) && pair.length === 2;
+    const offset = isPair ? pair[0] : undefined;
+    const marker = isPair ? pair[1] : undefined;
     if (!Number.isInteger(offset) || offset < 0 || offset >= content.length || content[offset] !== EMBED) {
-      throw new TypeError(`${method}() takes vals at the embed slots (U+FFFC) of the content`);
+      throw new ArgumentError(`${method}() takes vals at the embed slots (U+FFFC) of the content`);
     }
-    if (marker !== null && !isJsonValue(marker)) throw new TypeError(`${method}() takes a JSON value per embed`);
+    if (marker !== null && !isJsonValue(marker)) throw new ArgumentError(`${method}() takes a JSON value per embed`);
   }
   return vals;
 };

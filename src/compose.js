@@ -37,7 +37,9 @@ const composeAt = (entry, plugins, prefix, data, paths, base) => {
     if (rest === '') group.own = path;
     else group.deeper.push(rest);
   }
-  for (const [head, group] of byHead) {
+  for (const pair of byHead) {
+    const head = pair[0];
+    const group = pair[1];
     const full = prefix === '' ? head : `${prefix}/${head}`;
     const own = group.own === undefined ? out[head] : data[prefix === '' ? group.own : `${prefix}/${group.own}`];
     if (group.deeper.length === 0) {
@@ -86,10 +88,14 @@ const compose = (entry, plugins = null) => {
   const { data } = entry;
   const keys = Object.keys(data);
   let paths = null;
-  for (let i = 0; i < keys.length; i++) if (keys[i].includes('/')) (paths ??= []).push(keys[i]);
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i].includes('/')) (paths ??= []).push(keys[i]);
+  }
   if (paths === null) return data;
   const plain = {};
-  for (let i = 0; i < keys.length; i++) if (!keys[i].includes('/')) plain[keys[i]] = data[keys[i]];
+  for (let i = 0; i < keys.length; i++) {
+    if (!keys[i].includes('/')) plain[keys[i]] = data[keys[i]];
+  }
   return composeAt(entry, plugins, '', data, paths, plain);
 };
 
@@ -127,7 +133,9 @@ const decompose = (view, entry, plugins = null) => {
   if (!isObject(view)) return view;
   const fields = Object.keys(entry.data);
   let any = false;
-  for (const field of fields) if (field.includes('/')) any = true;
+  for (const field of fields) {
+    if (field.includes('/')) any = true;
+  }
   if (!any) return view;
   const out = {};
   const prefixes = new Set();
@@ -137,7 +145,9 @@ const decompose = (view, entry, plugins = null) => {
     for (const prefix of ancestorsOf(field)) prefixes.add(prefix);
   }
   // Keys of the view the fields do not name — a lens may have added them.
-  for (const key of Object.keys(view)) if (!Object.hasOwn(out, key) && !prefixes.has(key)) out[key] = view[key];
+  for (const key of Object.keys(view)) {
+    if (!Object.hasOwn(out, key) && !prefixes.has(key)) out[key] = view[key];
+  }
   for (const prefix of prefixes) {
     if (!Object.hasOwn(out, prefix)) continue;
     // A list or a tree reads as the entry renders it, its children apart.

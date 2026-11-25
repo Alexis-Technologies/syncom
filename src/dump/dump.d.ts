@@ -48,7 +48,7 @@ export interface ImportOptions {
 export function exportPages(db: Database, options?: ExportOptions): AsyncIterableIterator<DumpRecord[]>;
 /** The whole database as one JSON value. */
 export function exportJSON(db: Database, options?: ExportOptions): Promise<Dump>;
-/** A dump (or a foreign `{ records: [{ id, data }] }`) into `db`; `SCHEMA_MISMATCH` for another schema unless forced. */
+/** A dump (or a foreign `{ records: [{ id, data }] }`) into `db`; `ALX_ERR_SCHEMA_MISMATCH` for another schema unless forced. */
 export function importJSON(
   db: Database,
   dump: { records: readonly DumpRecord[]; schema?: { hash: string | null } | null },

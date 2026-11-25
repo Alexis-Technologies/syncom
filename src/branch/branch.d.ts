@@ -7,7 +7,7 @@ import type { Database, StorageOptions, Version, VersionVector } from '../../ind
 export interface BranchOptions extends Omit<StorageOptions, 'path'> {
   /** The branch's directory — a new one. */
   path: string;
-  /** Fork at a tag of the parent, or at any version its log can still give exactly (`HISTORY_GONE` otherwise), instead of its present. */
+  /** Fork at a tag of the parent, or at any version its log can still give exactly (`ALX_ERR_HISTORY_GONE` otherwise), instead of its present. */
   from?: { tag: string } | { at: Version } | null;
 }
 
@@ -31,15 +31,15 @@ export interface MergeResult {
  * A storage forked from `parent` at `path`: a new identity standing at the
  * parent's state (or at `from.tag`, or at `from.at`), opened with the
  * options given (`sync` gets `retention: { ops: 0 }` and `autoStart:
- * false`). Rejects with `BRANCH_EXISTS` when `path` holds any files — a
- * branch or another storage is never taken over — `TAG_NOT_FOUND` for a
- * `from.tag` the parent lacks, `HISTORY_GONE` for a `from.at` its log no
+ * false`). Rejects with `ALX_ERR_BRANCH_EXISTS` when `path` holds any files — a
+ * branch or another storage is never taken over — `ALX_ERR_TAG_NOT_FOUND` for a
+ * `from.tag` the parent lacks, `ALX_ERR_HISTORY_GONE` for a `from.at` its log no
  * longer gives exactly.
  */
 export function branch(parent: Database, options: BranchOptions): Promise<Database>;
 /** Hands `into` everything `source` has that it lacks — ops through `applyRemote`, or a join of state when the source compacted past it. */
 export function merge(source: Database, options: { into: Database }): Promise<MergeResult>;
-/** What a storage opened on a branch's directory was forked from, or `null` for one that is no branch; `CORRUPT` for an unreadable `branch.json`. */
+/** What a storage opened on a branch's directory was forked from, or `null` for one that is no branch; `ALX_ERR_CORRUPT` for an unreadable `branch.json`. */
 export function branchInfo(storage: Database): Promise<BranchInfo | null>;
-/** Closes a branch and removes its files (the empty directories stay); a storage that is no branch is a `TypeError`, an unreadable `branch.json` `CORRUPT`. */
+/** Closes a branch and removes its files (the empty directories stay); a storage that is no branch is a `TypeError`, an unreadable `branch.json` `ALX_ERR_CORRUPT`. */
 export function drop(storage: Database): Promise<void>;

@@ -13,7 +13,7 @@ assert.equal(laptop.signatures, 'verify');
 
 // #region forged
 const server = await createDatabase({ engine: memoryEngine() });
-server.on('error', (error) => console.log(error.code)); // BAD_SIGNATURE
+server.on('error', (error) => console.log(error.code)); // ALX_ERR_BAD_SIGNATURE
 
 const id = await laptop.insert({ title: 'Pay 10' });
 const [{ op }] = laptop.log.entriesOf(id); // the op as the laptop signed it
@@ -30,7 +30,7 @@ import * as lean from '@alexify/syncom';
 import { sync } from '@alexify/syncom/sync';
 
 const strict = await createDatabase({ engine: memoryEngine(), sync: { signatures: 'require' } });
-strict.on('error', (error) => console.log(error.code)); // UNSIGNED
+strict.on('error', (error) => console.log(error.code)); // ALX_ERR_UNSIGNED
 
 const unsigning = await lean.createDatabase({ engine: memoryEngine(), plugins: [sync] }); // no signing plugin
 const other = await unsigning.insert({ title: 'Unsigned' });
@@ -59,11 +59,11 @@ await phone.sync.awaitInSync();
 
 const keyless = await lean.createDatabase({ engine: memoryEngine(), plugins: [sync], sync: { connect } });
 await keyless.sync.addNode({ url: 'ws://127.0.0.1:8901/api' }); // has no key to prove
-// keyless.sync.peers()[0].lastError.code is 'UNPROVEN': it pushes nothing and receives nothing
+// keyless.sync.peers()[0].lastError.code is 'ALX_ERR_UNPROVEN': it pushes nothing and receives nothing
 // #endregion prove
 const pending = await keyless.insert({ title: 'Never sent' });
 await new Promise((resolve) => setTimeout(resolve, 300));
-assert.equal(keyless.sync.peers()[0].lastError?.code, 'UNPROVEN');
+assert.equal(keyless.sync.peers()[0].lastError?.code, 'ALX_ERR_UNPROVEN');
 assert.equal(await server.get(pending), null);
 assert.deepEqual(await phone.get(id), { title: 'Pay 10' }, 'the proven phone received the server’s records');
 

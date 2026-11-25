@@ -22,9 +22,9 @@ const SQLite = {
 import { sqliteEngine } from '@alexify/syncom/sqlite';
 
 // expo-sqlite's async API behind the calls the SQLite engine makes.
-const expoDriver = (SQLite) => ({
+const expoDriver = (expo) => ({
   async open(file) {
-    const db = await SQLite.openDatabaseAsync(file);
+    const db = await expo.openDatabaseAsync(file);
     return {
       exec: (sql) => db.execAsync(sql),
       prepare: (sql) => ({

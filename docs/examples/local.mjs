@@ -61,9 +61,9 @@ await board.close();
 
 // #region closed
 const closed = await board.local.set('late', 1).catch((error) => error);
-console.log(closed.code); // CLOSED
+console.log(closed.code); // ALX_ERR_CLOSED
 // #endregion closed
-assert.equal(closed.code, 'CLOSED');
+assert.equal(closed.code, 'ALX_ERR_CLOSED');
 
 // #region peers
 const mesh = await createMesh(['laptop', 'phone'], [['phone', 'laptop']], {

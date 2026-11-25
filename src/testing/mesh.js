@@ -5,6 +5,7 @@
 // engine, a temp directory, the plugins under test); the links and the hosts' rooms are made here.
 
 const { MemoryLink } = require('./link.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -16,14 +17,17 @@ const listOf = (storages) => {
   return list;
 };
 
+const inRooms = (client, rooms) => {
+  for (let i = 0; i < rooms.length; i++) {
+    if (client.rooms.has(rooms[i])) return true;
+  }
+  return false;
+};
+
 // What wrpc's `context.server` does for the links of one host: rooms the clients joined at hello,
 // `to(room).except(client).emit(name, data)` and `sendTo(clientId, name, data)`.
 const createServer = () => {
   const server = { links: new Set() };
-  const inRooms = (client, rooms) => {
-    for (let i = 0; i < rooms.length; i++) if (client.rooms.has(rooms[i])) return true;
-    return false;
-  };
   const deliver = (rooms, except, name, data) => {
     for (const link of server.links) {
       if (except !== null && link.client === except) continue;
@@ -39,7 +43,9 @@ const createServer = () => {
   server.to = (...rooms) => target(rooms, null);
   server.except = (client) => target(null, client);
   server.sendTo = (clientId, name, data) => {
-    for (const link of server.links) if (link.client.id === clientId) link.deliver(name, data);
+    for (const link of server.links) {
+      if (link.client.id === clientId) link.deliver(name, data);
+    }
   };
   return server;
 };
@@ -52,15 +58,15 @@ const createServer = () => {
  */
 const createMesh = async (names, edges, options = {}) => {
   const { createStorage, link: hazards, sync, nodes, unit, scopes } = options;
-  if (typeof createStorage !== 'function') throw new TypeError('createMesh() takes createStorage(name, options)');
+  if (typeof createStorage !== 'function') throw new ArgumentError('createMesh() takes createStorage(name, options)');
   const units = new Map();
   const links = new Map();
   const storages = new Map();
   const servers = new Map();
   const connect = (node) => {
-    const [, host] = node.url.split('mem://');
+    const host = node.url.split('mem://')[1];
     const hosted = units.get(host);
-    if (!hosted) throw new TypeError(`createMesh(): no host ${host}`);
+    if (!hosted) throw new ArgumentError(`createMesh(): no host ${host}`);
     let server = servers.get(host);
     if (server === undefined) servers.set(host, (server = createServer()));
     const link = new MemoryLink(hosted, { ...hazards, server });
@@ -75,7 +81,9 @@ const createMesh = async (names, edges, options = {}) => {
     units.set(name, storage.sync.unit(unit ?? { access: 'public' }));
   }
   for (let i = 0; i < edges.length; i++) {
-    const [from, to] = edges[i];
+    const edge = edges[i];
+    const from = edge[0];
+    const to = edge[1];
     await storages.get(from).sync.addNode({ url: `mem://${to}`, scopes: scopes?.[from] });
   }
   for (const storage of storages.values()) await storage.sync.start();
@@ -91,11 +99,15 @@ const sameVectors = (storages) => {
   const vectors = [];
   for (let i = 0; i < list.length; i++) vectors.push(list[i].vector);
   const keys = new Set();
-  for (let i = 0; i < vectors.length; i++) for (const key of Object.keys(vectors[i])) keys.add(key);
+  for (let i = 0; i < vectors.length; i++) {
+    for (const key of Object.keys(vectors[i])) keys.add(key);
+  }
   for (const key of keys) {
     if (key.endsWith('@~')) continue;
     const first = vectors[0][key] ?? 0;
-    for (let i = 1; i < vectors.length; i++) if ((vectors[i][key] ?? 0) !== first) return false;
+    for (let i = 1; i < vectors.length; i++) {
+      if ((vectors[i][key] ?? 0) !== first) return false;
+    }
   }
   return true;
 };
@@ -108,7 +120,9 @@ const idle = (list) => {
     const storage = list[i];
     if (storage.stats().queue !== 0) return false;
     const peers = storage.sync.peers();
-    for (let j = 0; j < peers.length; j++) if (peers[j].pending !== 0) return false;
+    for (let j = 0; j < peers.length; j++) {
+      if (peers[j].pending !== 0) return false;
+    }
   }
   return true;
 };

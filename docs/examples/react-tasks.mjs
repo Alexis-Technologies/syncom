@@ -6,7 +6,7 @@
 import { createElement as h, useSyncExternalStore } from 'react';
 import { board, openTasks } from './board.js';
 
-export function OpenTasks() {
+export const OpenTasks = () => {
   const rows = useSyncExternalStore(openTasks.subscribe, openTasks.getSnapshot);
   return h(
     'ul',
@@ -24,7 +24,7 @@ export function OpenTasks() {
       ),
     ),
   );
-}
+};
 // #endregion component
 
 // #region hook
@@ -32,20 +32,20 @@ import { useMemo } from 'react';
 import { toStore } from '@alexify/syncom/store';
 
 // A store per set of arguments: made again only when they change, so `subscribe` keeps its identity.
-export function useTasks(done) {
+export const useTasks = (done) => {
   const store = useMemo(() => toStore(board.Task.select({ done }).order('title'), { initial: [] }), [done]);
   return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-}
+};
 // #endregion hook
 
 // #region task
 import { taskStore } from './board.js';
 
-export function TaskTitle({ id }) {
+export const TaskTitle = ({ id }) => {
   const store = useMemo(() => taskStore(id), [id]);
   const task = useSyncExternalStore(store.subscribe, store.getSnapshot);
   if (task === undefined) return h('span', null, '…'); // the first read has not answered yet
   if (task === null) return h('span', null, 'deleted');
   return h('span', null, task.title);
-}
+};
 // #endregion task

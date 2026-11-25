@@ -28,6 +28,7 @@
 
 const { same } = require('./same.js');
 const { checkLookback, lookbackPull } = require('./lookback.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const CALLS = [
   'query',
@@ -44,13 +45,26 @@ const CALLS = [
 const CHUNK = 500;
 
 const field = (name, value) => {
-  if (typeof value !== 'string' || value.length === 0) throw new TypeError(`firestore(): ${name} must be a field name`);
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new ArgumentError(`firestore(): ${name} must be a field name`);
+  }
 };
 
 const refused = (id, error) => ({
   id,
-  error: { code: String(error?.code ?? 'refused'), message: error?.message ?? '' },
+  error: { code: `${error?.code ?? 'refused'}`, message: error?.message ?? '' },
 });
+
+// A checkpoint's position, `{ seconds, nanoseconds, id }` as this adapter writes it. Anything else is no
+// checkpoint: the start.
+const parse = (value) =>
+  value !== null &&
+  typeof value === 'object' &&
+  typeof value.seconds === 'number' &&
+  typeof value.nanoseconds === 'number' &&
+  typeof value.id === 'string'
+    ? { seconds: value.seconds, nanoseconds: value.nanoseconds, id: value.id }
+    : null;
 
 /**
  * `{ pull, push }` for `replicate()`. `sdk` is `firebase/firestore`,
@@ -69,25 +83,29 @@ const firestore = ({
   lookback = 0,
 } = {}) => {
   if (sdk === null || typeof sdk !== 'object') {
-    throw new TypeError('firestore(): sdk must be the firebase/firestore module');
+    throw new ArgumentError('firestore(): sdk must be the firebase/firestore module');
   }
   for (let i = 0; i < CALLS.length; i++) {
-    if (typeof sdk[CALLS[i]] !== 'function') throw new TypeError(`firestore(): sdk.${CALLS[i]} must be a function`);
+    if (typeof sdk[CALLS[i]] !== 'function') throw new ArgumentError(`firestore(): sdk.${CALLS[i]} must be a function`);
   }
   if (typeof sdk.Timestamp !== 'function' || typeof sdk.Timestamp.fromMillis !== 'function') {
-    throw new TypeError('firestore(): sdk.Timestamp is required');
+    throw new ArgumentError('firestore(): sdk.Timestamp is required');
   }
-  if (database === undefined || database === null) throw new TypeError('firestore(): database is required');
-  if (collection === undefined || collection === null) throw new TypeError('firestore(): collection is required');
+  if (database === undefined || database === null) throw new ArgumentError('firestore(): database is required');
+  if (collection === undefined || collection === null) throw new ArgumentError('firestore(): collection is required');
   field('stampField', stampField);
   field('deletedField', deletedField);
-  if (typeof stream !== 'boolean') throw new TypeError('firestore(): stream must be a boolean');
+  if (typeof stream !== 'boolean') throw new ArgumentError('firestore(): stream must be a boolean');
   checkLookback('firestore', lookback);
-  if (stream && typeof sdk.onSnapshot !== 'function') throw new TypeError('firestore(): sdk.onSnapshot is required');
+  if (stream && typeof sdk.onSnapshot !== 'function') {
+    throw new ArgumentError('firestore(): sdk.onSnapshot is required');
+  }
 
   const strip = (data) => {
     const out = {};
-    for (const key of Object.keys(data)) if (key !== stampField && key !== deletedField) out[key] = data[key];
+    for (const key of Object.keys(data)) {
+      if (key !== stampField && key !== deletedField) out[key] = data[key];
+    }
     return out;
   };
   // What the collection holds of a document: its data, or null for none or a tombstone.
@@ -105,16 +123,6 @@ const firestore = ({
     if (typeof value?.toMillis === 'function') return stampOf(sdk.Timestamp.fromMillis(value.toMillis()));
     return null;
   };
-  // A checkpoint's position, `{ seconds, nanoseconds, id }` as this adapter writes it. Anything else is no
-  // checkpoint: the start.
-  const parse = (value) =>
-    value !== null &&
-    typeof value === 'object' &&
-    typeof value.seconds === 'number' &&
-    typeof value.nanoseconds === 'number' &&
-    typeof value.id === 'string'
-      ? { seconds: value.seconds, nanoseconds: value.nanoseconds, id: value.id }
-      : null;
   // The documents after a position, in the cursor's order — by the stamp, then by id: one cursor, no second query
   // for the ties; a position with no id (a lookback's start) is the stamp alone.
   const read = async (after, limit) => {

@@ -9,16 +9,18 @@
 // `push` `{ query, variables(rows), read(data) → conflicts }` — so one adapter
 // fits every schema. An answer with `errors` is a failure (the connector
 // tries again). The stream is the application's too: `stream(emit)` as
-// `replicate()` takes it, over its subscription client. No requires.
+// `replicate()` takes it, over its subscription client. Requires argument-errors.js only.
+
+const { ArgumentError } = require('../argument-errors.js');
 
 const checkSide = (side, value) => {
   if (value === undefined) return null;
-  if (value === null || typeof value !== 'object') throw new TypeError(`graphql(): ${side} must be an object`);
+  if (value === null || typeof value !== 'object') throw new ArgumentError(`graphql(): ${side} must be an object`);
   if (typeof value.query !== 'string' || value.query.length === 0) {
-    throw new TypeError(`graphql(): ${side}.query is required`);
+    throw new ArgumentError(`graphql(): ${side}.query is required`);
   }
-  if (typeof value.variables !== 'function') throw new TypeError(`graphql(): ${side}.variables must be a function`);
-  if (typeof value.read !== 'function') throw new TypeError(`graphql(): ${side}.read must be a function`);
+  if (typeof value.variables !== 'function') throw new ArgumentError(`graphql(): ${side}.variables must be a function`);
+  if (typeof value.read !== 'function') throw new ArgumentError(`graphql(): ${side}.read must be a function`);
   return value;
 };
 
@@ -31,13 +33,13 @@ const checkSide = (side, value) => {
  */
 const graphql = ({ url, fetch = globalThis.fetch, headers = {}, request = null, pull, push, stream = null } = {}) => {
   if (request === null) {
-    if (typeof url !== 'string' || url.length === 0) throw new TypeError('graphql(): url or request is required');
-    if (typeof fetch !== 'function') throw new TypeError('graphql(): fetch must be a function');
-  } else if (typeof request !== 'function') throw new TypeError('graphql(): request must be a function');
+    if (typeof url !== 'string' || url.length === 0) throw new ArgumentError('graphql(): url or request is required');
+    if (typeof fetch !== 'function') throw new ArgumentError('graphql(): fetch must be a function');
+  } else if (typeof request !== 'function') throw new ArgumentError('graphql(): request must be a function');
   const pulling = checkSide('pull', pull);
   const pushing = checkSide('push', push);
-  if (pulling === null && pushing === null) throw new TypeError('graphql(): a pull, a push, or both');
-  if (stream !== null && typeof stream !== 'function') throw new TypeError('graphql(): stream must be a function');
+  if (pulling === null && pushing === null) throw new ArgumentError('graphql(): a pull, a push, or both');
+  if (stream !== null && typeof stream !== 'function') throw new ArgumentError('graphql(): stream must be a function');
 
   const post = async (query, variables) => {
     const response = await fetch(url, {
@@ -53,7 +55,7 @@ const graphql = ({ url, fetch = globalThis.fetch, headers = {}, request = null, 
     const body = await response.json();
     if (Array.isArray(body.errors) && body.errors.length > 0) {
       const messages = [];
-      for (let i = 0; i < body.errors.length; i++) messages.push(body.errors[i]?.message ?? String(body.errors[i]));
+      for (let i = 0; i < body.errors.length; i++) messages.push(body.errors[i]?.message ?? `${body.errors[i]}`);
       const error = new Error(`GraphQL errors: ${messages.join('; ')}`);
       error.errors = body.errors;
       throw error;

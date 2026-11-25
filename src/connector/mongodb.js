@@ -18,22 +18,33 @@
 // a probe (`assumed` undefined) is the document read back, nothing written.
 // With `lookback` ms a pull run starts that far before its checkpoint — a
 // document a writer with a slower clock stamped behind it is pulled after
-// all (lookback.js). Requires lookback.js only.
+// all (lookback.js). Requires lookback.js and errors.js only.
 
 const { checkLookback, lookbackPull } = require('./lookback.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const FIELDS = new Set(['_id', '_rev', '_deleted', '_updated']);
 
 const strip = (doc) => {
   const data = {};
-  for (const key of Object.keys(doc)) if (!FIELDS.has(key)) data[key] = doc[key];
+  for (const key of Object.keys(doc)) {
+    if (!FIELDS.has(key)) data[key] = doc[key];
+  }
   return data;
 };
 
 const documentOf = (doc) => {
-  const id = String(doc._id);
+  const id = `${doc._id}`;
   return doc._deleted === true ? { id, deleted: true } : { id, data: strip(doc) };
 };
+
+// A checkpoint's position, `{ at, id }` as this adapter writes it. Anything else is no checkpoint: the start.
+const parse = (value) =>
+  value !== null && typeof value === 'object' && typeof value.at === 'number' && typeof value.id === 'string'
+    ? { at: value.at, id: value.id }
+    : null;
+
+const positionOf = (doc) => (typeof doc._updated === 'number' ? { at: doc._updated, id: `${doc._id}` } : null);
 
 /** `{ pull, push }` for `replicate()`, over the driver's `collection`; `lookback` ms before the checkpoint (0: none). */
 const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = {}) => {
@@ -42,8 +53,10 @@ const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = 
     typeof collection === 'object' &&
     typeof collection.replaceOne === 'function' &&
     typeof collection.findOne === 'function';
-  if (!driver) throw new TypeError("mongodb(): collection must be the driver's collection (find, replaceOne, findOne)");
-  if (typeof changes !== 'boolean') throw new TypeError('mongodb(): changes must be a boolean');
+  if (!driver) {
+    throw new ArgumentError("mongodb(): collection must be the driver's collection (find, replaceOne, findOne)");
+  }
+  if (typeof changes !== 'boolean') throw new ArgumentError('mongodb(): changes must be a boolean');
   checkLookback('mongodb', lookback);
   const revs = new Map();
 
@@ -70,15 +83,9 @@ const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = 
     // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
     return collection.find(filter, { sort: { _updated: 1, _id: 1 }, limit }).toArray();
   };
-  // A checkpoint's position, `{ at, id }` as this adapter writes it. Anything else is no checkpoint: the start.
-  const parse = (value) =>
-    value !== null && typeof value === 'object' && typeof value.at === 'number' && typeof value.id === 'string'
-      ? { at: value.at, id: value.id }
-      : null;
-  const positionOf = (doc) => (typeof doc._updated === 'number' ? { at: doc._updated, id: String(doc._id) } : null);
   // A document handed over, its revision remembered.
   const pulled = (doc) => {
-    if (typeof doc._rev === 'number') revs.set(String(doc._id), doc._rev);
+    if (typeof doc._rev === 'number') revs.set(`${doc._id}`, doc._rev);
     return documentOf(doc);
   };
 
@@ -148,7 +155,7 @@ const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = 
           const doc = { _id: row.id, _rev: next, _updated: now(), ...(row.deleted ? { _deleted: true } : row.data) };
           // Matched on the revision last seen; a document never seen is made, and one that is there collides.
           const filter = held === undefined ? { _id: row.id, _rev: { $exists: false } } : { _id: row.id, _rev: held };
-          let result;
+          let result = null;
           try {
             result = await collection.replaceOne(filter, doc, { upsert: held === undefined });
           } catch (error) {
@@ -156,7 +163,7 @@ const mongodb = ({ collection, changes = true, lookback = 0, now = Date.now } = 
             // is the document refused by name; anything without one (the network) is the push's failure.
             if (error?.code === 11000) result = { matchedCount: 0, upsertedCount: 0 };
             else if (typeof error?.code === 'number') {
-              conflicts.push({ id: row.id, error: { code: String(error.code), message: error.message ?? '' } });
+              conflicts.push({ id: row.id, error: { code: `${error.code}`, message: error.message ?? '' } });
               continue;
             } else throw error;
           }

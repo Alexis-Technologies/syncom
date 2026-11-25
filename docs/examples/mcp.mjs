@@ -98,25 +98,25 @@ for (const args of [
     console.log(error.name, error.message);
   }
 }
-// TypeError args.limit: 1000 at most
-// TypeError args.sort is not a member
-// TypeError args.query.title.$regex is not allowed: createTools({ regex: true })
+// ArgumentError args.limit: 1000 at most
+// ArgumentError args.sort is not a member
+// ArgumentError args.query.title.$regex is not allowed: createTools({ regex: true })
 // #endregion door
 await assert.rejects(query.execute({ query: { done: false }, limit: 5000 }), {
-  name: 'TypeError',
+  name: 'ArgumentError',
   message: 'args.limit: 1000 at most',
 });
 await assert.rejects(query.execute({ query: { done: false }, sort: ['title'] }), {
-  name: 'TypeError',
+  name: 'ArgumentError',
   message: 'args.sort is not a member',
 });
 await assert.rejects(query.execute({ query: { title: { $regex: '^(a+)+$' } } }), {
-  name: 'TypeError',
+  name: 'ArgumentError',
   message: 'args.query.title.$regex is not allowed: createTools({ regex: true })',
 });
-await assert.rejects(byName.get('Task_get').execute({}), { name: 'TypeError', message: 'args.id is required' });
+await assert.rejects(byName.get('Task_get').execute({}), { name: 'ArgumentError', message: 'args.id is required' });
 await assert.rejects(byName.get('Task_get').execute({ id: 'x', constructor: 1 }), {
-  name: 'TypeError',
+  name: 'ArgumentError',
   message: 'args.constructor is not a member',
 });
 
@@ -171,7 +171,7 @@ const callTool = async ({ params }) => {
     const result = await tool.execute(params.arguments ?? {});
     return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   } catch (error) {
-    // A TypeError from the door, or a SyncomError from the collection: the model reads it and tries again
+    // An ArgumentError from the door, or a SyncomError from the collection: the model reads it and tries again
     return { isError: true, content: [{ type: 'text', text: `${error.code ?? error.name}: ${error.message}` }] };
   }
 };
@@ -180,7 +180,10 @@ assert.equal((await listTools()).tools.length, 8);
 const answer = await callTool({ params: { name: 'Task_count', arguments: { query: {} } } });
 assert.deepEqual(answer, { content: [{ type: 'text', text: '{"count":1}' }] });
 const wrong = await callTool({ params: { name: 'Task_get', arguments: {} } });
-assert.deepEqual(wrong, { isError: true, content: [{ type: 'text', text: 'TypeError: args.id is required' }] });
+assert.deepEqual(wrong, {
+  isError: true,
+  content: [{ type: 'text', text: 'ALX_ERR_INVALID_ARGUMENT: args.id is required' }],
+});
 
 // A stand-in for the browser's WebMCP registry, so the recipe below runs in Node.
 const registered = [];

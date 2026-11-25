@@ -15,7 +15,7 @@ const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
 const { digest, headerText } = require('./header.js');
 const { hashText } = require('./crypto/digest.js');
-const { ValidationError } = require('./errors.js');
+const { SyncomError, ArgumentError, DataError, ValidationError } = require('./errors.js');
 const { project, unproject, foldSet } = require('./schema/entity.js');
 const { fieldName } = require('./args.js');
 const { traced, now } = require('./telemetry/writer.js');
@@ -25,20 +25,22 @@ const { isPlainObject, asJson, VALIDATED, MAX_MESSAGE, isRecordId, invalidId } =
 const { nestsWithin, MAX_JSON_DEPTH, MAX_WIRE_DEPTH } = require('./shape.js');
 const { ancestorsOf } = require('./paths.js');
 const { compose } = require('./compose.js');
-const { SyncomError, typed } = require('./errors.js');
 
 // What a commit came to: an op, `null` for a write that changed nothing,
 // `undefined` for an encrypted record (saved locally, no op), and MISMATCH
 // for a swap whose expectation no longer held.
 const MISMATCH = Symbol('syncom.mismatch');
-// `expect: ABSENT` — a named insert: a live record there already is EXISTS, decided inside the queue.
+// `expect: ABSENT` — a named insert: a live record there already is ALX_ERR_EXISTS, decided inside the queue.
 const ABSENT = Symbol('syncom.absent');
 // An op of the migration a local write to a record of an older version runs first (`commitIn`): not validated
 // alone — the half state is read by no one — the write after it is, over the record as they leave it.
 const UNCHECKED = Symbol('syncom.unchecked');
 // What the write after a migration came to when it makes nothing: the transaction thrown away whole.
 const NOTHING = Symbol('syncom.nothing');
-const commitResult = (op) => (op === undefined ? 'encrypted' : op === null || op === MISMATCH ? 'noop' : 'applied');
+const commitResult = (op) => {
+  if (op === undefined) return 'encrypted';
+  return op === null || op === MISMATCH ? 'noop' : 'applied';
+};
 
 // `$type` names the collection a record belongs to and never changes: a
 // whole-record write that does not name it keeps it, and neither a write nor
@@ -48,7 +50,9 @@ const sameType = (type, id, data, current) => {
   const before = current?.$type;
   if (before === undefined) return data;
   if (data.$type === undefined) return type === 'write' ? { ...data, $type: before } : data;
-  if (data.$type !== before) throw typed('TYPE_IMMUTABLE', `Record ${id} is a ${before}; $type is immutable`);
+  if (data.$type !== before) {
+    throw new DataError('ALX_ERR_TYPE_IMMUTABLE', `Record ${id} is a ${before}; $type is immutable`);
+  }
   return data;
 };
 
@@ -66,21 +70,21 @@ const HINTS = {
 // path — so it is a TypeError, not a coded failure.
 const refuse = (core, id, rejected) => {
   if (rejected.length === 0) return;
-  const [{ field, reason, detail, count, max }] = rejected;
+  const { field, reason, detail, count, max } = rejected[0];
   if (reason === 'malformed') {
-    throw new TypeError(`Field ${field} of record ${id}: the engine does not admit this payload`);
+    throw new ArgumentError(`Field ${field} of record ${id}: the engine does not admit this payload`);
   }
   if (reason === 'member') {
     const { prefix, member } = rejected[0];
     const message = `Field ${field} of record ${id}: ${prefix} has no element or node ${member}`;
-    throw new SyncomError('NOT_FOUND', message, { id, field: prefix, elem: member });
+    throw new SyncomError('ALX_ERR_NOT_FOUND', message, { id, field: prefix, elem: member });
   }
   const fields = { field, kind: reason };
   if (detail !== undefined) Object.assign(fields, { detail, count, max });
   if (rejected[0].prefix !== undefined) fields.prefix = rejected[0].prefix;
   const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
   const where = fields.prefix === undefined ? `Field ${field}` : `Field ${field} lies under ${fields.prefix}, which`;
-  throw new SyncomError('FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
+  throw new SyncomError('ALX_ERR_FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
 };
 
 // `$type` and the fields a composite id is derived from are the record's for
@@ -94,10 +98,10 @@ const immutables = (core, type, id, payload, data) => {
     const names = payload.value;
     for (let i = 0; i < names.length; i++) {
       if (names[i] === '$type' && typeof data.$type === 'string') {
-        throw typed('TYPE_IMMUTABLE', `Record ${id} is a ${data.$type}; $type is immutable`);
+        throw new DataError('ALX_ERR_TYPE_IMMUTABLE', `Record ${id} is a ${data.$type}; $type is immutable`);
       }
       if (named !== null && named.has(names[i])) {
-        throw typed('ID_IMMUTABLE', `Record ${id}: ${names[i]} is part of its id and cannot be unset`);
+        throw new DataError('ALX_ERR_ID_IMMUTABLE', `Record ${id}: ${names[i]} is part of its id and cannot be unset`);
       }
     }
     return;
@@ -107,7 +111,7 @@ const immutables = (core, type, id, payload, data) => {
     const field = fields[i];
     if (!Object.hasOwn(payload.data, field)) continue;
     if (String(payload.data[field]) !== String(data[field])) {
-      throw typed('ID_IMMUTABLE', `Record ${id}: ${field} is part of its id and cannot change`);
+      throw new DataError('ALX_ERR_ID_IMMUTABLE', `Record ${id}: ${field} is part of its id and cannot change`);
     }
   }
 };
@@ -118,8 +122,10 @@ const expectation = async (core, id, current, expect) => {
   let seen = null;
   if (current?.encrypted) seen = current.data;
   else if (current && isAlive(current)) seen = await core.view(id, current);
-  if (!seen) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
-  for (const key of Object.keys(expect)) if (seen[key] !== expect[key]) return false;
+  if (!seen) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+  for (const key of Object.keys(expect)) {
+    if (seen[key] !== expect[key]) return false;
+  }
   return true;
 };
 
@@ -128,9 +134,9 @@ const replaced = async (core, type, payload, ctx) => {
   const replacement = await core.hook('beforeWrite', ctx);
   if (replacement === undefined) return payload;
   if (type !== 'write' && type !== 'set') {
-    throw new TypeError('beforeWrite may only replace data for write and set');
+    throw new ArgumentError('beforeWrite may only replace data for write and set');
   }
-  if (!isPlainObject(replacement)) throw new TypeError('beforeWrite must return a plain object or undefined');
+  if (!isPlainObject(replacement)) throw new ArgumentError('beforeWrite must return a plain object or undefined');
   ctx.data = replacement;
   return { ...payload, data: replacement };
 };
@@ -155,12 +161,15 @@ const unseal = async (core, id) => {
 
 // A write to a sealed record: set and write map onto the encrypted save, a
 // delete or purge removes it; a counter or a set needs ops.
+const sealedData = (type, id, payload, current) => {
+  if (type === 'write') return payload.data;
+  if (type === 'set') return { ...current?.data, ...payload.data };
+  if (type === 'delete' || type === 'purge') return null;
+  throw new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is encrypted; ${type} needs a replicated record`);
+};
+
 const commitSealed = async (core, type, id, payload, current, ctx, source) => {
-  let data;
-  if (type === 'write') data = payload.data;
-  else if (type === 'set') data = { ...(current?.data ?? {}), ...payload.data };
-  else if (type === 'delete' || type === 'purge') data = null;
-  else throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted; ${type} needs a replicated record`);
+  const data = sealedData(type, id, payload, current);
   if (data === null) await unseal(core, id);
   else await seal(core, id, data);
   try {
@@ -202,7 +211,9 @@ const assignScope = (core, op, dataOf) => {
 // Of a remove's observed tags, those of one origin; an element with none is left out.
 const ownTags = (removals, origin) => {
   const out = [];
-  for (const [element, tags] of removals) {
+  for (const entry of removals) {
+    const element = entry[0];
+    const tags = entry[1];
     if (Object.hasOwn(tags, origin)) out.push([element, { [origin]: tags[origin] }]);
   }
   return out;
@@ -232,7 +243,7 @@ const NONE = Object.freeze([]);
 // One field's refusals pushed onto `rejected` (made when the first one is): a
 // prefix a counter, a set or a text holds refuses every op under it; under a
 // list or a tree the next segment must name a member that is there
-// (NOT_FOUND otherwise, raised by the caller from `member`). A field with no
+// (ALX_ERR_NOT_FOUND otherwise, raised by the caller from `member`). A field with no
 // `/` has no prefix to read.
 const fieldClash = (field, takes, current, plugins, rejected) => {
   if (typeof field !== 'string') return rejected;
@@ -289,7 +300,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // Delete wins: a field op on a deleted (or purged) record would lie in its meta unseen — refused here as
   // update() refuses it; a whole-record write is what brings a deleted record back. An absent one it makes.
   if (current && !current.encrypted && !WHOLE.has(type) && !isAlive(current)) {
-    throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+    throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
   }
   refuse(core, id, kindClash(type, payload, current, core.plugins));
   core.observe(latestHeld(current?.meta), id);
@@ -315,7 +326,9 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
       }
     }
     const fields = [];
-    for (let i = 0; i < payload.value.length; i++) if (held.has(payload.value[i])) fields.push(payload.value[i]);
+    for (let i = 0; i < payload.value.length; i++) {
+      if (held.has(payload.value[i])) fields.push(payload.value[i]);
+    }
     op.value = fields;
   }
   // A remove names the tags this node observed, read here, inside the
@@ -549,11 +562,14 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
   // The kind `before` held a field as, where the op left it of another — a delete whose data lies on the tombstone
   // under a counter's name, a migration (`version`) that made a counter a register; no other local op lands on a
   // field of another kind (`kindClash`). `kinds` names one kind a field, the one after. Undefined otherwise.
-  let was;
-  for (const field of Object.keys(held)) if (held[field] !== kinds[field]) (was ??= {})[field] = held[field];
-  let beforeCopy;
-  let afterCopy;
-  let embeds;
+  let was = undefined;
+  for (const field of Object.keys(held)) {
+    if (held[field] !== kinds[field]) (was ??= {})[field] = held[field];
+  }
+  // `undefined` until the first read: null is a value a getter keeps.
+  let beforeCopy = undefined;
+  let afterCopy = undefined;
+  let embeds = undefined;
   return {
     op,
     seq,
@@ -574,9 +590,9 @@ const commitEvent = (core, op, entry, alive, committed, source, changes) => {
     // nothing does: an inverse that lays a cut marker again needs its value.
     get embeds() {
       if (embeds === undefined) {
-        const was = valuesOf(core.plugins, previous);
-        const now = alive ? valuesOf(core.plugins, entry) : null;
-        embeds = was === null && now === null ? null : { before: was, after: now };
+        const valuesBefore = valuesOf(core.plugins, previous);
+        const valuesAfter = alive ? valuesOf(core.plugins, entry) : null;
+        embeds = valuesBefore === null && valuesAfter === null ? null : { before: valuesBefore, after: valuesAfter };
       }
       return embeds ?? undefined;
     },
@@ -612,7 +628,7 @@ const valuesOf = (plugins, entry) => {
   for (const field of Object.keys(kinds)) {
     const mod = Object.hasOwn(plugins.byName, kinds[field]) ? plugins.byName[kinds[field]] : undefined;
     const values = mod?.values?.(entry, field);
-    if (values != null) (out ??= {})[field] = asJson(values);
+    if (values !== undefined && values !== null) (out ??= {})[field] = asJson(values);
   }
   return out;
 };
@@ -625,7 +641,7 @@ const shallow = (payload) => {
   for (let i = 0; i < PAYLOAD.length; i++) {
     const name = PAYLOAD[i];
     if (nestsWithin(payload[name], MAX_JSON_DEPTH)) continue;
-    throw new TypeError(`A write's ${name} nests deeper than ${MAX_JSON_DEPTH} levels`);
+    throw new ArgumentError(`A write's ${name} nests deeper than ${MAX_JSON_DEPTH} levels`);
   }
 };
 
@@ -658,7 +674,9 @@ const rehearse = async (core, id, ops) => {
   let current = await core.current(id);
   if (current?.encrypted) return;
   const scratch = { ...core, editing: null };
-  for (const [type, given] of ops) {
+  for (const pair of ops) {
+    const type = pair[0];
+    const given = pair[1];
     const payload = copyPayload(given);
     const visible = current && isAlive(current) ? compose(current, core.plugins) : null;
     if (type === 'write' || type === 'set') payload.data = sameType(type, id, payload.data, visible);
@@ -684,7 +702,7 @@ const outcome = (op, done = null) => ({ op, done });
 const messageArg = (message) => {
   if (message === undefined || message === null) return undefined;
   if (typeof message !== 'string' || message.length > MAX_MESSAGE) {
-    throw new TypeError(`message takes a string of at most ${MAX_MESSAGE} characters`);
+    throw new ArgumentError(`message takes a string of at most ${MAX_MESSAGE} characters`);
   }
   return message;
 };
@@ -705,10 +723,10 @@ const prepare = async (core, type, id, payload, options) => {
   const msg = messageArg(message);
   const current = await core.current(id);
   if (expect === ABSENT && current && (current.encrypted || isAlive(current))) {
-    throw new SyncomError('EXISTS', `Record ${id} exists already`, { id, entity: current.data?.$type ?? null });
+    throw new SyncomError('ALX_ERR_EXISTS', `Record ${id} exists already`, { id, entity: current.data?.$type ?? null });
   }
   if (encrypted && current && !current.encrypted) {
-    throw new SyncomError('ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
+    throw new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
   }
   if (expect !== null && expect !== ABSENT && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
   if ((type === 'set' || type === 'unset') && current && !current.encrypted && isAlive(current)) {
@@ -788,7 +806,7 @@ const prepared = (core, op, applied, current, ctx, source, via) => {
   // The data a beforeWrite hook or a validator handed back, as the op
   // carries it: never deeper than a peer takes.
   if (op.data !== undefined && !nestsWithin(op.data, MAX_WIRE_DEPTH)) {
-    throw new TypeError(`Record ${op.id}: its data nests deeper than ${MAX_WIRE_DEPTH} levels`);
+    throw new ArgumentError(`Record ${op.id}: its data nests deeper than ${MAX_WIRE_DEPTH} levels`);
   }
   // The validator may have filled the field the scope reads (a default):
   // the stream is the one of the record as it is written.
@@ -1092,7 +1110,9 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     touched.set(id, entry);
     const held = uniquesOf.get(id);
     if (held !== undefined) {
-      for (let i = 0; i < held.length; i++) if (uniques.get(held[i]) === id) uniques.delete(held[i]);
+      for (let i = 0; i < held.length; i++) {
+        if (uniques.get(held[i]) === id) uniques.delete(held[i]);
+      }
       uniquesOf.delete(id);
     }
     if (!isAlive(entry)) return;
@@ -1137,12 +1157,12 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   };
   // An op made here joins the transaction: grown into the one before it, or an item of its own.
   const join = async (made) => {
-    const grown = grows(made);
+    const folded = grows(made);
     const { op } = made;
     const { id } = op;
-    if (grown !== null) {
+    if (folded !== null) {
       await hold(id, made.entry);
-      return grown;
+      return folded;
     }
     const was = newestOf.get(id);
     if (was !== undefined) release(items[was]);
@@ -1157,7 +1177,10 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     if (!isRecordId(id)) throw invalidId(id);
     const current = await tx.current(id);
     if (options.encrypted === true || current?.encrypted === true) {
-      throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted: an encrypted write stays outside a transaction`);
+      throw new SyncomError(
+        'ALX_ERR_ENCRYPTED',
+        `Record ${id} is encrypted: an encrypted write stays outside a transaction`,
+      );
     }
     const given = { ...options, source, message: msg };
     if (given.actor === undefined) given.actor = actor;
@@ -1186,7 +1209,10 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const { id, type } = op;
     const current = await tx.current(id);
     if (current?.encrypted === true) {
-      throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted: an encrypted write stays outside a transaction`);
+      throw new SyncomError(
+        'ALX_ERR_ENCRYPTED',
+        `Record ${id} is encrypted: an encrypted write stays outside a transaction`,
+      );
     }
     if (msg !== undefined) op.msg = msg;
     assignScope(tx, op, () => scopeData(type, {}, current));
@@ -1241,7 +1267,9 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   // unhurried, here.
   const { fps, headers } = await link(ops, core.fingerprintOf, core.sign !== null);
   const signing = core.sign !== null && (count > 1 || core.pipelined()) ? [] : null;
-  if (signing !== null) for (let i = 0; i < count; i++) signing.push(core.sign(ops[i], true));
+  if (signing !== null) {
+    for (let i = 0; i < count; i++) signing.push(core.sign(ops[i], true));
+  }
   let ready = null;
   if (signing !== null) ready = Promise.all(signing);
   else if (core.sign !== null) await core.sign(ops[0], false);
@@ -1249,7 +1277,11 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
   const positions = [];
   for (let i = 0; i < count; i++) positions.push(ticket.entries[i].seq);
   // A record in flight is its newest entry, at its newest position.
-  for (const [id, last] of newestOf) core.inflight(id, touched.get(id), positions[last]);
+  for (const item of newestOf) {
+    const id = item[0];
+    const last = item[1];
+    core.inflight(id, touched.get(id), positions[last]);
+  }
   const done = core.landing(async () => {
     await ticket.done;
     const from = positions[0];
@@ -1261,12 +1293,20 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
         if (list === undefined) held.set(ops[i].id, [positions[i]]);
         else list.push(positions[i]);
       }
-      for (const [id, list] of held) await core.deferred(id, touched.get(id), list);
+      for (const pair of held) {
+        const id = pair[0];
+        const list = pair[1];
+        await core.deferred(id, touched.get(id), list);
+      }
     } else if (await core.land(touched, from, to)) {
       // One append: the positions run from `from` to `to` without a gap.
       core.log.applied(from, to);
     }
-    for (const [id, last] of newestOf) core.settled(id, positions[last]);
+    for (const pair of newestOf) {
+      const id = pair[0];
+      const last = pair[1];
+      core.settled(id, positions[last]);
+    }
     core.saveCatalog();
     // The transaction event's changes, built only while something listens.
     const listening = core.listening('transaction');
@@ -1303,7 +1343,7 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
 const tracedCommit = async (core, type, id, payload, options) => {
   const { otel } = core;
   const started = now();
-  let out;
+  let out = null;
   try {
     const task = () => commitLocal(core, type, id, payload, options);
     const attributes = { 'syncom.op.type': type, 'syncom.record.id': id };

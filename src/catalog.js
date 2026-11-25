@@ -76,7 +76,9 @@ const canonical = (value) => {
   }
   if (!isObject(value)) return value;
   const out = Object.create(null);
-  for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
+  const keys = Object.keys(value);
+  keys.sort();
+  for (let i = 0; i < keys.length; i++) out[keys[i]] = canonical(value[keys[i]]);
   return out;
 };
 
@@ -85,7 +87,9 @@ const canonical = (value) => {
 const meet = (result, found) => {
   if (result === null) return found;
   const next = new Set();
-  for (const id of result) if (found.has(id)) next.add(id);
+  for (const id of result) {
+    if (found.has(id)) next.add(id);
+  }
   return next;
 };
 
@@ -124,8 +128,11 @@ const textOf = (data, fields) => {
   // down, for a list's elements that carry fields — the strings of its objects.
   const collect = (value, depth) => {
     if (typeof value === 'string') parts.push(value);
-    else if (depth > 0 && Array.isArray(value)) for (let j = 0; j < value.length; j++) collect(value[j], depth - 1);
-    else if (depth > 0 && isObject(value)) for (const key of Object.keys(value)) collect(value[key], depth - 1);
+    else if (depth > 0 && Array.isArray(value)) {
+      for (let j = 0; j < value.length; j++) collect(value[j], depth - 1);
+    } else if (depth > 0 && isObject(value)) {
+      for (const key of Object.keys(value)) collect(value[key], depth - 1);
+    }
   };
   for (let i = 0; i < fields.length; i++) collect(valueOf(data, fields[i]), 4);
   return parts.join(' ');
@@ -167,7 +174,9 @@ const post = (map, value, id, fn) => {
 // `index` ones and every field of a unique key), the unique keys, the search fields.
 const defOf = (def) => {
   const fields = new Set(def.index);
-  for (const key of def.unique) for (const field of key) fields.add(field);
+  for (const key of def.unique) {
+    for (const field of key) fields.add(field);
+  }
   const search = def.search ?? [];
   // The sorted keys kept: the declared indexes (singles as one-field keys), each with its name.
   let indexes = def.indexes ?? null;
@@ -209,7 +218,9 @@ const keysOf = (fields, index) => {
 
 // The entries of `id` taken out of a bulk build's queue (a row removed before the build).
 const unqueue = (pending, id) => {
-  for (let i = pending.length - 1; i >= 0; i--) if (pending[i].id === id) pending.splice(i, 1);
+  for (let i = pending.length - 1; i >= 0; i--) {
+    if (pending[i].id === id) pending.splice(i, 1);
+  }
 };
 
 // Whether two indexed values are one: the same, or objects with one canonical text.
@@ -218,7 +229,9 @@ const sameValue = (x, y) =>
 
 // Whether a key (a field list) names a field among `changed`.
 const touches = (fields, changed) => {
-  for (let i = 0; i < fields.length; i++) if (changed.has(fields[i])) return true;
+  for (let i = 0; i < fields.length; i++) {
+    if (changed.has(fields[i])) return true;
+  }
   return false;
 };
 
@@ -299,7 +312,11 @@ class Catalog {
     this.#store = store ?? (rows === null ? fsiNamespace(fsi, `${path}/index`) : null);
     this.#text = text;
     this.#logger = logger;
-    for (const [name, def] of entities) this.#defs.set(name, defOf(def));
+    for (const entry of entities) {
+      const name = entry[0];
+      const def = entry[1];
+      this.#defs.set(name, defOf(def));
+    }
     this.#rekey();
   }
 
@@ -307,7 +324,11 @@ class Catalog {
   // collections, their indexes, unique keys and search fields.
   #rekey() {
     const shape = [];
-    for (const [name, def] of this.#defs) shape.push([name, def.index, def.indexes, def.unique, def.search]);
+    for (const entry of this.#defs) {
+      const name = entry[0];
+      const def = entry[1];
+      shape.push([name, def.index, def.indexes, def.unique, def.search]);
+    }
     // The format rides in the key: rows saved in another shape are not reused, by a file or a row store.
     this.#indexKey = keyOf([FORMAT, shape]);
   }
@@ -391,7 +412,7 @@ class Catalog {
   // it are skipped whole, the ones after come whole.
   #scanIn(type, plan, after, held) {
     const { index, prefix, range, desc } = plan;
-    const values = plan.in.values.slice().sort(compare);
+    const values = plan.in.values.toSorted(compare);
     if (desc) values.reverse();
     const parts = [];
     let estimate = 0;
@@ -448,7 +469,9 @@ class Catalog {
     if (list === undefined) return out;
     for (let i = 0; i < values.length; i++) {
       const held = list.get(keyOf(values[i]));
-      if (held !== undefined) for (const id of held) out.add(id);
+      if (held !== undefined) {
+        for (const id of held) out.add(id);
+      }
     }
     return out;
   }
@@ -497,7 +520,9 @@ class Catalog {
   #beginBulk() {
     this.#bulk = true;
     for (const byIndex of this.#keyed.values()) {
-      for (const held of byIndex.values()) if (held.pending === null) held.pending = [];
+      for (const held of byIndex.values()) {
+        if (held.pending === null) held.pending = [];
+      }
     }
   }
 
@@ -537,7 +562,11 @@ class Catalog {
     else this.#defs.set(name, defOf(def));
     if (index === null) this.#text.delete(name);
     else this.#text.set(name, index);
-    for (const [id, pending] of this.#textPending) if (pending.type === name) this.#textPending.delete(id);
+    for (const entry of this.#textPending) {
+      const id = entry[0];
+      const pending = entry[1];
+      if (pending.type === name) this.#textPending.delete(id);
+    }
     // The bare rows back, their sorted indexes built once (the caller indexes the records again).
     this.#beginBulk();
     for (let i = 0; i < ids.length; i++) {
@@ -564,7 +593,9 @@ class Catalog {
 
   #flushText() {
     if (this.#textPending.size === 0) return;
-    for (const [id, { type, text }] of this.#textPending) {
+    for (const entry of this.#textPending) {
+      const id = entry[0];
+      const { type, text } = entry[1];
       const index = this.#text.get(type);
       try {
         if (text === null) index.remove(id);
@@ -623,7 +654,9 @@ class Catalog {
     if (!def) return;
     // The type's structures may be gone already (`define` takes them whole, then the rows).
     const eq = this.#eq.get(row.type);
-    if (eq !== undefined) for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
+    if (eq !== undefined) {
+      for (const field of Object.keys(row.fields)) post(eq.get(field), row.fields[field], id, drop);
+    }
     const unique = this.#unique.get(row.type);
     if (unique !== undefined) {
       for (const key of def.unique) {
@@ -700,7 +733,8 @@ class Catalog {
     // A tombstone's view may name no collection (its data is empty): the row keeps the one it had — unless the
     // record was purged, which erases the collection with it.
     const kept = gone && view.purged !== true && was !== undefined ? was.type : null;
-    const type = view === null ? null : typeof view.type === 'string' ? view.type : kept;
+    let type = null;
+    if (view !== null) type = typeof view.type === 'string' ? view.type : kept;
     // A result of the collection the record was of, or joins, is of before this put — a no-op put too: the record
     // may read as another where the row does not say.
     if (before !== null) this.#bump(before);
@@ -739,8 +773,7 @@ class Catalog {
       this.#update(id, was, row, same);
       this.#dirty++;
       this.#changed.set(id, row);
-      this.#wake(type, true, id, 'update');
-      return;
+      return void this.#wake(type, true, id, 'update');
     }
     this.#remove(id);
     this.#dirty++;
@@ -761,7 +794,9 @@ class Catalog {
     for (const field of Object.keys(was.fields)) {
       if (!sameValue(was.fields[field], row.fields[field])) changed.add(field);
     }
-    for (const field of Object.keys(row.fields)) if (!Object.hasOwn(was.fields, field)) changed.add(field);
+    for (const field of Object.keys(row.fields)) {
+      if (!Object.hasOwn(was.fields, field)) changed.add(field);
+    }
     const eq = this.#eq.get(row.type);
     for (const field of changed) {
       const list = eq.get(field);
@@ -805,7 +840,11 @@ class Catalog {
 
   /** Every id with a file — live, encrypted or a tombstone — sorted, cached until the next put. */
   all() {
-    this.#sorted ??= [...this.#rows.keys()].sort();
+    if (this.#sorted === null) {
+      const sorted = [...this.#rows.keys()];
+      sorted.sort();
+      this.#sorted = sorted;
+    }
     return this.#sorted;
   }
 
@@ -833,7 +872,10 @@ class Catalog {
 
   #wake(type, changed, id, action) {
     const fns = this.#watchers.get(type);
-    if (fns) for (const fn of [...fns]) fn(changed, id, action);
+    if (!fns) return;
+    // A copy: a watcher may unsubscribe, or subscribe another, while it is called.
+    const called = [...fns];
+    for (const fn of called) fn(changed, id, action);
   }
 
   row(id) {
@@ -849,10 +891,16 @@ class Catalog {
     const key = type === undefined ? ALL : type;
     let sorted = this.#sortedIds.get(key);
     if (sorted !== undefined) return sorted;
-    if (type !== undefined) sorted = [...(this.#byType.get(type) ?? [])].sort();
-    else {
+    if (type !== undefined) {
+      sorted = [...(this.#byType.get(type) ?? [])];
+      sorted.sort();
+    } else {
       sorted = [];
-      for (const [id, row] of this.#rows) if (!row.gone) sorted.push(id);
+      for (const entry of this.#rows) {
+        const id = entry[0];
+        const row = entry[1];
+        if (!row.gone) sorted.push(id);
+      }
       sorted.sort();
     }
     this.#sortedIds.set(key, sorted);
@@ -869,7 +917,8 @@ class Catalog {
     if (set === undefined) return EMPTY;
     let sorted = this.#sealedSorted.get(type);
     if (sorted !== undefined) return sorted;
-    sorted = [...set].sort();
+    sorted = [...set];
+    sorted.sort();
     this.#sealedSorted.set(type, sorted);
     return sorted;
   }
@@ -897,7 +946,9 @@ class Catalog {
   // A fresh Set in the index's order: never the index's own structures.
   #ranked(index, text) {
     const found = new Set();
-    for (const hit of index.query(text)) if (isObject(hit) && typeof hit.id === 'string') found.add(hit.id);
+    for (const hit of index.query(text)) {
+      if (isObject(hit) && typeof hit.id === 'string') found.add(hit.id);
+    }
     return found;
   }
 
@@ -926,14 +977,16 @@ class Catalog {
         }
         if (!whole) result = meet(result, union);
       } else if (eq.has(key)) {
-        let values;
+        let values = null;
         if (!isObject(condition) || Array.isArray(condition)) values = [condition];
         else if (Object.hasOwn(condition, '$eq')) values = [condition.$eq];
         else if (Array.isArray(condition.$in)) values = condition.$in;
         else continue;
         const posting = eq.get(key);
         const found = new Set();
-        for (const value of values) for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
+        for (const value of values) {
+          for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
+        }
         result = meet(result, found);
       }
       if (result !== null && result.size === 0) break;
@@ -980,7 +1033,9 @@ class Catalog {
     this.#loaded = false;
     this.#floor = ++this.#generation;
     this.#beginBulk();
-    for (const [id, row] of rows) {
+    for (const entry of rows) {
+      const id = entry[0];
+      const row = entry[1];
       this.#remove(id);
       this.#insert(id, row);
       this.#dirty++;
@@ -1012,7 +1067,13 @@ class Catalog {
     this.#beginBulk();
     for (const row of parsed.rows) {
       if (!Array.isArray(row) || typeof row[0] !== 'string') continue;
-      const [id, type, v, encrypted, fields, gone, seventh] = row;
+      const id = row[0];
+      const type = row[1];
+      const v = row[2];
+      const encrypted = row[3];
+      const fields = row[4];
+      const gone = row[5];
+      const seventh = row[6];
       this.#remove(id);
       const loaded = {
         type: typeof type === 'string' ? type : null,
@@ -1045,7 +1106,9 @@ class Catalog {
     const rows = saved.rows;
     this.#beginBulk();
     for (let i = 0; i < rows.length; i++) {
-      const [id, row] = rows[i];
+      const pair = rows[i];
+      const id = pair[0];
+      const row = pair[1];
       this.#remove(id);
       this.#insert(id, row);
     }
@@ -1065,7 +1128,11 @@ class Catalog {
         await this.#rowStore.save(this.#indexKey, stamp, { all: () => this.rows(), changed, whole: !this.#loaded });
       } catch (error) {
         // What this save carried is still to save: back under what changed since.
-        for (const [id, row] of changed) if (!this.#changed.has(id)) this.#changed.set(id, row);
+        for (const entry of changed) {
+          const id = entry[0];
+          const row = entry[1];
+          if (!this.#changed.has(id)) this.#changed.set(id, row);
+        }
         throw error;
       }
       this.#loaded = true;
@@ -1073,7 +1140,9 @@ class Catalog {
       return;
     }
     const rows = [];
-    for (const [id, row] of this.#rows) {
+    for (const entry of this.#rows) {
+      const id = entry[0];
+      const row = entry[1];
       const cells = [id, row.type, row.v, row.encrypted, row.fields];
       if (row.gone) {
         cells.push(true);

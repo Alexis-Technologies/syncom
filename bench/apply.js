@@ -113,8 +113,8 @@ const main = async () => {
         { warmup: 3, measureMs: 1500, opsPerIteration: 100 },
       );
       if (chain) {
-        const page = await signPage(100);
-        await bench('verifyOp — 100 signed writes', () => Promise.all(page.map((op) => verifyOp(op, 'require'))), {
+        const signed = await signPage(100);
+        await bench('verifyOp — 100 signed writes', () => Promise.all(signed.map((op) => verifyOp(op, 'require'))), {
           opsPerIteration: 100,
         });
       }

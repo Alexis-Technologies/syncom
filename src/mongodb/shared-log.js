@@ -28,6 +28,8 @@
 // through `trimBefore(topic, id)`). The client is the caller's: nothing here
 // connects or closes it. Requires nothing of the core.
 
+const { ArgumentError } = require('../argument-errors.js');
+
 const DEFAULT_COLLECTION = 'shared';
 const LOG_ID = /^[A-Za-z0-9_-]{1,64}\.\d{1,16}$/;
 const PAGE = 256;
@@ -50,7 +52,7 @@ const coded = (message, code) => {
 const toText = (value) => {
   if (typeof value === 'string') return value;
   if (value instanceof Uint8Array) return decoder.decode(value);
-  throw new TypeError('mongoSharedLog.append: value must be a string or a Uint8Array');
+  throw new ArgumentError('mongoSharedLog.append: value must be a string or a Uint8Array');
 };
 
 // Headers as a plain string map; a key no one should set as a field stays a plain entry.
@@ -60,7 +62,7 @@ const toHeaders = (value) => {
   for (const key of Object.keys(value)) {
     const entry = value[key];
     if (entry === undefined || entry === null) continue;
-    headers[key] = typeof entry === 'string' ? entry : String(entry);
+    headers[key] = typeof entry === 'string' ? entry : `${entry}`;
   }
   return headers;
 };
@@ -69,15 +71,32 @@ const epochOf = () => `${Date.now().toString(36)}${Math.random().toString(36).sl
 const sleep = (ms, signal) =>
   new Promise((resolve) => {
     if (signal?.aborted) return void resolve();
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    function done() {
+    const done = () => {
       clearTimeout(timer);
       signal?.removeEventListener?.('abort', done);
       resolve();
-    }
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
     signal?.addEventListener?.('abort', done, { once: true });
   });
+
+const keyOf = (topic, n) => JSON.stringify([topic, n]);
+
+const requireTopic = (topic, where) => {
+  if (typeof topic !== 'string' || topic.length === 0) {
+    throw new ArgumentError(`${where}: topic must be a non-empty string`);
+  }
+};
+
+// A change stream closed, its failure ignored: it is over already, or its connection with it.
+const closeQuietly = (stream) => {
+  try {
+    stream.close()?.catch?.(() => {});
+  } catch {
+    // Closed already.
+  }
+};
 
 /**
  * A shared log over the MongoDB database `db` (or `client.db(name)`): the
@@ -95,18 +114,18 @@ const mongoSharedLog = ({
   logger = null,
 } = {}) => {
   if (db === null && (client === null || typeof client.db !== 'function')) {
-    throw new TypeError('mongoSharedLog: a connected MongoClient (client) or a Db (db) is required');
+    throw new ArgumentError('mongoSharedLog: a connected MongoClient (client) or a Db (db) is required');
   }
   if (typeof collection !== 'string' || collection.length === 0) {
-    throw new TypeError('mongoSharedLog: collection must be a non-empty string');
+    throw new ArgumentError('mongoSharedLog: collection must be a non-empty string');
   }
-  if (!Number.isFinite(poll) || poll <= 0) throw new TypeError('mongoSharedLog: poll must be a positive number');
+  if (!Number.isFinite(poll) || poll <= 0) throw new ArgumentError('mongoSharedLog: poll must be a positive number');
   if (!Number.isFinite(gapTimeout) || gapTimeout < 0) {
-    throw new TypeError('mongoSharedLog: gapTimeout must be a non-negative number');
+    throw new ArgumentError('mongoSharedLog: gapTimeout must be a non-negative number');
   }
   const maxEntries = retention?.maxEntries;
   if (maxEntries !== undefined && !(Number.isInteger(maxEntries) && maxEntries > 0)) {
-    throw new TypeError('mongoSharedLog: retention.maxEntries must be a positive integer');
+    throw new ArgumentError('mongoSharedLog: retention.maxEntries must be a positive integer');
   }
   // The topics retention trims: every one without a list.
   let trimmed = null;
@@ -115,7 +134,7 @@ const mongoSharedLog = ({
     for (let i = 0; valid && i < retention.topics.length; i++) {
       valid = typeof retention.topics[i] === 'string' && retention.topics[i].length > 0;
     }
-    if (!valid) throw new TypeError('mongoSharedLog: retention.topics must be an array of topic names');
+    if (!valid) throw new ArgumentError('mongoSharedLog: retention.topics must be an array of topic names');
     trimmed = new Set(retention.topics);
   }
   const database = db ?? client.db(name);
@@ -126,18 +145,11 @@ const mongoSharedLog = ({
     indexed ??= entries.createIndex({ topic: 1, n: 1 }).then(() => undefined);
     return indexed;
   };
-  const keyOf = (topic, n) => JSON.stringify([topic, n]);
   const appends = new Map();
   // One tail per topic of this instance, shared by every reader of it: the
   // change stream (or the poll) wakes every waiter once.
   const tails = new Map();
   let closed = false;
-
-  const requireTopic = (topic, where) => {
-    if (typeof topic !== 'string' || topic.length === 0) {
-      throw new TypeError(`${where}: topic must be a non-empty string`);
-    }
-  };
 
   // The head of a topic, its `next` taken one up: the number of this append and the topic's epoch.
   const number = async (topic) => {
@@ -182,7 +194,7 @@ const mongoSharedLog = ({
     const text = toText(value);
     const h = toHeaders(options.headers);
     await ensure();
-    let numbered;
+    let numbered = null;
     for (let attempt = 1; ; attempt++) {
       const started = Date.now();
       numbered = await number(topic);
@@ -245,11 +257,7 @@ const mongoSharedLog = ({
         const closing = stream;
         stream = null;
         logger?.warn?.({ event: 'shared.stream.failed', topic, err: error });
-        try {
-          closing.close()?.catch?.(() => {});
-        } catch {
-          // Closed already.
-        }
+        closeQuietly(closing);
         wake();
       };
       stream.on('change', wake);
@@ -269,24 +277,20 @@ const mongoSharedLog = ({
         if (stream !== null) {
           const closing = stream;
           stream = null;
-          try {
-            closing.close()?.catch?.(() => {});
-          } catch {
-            // Closed already.
-          }
+          closeQuietly(closing);
         }
       },
       // Until an entry lands, the poll elapses (a watchdog's length with a live stream) or the reader is done.
       wait(signal) {
         return new Promise((resolve) => {
-          const timer = setTimeout(done, stream === null ? poll : poll * WATCHDOG);
-          timer.unref?.();
-          function done() {
+          const done = () => {
             clearTimeout(timer);
             waiters.delete(done);
             signal?.removeEventListener?.('abort', done);
             resolve();
-          }
+          };
+          const timer = setTimeout(done, stream === null ? poll : poll * WATCHDOG);
+          timer.unref?.();
           waiters.add(done);
           signal?.addEventListener?.('abort', done, { once: true });
         });
@@ -299,15 +303,72 @@ const mongoSharedLog = ({
   const read = (topic, { after = null, from = 'latest', signal = null } = {}) => {
     requireTopic(topic, 'mongoSharedLog.read');
     if (from !== 'latest' && from !== 'earliest') {
-      throw new TypeError("mongoSharedLog.read: from must be 'latest' or 'earliest'");
+      throw new ArgumentError("mongoSharedLog.read: from must be 'latest' or 'earliest'");
     }
+    // The entries from `start` on, a page at a time, then the tail as they land; `knownEpoch` null until a head
+    // names one.
+    const follow = async function* (start, knownEpoch, tail) {
+      let position = start;
+      let epoch = knownEpoch;
+      // How long the entry at `position` has been waited for: past `gapTimeout` it is read once more, then told as
+      // a hole.
+      let waitedSince = 0;
+      for (;;) {
+        if (signal?.aborted || closed) return;
+        const query = { topic, n: { $gte: position } };
+        // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
+        const found = entries.find(query, { sort: { n: 1 }, limit: PAGE, projection: { _id: 0 } });
+        const docs = await found.toArray();
+        if (docs.length === 0) {
+          if (signal?.aborted || closed) return;
+          await tail.wait(signal);
+          continue;
+        }
+        // The head once per page: another epoch, or a trim past the reader, is 410.
+        const current = await heads.findOne({ _id: topic }, { projection: { _id: 0, epoch: 1, first: 1 } });
+        if (current === null) throw coded('Event id belongs to another log', 410);
+        if (epoch === null) epoch = current.epoch;
+        else if (current.epoch !== epoch) throw coded('Event id belongs to another log', 410);
+        if (position < current.first) throw coded('Event history was trimmed past this reader', 410);
+        let yielded = false;
+        for (let i = 0; i < docs.length; i++) {
+          let doc = docs[i];
+          if (doc.n > position) {
+            // A number handed out whose entry is not here yet, or never will be: waited for, read once more.
+            if (waitedSince === 0) waitedSince = Date.now();
+            if (Date.now() - waitedSince < gapTimeout) break;
+            const late = await entries.findOne({ _id: keyOf(topic, position) }, { projection: { _id: 0 } });
+            waitedSince = 0;
+            if (late === null) {
+              // A crashed appender's number: told, never passed in silence.
+              logger?.warn?.({ event: 'shared.hole', topic, n: position });
+              const id = `${epoch}.${position}`;
+              position++;
+              yielded = true;
+              yield { id, value: null, headers: { hole: '1' } };
+              i--;
+              continue;
+            }
+            doc = late;
+            i--;
+          }
+          waitedSince = 0;
+          position = doc.n + 1;
+          // A tombstone: an append that failed, or moved to a fresh number — nothing to tell.
+          if (doc.hole === true) continue;
+          yielded = true;
+          yield { id: `${epoch}.${doc.n}`, value: doc.v, headers: { ...doc.h } };
+        }
+        if (!yielded) await sleep(Math.min(poll, 50), signal);
+      }
+    };
     const iterate = async function* () {
       if (closed) throw coded('The shared log is closed', 503);
       await ensure();
       const head = await heads.findOne({ _id: topic });
       // A topic never appended to has no epoch yet: the first head seen is its.
-      let epoch = head?.epoch ?? null;
-      let position;
+      const epoch = head?.epoch ?? null;
+      let position = 0;
       if (after !== null && after !== undefined) {
         const id = parseId(after);
         if (id === null) throw coded('Malformed event id', 400);
@@ -321,57 +382,7 @@ const mongoSharedLog = ({
       const tail = tailOf(topic);
       tail.enter();
       try {
-        // How long the entry at `position` has been waited for: past `gapTimeout` it is read once more, then told as
-        // a hole.
-        let waitedSince = 0;
-        for (;;) {
-          if (signal?.aborted || closed) return;
-          const query = { topic, n: { $gte: position } };
-          // oxlint-disable-next-line no-restricted-properties -- the driver's find, not an array's
-          const found = entries.find(query, { sort: { n: 1 }, limit: PAGE, projection: { _id: 0 } });
-          const docs = await found.toArray();
-          if (docs.length === 0) {
-            if (signal?.aborted || closed) return;
-            await tail.wait(signal);
-            continue;
-          }
-          // The head once per page: another epoch, or a trim past the reader, is 410.
-          const current = await heads.findOne({ _id: topic }, { projection: { _id: 0, epoch: 1, first: 1 } });
-          if (current === null) throw coded('Event id belongs to another log', 410);
-          if (epoch === null) epoch = current.epoch;
-          else if (current.epoch !== epoch) throw coded('Event id belongs to another log', 410);
-          if (position < current.first) throw coded('Event history was trimmed past this reader', 410);
-          let yielded = false;
-          for (let i = 0; i < docs.length; i++) {
-            let doc = docs[i];
-            if (doc.n > position) {
-              // A number handed out whose entry is not here yet, or never will be: waited for, read once more.
-              if (waitedSince === 0) waitedSince = Date.now();
-              if (Date.now() - waitedSince < gapTimeout) break;
-              const late = await entries.findOne({ _id: keyOf(topic, position) }, { projection: { _id: 0 } });
-              waitedSince = 0;
-              if (late === null) {
-                // A crashed appender's number: told, never passed in silence.
-                logger?.warn?.({ event: 'shared.hole', topic, n: position });
-                const id = `${epoch}.${position}`;
-                position++;
-                yielded = true;
-                yield { id, value: null, headers: { hole: '1' } };
-                i--;
-                continue;
-              }
-              doc = late;
-              i--;
-            }
-            waitedSince = 0;
-            position = doc.n + 1;
-            // A tombstone: an append that failed, or moved to a fresh number — nothing to tell.
-            if (doc.hole === true) continue;
-            yielded = true;
-            yield { id: `${epoch}.${doc.n}`, value: doc.v, headers: { ...doc.h } };
-          }
-          if (!yielded) await sleep(Math.min(poll, 50), signal);
-        }
+        yield* follow(position, epoch, tail);
       } finally {
         tail.leave();
       }
@@ -382,7 +393,7 @@ const mongoSharedLog = ({
   const trim = async (topic, keep) => {
     requireTopic(topic, 'mongoSharedLog.trim');
     if (!Number.isInteger(keep) || keep < 0) {
-      throw new TypeError('mongoSharedLog.trim: keep must be a non-negative integer');
+      throw new ArgumentError('mongoSharedLog.trim: keep must be a non-negative integer');
     }
     const head = await heads.findOne({ _id: topic });
     if (head === null) return;
@@ -394,7 +405,7 @@ const mongoSharedLog = ({
   const trimBefore = async (topic, id) => {
     requireTopic(topic, 'mongoSharedLog.trimBefore');
     const parsed = parseId(id);
-    if (parsed === null) throw new TypeError('mongoSharedLog.trimBefore: id must be an event id');
+    if (parsed === null) throw new ArgumentError('mongoSharedLog.trimBefore: id must be an event id');
     const head = await heads.findOne({ _id: topic });
     if (head === null) return;
     const dot = parsed.lastIndexOf('.');
@@ -419,9 +430,9 @@ const mongoSharedLog = ({
     /** Stops every tail; a read after it fails with 503. The client is the caller's. */
     async close() {
       closed = true;
-      for (const tail of [...tails.values()]) tail.wake();
+      for (const tail of tails.values()) tail.wake();
     },
   });
 };
 
-module.exports = { mongoSharedLog };
+module.exports = { mongoSharedLog, closeQuietly };

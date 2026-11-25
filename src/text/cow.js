@@ -80,7 +80,9 @@ const get = (map, key) => {
   for (let depth = 0; ; depth++) {
     if (node instanceof Bucket) {
       const { pairs } = node;
-      for (let i = 0; i < pairs.length; i++) if (pairs[i].key === key) return pairs[i].value;
+      for (let i = 0; i < pairs.length; i++) {
+        if (pairs[i].key === key) return pairs[i].value;
+      }
       return undefined;
     }
     const bit = 1 << ((hash >>> (depth * BITS)) & MASK);
@@ -183,7 +185,7 @@ const removeIn = (node, key, hash, depth, owner) => {
   if ((node.bitmap & bit) === 0) return node;
   const index = popcount(node.bitmap & (bit - 1));
   const slot = node.slots[index];
-  let next;
+  let next = null;
   if (slot instanceof Pair) {
     if (slot.key !== key) return node;
     grown = -1;
@@ -345,21 +347,18 @@ const at = (list, key) => {
 // `held` as chunks of at most CHUNK, as even as they come.
 const chunked = (held, out) => {
   if (held.length === 0) return;
-  if (held.length <= CHUNK) {
-    out.push(held);
-    return;
-  }
+  if (held.length <= CHUNK) return void out.push(held);
   const count = Math.ceil(held.length / CHUNK);
   const size = Math.ceil(held.length / count);
   for (let k = 0; k < held.length; k += size) out.push(held.slice(k, k + size));
 };
 
 /**
- * The list with `remove` entries from position (`c`, `i`) replaced by `entries` (keeping it ascending):
+ * The list with `deleteCount` entries from position (`c`, `i`) replaced by `entries` (keeping it ascending):
  * the chunks touched copied into one — split when it overflows, dropped when nothing is left — the rest
  * shared. An empty list takes (0, 0).
  */
-const splice = (list, c, i, remove, entries) => {
+const splice = (list, c, i, deleteCount, entries) => {
   const { chunks } = list;
   if (chunks.length === 0) {
     const out = [];
@@ -368,7 +367,7 @@ const splice = (list, c, i, remove, entries) => {
   }
   let k = c;
   let j = i;
-  let left = remove;
+  let left = deleteCount;
   while (left > 0 && k < chunks.length) {
     const available = chunks[k].length - j;
     if (left < available) {
@@ -383,11 +382,13 @@ const splice = (list, c, i, remove, entries) => {
   const held = chunks[c].slice(0, i);
   for (let e = 0; e < entries.length; e++) held.push(entries[e]);
   const end = Math.min(k, chunks.length - 1);
-  if (k < chunks.length) for (let m = j; m < chunks[k].length; m++) held.push(chunks[k][m]);
+  if (k < chunks.length) {
+    for (let m = j; m < chunks[k].length; m++) held.push(chunks[k][m]);
+  }
   const out = chunks.slice(0, c);
   chunked(held, out);
   for (let m = end + 1; m < chunks.length; m++) out.push(chunks[m]);
-  return new List(out, list.size - (remove - left) + entries.length);
+  return new List(out, list.size - (deleteCount - left) + entries.length);
 };
 
 module.exports = {

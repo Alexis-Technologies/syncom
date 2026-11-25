@@ -84,10 +84,13 @@ const remove = (dir, filename) =>
 const list = (dir) =>
   withDir(dir, async (dirHandle) => {
     const names = [];
-    for await (const [name, handle] of dirHandle.entries()) {
+    for await (const entry of dirHandle.entries()) {
+      const name = entry[0];
+      const handle = entry[1];
       if (handle.kind === 'file') names.push(name);
     }
-    return names.sort();
+    names.sort();
+    return names;
   });
 
 module.exports = { read, write, exists, remove, list };

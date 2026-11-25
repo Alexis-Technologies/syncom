@@ -27,10 +27,10 @@ assert.deepEqual(readdirSync('board/keys').sort(), [
 
 // #region refused
 await board.Task.update(review.id, { done: true }); // a plain field: fine, sealed again
-await board.inc(review.id, 'votes', 1).catch((error) => console.log(error.code)); // ENCRYPTED
+await board.inc(review.id, 'votes', 1).catch((error) => console.log(error.code)); // ALX_ERR_ENCRYPTED
 // #endregion refused
 assert.equal((await board.Task.get(review.id)).done, true);
-assert.equal((await board.inc(review.id, 'votes', 1).catch((error) => error)).code, 'ENCRYPTED');
+assert.equal((await board.inc(review.id, 'votes', 1).catch((error) => error)).code, 'ALX_ERR_ENCRYPTED');
 await board.close();
 
 // #region stays-local
@@ -69,7 +69,7 @@ assert.ok(readFileSync(`vault/data/${note}.json`, 'utf8').startsWith('enc1:'));
 assert.ok(readFileSync('vault/node.json', 'utf8').startsWith('enc1:'));
 const wrongKey = atRest(disk, { key: crypto.getRandomValues(new Uint8Array(32)) });
 const refusedOpen = await createDatabase({ path: 'vault', fsi: wrongKey }).catch((error) => error);
-assert.equal(refusedOpen.code, 'DECRYPT_FAILED');
+assert.equal(refusedOpen.code, 'ALX_ERR_DECRYPT_FAILED');
 assert.equal(refusedOpen.reason, 'key');
 
 // #region password
@@ -97,7 +97,7 @@ await rotateAtRest(
   { path: 'vault', from: { key }, to: { key: newKey }, into: { path: 'vault-2' } },
 );
 
-await createDatabase({ path: 'vault', fsi: atRest(disk, { key }) }).catch((error) => console.log(error.code)); // MOVED
+await createDatabase({ path: 'vault', fsi: atRest(disk, { key }) }).catch((error) => console.log(error.code)); // ALX_ERR_MOVED
 const moved = await createDatabase({ path: 'vault-2', fsi: atRest(disk, { key: newKey }) });
 console.log(await moved.get(note)); // { text: 'The safe code is 1234' }   the same node, the same data
 await dropDatabase('vault', { fsi: atRest(disk, { key }) }); // once the new place reads

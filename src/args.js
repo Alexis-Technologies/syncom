@@ -7,12 +7,15 @@
 // subpath ship with both, without the op model.
 
 const { isPath, MAX_PATH_DEPTH, MAX_PATH } = require('./paths.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 const MAX_NODE_ID = 128;
 const EXPANDS = new Set(['before', 'after', 'both', 'none']);
 
 const hasControl = (value) => {
-  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) < 32) return true;
+  }
   return false;
 };
 
@@ -33,10 +36,10 @@ const isJsonValue = (value) => value !== undefined && typeof value !== 'function
 // A field name, or a path of them (`profile/city`): the segments non-empty,
 // never `__proto__`, at most MAX_PATH_DEPTH deep and MAX_PATH long.
 const fieldName = (method, key) => {
-  if (typeof key !== 'string') throw new TypeError(`${method}() takes a field name`);
+  if (typeof key !== 'string') throw new ArgumentError(`${method}() takes a field name`);
   if (!isPath(key)) {
     const shown = JSON.stringify(key.length > 40 ? `${key.slice(0, 40)}…` : key);
-    throw new TypeError(
+    throw new ArgumentError(
       `${method}() takes a field name or a path of them (${shown}): segments of at most ${MAX_PATH_DEPTH}, ${MAX_PATH} characters in all, none empty or __proto__`,
     );
   }
@@ -47,7 +50,7 @@ const fieldName = (method, key) => {
 const fieldNames = (method, fields) => {
   const list = typeof fields === 'string' ? [fields] : fields;
   if (!Array.isArray(list) || list.length === 0) {
-    throw new TypeError(`${method}() takes a field name or a non-empty array of them`);
+    throw new ArgumentError(`${method}() takes a field name or a non-empty array of them`);
   }
   const names = new Set();
   for (const field of list) {
@@ -59,7 +62,7 @@ const fieldNames = (method, fields) => {
 
 /** `value` when JSON can carry it; a TypeError naming the method otherwise. */
 const jsonValue = (method, value) => {
-  if (!isJsonValue(value)) throw new TypeError(`${method}() takes a JSON value; got ${typeof value}`);
+  if (!isJsonValue(value)) throw new ArgumentError(`${method}() takes a JSON value; got ${typeof value}`);
   return value;
 };
 
@@ -72,26 +75,26 @@ const EMBED = '\uFFFC';
 const spliceArgs = (method, key, index, count, content, { embeds = false } = {}) => {
   fieldName(method, key);
   if (index !== null && !(Number.isInteger(index) && index >= 0)) {
-    throw new TypeError(`${method}() takes a non-negative integer index`);
+    throw new ArgumentError(`${method}() takes a non-negative integer index`);
   }
-  if (!Number.isInteger(count) || count < 0) throw new TypeError(`${method}() takes a non-negative integer count`);
+  if (!Number.isInteger(count) || count < 0) throw new ArgumentError(`${method}() takes a non-negative integer count`);
   if (content !== undefined && typeof content !== 'string' && !Array.isArray(content)) {
-    throw new TypeError(`${method}() takes a string for a text or an array for a list`);
+    throw new ArgumentError(`${method}() takes a string for a text or an array for a list`);
   }
   // A lone surrogate half would leave the text malformed for every reader.
   if (typeof content === 'string' && !content.isWellFormed()) {
-    throw new TypeError(`${method}() takes well-formed text; the content holds a lone surrogate half`);
+    throw new ArgumentError(`${method}() takes well-formed text; the content holds a lone surrogate half`);
   }
   if (!embeds && typeof content === 'string' && content.includes(EMBED)) {
-    throw new TypeError(`${method}() takes text; an embed (U+FFFC) is inserted with insertEmbed() or splitBlock()`);
+    throw new ArgumentError(`${method}() takes text; an embed (U+FFFC) is inserted with insertEmbed() or splitBlock()`);
   }
   if (Array.isArray(content)) {
     for (const element of content) {
-      if (!isJsonValue(element)) throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
+      if (!isJsonValue(element)) throw new ArgumentError(`${method}() takes JSON values; got ${typeof element}`);
     }
   }
   if (count === 0 && (content === undefined || content.length === 0)) {
-    throw new TypeError(`${method}() takes a count to remove or content to insert`);
+    throw new ArgumentError(`${method}() takes a count to remove or content to insert`);
   }
   const payload = { key, index, count };
   if (content !== undefined) payload.content = content;
@@ -102,18 +105,24 @@ const spliceArgs = (method, key, index, count, content, { embeds = false } = {})
 // node id or null) and at most one sibling to land after or before.
 const treeArgs = (method, key, node, parent, { after, before } = {}) => {
   fieldName(method, key);
-  if (!isNodeId(node)) throw new TypeError(`${method}() takes a node id: a non-empty string of at most 128 characters`);
-  if (parent !== null && !isNodeId(parent)) throw new TypeError(`${method}() takes a parent: a node id or null`);
-  if (parent === node) throw new TypeError(`${method}() cannot put a node under itself`);
-  if (after !== undefined && before !== undefined) throw new TypeError(`${method}() takes after or before, not both`);
+  if (!isNodeId(node)) {
+    throw new ArgumentError(`${method}() takes a node id: a non-empty string of at most 128 characters`);
+  }
+  if (parent !== null && !isNodeId(parent)) throw new ArgumentError(`${method}() takes a parent: a node id or null`);
+  if (parent === node) throw new ArgumentError(`${method}() cannot put a node under itself`);
+  if (after !== undefined && before !== undefined) {
+    throw new ArgumentError(`${method}() takes after or before, not both`);
+  }
   const siblings = [
     ['after', after],
     ['before', before],
   ];
-  for (const [name, value] of siblings) {
+  for (const entry of siblings) {
+    const name = entry[0];
+    const value = entry[1];
     if (value === undefined) continue;
-    if (!isNodeId(value)) throw new TypeError(`${method}() takes ${name}: a node id`);
-    if (value === node) throw new TypeError(`${method}() cannot place a node ${name} itself`);
+    if (!isNodeId(value)) throw new ArgumentError(`${method}() takes ${name}: a node id`);
+    if (value === node) throw new ArgumentError(`${method}() cannot place a node ${name} itself`);
   }
 };
 
@@ -122,10 +131,10 @@ const treeArgs = (method, key, node, parent, { after, before } = {}) => {
 const markArgs = (method, key, start, end, name, expand) => {
   fieldName(method, key);
   if (!Number.isInteger(start) || start < 0 || !Number.isInteger(end) || end < start) {
-    throw new TypeError(`${method}() takes a range: 0 <= start <= end`);
+    throw new ArgumentError(`${method}() takes a range: 0 <= start <= end`);
   }
-  if (typeof name !== 'string' || name.length === 0) throw new TypeError(`${method}() takes a style name`);
-  if (!EXPANDS.has(expand)) throw new TypeError(`${method}() takes expand: before, after, both or none`);
+  if (typeof name !== 'string' || name.length === 0) throw new ArgumentError(`${method}() takes a style name`);
+  if (!EXPANDS.has(expand)) throw new ArgumentError(`${method}() takes expand: before, after, both or none`);
 };
 
 // What add()/remove() take: a field name and a non-empty array of JSON
@@ -133,10 +142,10 @@ const markArgs = (method, key, start, end, name, expand) => {
 const setElements = (method, key, elements) => {
   fieldName(method, key);
   if (!Array.isArray(elements) || elements.length === 0) {
-    throw new TypeError(`${method}() takes a non-empty array of elements`);
+    throw new ArgumentError(`${method}() takes a non-empty array of elements`);
   }
   for (const element of elements) {
-    if (!isJsonValue(element)) throw new TypeError(`${method}() takes JSON values; got ${typeof element}`);
+    if (!isJsonValue(element)) throw new ArgumentError(`${method}() takes JSON values; got ${typeof element}`);
   }
   return elements;
 };

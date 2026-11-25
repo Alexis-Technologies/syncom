@@ -37,11 +37,11 @@ await board.push('task-1', 'steps', ['Write', 'Review']); // a list: `board` run
 try {
   await notes.push('note-1', 'steps', ['Write']);
 } catch (error) {
-  console.log(error.code); // PLUGIN_MISSING: `notes` was opened without it
+  console.log(error.code); // ALX_ERR_PLUGIN_MISSING: `notes` was opened without it
 }
 // #endregion per-instance
 assert.deepEqual((await board.get('task-1')).steps, ['Write', 'Review']);
-await assert.rejects(notes.push('note-1', 'steps', ['Write']), { name: 'TypeError', code: 'PLUGIN_MISSING' });
+await assert.rejects(notes.push('note-1', 'steps', ['Write']), { name: 'DataError', code: 'ALX_ERR_PLUGIN_MISSING' });
 await notes.close();
 
 // #region registry
@@ -59,7 +59,7 @@ try {
 }
 // #endregion registry
 assert.deepEqual([...registry.names], ['text', 'tree']);
-assert.throws(() => createPlugins([text, text]), { name: 'TypeError', message: /plugin 'text' given twice/ });
+assert.throws(() => createPlugins([text, text]), { name: 'ArgumentError', message: /plugin 'text' given twice/ });
 assert.deepEqual(registry.rank, { register: 0, counter: 1, set: 2, list: 3, text: 4, tree: 5 });
 await board.close();
 
@@ -114,5 +114,5 @@ await assert.rejects(
     path: 'clash',
     plugins: [{ name: 'clash', setup: () => ({}), methods: { insert: async () => null } }],
   }),
-  { name: 'TypeError', message: /insert\(\) is a member of the storage already/ },
+  { name: 'ArgumentError', message: /insert\(\) is a member of the storage already/ },
 );

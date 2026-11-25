@@ -3,7 +3,7 @@
 // A database that refuses every write — what `createDatabase({ readOnly })`
 // opens over: a follower reads what another instance writes and lands, and
 // alters nothing, not even the log's index. `refuse(what)` makes the error
-// thrown (the core's READ_ONLY); the log's `append` fails its group through
+// thrown (the core's ALX_ERR_READ_ONLY); the log's `append` fails its group through
 // `onFail` as a medium that cannot write would, and a seal, a drop, an
 // index or a scrub are nothing (the writer's log is the writer's to keep).
 const readOnlyDb = (db, refuse) => {

@@ -30,7 +30,9 @@ const diff = (source, target) => {
     } else if (Array.isArray(target[key]) || target[key] instanceof Set) {
       const sourceSet = new Set(elementsOf(source[key]));
       const added = [];
-      for (const x of new Set(target[key])) if (!sourceSet.has(x)) added.push(x);
+      for (const x of new Set(target[key])) {
+        if (!sourceSet.has(x)) added.push(x);
+      }
       if (added.length > 0) {
         delta[key] = added;
       }

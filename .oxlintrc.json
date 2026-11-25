@@ -1,12 +1,9 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": [
-    "node",
-    "promise",
-    "import"
-  ],
+  "plugins": ["node", "promise", "import"],
   "categories": {
-    "correctness": "error"
+    "correctness": "error",
+    "suspicious": "error"
   },
   "env": {
     "builtin": true,
@@ -37,10 +34,7 @@
   ],
   "rules": {
     "no-var": "warn",
-    "object-shorthand": [
-      "warn",
-      "properties"
-    ],
+    "object-shorthand": ["warn", "properties"],
     "accessor-pairs": [
       "error",
       {
@@ -56,18 +50,9 @@
       }
     ],
     "constructor-super": "error",
-    "curly": [
-      "error",
-      "multi-line"
-    ],
+    "curly": ["error", "multi-line"],
     "default-case-last": "error",
-    "eqeqeq": [
-      "error",
-      "always",
-      {
-        "null": "ignore"
-      }
-    ],
+    "eqeqeq": ["error", "always"],
     "new-cap": [
       "error",
       {
@@ -145,10 +130,7 @@
       }
     ],
     "no-regex-spaces": "error",
-    "no-return-assign": [
-      "error",
-      "except-parens"
-    ],
+    "no-return-assign": ["error", "except-parens"],
     "no-self-assign": [
       "error",
       {
@@ -219,10 +201,7 @@
       }
     ],
     "symbol-description": "error",
-    "unicode-bom": [
-      "error",
-      "never"
-    ],
+    "unicode-bom": ["error", "never"],
     "use-isnan": [
       "error",
       {
@@ -236,15 +215,9 @@
         "requireStringLiterals": true
       }
     ],
-    "yoda": [
-      "error",
-      "never"
-    ],
+    "yoda": ["error", "never"],
     "promise/param-names": "error",
-    "node/handle-callback-err": [
-      "error",
-      "^(err|error)$"
-    ],
+    "node/handle-callback-err": ["error", "^(err|error)$"],
     "node/no-exports-assign": "error",
     "node/no-new-require": "error",
     "node/no-path-concat": "error",
@@ -255,13 +228,27 @@
     "no-unused-private-class-members": "error",
     "no-constant-binary-expression": "error",
     "preserve-caught-error": "error",
-    "no-useless-concat": "error"
+    "no-useless-concat": "error",
+    "func-style": ["error", "expression"],
+    "max-depth": [
+      "error",
+      {
+        "max": 4
+      }
+    ],
+    "no-nested-ternary": "error",
+    "no-console": "error",
+    "no-underscore-dangle": "off",
+    "import/no-unassigned-import": [
+      "error",
+      {
+        "allow": ["**/quiet-sqlite.js", "fake-indexeddb/auto", "@alexify/wrpc/sse"]
+      }
+    ]
   },
   "overrides": [
     {
-      "files": [
-        "src/**/*.js"
-      ],
+      "files": ["src/**"],
       "rules": {
         "no-restricted-properties": [
           "error",
@@ -275,10 +262,7 @@
           },
           {
             "property": "find",
-            "allowObjects": [
-              "T",
-              "SL"
-            ],
+            "allowObjects": ["T", "SL"],
             "message": "src/: a loop (T and SL are the rope and plist modules)"
           },
           {
@@ -322,7 +306,35 @@
             "property": "from",
             "message": "src/: a loop, or [...iterable] for a copy"
           }
-        ]
+        ],
+        "max-lines-per-function": [
+          "warn",
+          {
+            "max": 80,
+            "skipBlankLines": true,
+            "skipComments": true
+          }
+        ],
+        "unicorn/no-array-for-each": "error",
+        "unicorn/no-array-reduce": "error",
+        "unicorn/no-useless-spread": "error",
+        "unicorn/prefer-set-has": "error",
+        "unicorn/prefer-add-event-listener": "off"
+      },
+      "plugins": ["unicorn"]
+    },
+    {
+      "files": ["src/**/tests/**", "src/**/*.test.*", "src/**/*.spec.*"],
+      "rules": {
+        "no-restricted-properties": "off",
+        "unicorn/no-array-for-each": "off",
+        "unicorn/no-array-reduce": "off"
+      }
+    },
+    {
+      "files": ["bin/**", "scripts/**", "bench/**", "examples/**", "docs/examples/**", "tests/smoke/**"],
+      "rules": {
+        "no-console": "off"
       }
     }
   ]

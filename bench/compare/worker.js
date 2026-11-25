@@ -193,8 +193,8 @@ const measureKind = async (adapter, scenario, line, store, ids, dir, method) => 
     if (read !== 'acb') fail(adapter, scenario, `a text reads "${read}" after inserting "ab" then "c" at 1`);
     let length = 3;
     const random = lcg(SEED);
-    const at =
-      kind === 'append' ? () => length : kind === 'prepend' ? () => 0 : () => Math.floor(random() * (length + 1));
+    const AT = { append: () => length, prepend: () => 0 };
+    const at = AT[kind] ?? (() => Math.floor(random() * (length + 1)));
     return measureOps(() => {
       const wait = text.insert(at(), 'x');
       length++;

@@ -55,8 +55,8 @@ const readLE = (bytes, i) => (bytes[i] | (bytes[i + 1] << 8) | (bytes[i + 2] << 
 
 /** xxHash32 of `input` — a string (its UTF-8 bytes) or bytes — under `seed`, as an unsigned 32-bit number. */
 const xxh32 = (input, seed = 0) => {
-  let bytes;
-  let length;
+  let bytes = null;
+  let length = 0;
   if (typeof input !== 'string') {
     bytes = input;
     length = input.length;
@@ -68,7 +68,7 @@ const xxh32 = (input, seed = 0) => {
     length = bytes.length;
   }
   let i = 0;
-  let hash;
+  let hash = 0;
   if (length >= 16) {
     let v1 = (seed + P1 + P2) >>> 0;
     let v2 = (seed + P2) >>> 0;

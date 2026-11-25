@@ -85,14 +85,14 @@ assert.equal((await laptop.Task.get(task.id)).title, 'Review the release notes')
 
 // #region refused
 laptop.sync.on('error', (error) => {
-  if (error.code === 'WRITE_REFUSED') console.log(`${error.id}: the server kept it`);
+  if (error.code === 'ALX_ERR_WRITE_REFUSED') console.log(`${error.id}: the server kept it`);
 });
 await laptop.Task.delete(task.id);
 // ...a moment later, once the server answered the push:
 // <id>: the server kept it
 // #endregion refused
 const refused = await laptop.sync.toPromise('error');
-assert.equal(refused.code, 'WRITE_REFUSED');
+assert.equal(refused.code, 'ALX_ERR_WRITE_REFUSED');
 assert.equal(refused.id, task.id);
 await wait(async () => (await laptop.Task.get(task.id)) !== null);
 assert.equal((await laptop.Task.get(task.id)).title, 'Review the release notes');

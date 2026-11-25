@@ -25,7 +25,10 @@ const outbound = (log, { exclude, vector, scopes = null, own, allStreams = false
   // By stream, not over the whole log: a binary search for what the
   // receiver holds of each, the rest taken — what it lacks, not what the
   // log retains (a handshake with a log of a million ops read them all).
-  for (const [key, list, from] of log.streams()) {
+  for (const entry of log.streams()) {
+    const key = entry[0];
+    const list = entry[1];
+    const from = entry[2];
     const lead = list[from].op;
     if (lead.origin === exclude) continue;
     // A stream other than the bootstrap one is of one scope: its first op's.

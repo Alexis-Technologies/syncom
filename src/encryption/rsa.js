@@ -50,7 +50,7 @@ const encrypt = (data, publicKey) => {
 const decrypt = (text, privateKey) => {
   const envelope = JSON.parse(text);
   if (envelope.v !== 1 || envelope.alg !== ALG) {
-    throw new SyncomError('BAD_ENVELOPE', 'Unsupported ciphertext envelope');
+    throw new SyncomError('ALX_ERR_BAD_ENVELOPE', 'Unsupported ciphertext envelope');
   }
   const key = crypto.privateDecrypt({ key: privateKey, ...OAEP }, Buffer.from(envelope.key, 'base64'));
   const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'));

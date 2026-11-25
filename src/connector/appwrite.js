@@ -24,13 +24,22 @@
 
 const { same } = require('./same.js');
 const { checkLookback, lookbackPull } = require('./lookback.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const CALLS = ['listDocuments', 'createDocument', 'updateDocument', 'getDocument'];
 const BUILDERS = ['equal', 'greaterThan', 'orderAsc', 'limit', 'or', 'and'];
 
 const text = (name, value) => {
-  if (typeof value !== 'string' || value.length === 0) throw new TypeError(`appwrite(): ${name} is required`);
+  if (typeof value !== 'string' || value.length === 0) throw new ArgumentError(`appwrite(): ${name} is required`);
 };
+
+// A checkpoint's position, `{ updatedAt, id }` as this adapter writes it. Anything else is no checkpoint: the start.
+const parse = (value) =>
+  value !== null && typeof value === 'object' && typeof value.updatedAt === 'string' && typeof value.id === 'string'
+    ? { updatedAt: value.updatedAt, id: value.id }
+    : null;
+
+const positionOf = (doc) => ({ updatedAt: doc.$updatedAt, id: doc.$id });
 
 /**
  * `{ pull, push }` for `replicate()`. `databases` and `Query` are the SDK's,
@@ -50,31 +59,33 @@ const appwrite = ({
   lookback = 0,
 } = {}) => {
   if (databases === null || typeof databases !== 'object') {
-    throw new TypeError('appwrite(): databases must be the Databases service');
+    throw new ArgumentError('appwrite(): databases must be the Databases service');
   }
   for (let i = 0; i < CALLS.length; i++) {
     if (typeof databases[CALLS[i]] !== 'function') {
-      throw new TypeError(`appwrite(): databases.${CALLS[i]} must be a function`);
+      throw new ArgumentError(`appwrite(): databases.${CALLS[i]} must be a function`);
     }
   }
-  if (Query === null || Query === undefined) throw new TypeError('appwrite(): Query is required');
+  if (Query === null || Query === undefined) throw new ArgumentError('appwrite(): Query is required');
   for (let i = 0; i < BUILDERS.length; i++) {
     if (typeof Query[BUILDERS[i]] !== 'function') {
-      throw new TypeError(`appwrite(): Query.${BUILDERS[i]} must be a function`);
+      throw new ArgumentError(`appwrite(): Query.${BUILDERS[i]} must be a function`);
     }
   }
   text('databaseId', databaseId);
   text('collectionId', collectionId);
   text('deletedField', deletedField);
-  if (typeof stream !== 'boolean') throw new TypeError('appwrite(): stream must be a boolean');
+  if (typeof stream !== 'boolean') throw new ArgumentError('appwrite(): stream must be a boolean');
   checkLookback('appwrite', lookback);
   if (client !== null && typeof client?.subscribe !== 'function') {
-    throw new TypeError('appwrite(): client.subscribe must be a function');
+    throw new ArgumentError('appwrite(): client.subscribe must be a function');
   }
 
   const strip = (doc) => {
     const data = {};
-    for (const key of Object.keys(doc)) if (key[0] !== '$' && key !== deletedField) data[key] = doc[key];
+    for (const key of Object.keys(doc)) {
+      if (key[0] !== '$' && key !== deletedField) data[key] = doc[key];
+    }
     return data;
   };
   const documentOf = (doc) =>
@@ -96,12 +107,6 @@ const appwrite = ({
     const result = await list(queries);
     return Array.isArray(result?.documents) ? result.documents : [];
   };
-  // A checkpoint's position, `{ updatedAt, id }` as this adapter writes it. Anything else is no checkpoint: the start.
-  const parse = (value) =>
-    value !== null && typeof value === 'object' && typeof value.updatedAt === 'string' && typeof value.id === 'string'
-      ? { updatedAt: value.updatedAt, id: value.id }
-      : null;
-  const positionOf = (doc) => ({ updatedAt: doc.$updatedAt, id: doc.$id });
 
   return {
     pull: {

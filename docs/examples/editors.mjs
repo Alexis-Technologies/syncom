@@ -164,15 +164,15 @@ await laptop.updateText(doc, 'code', 'run()\n');
 await settle(mesh.storages);
 
 const editorOn = async (node) => {
-  const binding = createCodeMirror(node, doc, 'code', { state: cmState });
-  const view = {
-    state: cmState.EditorState.create({ doc: '', extensions: [binding.extension] }),
+  const editor = createCodeMirror(node, doc, 'code', { state: cmState });
+  const editorView = {
+    state: cmState.EditorState.create({ doc: '', extensions: [editor.extension] }),
     dispatch(...specs) {
       this.state = this.state.update(...specs).state;
     },
   };
-  await binding.attach(view).ready;
-  return { binding, view };
+  await editor.attach(editorView).ready;
+  return { binding: editor, view: editorView };
 };
 const left = await editorOn(laptop);
 const right = await editorOn(phone);

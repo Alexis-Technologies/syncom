@@ -30,7 +30,9 @@ const laptop = await createDatabase({
 
 const events = [];
 // #region events
-server.sync.on('hello', ({ node, scopes, schema }) => events.push(['hello', { node, scopes, schema }]));
+server.sync.on('hello', (hello) =>
+  events.push(['hello', { node: hello.node, scopes: hello.scopes, schema: hello.schema }]),
+);
 laptop.sync.on('peer', ({ url, connected, node }) => events.push(['peer', { url, connected, node }]));
 laptop.sync.on('sync', (event) => events.push(['sync', event]));
 // #endregion events

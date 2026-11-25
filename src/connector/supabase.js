@@ -19,11 +19,27 @@
 // an `END`. With `lookback` ms a pull run starts that far before its
 // checkpoint — a row that became visible late, a transaction that committed
 // after a newer stamp was pulled, is pulled after all (lookback.js; the
-// modified column must read as a date). Requires lookback.js only.
+// modified column must read as a date). Requires lookback.js and errors.js only.
 
 const { checkLookback, lookbackPull } = require('./lookback.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const OVER = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']);
+
+const answered = (result, what) => {
+  if (result?.error) {
+    const error = new Error(`Supabase ${what} failed: ${result.error.message ?? result.error}`);
+    error.cause = result.error;
+    throw error;
+  }
+  return result?.data ?? null;
+};
+
+// A checkpoint's position, `{ at, id }` as this adapter writes it. Anything else is no checkpoint: the start.
+const parse = (value) =>
+  value !== null && typeof value === 'object' && typeof value.at === 'string' && typeof value.id === 'string'
+    ? { at: value.at, id: value.id }
+    : null;
 
 /**
  * `{ pull, push }` for `replicate()`. `client.from(table)` is the table;
@@ -45,30 +61,23 @@ const supabase = ({
   now = () => new Date().toISOString(),
 } = {}) => {
   if (client === null || typeof client !== 'object' || typeof client.from !== 'function') {
-    throw new TypeError('supabase(): client must be a Supabase client (from)');
+    throw new ArgumentError('supabase(): client must be a Supabase client (from)');
   }
-  if (typeof table !== 'string' || table.length === 0) throw new TypeError('supabase(): table is required');
-  for (const [name, value] of [
+  if (typeof table !== 'string' || table.length === 0) throw new ArgumentError('supabase(): table is required');
+  for (const entry of [
     ['primaryKey', primaryKey],
     ['modifiedColumn', modifiedColumn],
     ['deletedColumn', deletedColumn],
   ]) {
+    const name = entry[0];
+    const value = entry[1];
     if (typeof value !== 'string' || value.length === 0) {
-      throw new TypeError(`supabase(): ${name} must be a column name`);
+      throw new ArgumentError(`supabase(): ${name} must be a column name`);
     }
   }
-  if (typeof stream !== 'boolean') throw new TypeError('supabase(): stream must be a boolean');
+  if (typeof stream !== 'boolean') throw new ArgumentError('supabase(): stream must be a boolean');
   checkLookback('supabase', lookback);
   const stamps = new Map();
-
-  const answered = (result, what) => {
-    if (result?.error) {
-      const error = new Error(`Supabase ${what} failed: ${result.error.message ?? String(result.error)}`);
-      error.cause = result.error;
-      throw error;
-    }
-    return result?.data ?? null;
-  };
 
   const strip = (row) => {
     const data = {};
@@ -79,7 +88,7 @@ const supabase = ({
   };
 
   const documentOf = (row) => {
-    const id = String(row[primaryKey]);
+    const id = `${row[primaryKey]}`;
     if (typeof row[modifiedColumn] === 'string') stamps.set(id, row[modifiedColumn]);
     return row[deletedColumn] === true ? { id, deleted: true } : { id, data: strip(row) };
   };
@@ -107,13 +116,8 @@ const supabase = ({
     query = query.order(m, { ascending: true }).order(primaryKey, { ascending: true }).limit(limit);
     return answered(await query, 'select') ?? [];
   };
-  // A checkpoint's position, `{ at, id }` as this adapter writes it. Anything else is no checkpoint: the start.
-  const parse = (value) =>
-    value !== null && typeof value === 'object' && typeof value.at === 'string' && typeof value.id === 'string'
-      ? { at: value.at, id: value.id }
-      : null;
   const positionOf = (row) =>
-    typeof row[modifiedColumn] === 'string' ? { at: row[modifiedColumn], id: String(row[primaryKey]) } : null;
+    typeof row[modifiedColumn] === 'string' ? { at: row[modifiedColumn], id: `${row[primaryKey]}` } : null;
 
   return {
     pull: {
@@ -182,7 +186,7 @@ const supabase = ({
             held === undefined
               ? await client.from(table).insert(values).select()
               : await client.from(table).update(values).eq(primaryKey, row.id).eq(modifiedColumn, held).select();
-          let landed;
+          let landed = null;
           if (result?.error && typeof result.error.code === 'string') {
             // A duplicate key is the conflict (the row read back); another code of the database's — a constraint,
             // a type — is the row refused by name. An error without a code (the network) is the push's failure.

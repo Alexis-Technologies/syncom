@@ -20,14 +20,14 @@ assert.equal(await db.Task.select({ done: false }).count(), 1);
 try {
   await db.splice(task.id, 'notes', 0, 0, 'Start with the install page');
 } catch (error) {
-  console.log(error.code); // 'PLUGIN_MISSING'
+  console.log(error.code); // 'ALX_ERR_PLUGIN_MISSING'
   console.log(error.message);
   // splice() needs the text plugin: createDatabase({ plugins: [text] }) from '@alexify/syncom/text'
 }
 // #endregion missing
 await assert.rejects(() => db.splice(task.id, 'notes', 0, 0, 'x'), {
-  name: 'TypeError',
-  code: 'PLUGIN_MISSING',
+  name: 'DataError',
+  code: 'ALX_ERR_PLUGIN_MISSING',
   message: "splice() needs the text plugin: createDatabase({ plugins: [text] }) from '@alexify/syncom/text'",
 });
 await db.close();

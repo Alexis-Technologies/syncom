@@ -282,8 +282,12 @@ const textOf = (node) => {
   let out = '';
   const { kids } = node;
   if (node.leaf) {
-    for (let i = 0; i < kids.length; i++) if (kids[i].vis) out += kids[i].body;
-  } else for (let i = 0; i < kids.length; i++) out += textOf(kids[i]);
+    for (let i = 0; i < kids.length; i++) {
+      if (kids[i].vis) out += kids[i].body;
+    }
+  } else {
+    for (let i = 0; i < kids.length; i++) out += textOf(kids[i]);
+  }
   node.text = out;
   return out;
 };
@@ -329,8 +333,9 @@ const rehint = (root) => {
     const node = stack.pop();
     const { kids, handle } = node;
     handle.node = node;
-    if (node.leaf) for (let i = 0; i < kids.length; i++) kids[i].leaf = handle;
-    else {
+    if (node.leaf) {
+      for (let i = 0; i < kids.length; i++) kids[i].leaf = handle;
+    } else {
       for (let i = 0; i < kids.length; i++) {
         kids[i].up = handle;
         stack.push(kids[i]);
@@ -412,7 +417,9 @@ const firstUnder = (node) => {
 const before = (holder, span) => {
   const levels = levelsOf(holder, span);
   if (AT[0] > 0) return PATH[0].kids[AT[0] - 1];
-  for (let k = 1; k < levels; k++) if (AT[k] > 0) return lastUnder(PATH[k].kids[AT[k] - 1]);
+  for (let k = 1; k < levels; k++) {
+    if (AT[k] > 0) return lastUnder(PATH[k].kids[AT[k] - 1]);
+  }
   return null;
 };
 
@@ -420,7 +427,9 @@ const before = (holder, span) => {
 const after = (holder, span) => {
   const levels = levelsOf(holder, span);
   if (AT[0] + 1 < PATH[0].kids.length) return PATH[0].kids[AT[0] + 1];
-  for (let k = 1; k < levels; k++) if (AT[k] + 1 < PATH[k].kids.length) return firstUnder(PATH[k].kids[AT[k] + 1]);
+  for (let k = 1; k < levels; k++) {
+    if (AT[k] + 1 < PATH[k].kids.length) return firstUnder(PATH[k].kids[AT[k] + 1]);
+  }
   return null;
 };
 

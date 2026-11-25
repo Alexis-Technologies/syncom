@@ -18,6 +18,7 @@ const { link } = require('./commit.js');
 const { traced, now } = require('./telemetry/writer.js');
 const { GLOBAL_SCOPE, inScope } = require('./scope.js');
 const { isPlainObject, asJson, isRecordId, nestsWithin, MAX_WIRE_DEPTH } = require('./shape.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 const DEFAULT_LIMIT = 500;
 
@@ -46,7 +47,7 @@ const pageOf = async (core, { cursor = null, limit = DEFAULT_LIMIT, scopes = nul
     const id = ids[index];
     last = id;
     if (catalog.row(id)?.encrypted) continue;
-    let entry;
+    let entry = null;
     try {
       entry = await core.entries.load(id);
     } catch (error) {
@@ -61,7 +62,7 @@ const pageOf = async (core, { cursor = null, limit = DEFAULT_LIMIT, scopes = nul
     // the page, which would fail every snapshot of this node while the record
     // is there.
     if (scopes !== null) {
-      let scope;
+      let scope = '';
       try {
         scope = core.scopeOf(id, entry.data);
       } catch (error) {
@@ -104,8 +105,10 @@ const mergeOne = async (batch, record) => {
     nestsWithin(record.data, MAX_WIRE_DEPTH) &&
     nestsWithin(record.meta, MAX_WIRE_DEPTH);
   if (!shaped) {
-    core.logger.warn({ event: 'sync.record.malformed', id: isPlainObject(record) ? record.id : typeof record });
-    return;
+    return void core.logger.warn({
+      event: 'sync.record.malformed',
+      id: isPlainObject(record) ? record.id : typeof record,
+    });
   }
   const { id } = record;
   // A stamp beyond the skew allowed is refused here as an op's is in
@@ -115,21 +118,19 @@ const mergeOne = async (batch, record) => {
   const meta = settleMeta(asJson(record.meta));
   const latest = latestClock(meta, false, core.limits);
   if (latest !== null && latest[0] > batch.horizon) {
-    core.logger.warn({ event: 'sync.record.skew', id, ts: latest[0], ahead: latest[0] - batch.horizon });
-    return;
+    return void core.logger.warn({ event: 'sync.record.skew', id, ts: latest[0], ahead: latest[0] - batch.horizon });
   }
   const current = batch.touched.get(id) ?? (await core.current(id));
   if (current?.encrypted) {
     // Sealed here for this node alone: a peer's state of it is not taken.
-    core.logger.warn({ event: 'sync.record.encrypted', id });
-    return;
+    return void core.logger.warn({ event: 'sync.record.encrypted', id });
   }
   const visible = current && isAlive(current) ? current.data : null;
   const ctx = { type: 'merge', id, data, meta, current: visible, encrypted: false, source: null, via, from };
   ctx.v = core.version;
   ctx.actor = null;
   if ((await core.hook('beforeWrite', ctx)) !== undefined) {
-    throw new TypeError('beforeWrite may only replace data for write and set');
+    throw new ArgumentError('beforeWrite may only replace data for write and set');
   }
   const scope = core.scopeOf(id, data ?? current?.data ?? {});
   core.observe(latestHeld(current?.meta), id);
@@ -192,7 +193,9 @@ const mergeBatch = async (core, records, via, from) => {
   // host's state as its own — a snapshot record carries no provenance to
   // sign over.
   const { fps, headers } = await link(batch.ops, core.fingerprintOf, core.sign !== null);
-  if (core.sign !== null) for (const op of batch.ops) await core.sign(op);
+  if (core.sign !== null) {
+    for (const op of batch.ops) await core.sign(op);
+  }
   const ticket = core.log.enqueue(batch.ops, { fps, headers });
   await ticket.done;
   const { entries } = ticket;
@@ -244,7 +247,7 @@ const mergeBatch = async (core, records, via, from) => {
 };
 
 // The highest seq this node takes for a stream of its own from a host
-// (REWOUND): room left for 2^32 more ops before a seq is no safe integer —
+// (ALX_ERR_REWOUND): room left for 2^32 more ops before a seq is no safe integer —
 // past that every peer would refuse its ops as malformed.
 const MAX_ADOPTED = Number.MAX_SAFE_INTEGER - 2 ** 32;
 
@@ -257,7 +260,7 @@ const ownKey = (core, key) => key === core.nodeId || key.startsWith(`${core.node
  * node's own log, so a peer replaying the merges that carried the state
  * also learns which ops they cover — and does not report the next live op
  * of those origins as a gap. This node's own streams are not a peer's to
- * move: their keys are left out — but with `own`, the REWOUND path, which
+ * move: their keys are left out — but with `own`, the ALX_ERR_REWOUND path, which
  * takes them alone, up to MAX_ADOPTED (src/sync/manager.js `#rewind`), with
  * the ops its proof carried (`proofs`, checked there): each the head of its
  * stream from now on, what the next op of it chains to — a stream taken
@@ -281,7 +284,7 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   }
   const op = { origin: core.nodeId, seq: 0, ts: core.clock.now(), type: 'advance', vector: news };
   if (from) op.from = from;
-  // Numbered after what it adopts of its own stream (REWOUND on `@~`): the
+  // Numbered after what it adopts of its own stream (ALX_ERR_REWOUND on `@~`): the
   // seqs below are the host's already.
   const key = opKey(op);
   op.seq = Math.max(known[key] ?? 0, news[key] ?? 0) + 1;
@@ -289,7 +292,7 @@ const adopt = async (core, vector, { via = null, from = null, own = false, proof
   if (core.sign !== null) await core.sign(op);
   const ticket = core.log.enqueue([op], { fps, headers });
   await ticket.done;
-  const [{ seq }] = ticket.entries;
+  const { seq } = ticket.entries[0];
   await core.log.advance(news);
   core.log.applied(seq);
   core.emit('change', op, via, { changes: [], seq });

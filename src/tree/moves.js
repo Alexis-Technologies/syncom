@@ -64,7 +64,7 @@ const MAX_DEPTH = 512;
 const MAX_FI = 1024;
 // The ancestors the cycle check walks: a parent the tree reads (MAX_DEPTH
 // levels) is never past it, and a local move under one deeper is refused
-// anyway (OUT_OF_RANGE), so only a peer's move under a node no reading
+// anyway (ALX_ERR_OUT_OF_RANGE), so only a peer's move under a node no reading
 // shows is moot by it. Unbounded, a chain of n nodes cost the fold n²/2
 // steps — 10 000 nodes, one snapshot block of 330 KB, four seconds of the
 // mutation queue on every later op of the field.
@@ -82,7 +82,9 @@ const HIDDEN = MAX_DEPTH + 1;
 const NONE = Object.freeze([]);
 
 const hasControl = (value) => {
-  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) < 32) return true;
+  }
   return false;
 };
 const isParent = (value) => value === null || value === TRASH || isNodeId(value);
@@ -98,7 +100,9 @@ const createTree = () => ({ k: 'tree', ts: 0, moves: {} });
 
 const stampsMax = (tree) => {
   let ts = 0;
-  for (const node of Object.keys(tree.moves)) for (const move of tree.moves[node]) ts = Math.max(ts, move[0]);
+  for (const node of Object.keys(tree.moves)) {
+    for (const move of tree.moves[node]) ts = Math.max(ts, move[0]);
+  }
   return ts;
 };
 
@@ -118,7 +122,10 @@ const normalizeTree = (raw) => {
     const list = [];
     for (const move of raw.moves[node]) {
       if (!Array.isArray(move) || move.length !== 4) continue;
-      const [ts, origin, parent, fi] = move;
+      const ts = move[0];
+      const origin = move[1];
+      const parent = move[2];
+      const fi = move[3];
       if (!isStamp(ts) || !isOrigin(origin) || !isParent(parent) || !isFi(fi)) continue;
       list.push([ts, origin, parent, fi]);
     }
@@ -177,11 +184,14 @@ const pruneTree = (tree, base) => {
 // repeats) by node id, so the order is a function of the moves alone.
 const oldest = (tree) => {
   const all = [];
-  for (const node of Object.keys(tree.moves)) for (const move of tree.moves[node]) all.push([node, move]);
+  for (const node of Object.keys(tree.moves)) {
+    for (const move of tree.moves[node]) all.push([node, move]);
+  }
   all.sort((x, y) => byStamp(x[1], y[1]) || (x[0] < y[0] ? -1 : 1));
   const out = createTree();
   for (let i = 0; i < MAX_MOVES; i++) {
-    const [node, move] = all[i];
+    const node = all[i][0];
+    const move = all[i][1];
     (own(out.moves, node) ?? (out.moves[node] = [])).push(move);
   }
   return out;
@@ -206,7 +216,7 @@ const joinTrees = (a, b) => {
     let i = 0;
     let j = 0;
     while (i < mine.length || j < theirs.length) {
-      let move;
+      let move = null;
       if (j >= theirs.length) move = mine[i++];
       else if (i >= mine.length) move = theirs[j++];
       else {
@@ -306,7 +316,9 @@ const put = (s, n, w) => {
     const list = listOf(s, n.parent);
     list.splice(list.indexOf(n), 1);
   }
-  [n.parent, n.place, n.first] = w;
+  n.parent = w[0];
+  n.place = w[1];
+  n.first = w[2];
   n.up = s.nodes.get(n.parent);
   if (n.parent !== undefined) {
     const list = listOf(s, n.parent);
@@ -347,7 +359,9 @@ const step = (s, e, live) => {
   const w = [m[2], m, n.first ?? m];
   if (live) put(s, n, w);
   else {
-    [n.parent, n.place, n.first] = w;
+    n.parent = w[0];
+    n.place = w[1];
+    n.first = w[2];
     n.up = s.nodes.get(n.parent);
   }
 };
@@ -432,14 +446,22 @@ const land = (s, e, fresh) => {
   const i = log.length > 0 && later(e, log[log.length - 1]) ? log.length : bisect(log, (f) => later(f, e));
   if ((fresh && s.frag.has(e.n.id)) || (log.length - i) * 2 > log.length) {
     for (const n of s.nodes.values()) s.was.set(n, stateNow(n));
-    for (const [key, list] of s.kids) s.wasKids.set(key, list);
+    for (const entry of s.kids) {
+      const key = entry[0];
+      const list = entry[1];
+      s.wasKids.set(key, list);
+    }
     log.splice(i, 0, e);
     fold(s);
-    for (const key of s.kids.keys()) if (!s.wasKids.has(key)) s.wasKids.set(key, NONE);
+    for (const key of s.kids.keys()) {
+      if (!s.wasKids.has(key)) s.wasKids.set(key, NONE);
+    }
     s.reading = null;
     return;
   }
-  for (let j = log.length - 1; j >= i; j--) if (log[j].w !== null) put(s, log[j].n, log[j].w);
+  for (let j = log.length - 1; j >= i; j--) {
+    if (log[j].w !== null) put(s, log[j].n, log[j].w);
+  }
   walks.undone += log.length - i;
   log.splice(i, 0, e);
   for (let j = i; j < log.length; j++) step(s, log[j], true);
@@ -471,7 +493,9 @@ const build = (s, n, level) => {
   n.r = { id: n.id, children: [] };
   const stack = [[n, level]];
   while (stack.length > 0) {
-    const [node, at] = stack.pop();
+    const item = stack.pop();
+    const node = item[0];
+    const at = item[1];
     const list = at < MAX_DEPTH ? (s.kids.get(node.id) ?? NONE) : NONE;
     for (let i = 0; i < list.length; i++) {
       list[i].r = { id: list[i].id, children: [] };
@@ -522,7 +546,9 @@ const byKey = (x, y) => {
   const b = y[0];
   const m = a.length - 1;
   const n = b.length - 1;
-  for (let t = 0; t < m && t < n; t++) if (a[t] !== b[t]) return b[t] - a[t];
+  for (let t = 0; t < m && t < n; t++) {
+    if (a[t] !== b[t]) return b[t] - a[t];
+  }
   return m !== n ? m - n : a[m] - b[n];
 };
 
@@ -537,7 +563,11 @@ const byKey = (x, y) => {
 // cuts, read down from it, past nothing else that moved.
 const changesOf = (s) => {
   const moved = new Set();
-  for (const [n, w] of s.was) if (w[0] !== n.parent || w[1] !== n.place || w[2] !== n.first) moved.add(n);
+  for (const entry of s.was) {
+    const n = entry[0];
+    const w = entry[1];
+    if (w[0] !== n.parent || w[1] !== n.place || w[2] !== n.first) moved.add(n);
+  }
   if (moved.size === 0) return [];
   // A node's siblings in a view and its index among them: found by halves
   // in a list as it is (sorted by `sooner`), by a scan in one as it was.
@@ -549,9 +579,13 @@ const changesOf = (s) => {
   const whole = [];
   for (const n of moved) {
     candidates.add(n);
-    const [was, i] = spot(n, true);
+    const placeBefore = spot(n, true);
+    const was = placeBefore[0];
+    const i = placeBefore[1];
     if (i >= 0 && i + 1 < was.length) candidates.add(was[i + 1]);
-    const [is, j] = spot(n, false);
+    const placeAfter = spot(n, false);
+    const is = placeAfter[0];
+    const j = placeAfter[1];
     if (j + 1 < is.length) candidates.add(is[j + 1]);
     const from = levelOf(s, n, true);
     const to = levelOf(s, n);
@@ -563,28 +597,37 @@ const changesOf = (s) => {
     whole.push([n, to]);
     const stack = [[n, 0]];
     while (stack.length > 0) {
-      const [at, rel] = stack.pop();
+      const item = stack.pop();
+      const at = item[0];
+      const rel = item[1];
       if (rel >= lo) candidates.add(at);
       const list = rel < hi ? kidsIn(s, at.id, false) : NONE;
-      for (let i = 0; i < list.length; i++) if (!moved.has(list[i])) stack.push([list[i], rel + 1]);
+      for (let k = 0; k < list.length; k++) {
+        if (!moved.has(list[k])) stack.push([list[k], rel + 1]);
+      }
     }
   }
   // A node's key in a reading's order (`byKey`).
   const keyOf = (n, before) => {
     const key = [];
     for (let at = n; at !== undefined; at = s.nodes.get(parentIn(s, at, before))) key.push(spot(at, before)[1]);
-    return key.reverse();
+    key.reverse();
+    return key;
   };
   const shown = [];
   const gone = [];
   for (const n of candidates) {
     const from = levelOf(s, n, true);
     if (levelOf(s, n) !== HIDDEN) {
-      const [list, i] = spot(n, false);
+      const placeAfter = spot(n, false);
+      const list = placeAfter[0];
+      const i = placeAfter[1];
       const is = [parentIn(s, n, false), i === 0 ? null : list[i - 1].id];
       let was = null;
       if (from !== HIDDEN) {
-        const [old, j] = spot(n, true);
+        const placeBefore = spot(n, true);
+        const old = placeBefore[0];
+        const j = placeBefore[1];
         was = [parentIn(s, n, true), j === 0 ? null : old[j - 1].id];
       }
       if (was === null || was[0] !== is[0] || was[1] !== is[1]) {
@@ -708,7 +751,9 @@ const heightOf = (s, name) => {
   const order = [name];
   for (let i = 0; i < order.length; i++) {
     const list = kidsIn(s, order[i], false);
-    for (let j = 0; j < list.length; j++) if (list[j].h === 0) order.push(list[j].id);
+    for (let j = 0; j < list.length; j++) {
+      if (list[j].h === 0) order.push(list[j].id);
+    }
   }
   let height = 1;
   for (let i = order.length - 1; i >= 0; i--) {

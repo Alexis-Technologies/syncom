@@ -7,7 +7,7 @@
 // the same cursor. The catalog, its indexes and the text index behind
 // `$text` (`createDatabase({ search })`) are the core's: what a query reads is kept
 // whether or not anything queries it. Without the plugin `select()` and
-// `count()` throw PLUGIN_MISSING, and so does `update(id, delta, { ifMatch })`.
+// `count()` throw ALX_ERR_PLUGIN_MISSING, and so does `update(id, delta, { ifMatch })`.
 // The hook the core takes: `query` — `cursor(source, entity, query, { sealed })`, the
 // cursor over a source seam (the collection's sealed records read where `sealed`, left
 // out otherwise), and `matches(query)`, the query as a predicate over `{ id, ...record }`
@@ -15,6 +15,7 @@
 
 const { Cursor, compileQuery } = require('./cursor.js');
 const { QueryCache } = require('./cache.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const query = Object.freeze({
   name: 'query',
@@ -42,7 +43,7 @@ const query = Object.freeze({
 const matches = (criteria) => {
   const test = compileQuery(criteria);
   return (doc) => {
-    if (typeof doc !== 'object' || doc === null) throw new TypeError('matches() takes an object');
+    if (typeof doc !== 'object' || doc === null) throw new ArgumentError('matches() takes an object');
     return test(doc);
   };
 };

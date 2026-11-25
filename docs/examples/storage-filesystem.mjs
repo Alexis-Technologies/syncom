@@ -33,10 +33,10 @@ await server.Task.insert({ title: 'fsync before resolve', done: false });
 try {
   await createDatabase({ path: 'server', schema });
 } catch (error) {
-  console.log(error.code); // 'LOCKED': another instance holds the directory
+  console.log(error.code); // 'ALX_ERR_LOCKED': another instance holds the directory
 }
 // #endregion locked
-await assert.rejects(() => createDatabase({ path: 'server', schema }), { code: 'LOCKED' });
+await assert.rejects(() => createDatabase({ path: 'server', schema }), { code: 'ALX_ERR_LOCKED' });
 const lock = JSON.parse(readFileSync('server/lock.json', 'utf8'));
 assert.equal(lock.pid, process.pid);
 

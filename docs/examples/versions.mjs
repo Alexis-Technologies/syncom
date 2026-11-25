@@ -97,9 +97,9 @@ await board.purge(later.id);
 try {
   await board.Task.get(later.id, { at: before });
 } catch (error) {
-  if (error.code !== 'HISTORY_GONE') throw error;
+  if (error.code !== 'ALX_ERR_HISTORY_GONE') throw error;
   console.log(error.reason); // 'scrubbed': the purge took the payload; 'compacted' when retention dropped it
 }
 // #endregion gone
-await assert.rejects(board.Task.get(later.id, { at: before }), { code: 'HISTORY_GONE', reason: 'scrubbed' });
+await assert.rejects(board.Task.get(later.id, { at: before }), { code: 'ALX_ERR_HISTORY_GONE', reason: 'scrubbed' });
 await board.close();

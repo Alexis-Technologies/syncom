@@ -33,7 +33,7 @@ await createDatabase({ path: 'other', engine }).catch((error) => console.log(err
 // serveEngine(): other is not served over this port
 // #endregion allow
 const outside = await createDatabase({ path: 'other', engine }).catch((error) => error);
-assert.equal(outside.name, 'TypeError');
+assert.equal(outside.name, 'ArgumentError');
 
 // #region stats
 console.log(engine.stats()); // { inflight: 0, oldestMs: 0, calls: 33, failures: 2, closed: false }
@@ -46,11 +46,11 @@ await board.close();
 port1.close(); // the serving side goes away: a worker that exits, a closed window
 
 await createDatabase({ path: 'board', engine }).catch((error) => console.log(error.code, error.reason));
-// ENGINE_UNREACHABLE closed
+// ALX_ERR_ENGINE_UNREACHABLE closed
 // #endregion unreachable
 await new Promise((resolve) => setTimeout(resolve, 20));
 const gone = await createDatabase({ path: 'board', engine }).catch((error) => error);
-assert.equal(gone.code, 'ENGINE_UNREACHABLE');
+assert.equal(gone.code, 'ALX_ERR_ENGINE_UNREACHABLE');
 assert.equal(gone.reason, 'closed');
 assert.equal(engine.stats().closed, true);
 await server.close();

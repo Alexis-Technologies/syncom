@@ -36,8 +36,8 @@
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
-const { SyncomError, typed } = require('../errors.js');
-const { mongoSharedLog } = require('./shared-log.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
+const { mongoSharedLog, closeQuietly } = require('./shared-log.js');
 
 const COLLECTIONS = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
 // A lease per database path: `{ _id: path, owner, gen, expires }`, renewed by its holder, taken once it lapsed.
@@ -58,14 +58,14 @@ const DUPLICATE = 11000;
 const isDuplicate = (error) => error?.code === DUPLICATE || error?.writeErrors?.[0]?.code === DUPLICATE;
 
 const locked = (path, why = 'is leased by another instance') =>
-  new SyncomError('LOCKED', `Database at ${path} ${why}`, { path });
+  new SyncomError('ALX_ERR_LOCKED', `Database at ${path} ${why}`, { path });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const unreadable = (id, cause = null) => unreadableRecord(SyncomError, id, cause);
 
-// A record's text read back: the object it parses to, or INTEGRITY.
+// A record's text read back: the object it parses to, or ALX_ERR_INTEGRITY.
 const parsed = (id, text) => {
-  let value;
+  let value = null;
   try {
     value = JSON.parse(text);
   } catch {
@@ -94,7 +94,22 @@ const partsOf = (_id) => {
 const sorted = (docs, field) => {
   const out = [];
   for (let i = 0; i < docs.length; i++) out.push(docs[i][field]);
-  return out.sort();
+  out.sort();
+  return out;
+};
+
+const bulk = async (collection, ops, session) => {
+  if (ops.length === 0) return;
+  await collection.bulkWrite(ops, session === undefined ? { ordered: true } : { ordered: true, session });
+};
+
+// Attachments' bytes by digest: a Binary (the driver's) or the bytes themselves (a fake's), answered as a Uint8Array.
+const bytesOf = (value) => {
+  if (value === null || value === undefined) return null;
+  if (value instanceof Uint8Array) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value?.buffer)) return new Uint8Array(value.buffer);
+  if (typeof value?.value === 'function') return new Uint8Array(value.value(true));
+  return null;
 };
 
 const token = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -110,13 +125,15 @@ const token = () => `${Date.now().toString(36)}${Math.random().toString(36).slic
  */
 const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions = false, changes = true } = {}) => {
   if (db === null && (client === null || typeof client?.db !== 'function')) {
-    throw new TypeError('mongoEngine: pass the driver’s client ({ client }) or a database ({ db })');
+    throw new ArgumentError('mongoEngine: pass the driver’s client ({ client }) or a database ({ db })');
   }
   if (transactions && typeof client?.startSession !== 'function') {
-    throw new TypeError('mongoEngine: transactions need the client ({ client }), whose sessions they run in');
+    throw new ArgumentError('mongoEngine: transactions need the client ({ client }), whose sessions they run in');
   }
   const database = db ?? client.db(name);
-  if (typeof database?.collection !== 'function') throw new TypeError('mongoEngine: the database has no collection()');
+  if (typeof database?.collection !== 'function') {
+    throw new ArgumentError('mongoEngine: the database has no collection()');
+  }
   const capabilities = capabilitiesOf({
     atomicBatch: transactions,
     exclusiveCreate: true,
@@ -145,7 +162,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   let ticking = 0;
   const tick = async () => {
     const ready = [];
-    for (const lease of leases.values()) if (lease.ready()) ready.push(lease);
+    for (const lease of leases.values()) {
+      if (lease.ready()) ready.push(lease);
+    }
     if (ready.length === 0) return;
     if (ready.length === 1) return void ready[0].renew();
     const ops = [];
@@ -168,7 +187,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
   };
   const arm = () => {
     let least = Infinity;
-    for (const lease of leases.values()) if (lease.margin < least) least = lease.margin;
+    for (const lease of leases.values()) {
+      if (lease.margin < least) least = lease.margin;
+    }
     const interval = leases.size === 0 ? 0 : Math.max(10, least);
     if (interval === ticking) return;
     if (ticker !== null) clearInterval(ticker);
@@ -204,10 +225,6 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       await session.endSession();
     }
   };
-  const bulk = async (collection, ops, session) => {
-    if (ops.length === 0) return;
-    await collection.bulkWrite(ops, session === undefined ? { ordered: true } : { ordered: true, session });
-  };
   const one = async (collection, _id, projection) => {
     await ensure();
     return collection.findOne({ _id }, { projection });
@@ -227,7 +244,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     // and no put or removal of this handle's matches a document of a newer
     // one: the upsert then tries an insert, the `_id` collides, and the
     // statement — the ordered bulk, the write set, the log's group — fails
-    // as LEASE_LOST. Under transactions the lease is checked first, inside
+    // as ALX_ERR_LEASE_LOST. Under transactions the lease is checked first, inside
     // the transaction, where the handle holds one.
     let gen = (await locks.findOne({ _id: p }, { projection: { _id: 0, gen: 1 } }))?.gen ?? 0;
     let owner = null;
@@ -239,10 +256,14 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     });
     const del = (_id) => ({ deleteOne: { filter: { _id, ...fence() } } });
     const leaseLost = (cause) =>
-      new SyncomError('LEASE_LOST', `Database at ${p}: a newer lease holds the document, the write was refused`, {
-        path: p,
-        cause,
-      });
+      new SyncomError(
+        'ALX_ERR_LEASE_LOST',
+        `Database at ${p}: a newer lease holds the document, the write was refused`,
+        {
+          path: p,
+          cause,
+        },
+      );
     // Every statement of this handle: under the fence, in a transaction where asked.
     const fenced = async (fn) => {
       try {
@@ -263,14 +284,14 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       has: async (ns, key) => (await one(c.kv, keyOf([p, ns, key]), { _id: 1 })) !== null,
       list: async (ns) => sorted(await many(c.kv, { p, ns }, { projection: { _id: 0, key: 1 } }), 'key'),
       put: (ns, key, value) =>
-        fenced((session) => bulk(c.kv, [put(keyOf([p, ns, key]), { p, ns, key, v: String(value) })], session)),
+        fenced((session) => bulk(c.kv, [put(keyOf([p, ns, key]), { p, ns, key, v: `${value}` })], session)),
       remove: (ns, key) => fenced((session) => bulk(c.kv, [del(keyOf([p, ns, key]))], session)),
       // The exclusive create the lock prefers: an insert, refused on the key's unique `_id`.
       create: async (ns, key, value) => {
         await ensure();
         const _id = keyOf([p, ns, key]);
         try {
-          await c.kv.insertOne({ _id, p, ns, key, v: String(value), gen });
+          await c.kv.insertOne({ _id, p, ns, key, v: `${value}`, gen });
         } catch (error) {
           throw isDuplicate(error) ? eexist(`${ns}/${key}`) : error;
         }
@@ -310,16 +331,18 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     };
 
     const pieces = {
-      get: async (id, name) => (await one(c.pieces, keyOf([p, id, name]), { _id: 0, t: 1 }))?.t ?? null,
+      get: async (id, piece) => (await one(c.pieces, keyOf([p, id, piece]), { _id: 0, t: 1 }))?.t ?? null,
       // Every piece of the record in one query over `{ p, id }`, the ones named kept.
       getMany: async (id, names) => {
         const docs = await many(c.pieces, { p, id }, { projection: { _id: 0, name: 1, t: 1 } });
         const wanted = new Set(names);
         const found = new Map();
-        for (let i = 0; i < docs.length; i++) if (wanted.has(docs[i].name)) found.set(docs[i].name, docs[i].t);
+        for (let i = 0; i < docs.length; i++) {
+          if (wanted.has(docs[i].name)) found.set(docs[i].name, docs[i].t);
+        }
         return found;
       },
-      remove: (id, name) => fenced((session) => bulk(c.pieces, [del(keyOf([p, id, name]))], session)),
+      remove: (id, piece) => fenced((session) => bulk(c.pieces, [del(keyOf([p, id, piece]))], session)),
     };
 
     const copies = {
@@ -332,14 +355,6 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       drop: (tag) => fenced((session) => bulk(c.copies, [{ deleteMany: { filter: { p, tag, ...fence() } } }], session)),
     };
 
-    // Attachments' bytes by digest: a Binary (the driver's) or the bytes themselves (a fake's), answered as a Uint8Array.
-    const bytesOf = (value) => {
-      if (value === null || value === undefined) return null;
-      if (value instanceof Uint8Array) return new Uint8Array(value);
-      if (ArrayBuffer.isView(value?.buffer)) return new Uint8Array(value.buffer);
-      if (typeof value?.value === 'function') return new Uint8Array(value.value(true));
-      return null;
-    };
     const blobs = {
       get: async (digest) => {
         checkDigest(digest, 'blobs.get');
@@ -365,7 +380,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       list: async () => sorted(await many(c.blobs, { p, n: 0 }, { projection: { _id: 0, digest: 1 } }), 'digest'),
       put: async (digest, bytes) => {
         checkDigest(digest, 'blobs.put');
-        const whole = checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES);
+        const whole = checkBlobBytes(bytes, 'blobs.put', MAX_STORED_BYTES);
         const ops = [];
         let n = 0;
         for (let from = 0; from < whole.length; from += BLOB_CHUNK) {
@@ -419,8 +434,8 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       // now. Nothing acknowledged sits there (a seq is handed out once per
       // epoch), so the wipe is the group's first statement, and a best effort
       // after a failure, before the next open could read the leftovers.
-      const from = (first) => ({ p, seq: { $gte: first }, ...fence() });
-      const wipeFrom = (first) => ({ deleteMany: { filter: from(first) } });
+      const atOrPast = (first) => ({ p, seq: { $gte: first }, ...fence() });
+      const wipeFrom = (first) => ({ deleteMany: { filter: atOrPast(first) } });
       return {
         journaled: false,
         async load() {
@@ -452,7 +467,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           for (const group of byFirst.values()) {
             const held = { first: group.first, last: group.last };
             for (let i = 0; i < group.docs.length; i++) {
-              let entry;
+              let entry = null;
               try {
                 entry = JSON.parse(group.docs[i].e);
               } catch (error) {
@@ -466,7 +481,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
               groupOf.set(group.docs[i].seq, held);
             }
           }
-          const floor = index !== null ? index.floor : entries.length > 0 ? entries[0].seq : 1;
+          let floor = 1;
+          if (index !== null) floor = index.floor;
+          else if (entries.length > 0) floor = entries[0].seq;
           const sealed = sealedTo() ?? floor - 1;
           groups = [];
           const open = [];
@@ -508,7 +525,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
             await fenced((session) => bulk(c.log, ops, session));
           } catch (error) {
             try {
-              await c.log.deleteMany(from(first));
+              await c.log.deleteMany(atOrPast(first));
             } catch {
               // The next group wipes it; a reopen before that leaves a group short of its documents out.
             }
@@ -527,11 +544,13 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         },
         async sealed(to) {
           const kept = [];
-          for (let i = 0; i < groups.length; i++) if (groups[i].last > to) kept.push(groups[i]);
+          for (let i = 0; i < groups.length; i++) {
+            if (groups[i].last > to) kept.push(groups[i]);
+          }
           groups = kept;
         },
         async drop(segment) {
-          if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
+          if (segments[0] !== segment) throw new ArgumentError('drop(segment): the oldest segment goes first');
           const rest = segments.slice(1);
           await fenced(async (session) => {
             await bulk(
@@ -578,8 +597,11 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       const puts = batch.kv?.put;
       if (puts !== undefined) {
         for (let i = 0; i < puts.length; i++) {
-          const [ns, key, value] = puts[i];
-          kvPuts.push(put(keyOf([p, ns, key]), { p, ns, key, v: String(value) }));
+          const kvPut = puts[i];
+          const ns = kvPut[0];
+          const key = kvPut[1];
+          const value = kvPut[2];
+          kvPuts.push(put(keyOf([p, ns, key]), { p, ns, key, v: `${value}` }));
         }
       }
       const rows = batch.records;
@@ -596,7 +618,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
           const t = rowOf.stored !== undefined ? JSON.stringify(rowOf.stored) : rowOf.text;
           recordOps.push(put(keyOf([p, id]), { p, id, t, w: writer }));
           const drops = rowOf.pieces?.remove;
-          if (drops !== undefined) for (let k = 0; k < drops.length; k++) dropped.push(del(keyOf([p, id, drops[k]])));
+          if (drops !== undefined) {
+            for (let k = 0; k < drops.length; k++) dropped.push(del(keyOf([p, id, drops[k]])));
+          }
         }
       }
       const removed = batch.remove;
@@ -610,7 +634,10 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       const copiesPut = batch.copies?.put;
       if (copiesPut !== undefined) {
         for (let i = 0; i < copiesPut.length; i++) {
-          const [tag, id, text] = copiesPut[i];
+          const copy = copiesPut[i];
+          const tag = copy[0];
+          const id = copy[1];
+          const text = copy[2];
           copied.push(put(keyOf([p, tag, id]), { p, tag, id, t: text }));
         }
       }
@@ -632,7 +659,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         await bulk(c.pieces, dropped, session);
         await bulk(c.kv, kvDrops, session);
       });
-      if (listening > 0) for (let i = 0; i < removedKeys.length; i++) deleted.add(removedKeys[i]);
+      if (listening > 0) {
+        for (let i = 0; i < removedKeys.length; i++) deleted.add(removedKeys[i]);
+      }
     };
 
     // What another instance over the same database wrote — `{ records: [id] }`
@@ -667,11 +696,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
       };
       const ended = (error) => {
         if (!over()) return;
-        try {
-          stream.close()?.catch?.(() => {});
-        } catch {
-          // Closed already.
-        }
+        closeQuietly(stream);
         listener({ p, error });
       };
       stream.on('change', (event) => {
@@ -725,7 +750,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
 
     // The lease: one document per path, this instance's while it renews it
     // every third of `staleAfter` on the server's clock; a lapsed one is
-    // taken over, a live one is LOCKED (at once, or after `timeout` under
+    // taken over, a live one is ALX_ERR_LOCKED (at once, or after `timeout` under
     // 'wait'). A renewal that fails is tried again every `poll` ms while two
     // thirds of `staleAfter` are left since the last one that landed, then
     // given up as lost; lost — taken by another instance, or given up —
@@ -841,7 +866,7 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
         const docs = await many(c.catalog, { p }, { projection: { _id: 0, id: 1, row: 1 } });
         const rows = [];
         for (let i = 0; i < docs.length; i++) {
-          let row;
+          let row = null;
           try {
             row = JSON.parse(docs[i].row);
           } catch (error) {
@@ -863,7 +888,9 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
               ops.push(put(keyOf([p, rows[i][0]]), { p, id: rows[i][0], row: JSON.stringify(rows[i][1]) }));
             }
           } else {
-            for (const [id, row] of changed) {
+            for (const entry of changed) {
+              const id = entry[0];
+              const row = entry[1];
               ops.push(row === null ? del(keyOf([p, id])) : put(keyOf([p, id]), { p, id, row: JSON.stringify(row) }));
             }
           }

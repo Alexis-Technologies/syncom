@@ -51,7 +51,7 @@ const { DEFAULT_PAGE_SIZE } = require('./protocol.js');
 const { isSharedLog } = require('./shared-log.js');
 const { vectorAdvance, opKey, parseEventId } = require('../vector.js');
 const { isPlainObject, wellFormed } = require('../shape.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 
 const DEFAULT_TOPIC = 'syncom';
@@ -92,13 +92,13 @@ const token = () => `${Date.now().toString(36)}${Math.random().toString(36).slic
 const sleep = (ms, signal = null) =>
   new Promise((resolve) => {
     if (signal?.aborted) return void resolve();
-    const timer = setTimeout(done, ms);
-    timer.unref?.();
-    function done() {
+    const done = () => {
       clearTimeout(timer);
       signal?.removeEventListener?.('abort', done);
       resolve();
-    }
+    };
+    const timer = setTimeout(done, ms);
+    timer.unref?.();
     signal?.addEventListener?.('abort', done, { once: true });
   });
 
@@ -107,18 +107,18 @@ const normalizeShared = (value) => {
   if (value === undefined || value === null) return null;
   const given = isSharedLog(value) ? { log: value } : value;
   if (!isPlainObject(given) || !isSharedLog(given.log)) {
-    throw new TypeError('sync.sharedLog: a shared log (append, read, parseId), or { log, topic, inbox, stopWait }');
+    throw new ArgumentError('sync.sharedLog: a shared log (append, read, parseId), or { log, topic, inbox, stopWait }');
   }
   const { topic = DEFAULT_TOPIC, stopWait = DEFAULT_STOP_WAIT } = given;
   if (typeof topic !== 'string' || topic.length === 0) {
-    throw new TypeError('sync.sharedLog.topic must be a non-empty string');
+    throw new ArgumentError('sync.sharedLog.topic must be a non-empty string');
   }
   const inbox = given.inbox === undefined ? `${topic}.inbox` : given.inbox;
   if (inbox !== false && (typeof inbox !== 'string' || inbox.length === 0 || inbox === topic)) {
-    throw new TypeError('sync.sharedLog.inbox must be a non-empty string other than the topic, or false');
+    throw new ArgumentError('sync.sharedLog.inbox must be a non-empty string other than the topic, or false');
   }
   if (!Number.isInteger(stopWait) || stopWait < 0) {
-    throw new TypeError('sync.sharedLog.stopWait must be a non-negative integer of milliseconds');
+    throw new ArgumentError('sync.sharedLog.stopWait must be a non-negative integer of milliseconds');
   }
   return { log: given.log, topic, inbox, stopWait };
 };
@@ -143,7 +143,9 @@ const revokeText = (node, revoked, scopes) =>
 const scopesOf = (value) => {
   if (!Array.isArray(value)) return null;
   const scopes = [];
-  for (let i = 0; i < value.length; i++) if (typeof value[i] === 'string') scopes.push(value[i]);
+  for (let i = 0; i < value.length; i++) {
+    if (typeof value[i] === 'string') scopes.push(value[i]);
+  }
   return scopes;
 };
 
@@ -163,7 +165,9 @@ const droppedOf = (value) => {
 const revokeOf = (value) => {
   if (!isPlainObject(value) || typeof value.node !== 'string' || !Array.isArray(value.scopes)) return null;
   const scopes = [];
-  for (let i = 0; i < value.scopes.length; i++) if (typeof value.scopes[i] === 'string') scopes.push(value.scopes[i]);
+  for (let i = 0; i < value.scopes.length; i++) {
+    if (typeof value.scopes[i] === 'string') scopes.push(value.scopes[i]);
+  }
   return scopes.length === 0 ? null : { node: value.node, scopes };
 };
 
@@ -178,7 +182,7 @@ const revokeOf = (value) => {
  */
 const parseEntry = (text) => {
   if (typeof text !== 'string') return undefined;
-  let value;
+  let value = null;
   try {
     value = JSON.parse(text);
   } catch {
@@ -199,7 +203,17 @@ const parseEntry = (text) => {
 };
 
 // A failure of the shared log as the manager reports it: `reason` names the half.
-const failed = (reason, message, fields) => new SyncomError('SHARED_LOG_FAILED', message, { reason, ...fields });
+// The newest stamp among the ops of an entry, 0 for none.
+const newestTs = (ops) => {
+  let newest = 0;
+  for (let i = 0; i < ops.length; i++) {
+    if (ops[i].ts > newest) newest = ops[i].ts;
+  }
+  return newest;
+};
+
+const failed = (reason, message, fields) =>
+  new SyncomError('ALX_ERR_SHARED_LOG_FAILED', message, { reason, ...fields });
 
 class SharedHub {
   #manager;
@@ -405,19 +419,21 @@ class SharedHub {
   #saveCursor() {
     if (this.#storage.readOnly || this.#saveQueued) return;
     this.#saveQueued = true;
-    this.#saving = this.#saving.then(async () => {
-      this.#saveQueued = false;
-      const text = JSON.stringify({
-        topic: this.#cursor.topic,
-        inbox: this.#cursor.inbox,
-        appended: this.#watermark(),
-      });
-      try {
-        await this.#kv.put(SHARED, CURSOR, text, { atomic: true });
-      } catch (error) {
-        this.#logger.warn({ event: 'shared.cursor.failed', topic: this.#topic, err: error });
-      }
+    this.#saving = this.#saving.then(() => this.#writeCursor());
+  }
+
+  async #writeCursor() {
+    this.#saveQueued = false;
+    const text = JSON.stringify({
+      topic: this.#cursor.topic,
+      inbox: this.#cursor.inbox,
+      appended: this.#watermark(),
     });
+    try {
+      await this.#kv.put(SHARED, CURSOR, text, { atomic: true });
+    } catch (error) {
+      this.#logger.warn({ event: 'shared.cursor.failed', topic: this.#topic, err: error });
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -483,7 +499,9 @@ class SharedHub {
     this.#told = false;
     this.#stats.relayed += items.length;
     if (this.#otel.enabled) this.#otel.recordShared('relayed', items.length);
-    for (let i = 0; i < items.length; i++) if (items[i].seq !== null) this.#cover(items[i].seq);
+    for (let i = 0; i < items.length; i++) {
+      if (items[i].seq !== null) this.#cover(items[i].seq);
+    }
   }
 
   // A position known to be in the topic: kept above the watermark, sorted, until the run from the watermark
@@ -554,39 +572,39 @@ class SharedHub {
   #recover() {
     this.#recoverTimer = null;
     if (!this.#running) return;
-    this.#appending = this.#appending
-      .then(async () => {
-        if (!this.#running || !this.#behind) return;
-        const { log } = this.#storage;
-        let entries = log.since(this.#watermark());
-        if (entries === null) {
-          const appended = this.#watermark();
-          this.#logger.warn({ event: 'shared.recover.lost', topic: this.#topic, appended });
-          const message = `The log no longer reaches ${appended ?? 'its first op'}: what fell below is not in the shared log ${this.#topic}`;
-          notify(this.#manager, this.#logger, 'error', failed('lost', message, { topic: this.#topic, appended }));
-          this.#reached(log.floor - 1);
-          entries = log.since(this.#watermark()) ?? [];
-        }
-        const ops = [];
-        let last = this.#appendedSeq;
-        for (let i = 0; i < entries.length; i++) {
-          ops.push(entries[i].op);
-          if (entries[i].seq > last) last = entries[i].seq;
-        }
-        try {
-          await this.#appendPages(ops);
-          if (!this.#running) return;
-          this.#behind = false;
-          this.#backoff = 0;
-          this.#told = false;
-          this.#stats.relayed += ops.length;
-          if (this.#otel.enabled) this.#otel.recordShared('relayed', ops.length);
-          this.#reached(last);
-        } catch (error) {
-          this.#fallBehind(error);
-        }
-      })
-      .catch(NOOP);
+    this.#appending = this.#appending.then(() => this.#appendBehind()).catch(NOOP);
+  }
+
+  async #appendBehind() {
+    if (!this.#running || !this.#behind) return;
+    const { log } = this.#storage;
+    let entries = log.since(this.#watermark());
+    if (entries === null) {
+      const appended = this.#watermark();
+      this.#logger.warn({ event: 'shared.recover.lost', topic: this.#topic, appended });
+      const message = `The log no longer reaches ${appended ?? 'its first op'}: what fell below is not in the shared log ${this.#topic}`;
+      notify(this.#manager, this.#logger, 'error', failed('lost', message, { topic: this.#topic, appended }));
+      this.#reached(log.floor - 1);
+      entries = log.since(this.#watermark()) ?? [];
+    }
+    const ops = [];
+    let last = this.#appendedSeq;
+    for (let i = 0; i < entries.length; i++) {
+      ops.push(entries[i].op);
+      if (entries[i].seq > last) last = entries[i].seq;
+    }
+    try {
+      await this.#appendPages(ops);
+      if (!this.#running) return;
+      this.#behind = false;
+      this.#backoff = 0;
+      this.#told = false;
+      this.#stats.relayed += ops.length;
+      if (this.#otel.enabled) this.#otel.recordShared('relayed', ops.length);
+      this.#reached(last);
+    } catch (error) {
+      this.#fallBehind(error);
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -720,9 +738,7 @@ class SharedHub {
         this.#retrying[name] = false;
         if (this.#otel.enabled) {
           this.#otel.recordShared('applied', result.applied);
-          let newest = 0;
-          for (let i = 0; i < parsed.ops.length; i++) if (parsed.ops[i].ts > newest) newest = parsed.ops[i].ts;
-          this.#otel.recordSharedLag(Math.max(0, Date.now() - newest));
+          this.#otel.recordSharedLag(Math.max(0, Date.now() - newestTs(parsed.ops)));
         }
         if (inbox) await this.#judged(topic, entry, parsed, result);
         return true;
@@ -735,13 +751,13 @@ class SharedHub {
           return true;
         }
         // Closed under the apply: the loop ends with the hub.
-        if (error?.code === 'CLOSED') return false;
+        if (error?.code === 'ALX_ERR_CLOSED') return false;
         this.#logger.warn({ event: 'shared.entry.failed', topic, id: entry.id, attempt, err: error });
         this.#otel.recordSharedEntry('retried');
         // A rule's refusal is the same at every try — a hook that throws, a bug (a TypeError): three times and the
         // topic is stuck, for someone to look at. The engine's is not — the medium down, a lease late, a group the
         // log refused: tried again, backed off, until it lands; told once per run.
-        const deterministic = error?.code === 'HOOK_FAILED' || error instanceof TypeError;
+        const deterministic = error?.code === 'ALX_ERR_HOOK_FAILED' || error instanceof TypeError;
         if (deterministic) {
           if (attempt >= MAX_APPLY_RETRIES) {
             this.#stuck[name] = true;
@@ -822,7 +838,9 @@ class SharedHub {
   // The holds a writer's `dropped` entry names, let go of: the client's stream is read from the shadow again.
   #release(dropped) {
     for (let i = 0; i < dropped.length; i++) {
-      const [key, seq] = dropped[i];
+      const pair = dropped[i];
+      const key = pair[0];
+      const seq = pair[1];
       const held = this.#forwarded.get(key);
       if (held !== undefined && held.seq <= seq) this.#forwarded.delete(key);
     }
@@ -1035,8 +1053,16 @@ class SharedHub {
   async forward(ops, node, scopes) {
     const shadow = this.vector();
     const now = Date.now();
-    for (const [key, held] of this.#forwarded) if (now - held.at > FORWARD_TTL) this.#forwarded.delete(key);
-    for (const [pusher, held] of this.#expected) if (now - held.at > FORWARD_TTL) this.#expected.delete(pusher);
+    for (const item of this.#forwarded) {
+      const key = item[0];
+      const held = item[1];
+      if (now - held.at > FORWARD_TTL) this.#forwarded.delete(key);
+    }
+    for (const item of this.#expected) {
+      const pusher = item[0];
+      const held = item[1];
+      if (now - held.at > FORWARD_TTL) this.#expected.delete(pusher);
+    }
     const result = {
       vector: {},
       applied: 0,
@@ -1061,11 +1087,9 @@ class SharedHub {
       const key = opKey(op);
       const shown = Object.hasOwn(shadow, key) ? shadow[key] : 0;
       const forwarded = this.#forwarded.get(key);
-      const held = Object.hasOwn(seqs, key)
-        ? seqs[key]
-        : forwarded !== undefined && forwarded.seq > shown
-          ? forwarded.seq
-          : shown;
+      let held = shown;
+      if (Object.hasOwn(seqs, key)) held = seqs[key];
+      else if (forwarded !== undefined && forwarded.seq > shown) held = forwarded.seq;
       if (op.seq <= held) {
         result.duplicates++;
         continue;

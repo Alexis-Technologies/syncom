@@ -55,7 +55,9 @@ const editors = (entry, field) => {
   const all = new Set();
   let last = null;
   for (const node of Object.keys(block?.moves ?? {})) {
-    for (const [ts, origin] of block.moves[node]) {
+    for (const pair of block.moves[node]) {
+      const ts = pair[0];
+      const origin = pair[1];
       all.add(origin);
       if (last === null || ts > last.ts) last = { origin, ts };
     }
@@ -87,7 +89,7 @@ const holds = (entry, field, member) => {
   return block !== undefined && T.shows(block, member);
 };
 const pick = (entry, field, rendered, member) => {
-  let found;
+  let found = undefined;
   const stack = [...rendered];
   while (stack.length > 0) {
     const node = stack.pop();
@@ -117,11 +119,11 @@ const join = (a, b) => T.joinTrees(a, b);
 // travels is the place among the siblings as a fractional index
 // (@alexify/syncom/order) between its neighbours — decided inside the
 // queue, against the fold the block keeps. A parent in the node's own
-// subtree is CYCLE (up from the parent), a sibling not under the parent
-// NOT_FOUND; a move to where the node already is makes no op (null). A move
+// subtree is ALX_ERR_CYCLE (up from the parent), a sibling not under the parent
+// ALX_ERR_NOT_FOUND; a move to where the node already is makes no op (null). A move
 // that would reach below the level a tree reads (MAX_DEPTH), or a place with
 // no room left between its neighbours (an index past MAX_FI), is
-// OUT_OF_RANGE. Siblings that share an index order by stamp, and a node put
+// ALX_ERR_OUT_OF_RANGE. Siblings that share an index order by stamp, and a node put
 // after one of them lands after all of them.
 const resolve = (core, id, type, payload, current) => {
   const { key, node, parent, after, before } = payload;
@@ -130,7 +132,7 @@ const resolve = (core, id, type, payload, current) => {
   if (T.under(s, node, parent)) {
     const where = parent === node ? 'itself' : `${parent}, a node under it`;
     const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
-    throw new SyncomError('CYCLE', message, { id, field: key, node, parent });
+    throw new SyncomError('ALX_ERR_CYCLE', message, { id, field: key, node, parent });
   }
   // The siblings without the node in one pass: where it was, and where the
   // sibling it lands after or before is among the others.
@@ -152,7 +154,7 @@ const resolve = (core, id, type, payload, current) => {
   if (next !== undefined) {
     if (i < 0) {
       const message = `Node ${next} is not under ${parent ?? 'the root'} of field ${key} of record ${id}`;
-      throw new SyncomError('NOT_FOUND', message, { id, field: key, node: next });
+      throw new SyncomError('ALX_ERR_NOT_FOUND', message, { id, field: key, node: next });
     }
     at = after !== undefined ? i + 1 : i;
   }
@@ -161,16 +163,16 @@ const resolve = (core, id, type, payload, current) => {
     const depth = (parent === null ? 0 : T.depthOf(s, parent)) + T.heightOf(s, node);
     if (depth > T.MAX_DEPTH) {
       const message = `Node ${node} of field ${key} of record ${id} would reach level ${depth}; a tree reads ${T.MAX_DEPTH}`;
-      throw new SyncomError('OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
+      throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
     }
   }
   const lower = at > 0 ? sibs[at - 1] : null;
   let upper = at < sibs.length ? sibs[at] : null;
   if (lower !== null && upper !== null && upper <= lower) {
     upper = null;
-    for (let i = at + 1; i < sibs.length; i++) {
-      if (sibs[i] > lower) {
-        upper = sibs[i];
+    for (let j = at + 1; j < sibs.length; j++) {
+      if (sibs[j] > lower) {
+        upper = sibs[j];
         break;
       }
     }
@@ -178,7 +180,7 @@ const resolve = (core, id, type, payload, current) => {
   const fi = between(lower, upper);
   if (fi.length > T.MAX_FI) {
     const message = `No room left between the neighbours of node ${node} in field ${key} of record ${id}; move a sibling away or reset the field`;
-    throw new SyncomError('OUT_OF_RANGE', message, {
+    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, {
       id,
       field: key,
       node,
@@ -212,17 +214,23 @@ const treePatches = (field, from, to) => {
   const after = walk(to);
   const patches = [];
   const changed = new Set();
-  for (const [node, place] of after) {
+  for (const entry of after) {
+    const node = entry[0];
+    const place = entry[1];
     const was = before.get(node);
     if (was === undefined || was.parent !== place.parent || was.prev !== place.prev) changed.add(place.parent);
   }
-  for (const [node, { parent, prev }] of after) {
+  for (const entry of after) {
+    const node = entry[0];
+    const { parent, prev } = entry[1];
     if (!changed.has(parent)) continue;
     const patch = { action: 'treeMove', field, node, parent };
     if (prev !== null) patch.after = prev;
     patches.push(patch);
   }
-  for (const node of before.keys()) if (!after.has(node)) patches.push({ action: 'treeRemove', field, node });
+  for (const node of before.keys()) {
+    if (!after.has(node)) patches.push({ action: 'treeRemove', field, node });
+  }
   return patches;
 };
 
@@ -251,7 +259,9 @@ const migrate = (kind, key, value) => {
   const stack = [];
   for (let i = value.length - 1; i >= 0; i--) stack.push([value[i], null]);
   while (stack.length > 0) {
-    const [{ id: node, children }, parent] = stack.pop();
+    const item = stack.pop();
+    const { id: node, children } = item[0];
+    const parent = item[1];
     ops.push(['tree', { key, node, parent }]);
     for (let i = children.length - 1; i >= 0; i--) stack.push([children[i], node]);
   }
@@ -269,8 +279,8 @@ const compact = () => [];
  * A node the tree has not is created there; the field, and the record,
  * when absent. Two nodes moving concurrently so that each would hang
  * under the other: the newer move loses, on every node, and a later move
- * can revive it. Rejects with `CYCLE` for a parent under the node itself
- * and with `NOT_FOUND` for a sibling not under `parent`; a move to where
+ * can revive it. Rejects with `ALX_ERR_CYCLE` for a parent under the node itself
+ * and with `ALX_ERR_NOT_FOUND` for a sibling not under `parent`; a move to where
  * the node already is makes no op.
  */
 const treeMove = async (core, id, key, node, parent = null, { after, before, actor } = {}) => {

@@ -32,6 +32,8 @@
 // the log in its own structures. `capabilities` says what a medium can do, so
 // the core asks nothing a medium lacks.
 
+const { ArgumentError } = require('./argument-errors.js');
+
 const METHODS = ['open', 'remove'];
 const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'write', 'close'];
 
@@ -60,7 +62,9 @@ const CAPABILITIES = Object.freeze({
 // The name of the first member an engine lacks, or null.
 const missingEngineMethod = (value) => {
   if (typeof value !== 'object' || value === null) return METHODS[0];
-  for (let i = 0; i < METHODS.length; i++) if (typeof value[METHODS[i]] !== 'function') return METHODS[i];
+  for (let i = 0; i < METHODS.length; i++) {
+    if (typeof value[METHODS[i]] !== 'function') return METHODS[i];
+  }
   if (typeof value.name !== 'string' || value.name.length === 0) return 'name';
   if (typeof value.capabilities !== 'object' || value.capabilities === null) return 'capabilities';
   return null;
@@ -72,7 +76,7 @@ const isEngine = (value) => missingEngineMethod(value) === null;
 // What `createDatabase()` calls: the contract, refused with the member's name.
 const checkEngine = (value, label) => {
   const missing = missingEngineMethod(value);
-  if (missing !== null) throw new TypeError(`${label}: engine has no ${missing}`);
+  if (missing !== null) throw new ArgumentError(`${label}: engine has no ${missing}`);
   return value;
 };
 
@@ -94,7 +98,7 @@ const missingStore = (db) => {
 // What `engine.open()` must have answered with.
 const checkEngineDb = (db, label) => {
   const missing = missingStore(db);
-  if (missing !== null) throw new TypeError(`${label}: the engine's database has no ${missing}`);
+  if (missing !== null) throw new ArgumentError(`${label}: the engine's database has no ${missing}`);
   return db;
 };
 
@@ -168,20 +172,22 @@ const isKvNamespace = (value) => {
   if (value === '') return true;
   if (typeof value !== 'string') return false;
   const parts = value.split('/');
-  for (let i = 0; i < parts.length; i++) if (!isKvKey(parts[i])) return false;
+  for (let i = 0; i < parts.length; i++) {
+    if (!isKvKey(parts[i])) return false;
+  }
   return true;
 };
 const checkKvKey = (ns, key, label) => {
-  if (!isKvNamespace(ns)) throw new TypeError(`${label}: ${JSON.stringify(ns)} is not a namespace`);
-  if (!isKvKey(key)) throw new TypeError(`${label}: ${JSON.stringify(key)} is not a key`);
+  if (!isKvNamespace(ns)) throw new ArgumentError(`${label}: ${JSON.stringify(ns)} is not a namespace`);
+  if (!isKvKey(key)) throw new ArgumentError(`${label}: ${JSON.stringify(key)} is not a key`);
 };
 
 // What every engine answers the same: a record the medium holds that is no
-// record (INTEGRITY, `reason: 'unreadable'`, the parse error as `cause` where
+// record (ALX_ERR_INTEGRITY, `reason: 'unreadable'`, the parse error as `cause` where
 // there is one), and a key `create` found held (EEXIST, as an fsi says it).
 // No requires here: the error class is the caller's (src/errors.js).
 const unreadableRecord = (SyncomError, id, cause = null) =>
-  new SyncomError('INTEGRITY', `Record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+  new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
 const eexist = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
 
 module.exports = {

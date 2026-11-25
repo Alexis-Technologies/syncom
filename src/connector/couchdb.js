@@ -16,7 +16,9 @@
 // life: a connector that starts anew learns them with its first pull, and a
 // push of a document whose revision it does not know lands as a new document
 // — a conflict where one exists, as it should. Credentials in the url move
-// to the Authorization header, so no message ever carries them. No requires.
+// to the Authorization header, so no message ever carries them. Requires argument-errors.js only.
+
+const { ArgumentError } = require('../argument-errors.js');
 
 const DEFAULT_LONGPOLL = 60_000;
 // A long poll the server never answers (a proxy holding the connection) is given up after the wait and this much.
@@ -24,7 +26,9 @@ const LONGPOLL_GRACE = 10_000;
 
 const strip = (doc) => {
   const data = {};
-  for (const key of Object.keys(doc)) if (key !== '_id' && key !== '_rev' && key !== '_deleted') data[key] = doc[key];
+  for (const key of Object.keys(doc)) {
+    if (key !== '_id' && key !== '_rev' && key !== '_deleted') data[key] = doc[key];
+  }
   return data;
 };
 
@@ -55,9 +59,11 @@ const basic = (user, password) => {
  * `Authorization`); `longpoll` is the stream's wait in ms (60 000).
  */
 const couchdb = ({ url, fetch = globalThis.fetch, headers = {}, longpoll = DEFAULT_LONGPOLL } = {}) => {
-  if (typeof url !== 'string' || url.length === 0) throw new TypeError('couchdb(): url is required');
-  if (typeof fetch !== 'function') throw new TypeError('couchdb(): fetch must be a function');
-  if (!Number.isFinite(longpoll) || longpoll <= 0) throw new TypeError('couchdb(): longpoll must be a positive number');
+  if (typeof url !== 'string' || url.length === 0) throw new ArgumentError('couchdb(): url is required');
+  if (typeof fetch !== 'function') throw new ArgumentError('couchdb(): fetch must be a function');
+  if (!Number.isFinite(longpoll) || longpoll <= 0) {
+    throw new ArgumentError('couchdb(): longpoll must be a positive number');
+  }
   const common = { accept: 'application/json', ...headers };
   let base = url.replace(/\/+$/, '');
   try {
@@ -75,17 +81,17 @@ const couchdb = ({ url, fetch = globalThis.fetch, headers = {}, longpoll = DEFAU
   const revs = new Map();
 
   const request = async (path, init = {}) => {
-    const response = await fetch(`${base}${path}`, { ...init, headers: { ...common, ...(init.headers ?? {}) } });
+    const response = await fetch(`${base}${path}`, { ...init, headers: { ...common, ...init.headers } });
     return response;
   };
 
   // A page of `_changes`, read into documents; the revisions remembered.
   const changes = async (since, limit, { feed = null, signal = null } = {}) => {
-    const query = new URLSearchParams({ include_docs: 'true', limit: String(limit) });
-    if (since !== null && since !== undefined) query.set('since', String(since));
+    const query = new URLSearchParams({ include_docs: 'true', limit: `${limit}` });
+    if (since !== null && since !== undefined) query.set('since', `${since}`);
     if (feed !== null) {
       query.set('feed', feed);
-      query.set('timeout', String(longpoll));
+      query.set('timeout', `${longpoll}`);
     }
     const response = await request(`/_changes?${query}`, { signal });
     if (!response.ok) throw await failed(response, '_changes');

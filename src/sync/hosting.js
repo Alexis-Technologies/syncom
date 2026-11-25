@@ -27,6 +27,7 @@ const { hashBytes } = require('../crypto/digest.js');
 const { fromBase64 } = require('../crypto/pem.js');
 const { streams, sendAll, collect } = require('./chunks.js');
 const { isDigest, MAX_BLOB_BYTES } = require('../blobs.js');
+const { ArgumentError } = require('../argument-errors.js');
 const {
   coded,
   refuse,
@@ -77,7 +78,7 @@ const nextOrIdle = (pending, ms) =>
     pending.then(
       (result) => {
         clearTimeout(timer);
-        resolve(result);
+        return void resolve(result);
       },
       (error) => {
         clearTimeout(timer);
@@ -121,7 +122,7 @@ const streamed = (client, page, pageBytes) => {
 };
 
 // What a dialer that lost part of its log needs to move its streams past
-// what this host holds of them (REWOUND, src/sync/manager.js `#rewind`): for
+// what this host holds of them (ALX_ERR_REWOUND, src/sync/manager.js `#rewind`): for
 // each of its own streams this host is ahead on, the newest op of it held
 // here — signed by the dialer's own key, so the claim carries its proof. For
 // a dialer whose id is a key (one that signs), only when its hello says it
@@ -137,7 +138,9 @@ const proofOf = (storage, node, claimed, held) => {
   }
   if (wanted.size === 0) return null;
   const ops = [];
-  for (const [key, seq] of wanted) {
+  for (const pair of wanted) {
+    const key = pair[0];
+    const seq = pair[1];
     const entry = storage.log.entryOf(key, seq);
     if (entry !== undefined) ops.push(entry.op);
   }
@@ -236,7 +239,7 @@ const greet = async (host, context, args, keep) => {
     version: PROTOCOL,
     schema: schemaOf(storage.schemaInfo),
     // The kinds this host can hold: a dialer that holds more does not
-    // bootstrap from here (KINDS_MISMATCH), since a snapshot of this host
+    // bootstrap from here (ALX_ERR_KINDS_MISMATCH), since a snapshot of this host
     // would lack those fields.
     kinds: storage.kinds,
   };
@@ -362,13 +365,13 @@ const blobPut = (host) => async (context, args) => {
   const { digest, id, name, base64, stream, size } = args ?? {};
   if (!isDigest(digest)) throw no('blobPut needs a digest (SHA-256, hex)', 400, 'BAD_DIGEST');
   const client = context?.client;
-  const streamed = stream !== undefined;
-  const shaped = streamed
+  const isStreamed = stream !== undefined;
+  const shaped = isStreamed
     ? base64 === undefined && typeof stream === 'string' && Number.isSafeInteger(size) && size >= 0 && streams(client)
     : base64 === undefined || typeof base64 === 'string';
   if (!shaped) throw no('blobPut takes the bytes as a stream of its size, or as base64', 400, 'BAD_BLOB');
   let readable = null;
-  if (streamed) {
+  if (isStreamed) {
     try {
       readable = client.getStream(stream);
     } catch {
@@ -381,7 +384,7 @@ const blobPut = (host) => async (context, args) => {
     const own = limits.bytesPerBlob < MAX_BLOB_BYTES;
     const max = own ? limits.bytesPerBlob : MAX_BLOB_BYTES;
     const past = () => no(`A blob past ${max} bytes`, 413, own ? 'BYTES_PER_BLOB' : 'BLOB_TOO_LARGE');
-    if (streamed ? size > max : base64 !== undefined && base64.length > Math.ceil(max / 3) * 4) throw past();
+    if (isStreamed ? size > max : base64 !== undefined && base64.length > Math.ceil(max / 3) * 4) throw past();
     if (!(await blobNamed(host, state, digest, id, name))) {
       // No refusal: the course of an upload through a follower, neither logged nor counted as one.
       if (storage.readOnly && host.shared !== null && host.shared.expects(state.node, `${digest}/${id}/${name}`)) {
@@ -390,9 +393,9 @@ const blobPut = (host) => async (context, args) => {
       throw no('No record of yours names it', 404, 'NOT_NAMED');
     }
     if (await store.has(digest)) return { digest, have: true };
-    if (!streamed && base64 === undefined) return { digest, have: false, stream: streams(client) };
-    const bytes = streamed ? await collect(readable, size) : fromBase64(base64);
-    if (bytes === null || (streamed && bytes.length !== size)) {
+    if (!isStreamed && base64 === undefined) return { digest, have: false, stream: streams(client) };
+    const bytes = isStreamed ? await collect(readable, size) : fromBase64(base64);
+    if (bytes === null || (isStreamed && bytes.length !== size)) {
       throw no('The stream is not the size it announced', 400, 'BAD_BLOB');
     }
     if (bytes.length > max) throw past();
@@ -464,6 +467,76 @@ const snapshot = (host) => async (context, args) => {
   return streamed(context?.client, page, host.pageBytes);
 };
 
+// The ops of a shared entry this peer is sent, pushed to `ops`: in its scopes, neither its own nor relayed from it.
+// True where the peer's own op is among the entry's.
+const peerOps = (entryOps, node, scopes, ops) => {
+  let echoed = false;
+  for (let i = 0; i < entryOps.length; i++) {
+    const op = entryOps[i];
+    if (op.origin === node) echoed = true;
+    else if (opInScope(op, scopes) && op.from !== node) ops.push(op);
+  }
+  return echoed;
+};
+
+// sharedChanges' read of the topic from the feed's cursor, read again after a failure, backed off.
+const sharedFeed = async function* (host, state, generation, feed, signal) {
+  const { shared } = host;
+  const { node, scopes } = feed;
+  let cursor = feed.cursor;
+  let passed = 0;
+  let backoff = 0;
+  // Whether the last page told the peer it was caught up: told once per lull.
+  let idle = false;
+  for (;;) {
+    if (signal?.aborted) return;
+    try {
+      const iterator = shared.read(cursor, signal)[Symbol.asyncIterator]();
+      let pending = iterator.next();
+      for (;;) {
+        // A lull in the log — nothing for IDLE_AFTER — is the peer's `caughtUp`: an empty page, labelled
+        // with the cursor, says so once; the read goes on.
+        const result = idle ? await pending : await nextOrIdle(pending, IDLE_AFTER);
+        if (signal?.aborted || state.generation !== generation) return;
+        if (result === IDLE) {
+          idle = true;
+          yield host.track(cursor, { ops: [], eventId: cursor, idle: true });
+          continue;
+        }
+        if (result.done) break;
+        const entry = result.value;
+        pending = iterator.next();
+        backoff = 0;
+        const parsed = parseEntry(entry.value);
+        const ops = [];
+        // The peer's own op, landed by a writer: no page for it, but the lull after it is told (an idle
+        // page) — what the peer waits for of its own ops, an upload this hub said "not yet" to, is asked again.
+        if (parsed !== null && parsed !== undefined && peerOps(parsed.ops, node, scopes, ops)) idle = false;
+        cursor = entry.id;
+        // Nothing for this peer: the position moves without a page, labelled
+        // every PASS_EVERY entries so a resume looks at few of these again.
+        if (ops.length === 0 && ++passed < PASS_EVERY) continue;
+        passed = 0;
+        idle = false;
+        feed.cursor = cursor;
+        // `beforeSend` rules a hosted page as it rules a push: an op it says no to goes as its header.
+        const sent = ops.length === 0 ? ops : await host.manager.sendable(ops, state.ref);
+        yield host.track(cursor, { ops: packOps(sent), eventId: cursor });
+      }
+      // The read ended without an abort — the log closed, a tail that ends: read again from the cursor.
+    } catch (error) {
+      if (signal?.aborted) return;
+      if (error?.code === 410 || error?.code === 400) {
+        yield { bootstrap: true };
+        return;
+      }
+      host.logger.warn({ event: 'shared.feed.failed', topic: shared.topic, node, err: error });
+    }
+    backoff = backoff === 0 ? FEED_BACKOFF : Math.min(backoff * 2, MAX_FEED_BACKOFF);
+    await sleep(backoff, signal);
+  }
+};
+
 // The feed over a shared log: the topic from the client's cursor on, every
 // entry's ops narrowed to its scopes and less its own echoes, one page per
 // entry, labelled with the entry's id — the same position on every hub. A
@@ -472,7 +545,7 @@ const snapshot = (host) => async (context, args) => {
 // page is what positions a client in the log. A read that fails is read again
 // from the cursor, backed off.
 const sharedChanges = async function* (host, context, args, subscription) {
-  const { shared, feeds } = host;
+  const { feeds } = host;
   const state = peerOf(host, context);
   const { node, scopes: granted, generation } = state;
   const { lastEventId, signal } = subscription;
@@ -481,68 +554,10 @@ const sharedChanges = async function* (host, context, args, subscription) {
     yield { bootstrap: true };
     return;
   }
-  let cursor = lastEventId;
-  const feed = { node, scopes, since: Date.now(), cursor };
+  const feed = { node, scopes, since: Date.now(), cursor: lastEventId };
   feeds.add(feed);
   try {
-    let passed = 0;
-    let backoff = 0;
-    // Whether the last page told the peer it was caught up: told once per lull.
-    let idle = false;
-    for (;;) {
-      if (signal?.aborted) return;
-      try {
-        const iterator = shared.read(cursor, signal)[Symbol.asyncIterator]();
-        let pending = iterator.next();
-        for (;;) {
-          // A lull in the log — nothing for IDLE_AFTER — is the peer's `caughtUp`: an empty page, labelled
-          // with the cursor, says so once; the read goes on.
-          const result = idle ? await pending : await nextOrIdle(pending, IDLE_AFTER);
-          if (signal?.aborted || state.generation !== generation) return;
-          if (result === IDLE) {
-            idle = true;
-            yield host.track(cursor, { ops: [], eventId: cursor, idle: true });
-            continue;
-          }
-          if (result.done) break;
-          const entry = result.value;
-          pending = iterator.next();
-          backoff = 0;
-          const parsed = parseEntry(entry.value);
-          const ops = [];
-          if (parsed !== null && parsed !== undefined) {
-            for (let i = 0; i < parsed.ops.length; i++) {
-              const op = parsed.ops[i];
-              if (op.origin === node) {
-                // The peer's own op, landed by a writer: no page for it, but the lull after it is told (an idle
-                // page) — what the peer waits for of its own ops, an upload this hub said "not yet" to, is asked again.
-                idle = false;
-              } else if (opInScope(op, scopes) && op.from !== node) ops.push(op);
-            }
-          }
-          cursor = entry.id;
-          // Nothing for this peer: the position moves without a page, labelled
-          // every PASS_EVERY entries so a resume looks at few of these again.
-          if (ops.length === 0 && ++passed < PASS_EVERY) continue;
-          passed = 0;
-          idle = false;
-          feed.cursor = cursor;
-          // `beforeSend` rules a hosted page as it rules a push: an op it says no to goes as its header.
-          const sent = ops.length === 0 ? ops : await host.manager.sendable(ops, state.ref);
-          yield host.track(cursor, { ops: packOps(sent), eventId: cursor });
-        }
-        // The read ended without an abort — the log closed, a tail that ends: read again from the cursor.
-      } catch (error) {
-        if (signal?.aborted) return;
-        if (error?.code === 410 || error?.code === 400) {
-          yield { bootstrap: true };
-          return;
-        }
-        host.logger.warn({ event: 'shared.feed.failed', topic: shared.topic, node, err: error });
-      }
-      backoff = backoff === 0 ? FEED_BACKOFF : Math.min(backoff * 2, MAX_FEED_BACKOFF);
-      await sleep(backoff, signal);
-    }
+    yield* sharedFeed(host, state, generation, feed, signal);
   } finally {
     feeds.delete(feed);
   }
@@ -598,7 +613,9 @@ const changes = (host) =>
           continue;
         }
         const ops = [];
-        for (const { op } of entries) if (op.origin !== node && op.from !== node) ops.push(op);
+        for (const { op } of entries) {
+          if (op.origin !== node && op.from !== node) ops.push(op);
+        }
         cursor = storage.log.formatId(entries[entries.length - 1].seq);
         feed.cursor = cursor;
         idle = false;
@@ -668,7 +685,9 @@ const presence = (host) => async (context, update) => {
   let room = host.presence.rooms.get(update.scope);
   if (room === undefined) host.presence.rooms.set(update.scope, (room = new Map()));
   const floor = now - timeout;
-  for (const [other, held] of room) {
+  for (const pair of room) {
+    const other = pair[0];
+    const held = pair[1];
     if (held[2] >= floor) break;
     room.delete(other);
   }
@@ -717,30 +736,32 @@ const createUnit = (
   } = options;
   const serveQuery = normalizeQuery(options.query);
   if (authorizeWrite !== null && typeof authorizeWrite !== 'function') {
-    throw new TypeError('unit({ authorizeWrite }): authorizeWrite must be a function');
+    throw new ArgumentError('unit({ authorizeWrite }): authorizeWrite must be a function');
   }
-  if (typeof proving !== 'boolean') throw new TypeError('unit({ prove }): prove must be a boolean');
+  if (typeof proving !== 'boolean') throw new ArgumentError('unit({ prove }): prove must be a boolean');
   if (proving && storage[SIGNER] === null) {
-    throw new TypeError('unit({ prove }): a proof of key needs the signing plugin (@alexify/syncom/signing)');
+    throw new ArgumentError('unit({ prove }): a proof of key needs the signing plugin (@alexify/syncom/signing)');
   }
   const presenceOptions = options.presence ?? {};
   if (typeof presenceOptions !== 'object' || presenceOptions === null) {
-    throw new TypeError('unit({ presence }): presence must be an object');
+    throw new ArgumentError('unit({ presence }): presence must be an object');
   }
   const { timeout: presenceTimeout = 30_000, rate: presenceRate = 20, max: presenceMax = 1024 } = presenceOptions;
-  for (const [name, value] of [
+  for (const entry of [
     ['timeout', presenceTimeout],
     ['rate', presenceRate],
     ['max', presenceMax],
   ]) {
+    const name = entry[0];
+    const value = entry[1];
     if (!Number.isFinite(value) || value <= 0) {
-      throw new TypeError(`unit({ presence: { ${name} } }): a positive number`);
+      throw new ArgumentError(`unit({ presence: { ${name} } }): a positive number`);
     }
   }
   const limits = normalizeLimits(options.limits);
   const allow = normalizeAllow(options.allow);
   if (meta !== undefined && (typeof meta !== 'object' || meta === null || Array.isArray(meta))) {
-    throw new TypeError('unit({ meta }): meta must be an object');
+    throw new ArgumentError('unit({ meta }): meta must be an object');
   }
   // What every procedure reaches of the host.
   const host = {
@@ -765,7 +786,7 @@ const createUnit = (
     pageSize,
     pageBytes,
     logger: storage.logger,
-    track: tracked ?? ((id, data) => ({ [TRACKED]: true, id: String(id), data })),
+    track: tracked ?? ((id, data) => ({ [TRACKED]: true, id: `${id}`, data })),
     // What a read that carries its hello greets through (src/sync/reads.js `greeted`).
     greet: (context, args, keep) => greet(host, context, args, keep),
     presence: { timeout: presenceTimeout, rate: presenceRate, max: presenceMax, rooms: new Map() },

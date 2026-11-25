@@ -110,8 +110,8 @@ const landed = async (instance) => {
 };
 assert.deepEqual(await landed(tab), { title: 'Written in a tab', $type: 'Task' });
 assert.deepEqual(await landed(other), { title: 'Written in a tab', $type: 'Task' }, 'every tab reads it');
-await assert.rejects(() => tab.collection('Task').update('missing', { done: true }), { code: 'NOT_FOUND' });
-await assert.rejects(async () => tab.sync, { code: 'NOT_LEADER' });
+await assert.rejects(() => tab.collection('Task').update('missing', { done: true }), { code: 'ALX_ERR_NOT_FOUND' });
+await assert.rejects(async () => tab.sync, { code: 'ALX_ERR_NOT_LEADER' });
 
 stop();
 await other.close();

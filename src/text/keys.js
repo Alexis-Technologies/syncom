@@ -34,7 +34,9 @@ const MAX_MARKS = 1 << 16;
 // characters are not). Canonical digits only, or one element would have
 // two names.
 const hasControl = (value) => {
-  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) < 32) return true;
+  }
   return false;
 };
 const isOrigin = (value) =>
@@ -94,7 +96,10 @@ const keysOf = (object) => (object && typeof object === 'object' ? Object.keys(o
 const isStamp = (value) => Number.isSafeInteger(value) && value > 0;
 const JSON_TYPES = new Set(['string', 'number', 'boolean', 'object']);
 const isJson = (value) => value === null || JSON_TYPES.has(typeof value);
-const byOrigin = (a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.ts - b.ts);
+const byOrigin = (a, b) => {
+  if (a.origin < b.origin) return -1;
+  return a.origin > b.origin ? 1 : a.ts - b.ts;
+};
 const minStamp = (a, b) => (a === null || compareClock(b, a) < 0 ? b : a);
 // The older of a stamp and `[ts, origin]`: the stamp itself while it is not newer.
 const olderOf = (a, ts, origin) => (a === null || ts < a[0] || (ts === a[0] && origin < a[1]) ? [ts, origin] : a);

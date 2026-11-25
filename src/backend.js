@@ -14,12 +14,16 @@
 // prefers, and `append(dir, name, content)` — at the end of the file, made
 // when absent — which the log's journal prefers to a file per group.
 
+const { ArgumentError } = require('./argument-errors.js');
+
 const METHODS = ['read', 'write', 'exists', 'remove', 'list'];
 
 // The name of the first method an adapter lacks, or null.
 const missingFsiMethod = (value) => {
   if (typeof value !== 'object' || value === null) return METHODS[0];
-  for (const name of METHODS) if (typeof value[name] !== 'function') return name;
+  for (const name of METHODS) {
+    if (typeof value[name] !== 'function') return name;
+  }
   return null;
 };
 
@@ -29,7 +33,7 @@ const isFsi = (value) => missingFsiMethod(value) === null;
 // What the constructors call: the contract, refused with the method's name.
 const checkFsi = (value, label) => {
   const missing = missingFsiMethod(value);
-  if (missing !== null) throw new TypeError(`${label}: adapter has no ${missing}()`);
+  if (missing !== null) throw new ArgumentError(`${label}: adapter has no ${missing}()`);
   return value;
 };
 

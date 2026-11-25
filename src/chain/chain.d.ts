@@ -3,7 +3,7 @@
 // page, a replay — appends a block naming the hash of each record's data
 // after it, a record file is checked against its block on a cold read
 // (`integrity: 'verify'`), and `validate()` walks the chain. Without the
-// plugin no block is written and `validate()` rejects with `NO_CHAIN`;
+// plugin no block is written and `validate()` rejects with `ALX_ERR_NO_CHAIN`;
 // `open({ chain: false })` keeps the plugin registered and the chain off.
 // `Blockchain` is the chain on its own, for an audit tool or the contracts
 // subpath.

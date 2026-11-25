@@ -26,7 +26,7 @@
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 
 const STORES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'blobs'];
 const KEYS = {
@@ -57,15 +57,22 @@ const completion = (tx) =>
 
 const unreadable = (id) => unreadableRecord(SyncomError, id);
 
-// A record given as text: the object it parses to, or the text kept aside (read as INTEGRITY).
+// A record given as text: the object it parses to, or the text kept aside (read as ALX_ERR_INTEGRITY).
 const parsed = (text) => {
-  let value;
   try {
-    value = JSON.parse(text);
+    const value = JSON.parse(text);
+    return value === null || typeof value !== 'object' || Array.isArray(value) ? { text } : { stored: value };
   } catch {
     return { text };
   }
-  return value === null || typeof value !== 'object' || Array.isArray(value) ? { text } : { stored: value };
+};
+
+// The room: the browser's Storage API estimate for the origin (every database of it), where there is one.
+const estimate = async () => {
+  const storage = globalThis.navigator?.storage;
+  if (storage === undefined || typeof storage.estimate !== 'function') return { usage: null, quota: null };
+  const { usage = null, quota = null } = await storage.estimate();
+  return { usage, quota };
 };
 
 /**
@@ -75,16 +82,18 @@ const parsed = (text) => {
  * `'relaxed'`, `'strict'`); `close()` closes the connection.
  */
 const idbEngine = ({
-  name = 'syncom',
+  name: databaseName = 'syncom',
   indexedDB = globalThis.indexedDB,
   IDBKeyRange: KeyRange = globalThis.IDBKeyRange,
   durability = 'default',
   channel: Channel = globalThis.BroadcastChannel,
 } = {}) => {
   if (!indexedDB || typeof indexedDB.open !== 'function') {
-    throw new TypeError('idbEngine: no indexedDB — pass one, or use another engine');
+    throw new ArgumentError('idbEngine: no indexedDB — pass one, or use another engine');
   }
-  if (!KeyRange || typeof KeyRange.bound !== 'function') throw new TypeError('idbEngine: no IDBKeyRange — pass one');
+  if (!KeyRange || typeof KeyRange.bound !== 'function') {
+    throw new ArgumentError('idbEngine: no IDBKeyRange — pass one');
+  }
   const broadcasts = typeof Channel === 'function';
   const capabilities = capabilitiesOf({
     atomicBatch: true,
@@ -100,7 +109,7 @@ const idbEngine = ({
 
   const open = () => {
     opening ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(name, VERSION);
+      const req = indexedDB.open(databaseName, VERSION);
       req.onupgradeneeded = () => {
         const db = req.result;
         for (let i = 0; i < STORES.length; i++) db.createObjectStore(STORES[i], { keyPath: KEYS[STORES[i]] });
@@ -132,7 +141,7 @@ const idbEngine = ({
     completed.catch(() => {});
     const stores = {};
     for (let i = 0; i < names.length; i++) stores[names[i]] = tx.objectStore(names[i]);
-    let value;
+    let value = undefined;
     try {
       value = await fn(stores, tx);
     } catch (error) {
@@ -160,7 +169,9 @@ const idbEngine = ({
 
   const post = (message) => {
     if (!broadcasts) return;
-    bus ??= new Channel(`syncom:${name}`);
+    bus ??= new Channel(`syncom:${databaseName}`);
+    // A BroadcastChannel's postMessage takes no target origin.
+    // oxlint-disable-next-line unicorn/require-post-message-target-origin
     bus.postMessage({ ...message, token });
   };
 
@@ -178,13 +189,13 @@ const idbEngine = ({
           return names;
         }),
       put: (ns, key, value) =>
-        transaction(['kv'], 'readwrite', ({ kv: s }) => void s.put({ p, ns, key, value: String(value) })),
+        transaction(['kv'], 'readwrite', ({ kv: s }) => void s.put({ p, ns, key, value: `${value}` })),
       remove: (ns, key) => transaction(['kv'], 'readwrite', ({ kv: s }) => void s.delete([p, ns, key])),
       // `add` refuses a key that is there: the exclusive create the lock prefers.
       create: (ns, key, value) =>
         transaction(['kv'], 'readwrite', async ({ kv: s }) => {
           try {
-            await request(s.add({ p, ns, key, value: String(value) }));
+            await request(s.add({ p, ns, key, value: `${value}` }));
           } catch (error) {
             throw error?.name === 'ConstraintError' ? eexist(`${ns}/${key}`) : error;
           }
@@ -245,7 +256,9 @@ const idbEngine = ({
           const rows = await request(s.getAll(under([p, id])));
           const wanted = new Set(names);
           const found = new Map();
-          for (let i = 0; i < rows.length; i++) if (wanted.has(rows[i].name)) found.set(rows[i].name, rows[i].text);
+          for (let i = 0; i < rows.length; i++) {
+            if (wanted.has(rows[i].name)) found.set(rows[i].name, rows[i].text);
+          }
           return found;
         }),
       remove: (id, name) => transaction(['pieces'], 'readwrite', ({ pieces: s }) => void s.delete([p, id, name])),
@@ -302,7 +315,7 @@ const idbEngine = ({
         }),
       put: async (digest, bytes) => {
         checkDigest(digest, 'blobs.put');
-        const copy = checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES).slice();
+        const copy = checkBlobBytes(bytes, 'blobs.put', MAX_STORED_BYTES).slice();
         return transaction(['blobs'], 'readwrite', ({ blobs: s }) => void s.put({ p, digest, bytes: copy }));
       },
       remove: async (digest) => {
@@ -335,11 +348,14 @@ const idbEngine = ({
         journaled: false,
         async load() {
           return transaction(['log', 'meta'], 'readonly', async ({ log: l, meta: m }) => {
-            const [index, saved, rows] = await Promise.all([
+            const read = await Promise.all([
               request(m.get([p, 'index'])),
               request(m.get([p, 'segments'])),
               request(l.getAll(under([p]))),
             ]);
+            const index = read[0];
+            const saved = read[1];
+            const rows = read[2];
             segments = Array.isArray(saved?.value) ? saved.value : [];
             const entries = [];
             const byFirst = new Map();
@@ -353,20 +369,24 @@ const idbEngine = ({
               group.seqs.push(row.seq);
             }
             const stored = index?.value ?? null;
-            const floor = stored !== null ? stored.floor : entries.length > 0 ? entries[0].seq : 1;
+            let floor = 1;
+            if (stored !== null) floor = stored.floor;
+            else if (entries.length > 0) floor = entries[0].seq;
             const sealed = sealedTo() ?? floor - 1;
             groups = [];
-            const open = [];
+            const openGroups = [];
             for (const group of byFirst.values()) {
               if (group.last <= sealed) continue;
               groups.push({ first: group.first, last: group.last });
               const unsealed = [];
-              for (let i = 0; i < group.seqs.length; i++) if (group.seqs[i] > sealed) unsealed.push(group.seqs[i]);
-              open.push({ first: group.first, last: group.last, unsealed });
+              for (let i = 0; i < group.seqs.length; i++) {
+                if (group.seqs[i] > sealed) unsealed.push(group.seqs[i]);
+              }
+              openGroups.push({ first: group.first, last: group.last, unsealed });
             }
             groups.sort((a, b) => a.first - b.first);
-            open.sort((a, b) => a.first - b.first);
-            return { index: stored, hasIndex: stored !== null, entries, groups: open, floor, lost: false };
+            openGroups.sort((a, b) => a.first - b.first);
+            return { index: stored, hasIndex: stored !== null, entries, groups: openGroups, floor, lost: false };
           });
         },
         get sealedTo() {
@@ -406,11 +426,13 @@ const idbEngine = ({
         },
         async sealed(to) {
           const kept = [];
-          for (let i = 0; i < groups.length; i++) if (groups[i].last > to) kept.push(groups[i]);
+          for (let i = 0; i < groups.length; i++) {
+            if (groups[i].last > to) kept.push(groups[i]);
+          }
           groups = kept;
         },
         async drop(segment) {
-          if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
+          if (segments[0] !== segment) throw new ArgumentError('drop(segment): the oldest segment goes first');
           const rest = segments.slice(1);
           await transaction(['log', 'meta'], 'readwrite', ({ log: l, meta: m }) => {
             l.delete(KeyRange.bound([p, segment.from], [p, segment.to]));
@@ -446,7 +468,7 @@ const idbEngine = ({
         const puts = batch.kv?.put;
         if (puts !== undefined) {
           for (let i = 0; i < puts.length; i++) {
-            s.kv.put({ p, ns: puts[i][0], key: puts[i][1], value: String(puts[i][2]) });
+            s.kv.put({ p, ns: puts[i][0], key: puts[i][1], value: `${puts[i][2]}` });
           }
         }
         const rows = batch.records;
@@ -491,7 +513,8 @@ const idbEngine = ({
     const changes = broadcasts
       ? {
           subscribe(listener) {
-            const listening = new Channel(`syncom:${name}`);
+            const listening = new Channel(`syncom:${databaseName}`);
+            // One handler per channel, as `onmessage` sets it: a `channel` handed in may have no addEventListener.
             listening.onmessage = (event) => {
               const message = event.data;
               if (message === null || typeof message !== 'object' || message.p !== p || message.token === token) return;
@@ -502,13 +525,6 @@ const idbEngine = ({
         }
       : undefined;
 
-    // The room: the browser's Storage API estimate for the origin (every database of it), where there is one.
-    const estimate = async () => {
-      const storage = globalThis.navigator?.storage;
-      if (storage === undefined || typeof storage.estimate !== 'function') return { usage: null, quota: null };
-      const { usage = null, quota = null } = await storage.estimate();
-      return { usage, quota };
-    };
     const db = {
       path: p,
       capabilities,
@@ -548,7 +564,7 @@ const idbEngine = ({
     /** Deletes the whole IndexedDB database — every path's stores. */
     async destroy() {
       await this.close();
-      await request(indexedDB.deleteDatabase(name));
+      await request(indexedDB.deleteDatabase(databaseName));
     },
   });
 };

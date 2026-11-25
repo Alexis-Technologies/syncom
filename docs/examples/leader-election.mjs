@@ -90,8 +90,8 @@ const id = await first.insert({ $type: 'Task', title: 'Write the docs', done: fa
 await waitUntil(() => third.hasRecord(id), { timeout: 3000 });
 assert.deepEqual(await third.get(id), { $type: 'Task', title: 'Write the docs', done: false });
 assert.deepEqual(log, ['true false false']);
-await assert.rejects(second.insert({ $type: 'Task', title: 'x' }), { code: 'NOT_LEADER' });
-assert.throws(() => second.sync, { code: 'NOT_LEADER' });
+await assert.rejects(second.insert({ $type: 'Task', title: 'x' }), { code: 'ALX_ERR_NOT_LEADER' });
+assert.throws(() => second.sync, { code: 'ALX_ERR_NOT_LEADER' });
 
 // #region failover
 second.onLeader(({ generation }) => console.log('the second tab leads, generation', generation));

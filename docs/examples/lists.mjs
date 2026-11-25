@@ -28,17 +28,17 @@ assert.deepEqual((await board.Task.get(task.id)).checklist, [{ step: 'test', own
 try {
   await board.splice(task.id, 'checklist', 9, 0, ['late']);
 } catch (error) {
-  console.log(error.code, error.length); // OUT_OF_RANGE 3
+  console.log(error.code, error.length); // ALX_ERR_OUT_OF_RANGE 3
 }
 try {
   await board.splice(task.id, 'title', 0, 0, ['not a list']);
 } catch (error) {
-  console.log(error.code, error.kind); // FIELD_KIND register
+  console.log(error.code, error.kind); // ALX_ERR_FIELD_KIND register
 }
 // #endregion errors
-await assert.rejects(board.splice(task.id, 'checklist', 9, 0, ['late']), { code: 'OUT_OF_RANGE', length: 3 });
-await assert.rejects(board.splice(task.id, 'title', 0, 0, ['x']), { code: 'FIELD_KIND', kind: 'register' });
-await assert.rejects(board.Task.update(task.id, { checklist: [] }), { code: 'FIELD_KIND', kind: 'list' });
+await assert.rejects(board.splice(task.id, 'checklist', 9, 0, ['late']), { code: 'ALX_ERR_OUT_OF_RANGE', length: 3 });
+await assert.rejects(board.splice(task.id, 'title', 0, 0, ['x']), { code: 'ALX_ERR_FIELD_KIND', kind: 'register' });
+await assert.rejects(board.Task.update(task.id, { checklist: [] }), { code: 'ALX_ERR_FIELD_KIND', kind: 'list' });
 
 // #region move
 await board.setAt(task.id, 'checklist', 0, 'test it'); // a new value for the element at 0

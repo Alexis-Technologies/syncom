@@ -30,6 +30,7 @@ const { diffViews } = require('../patch.js');
 const { Emitter } = require('../emitter.js');
 const { PLUGINS } = require('../symbols.js');
 const { under } = require('../paths.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const WHOLE = new Set(['write', 'delete', 'merge', 'purge']);
 const GLOBAL = '*';
@@ -47,7 +48,9 @@ const touchedBy = (op) => {
 // is a reset for diffViews, since no op removes one field.
 const kindsIn = (data, kinds) => {
   const out = {};
-  if (data !== null) for (const field of Object.keys(data)) out[field] = kinds[field];
+  if (data !== null) {
+    for (const field of Object.keys(data)) out[field] = kinds[field];
+  }
   return out;
 };
 
@@ -55,8 +58,10 @@ const kindsIn = (data, kinds) => {
 // it and on a prefix of it (a write at `profile` is a change of
 // `profile/city`): what a patch of the field runs into.
 const typesAround = (conflicts, field) => {
-  let out;
-  for (const [other, types] of conflicts) {
+  let out = null;
+  for (const entry of conflicts) {
+    const other = entry[0];
+    const types = entry[1];
     if (other !== field && !under(other, field) && !under(field, other)) continue;
     out ??= new Set();
     for (const type of types) out.add(type);
@@ -69,21 +74,72 @@ const typesAround = (conflicts, field) => {
 // field moved); for a counter only what is not an increment, for a set
 // only what is not an add or a remove — those commute with the patch.
 const conflicting = (patch, types) => {
-  if (types === undefined) return false;
+  if (types === null) return false;
   if (patch.action === 'inc') {
-    for (const type of types) if (type !== 'inc') return true;
+    for (const type of types) {
+      if (type !== 'inc') return true;
+    }
     return false;
   }
   if (patch.action === 'add' || (patch.action === 'remove' && patch.own === true)) {
-    for (const type of types) if (type !== 'add' && type !== 'remove') return true;
+    for (const type of types) {
+      if (type !== 'add' && type !== 'remove') return true;
+    }
     return false;
   }
   return true;
 };
 
+// Field by field: the exact way back where nothing else touched the field;
+// where something did, the loose one — a counter taken down, this node's
+// adds removed — when it commutes with what the others did, else the field
+// is left alone. The patches kept pushed to `kept`; the count of the ones
+// left alone returned.
+const keepPatches = (patches, loose, conflicts, kept) => {
+  const byField = new Map();
+  for (let i = 0; i < loose.length; i++) {
+    const alt = loose[i];
+    const list = byField.get(alt.field);
+    if (list === undefined) byField.set(alt.field, [alt]);
+    else list.push(alt);
+  }
+  // A field the way back resets either way — one that changed kind, a register that was not there — has
+  // no looser way: its patches go together or not at all. The made-again kind taken without its `unset`
+  // lands on a field of the other kind (ALX_ERR_FIELD_KIND, the whole undo refused), the `unset` alone leaves none.
+  const reset = new Set();
+  for (let i = 0; i < loose.length; i++) {
+    if (loose[i].action === 'unset') reset.add(loose[i].field);
+  }
+  let skipped = 0;
+  for (const patch of patches) {
+    const types = typesAround(conflicts, patch.field);
+    if (types !== null && reset.has(patch.field)) {
+      skipped++;
+      continue;
+    }
+    if (!conflicting(patch, types)) {
+      kept.push(patch);
+      continue;
+    }
+    const alternatives = byField.get(patch.field);
+    let taken = 0;
+    if (alternatives !== undefined) {
+      for (let i = 0; i < alternatives.length; i++) {
+        if (conflicting(alternatives[i], types)) continue;
+        kept.push(alternatives[i]);
+        taken++;
+      }
+    }
+    if (taken === 0) skipped++;
+  }
+  return skipped;
+};
+
 // Whether a field is one of the tracked `paths`, or hangs under one.
 const tracked = (field, paths) => {
-  for (let i = 0; i < paths.length; i++) if (field === paths[i] || under(field, paths[i])) return true;
+  for (let i = 0; i < paths.length; i++) {
+    if (field === paths[i] || under(field, paths[i])) return true;
+  }
   return false;
 };
 
@@ -132,7 +188,9 @@ const reaches = (changes, paths) => {
 // A non-empty list of strings.
 const isPathList = (paths) => {
   if (!Array.isArray(paths) || paths.length === 0) return false;
-  for (let i = 0; i < paths.length; i++) if (typeof paths[i] !== 'string') return false;
+  for (let i = 0; i < paths.length; i++) {
+    if (typeof paths[i] !== 'string') return false;
+  }
   return true;
 };
 
@@ -206,17 +264,23 @@ class UndoManager extends Emitter {
   // asked to keep; read by the pin on every entry, so kept, not recomputed.
   #oldestSeq = Infinity;
   #collecting = null;
-  #unpin;
+  #unpin = null;
+  // Takes the manager's two listeners off the storage: the closures that call its methods, made once at the start.
+  #unlisten = null;
   #stopped = false;
-  #onCommit = (event) => this.#commit(event);
-  #onClose = () => this.stop();
 
   constructor(storage, options) {
     super();
     this.#storage = storage;
     this.#options = options;
-    storage.on('commit', this.#onCommit);
-    storage.on('close', this.#onClose);
+    const onCommit = (event) => this.#commit(event);
+    const onClose = () => this.stop();
+    storage.on('commit', onCommit);
+    storage.on('close', onClose);
+    this.#unlisten = () => {
+      storage.off('commit', onCommit);
+      storage.off('close', onClose);
+    };
     if (options.onPush) this.on('push', options.onPush);
     if (options.onPop) this.on('pop', options.onPop);
     // What a step's conflicts are read from must stay in the log.
@@ -230,7 +294,9 @@ class UndoManager extends Emitter {
     for (const step of this.#undo) seq = Math.min(seq, step.lastSeq);
     for (const step of this.#redo) seq = Math.min(seq, step.lastSeq);
     this.#oldestSeq = seq;
-    for (const own of this.#own) if (own <= seq) this.#own.delete(own);
+    for (const own of this.#own) {
+      if (own <= seq) this.#own.delete(own);
+    }
   }
 
   get canUndo() {
@@ -348,7 +414,9 @@ class UndoManager extends Emitter {
   #conflicts(step, id) {
     const fields = new Map();
     const undone = new Set();
-    for (const taken of this.#redo) for (const seq of taken.taken) undone.add(seq);
+    for (const taken of this.#redo) {
+      for (const seq of taken.taken) undone.add(seq);
+    }
     for (const entry of this.#storage.log.entriesOf(id)) {
       const { seq, op } = entry;
       if (seq <= step.lastSeq || step.seqs.has(seq) || this.#own.has(seq) || undone.has(seq) || entry.skipped) continue;
@@ -386,7 +454,9 @@ class UndoManager extends Emitter {
     };
     let current = null;
     try {
-      for (const [id, record] of step.records) {
+      for (const pair of step.records) {
+        const id = pair[0];
+        const record = pair[1];
         current = id;
         const conflicts = this.#conflicts(step, id);
         const plugins = this.#storage[PLUGINS];
@@ -399,45 +469,9 @@ class UndoManager extends Emitter {
           kept = [];
           skipped = patches.length;
         } else if (!force) {
-          // Field by field: the exact way back where nothing else touched
-          // the field; where something did, the loose one — a counter taken
-          // down, this node's adds removed — when it commutes with what the
-          // others did, else the field is left alone.
           const loose = invert(record, false, plugins, paths);
-          const byField = new Map();
-          for (let i = 0; i < loose.length; i++) {
-            const alt = loose[i];
-            const list = byField.get(alt.field);
-            if (list === undefined) byField.set(alt.field, [alt]);
-            else list.push(alt);
-          }
-          // A field the way back resets either way — one that changed kind, a register that was not there — has
-          // no looser way: its patches go together or not at all. The made-again kind taken without its `unset`
-          // lands on a field of the other kind (FIELD_KIND, the whole undo refused), the `unset` alone leaves none.
-          const reset = new Set();
-          for (let i = 0; i < loose.length; i++) if (loose[i].action === 'unset') reset.add(loose[i].field);
           kept = [];
-          for (const patch of patches) {
-            const types = typesAround(conflicts, patch.field);
-            if (types !== undefined && reset.has(patch.field)) {
-              skipped++;
-              continue;
-            }
-            if (!conflicting(patch, types)) {
-              kept.push(patch);
-              continue;
-            }
-            const alternatives = byField.get(patch.field);
-            let taken = 0;
-            if (alternatives !== undefined) {
-              for (let i = 0; i < alternatives.length; i++) {
-                if (conflicting(alternatives[i], types)) continue;
-                kept.push(alternatives[i]);
-                taken++;
-              }
-            }
-            if (taken === 0) skipped++;
-          }
+          skipped = keepPatches(patches, loose, conflicts, kept);
         }
         result.skipped += skipped;
         if (kept.length > 0) {
@@ -488,7 +522,7 @@ class UndoManager extends Emitter {
    * is the step.
    */
   async group(fn) {
-    if (typeof fn !== 'function') throw new TypeError('group() takes a function');
+    if (typeof fn !== 'function') throw new ArgumentError('group() takes a function');
     this.groupStart();
     try {
       return await fn();
@@ -550,8 +584,7 @@ class UndoManager extends Emitter {
   stop() {
     if (this.#stopped) return;
     this.#stopped = true;
-    this.#storage.off('commit', this.#onCommit);
-    this.#storage.off('close', this.#onClose);
+    this.#unlisten();
     this.#unpin();
     this.#undo = [];
     this.#redo = [];
@@ -572,25 +605,29 @@ const createUndo = (storage, options = {}) => {
   const { mergeInterval = 500, limit = 100, scope, exclude = null, actor, onPush, onPop } = options;
   const { trackedSources = null, records = null, paths = null } = options;
   if (!Number.isFinite(mergeInterval) || mergeInterval < 0) {
-    throw new TypeError('createUndo(): mergeInterval is ms ≥ 0');
+    throw new ArgumentError('createUndo(): mergeInterval is ms ≥ 0');
   }
-  if (!Number.isInteger(limit) || limit < 1) throw new TypeError('createUndo(): limit is a positive integer');
-  if (exclude !== null && typeof exclude !== 'function') throw new TypeError('createUndo(): exclude is a function');
-  if (scope !== undefined && typeof scope !== 'string') throw new TypeError('createUndo(): scope is a string');
+  if (!Number.isInteger(limit) || limit < 1) throw new ArgumentError('createUndo(): limit is a positive integer');
+  if (exclude !== null && typeof exclude !== 'function') throw new ArgumentError('createUndo(): exclude is a function');
+  if (scope !== undefined && typeof scope !== 'string') throw new ArgumentError('createUndo(): scope is a string');
   if (trackedSources !== null && typeof trackedSources?.[Symbol.iterator] !== 'function') {
-    throw new TypeError('createUndo(): trackedSources is a list of sources');
+    throw new ArgumentError('createUndo(): trackedSources is a list of sources');
   }
   if (records !== null && typeof records !== 'function' && typeof records?.[Symbol.iterator] !== 'function') {
-    throw new TypeError('createUndo(): records is a list of ids, or a predicate');
+    throw new ArgumentError('createUndo(): records is a list of ids, or a predicate');
   }
-  if (paths !== null && !isPathList(paths)) throw new TypeError('createUndo(): paths is a list of field paths');
-  for (const [name, fn] of [
+  if (paths !== null && !isPathList(paths)) throw new ArgumentError('createUndo(): paths is a list of field paths');
+  for (const entry of [
     ['onPush', onPush],
     ['onPop', onPop],
   ]) {
-    if (fn !== undefined && typeof fn !== 'function') throw new TypeError(`createUndo(): ${name} is a function`);
+    const name = entry[0];
+    const fn = entry[1];
+    if (fn !== undefined && typeof fn !== 'function') throw new ArgumentError(`createUndo(): ${name} is a function`);
   }
-  if (!storage || typeof storage.on !== 'function' || !storage.log) throw new TypeError('createUndo() takes a storage');
+  if (!storage || typeof storage.on !== 'function' || !storage.log) {
+    throw new ArgumentError('createUndo() takes a storage');
+  }
   return new UndoManager(storage, {
     mergeInterval,
     limit,

@@ -65,12 +65,12 @@ const reopened = await createDatabase({ path: 'board', schema: { entities: { Tas
 try {
   await reopened.Task.get(task.id);
 } catch (error) {
-  if (error.code !== 'INTEGRITY') throw error;
+  if (error.code !== 'ALX_ERR_INTEGRITY') throw error;
   // look at the file first: it is evidence. Then rebuild the record from this node's log.
   console.log(await reopened.repair(task.id)); // { ops: 30, alive: true }: the entries it replayed
 }
 console.log((await reopened.Task.get(task.id)).title); // 'Ship it'
 // #endregion repair
 assert.equal((await reopened.Task.get(task.id)).title, 'Ship it');
-await assert.rejects(reopened.repair('never-written'), { code: 'UNRECOVERABLE' });
+await assert.rejects(reopened.repair('never-written'), { code: 'ALX_ERR_UNRECOVERABLE' });
 await reopened.close();

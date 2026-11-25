@@ -6,14 +6,15 @@
 // unless `readOnly` (`tools` names the verbs to make) — JSON in, JSON out. Registering them is the caller's: an MCP
 // server's `tools/list` answers the definitions and its `tools/call` runs `execute`, WebMCP's
 // `navigator.modelContext.registerTool(tool)` takes one as it is; no SDK is imported. `execute(args)` checks `args`
-// against `inputSchema` first (`checkArgs`: the subset of JSON Schema the tools declare, own members alone) — a tool
-// is called by a model, and a wrong argument is a TypeError at the door, never a crash deeper down; a `$regex`
-// anywhere in a query is refused the same way unless `regex: true` (a pattern of the model's is a pattern on the
-// event loop). The collection's own errors (NOT_FOUND, a validator's, PLUGIN_MISSING without the query plugin) come
+// against `inputSchema` first (`checkArgs`: the subset of JSON Schema the tools declare, own members alone) — a tool is
+// called by a model, and a wrong argument is a TypeError at the door, never a crash deeper down; a `$regex` anywhere in
+// a query is refused the same way unless `regex: true` (a pattern of the model's is a pattern on the event loop). The
+// collection's own errors (ALX_ERR_NOT_FOUND, a validator's, ALX_ERR_PLUGIN_MISSING without the query plugin) come
 // through as they are: SyncomErrors with a code the server reports. `changes` answers at most `limit` records and
 // `more` while the log holds more.
 
 const { SOURCE } = require('../symbols.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const MAX_LIMIT = 1000;
 const DEFAULT_LIMIT = 100;
@@ -26,7 +27,10 @@ const MAX_QUERY_DEPTH = 32;
 const VERBS = ['query', 'count', 'get', 'changes', 'wait_changes', 'insert', 'upsert', 'delete'];
 const WRITERS = new Set(['insert', 'upsert', 'delete']);
 
-const kindOf = (value) => (Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value);
+const kindOf = (value) => {
+  if (Array.isArray(value)) return 'array';
+  return value === null ? 'null' : typeof value;
+};
 
 // `value` against `schema`: type, enum, minimum/maximum, items, properties with required and a closed object where
 // `additionalProperties` is false — what the tools declare, no more. A member is one the schema NAMES as its own
@@ -36,17 +40,17 @@ const check = (schema, value, path) => {
   if (schema.type !== undefined) {
     const expected = schema.type === 'integer' || schema.type === 'number' ? 'number' : schema.type;
     const ok = kind === expected && (schema.type !== 'integer' || Number.isInteger(value));
-    if (!ok) throw new TypeError(`${path}: ${schema.type} expected, ${kind} given`);
+    if (!ok) throw new ArgumentError(`${path}: ${schema.type} expected, ${kind} given`);
   }
   if (schema.enum !== undefined && !schema.enum.includes(value)) {
-    throw new TypeError(`${path}: one of ${schema.enum.join(', ')} expected`);
+    throw new ArgumentError(`${path}: one of ${schema.enum.join(', ')} expected`);
   }
   if (kind === 'number') {
     if (schema.minimum !== undefined && value < schema.minimum) {
-      throw new TypeError(`${path}: ${schema.minimum} at least`);
+      throw new ArgumentError(`${path}: ${schema.minimum} at least`);
     }
     if (schema.maximum !== undefined && value > schema.maximum) {
-      throw new TypeError(`${path}: ${schema.maximum} at most`);
+      throw new ArgumentError(`${path}: ${schema.maximum} at most`);
     }
   }
   if (kind === 'array' && schema.items !== undefined) {
@@ -55,11 +59,11 @@ const check = (schema, value, path) => {
   if (kind === 'object' && schema.properties !== undefined) {
     const required = schema.required ?? [];
     for (let i = 0; i < required.length; i++) {
-      if (!Object.hasOwn(value, required[i])) throw new TypeError(`${path}.${required[i]} is required`);
+      if (!Object.hasOwn(value, required[i])) throw new ArgumentError(`${path}.${required[i]} is required`);
     }
     for (const key of Object.keys(value)) {
       if (!Object.hasOwn(schema.properties, key)) {
-        if (schema.additionalProperties === false) throw new TypeError(`${path}.${key} is not a member`);
+        if (schema.additionalProperties === false) throw new ArgumentError(`${path}.${key} is not a member`);
         continue;
       }
       check(schema.properties[key], value[key], `${path}.${key}`);
@@ -73,13 +77,13 @@ const checkArgs = (schema, args) => check(schema, args, 'args');
 // A `$regex` anywhere in `query` — own keys, arrays, MAX_QUERY_DEPTH deep — is refused: a TypeError at the door.
 const forbidRegex = (value, path, depth) => {
   if (value === null || typeof value !== 'object') return;
-  if (depth > MAX_QUERY_DEPTH) throw new TypeError(`${path}: too deep`);
+  if (depth > MAX_QUERY_DEPTH) throw new ArgumentError(`${path}: too deep`);
   if (Array.isArray(value)) {
     for (let i = 0; i < value.length; i++) forbidRegex(value[i], `${path}[${i}]`, depth + 1);
     return;
   }
   for (const key of Object.keys(value)) {
-    if (key === '$regex') throw new TypeError(`${path}.$regex is not allowed: createTools({ regex: true })`);
+    if (key === '$regex') throw new ArgumentError(`${path}.$regex is not allowed: createTools({ regex: true })`);
     forbidRegex(value[key], `${path}.${key}`, depth + 1);
   }
 };
@@ -236,7 +240,7 @@ const toolsOf = (db, name, collection, { verbs, limit: maxLimit, sealed, regex }
       `The record of ${name} deleted; deleted false where there is none`,
       object({ id: ID }, ['id']),
       async ({ id }) => {
-        // Nothing to delete leaves no tombstone; a record of another collection is the collection's NOT_FOUND.
+        // Nothing to delete leaves no tombstone; a record of another collection is the collection's ALX_ERR_NOT_FOUND.
         const row = seam.row(id);
         if (row === null || row.gone === true) return { id, deleted: false };
         await collection.delete(id);
@@ -246,7 +250,11 @@ const toolsOf = (db, name, collection, { verbs, limit: maxLimit, sealed, regex }
   ];
   const tools = [];
   for (let i = 0; i < defs.length; i++) {
-    const [verb, description, schema, run] = defs[i];
+    const def = defs[i];
+    const verb = def[0];
+    const description = def[1];
+    const schema = def[2];
+    const run = def[3];
     if (verbs.has(verb)) tools.push(tool(seam.otel, verb, `${name}_${verb}`, description, schema, run));
   }
   return tools;
@@ -261,7 +269,7 @@ const toolsOf = (db, name, collection, { verbs, limit: maxLimit, sealed, regex }
  */
 const createTools = (db, options = {}) => {
   if (db === null || typeof db !== 'object' || typeof db.log?.read !== 'function' || db.collections === undefined) {
-    throw new TypeError('createTools() takes a database');
+    throw new ArgumentError('createTools() takes a database');
   }
   const {
     collections = null,
@@ -272,30 +280,32 @@ const createTools = (db, options = {}) => {
     regex = false,
   } = options;
   if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIMIT) {
-    throw new TypeError(`createTools(): limit is 1..${MAX_LIMIT}`);
+    throw new ArgumentError(`createTools(): limit is 1..${MAX_LIMIT}`);
   }
-  for (const [option, value] of [
+  for (const entry of [
     ['sealed', sealed],
     ['regex', regex],
     ['readOnly', readOnly],
   ]) {
-    if (typeof value !== 'boolean') throw new TypeError(`createTools(): ${option} is a boolean`);
+    const option = entry[0];
+    const value = entry[1];
+    if (typeof value !== 'boolean') throw new ArgumentError(`createTools(): ${option} is a boolean`);
   }
-  if (tools !== null && !Array.isArray(tools)) throw new TypeError('createTools(): tools is an array of verbs');
+  if (tools !== null && !Array.isArray(tools)) throw new ArgumentError('createTools(): tools is an array of verbs');
   const wanted = tools ?? VERBS;
   const verbs = new Set();
   for (let i = 0; i < wanted.length; i++) {
     const verb = wanted[i];
-    if (!VERBS.includes(verb)) throw new TypeError(`createTools(): no tool ${verb}`);
+    if (!VERBS.includes(verb)) throw new ArgumentError(`createTools(): no tool ${verb}`);
     if (!readOnly || !WRITERS.has(verb)) verbs.add(verb);
   }
   const all = db.collections;
   const names = collections === null ? Object.keys(all) : collections;
-  if (!Array.isArray(names)) throw new TypeError('createTools(): collections is an array');
+  if (!Array.isArray(names)) throw new ArgumentError('createTools(): collections is an array');
   const out = [];
   for (let i = 0; i < names.length; i++) {
     const collection = all[names[i]];
-    if (collection === undefined) throw new TypeError(`createTools(): no collection ${names[i]}`);
+    if (collection === undefined) throw new ArgumentError(`createTools(): no collection ${names[i]}`);
     const made = toolsOf(db, names[i], collection, { verbs, limit, sealed, regex });
     for (let j = 0; j < made.length; j++) out.push(made[j]);
   }

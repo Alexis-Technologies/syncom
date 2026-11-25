@@ -14,12 +14,13 @@
 const { valueAt, isPath } = require('../paths.js');
 const { isPlainObject } = require('../shape.js');
 const { CREATE } = require('../symbols.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const PREFIX = 'state.';
 
 const pathArg = (method, path) => {
   if (path === undefined || path === null) return null;
-  if (!isPath(path)) throw new TypeError(`${method}() takes a path (segments joined by '/')`);
+  if (!isPath(path)) throw new ArgumentError(`${method}() takes a path (segments joined by '/')`);
   return path;
 };
 
@@ -41,7 +42,7 @@ const laid = (object, path, value) => {
 const next = (method, given, current) => {
   const value = typeof given === 'function' ? given(current === undefined ? null : current) : given;
   if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
-    throw new TypeError(`${method}() takes a JSON value, or a function of the value that answers one`);
+    throw new ArgumentError(`${method}() takes a JSON value, or a function of the value that answers one`);
   }
   return value;
 };
@@ -56,7 +57,9 @@ const overRecord = (db, id) => ({
     if (data === null) return path === null ? {} : undefined;
     if (path === null) {
       const out = {};
-      for (const key of Object.keys(data)) if (key !== '$type') out[key] = data[key];
+      for (const key of Object.keys(data)) {
+        if (key !== '$type') out[key] = data[key];
+      }
       return out;
     }
     return valueAt(data, path);
@@ -66,7 +69,7 @@ const overRecord = (db, id) => ({
       const data = await tx.get(id);
       if (path === null) {
         const value = next('set', given, data === null ? null : data);
-        if (!isPlainObject(value)) throw new TypeError('set() of the whole state takes an object');
+        if (!isPlainObject(value)) throw new ArgumentError('set() of the whole state takes an object');
         await tx.set(id, value);
         return value;
       }
@@ -96,11 +99,11 @@ const overLocal = (store, key) => ({
     return held === null ? undefined : valueAt(held, path);
   },
   set: async (path, given) => {
-    let value;
+    let value = undefined;
     await store.set(key, (held) => {
       if (path === null) {
         value = next('set', given, held);
-        if (!isPlainObject(value)) throw new TypeError('set() of the whole state takes an object');
+        if (!isPlainObject(value)) throw new ArgumentError('set() of the whole state takes an object');
         return value;
       }
       value = next('set', given, held === null ? undefined : valueAt(held, path));
@@ -125,10 +128,10 @@ const overLocal = (store, key) => ({
  */
 const createState = (db, name, { local = false } = {}) => {
   if (!db || typeof db.get !== 'function' || typeof db.transact !== 'function') {
-    throw new TypeError('createState() takes a database');
+    throw new ArgumentError('createState() takes a database');
   }
   if (typeof name !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,100}$/.test(name)) {
-    throw new TypeError('createState() takes a name: letters, digits, _ . -');
+    throw new ArgumentError('createState() takes a name: letters, digits, _ . -');
   }
   const id = `${PREFIX}${name}`;
   const inner = local ? overLocal(db.local, id) : overRecord(db, id);
@@ -147,8 +150,11 @@ const createState = (db, name, { local = false } = {}) => {
     },
     delete: async (path) => inner.delete(pathArg('delete', path)),
     observe: (path, listener) => {
-      if (typeof path === 'function' && listener === undefined) [path, listener] = [null, path];
-      if (typeof listener !== 'function') throw new TypeError('observe() takes a listener');
+      if (typeof path === 'function' && listener === undefined) {
+        listener = path;
+        path = null;
+      }
+      if (typeof listener !== 'function') throw new ArgumentError('observe() takes a listener');
       const at = pathArg('observe', path);
       // What the listener hears: the value at the path, read after the change; a read that fails or a listener
       // that throws is contained, as every listener is.

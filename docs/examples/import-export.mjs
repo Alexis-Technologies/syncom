@@ -79,10 +79,10 @@ const v2 = await createDatabase({
   schema: { ...schema, version: 2, snapshot: { Task: ['title', 'done', 'due'] } },
 });
 const refused = await importJSON(v2, dump).catch((error) => error);
-console.log(refused.code); // SCHEMA_MISMATCH: the dump was made under another schema
+console.log(refused.code); // ALX_ERR_SCHEMA_MISMATCH: the dump was made under another schema
 await importJSON(v2, dump, { force: true }); // you know the records read the same under both
 // #endregion mismatch
-assert.equal(refused.code, 'SCHEMA_MISMATCH');
+assert.equal(refused.code, 'ALX_ERR_SCHEMA_MISMATCH');
 assert.equal((await v2.get(task.id)).title, 'Write the docs');
 
 await Promise.all([board.close(), copy.close(), fresh.close(), v2.close()]);

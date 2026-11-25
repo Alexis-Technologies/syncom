@@ -32,7 +32,7 @@ const { now } = require('./telemetry/writer.js');
 const TOMBSTONES = 'tombstones';
 
 const unreadableTombstone = (id, cause) =>
-  new SyncomError('INTEGRITY', `Tombstone ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+  new SyncomError('ALX_ERR_INTEGRITY', `Tombstone ${id} is unreadable`, { id, cause, reason: 'unreadable' });
 
 // A write set's kv part with the tombstones' removals added — the chain's puts never edited in place.
 const withRemovals = (kv, removals) => {
@@ -42,6 +42,9 @@ const withRemovals = (kv, removals) => {
 };
 
 const isThenable = (value) => value !== null && typeof value === 'object' && typeof value.then === 'function';
+
+// The collection an unpurged tombstone was of: the stored record's `type`, else the row's own.
+const typeOfGone = (entry) => (typeof entry.data?.$type === 'string' ? entry.data.$type : entry.type);
 
 // How many of the oldest cached entries one write looks at for one to evict.
 const EVICT_SCAN = 64;
@@ -202,7 +205,9 @@ class EntryStore {
   /** Lists the `tombstones` namespace once — the ids whose entry lives there. Run at open, before the catalog loads. */
   async open() {
     const ids = await this.#tombstones.list();
-    for (let i = 0; i < ids.length; i++) if (isRecordId(ids[i])) this.#folded.add(ids[i]);
+    for (let i = 0; i < ids.length; i++) {
+      if (isRecordId(ids[i])) this.#folded.add(ids[i]);
+    }
   }
 
   /** Whether `id` is a folded tombstone: its entry in the `tombstones` kv namespace, no record file. */
@@ -210,16 +215,17 @@ class EntryStore {
     return this.#folded.has(id);
   }
 
-  /** The folded ids, sorted — a copy. */
   /** How many tombstones are folded into the namespace. */
   get foldedCount() {
     return this.#folded.size;
   }
 
+  /** The folded ids, sorted — a copy. */
   foldedIds() {
     const ids = [];
     for (const id of this.#folded) ids.push(id);
-    return ids.sort();
+    ids.sort();
+    return ids;
   }
 
   async load(id, stored = undefined) {
@@ -305,7 +311,9 @@ class EntryStore {
     await this.#write(batch);
     for (let i = 0; i < marks.length; i++) marks[i]();
     for (let i = 0; i < folded.length; i++) {
-      const [id, entry] = folded[i];
+      const pair = folded[i];
+      const id = pair[0];
+      const entry = pair[1];
       await this.#drop(id, new Set(), 0);
       this.#folded.add(id);
       this.remember(id, entry);
@@ -321,7 +329,9 @@ class EntryStore {
    */
   async dropMany(ids, { keepRows = false } = {}) {
     const removals = [];
-    for (let i = 0; i < ids.length; i++) if (this.#folded.has(ids[i])) removals.push([TOMBSTONES, ids[i]]);
+    for (let i = 0; i < ids.length; i++) {
+      if (this.#folded.has(ids[i])) removals.push([TOMBSTONES, ids[i]]);
+    }
     if (removals.length === 0) return 0;
     await this.#write({ kv: { remove: removals } });
     for (let i = 0; i < removals.length; i++) {
@@ -382,14 +392,14 @@ class EntryStore {
    */
   async parse(id, raw) {
     let stored = null;
-    let cause;
+    let cause = undefined;
     try {
       stored = JSON.parse(raw);
     } catch (error) {
       cause = error;
     }
     if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
-      throw new SyncomError('INTEGRITY', `Record ${id} is unreadable`, { id, cause });
+      throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is unreadable`, { id, cause });
     }
     return this.#fromStored(id, stored);
   }
@@ -400,7 +410,7 @@ class EntryStore {
     const { data, meta, encrypted, block } = stored;
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
-      if (!isValid) throw new SyncomError('INTEGRITY', `Record ${id} is invalid`, { id });
+      if (!isValid) throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is invalid`, { id });
     }
     if (encrypted) return { data: await this.#decrypt(data), meta: null, encrypted: true, block };
     const entry = { data, meta: await this.#assemble(id, meta, stored.gen, true), encrypted: false, block };
@@ -428,7 +438,7 @@ class EntryStore {
         const name = held.parts[i];
         if (name === null) continue;
         if (typeof name !== 'string' || !name.startsWith(`${id}~`) || !name.endsWith('.json')) {
-          throw new SyncomError('INTEGRITY', `Record ${id} names a piece not its own`, { id });
+          throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} names a piece not its own`, { id });
         }
         wanted.push(name);
       }
@@ -441,22 +451,26 @@ class EntryStore {
       for (let i = 0; i < held.parts.length; i++) {
         const name = held.parts[i];
         if (name === null) continue;
-        let piece;
+        let piece = null;
         try {
           const text = texts.get(name) ?? null;
-          if (text === null) throw new SyncomError('INTEGRITY', `piece ${name} is missing`, { id });
+          if (text === null) throw new SyncomError('ALX_ERR_INTEGRITY', `piece ${name} is missing`, { id });
           piece = JSON.parse(text);
         } catch (cause) {
-          throw new SyncomError('INTEGRITY', `Record ${id} is unreadable: its piece ${name}`, { id, cause });
+          throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is unreadable: its piece ${name}`, { id, cause });
         }
-        if (!isPlainObject(piece)) throw new SyncomError('INTEGRITY', `Record ${id}: piece ${name}`, { id });
+        if (!isPlainObject(piece)) throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id}: piece ${name}`, { id });
         const keys = Object.keys(piece);
-        for (let k = 0; k < keys.length; k++) if (keys[k] !== '__proto__') runs[keys[k]] = piece[keys[k]];
+        for (let k = 0; k < keys.length; k++) {
+          if (keys[k] !== '__proto__') runs[keys[k]] = piece[keys[k]];
+        }
         (names ??= new Set()).add(name);
       }
       const plain = {};
       const keys = Object.keys(held);
-      for (let k = 0; k < keys.length; k++) if (keys[k] !== 'parts') plain[keys[k]] = held[keys[k]];
+      for (let k = 0; k < keys.length; k++) {
+        if (keys[k] !== 'parts') plain[keys[k]] = held[keys[k]];
+      }
       plain.runs = runs;
       if (meta === stored) meta = { ...stored, blocks: { ...blocks } };
       meta.blocks[field] = plain;
@@ -486,8 +500,12 @@ class EntryStore {
         // Read in pieces and unchanged: the same files.
         head = {};
         const keys = Object.keys(block);
-        for (let k = 0; k < keys.length; k++) if (keys[k] !== 'runs') head[keys[k]] = block[keys[k]];
-        for (let i = 0; i < names.length; i++) if (names[i] !== null) kept.add(names[i]);
+        for (let k = 0; k < keys.length; k++) {
+          if (keys[k] !== 'runs') head[keys[k]] = block[keys[k]];
+        }
+        for (let i = 0; i < names.length; i++) {
+          if (names[i] !== null) kept.add(names[i]);
+        }
       } else {
         const code = isPlainObject(block) ? block.k : undefined;
         const mod =
@@ -563,14 +581,14 @@ class EntryStore {
       // else the row's own) and the stamp of its delete, for a reader that never opens the file (cleanup, a pipeline).
       // A purge erases the collection with the record: its row names none.
       const purged = Boolean(entry.meta.purged);
-      const type = purged ? null : typeof entry.data?.$type === 'string' ? entry.data.$type : entry.type;
+      const type = purged ? null : typeOfGone(entry);
       const row = { type, v: entry.meta.v ?? null, gone: true };
       if (purged) row.purged = true;
       const { deleted } = entry.meta;
       if (Array.isArray(deleted)) row.deleted = [deleted[0], deleted[1]];
       return row;
     }
-    let data;
+    let data = null;
     try {
       data = this.#view(id, entry);
     } catch (error) {
@@ -593,12 +611,11 @@ class EntryStore {
   // Puts what the record `id` is now; a record that fails its integrity
   // check is left out, like a replay leaves it alone.
   async index(id, stored = undefined) {
-    let entry;
+    let entry = null;
     try {
       entry = await this.load(id, stored);
     } catch (error) {
-      this.#logger.warn({ event: 'catalog.skipped', id, err: error });
-      return;
+      return void this.#logger.warn({ event: 'catalog.skipped', id, err: error });
     }
     this.#catalog.put(id, await this.row(id, entry));
   }
@@ -610,14 +627,16 @@ class EntryStore {
    * at a time, which logs what it skips.
    */
   async indexMany(ids) {
-    let found;
+    let found = null;
     try {
       found = await this.loadMany(ids);
     } catch {
       for (let i = 0; i < ids.length; i++) await this.index(ids[i]);
       return;
     }
-    for (const [id, entry] of found) {
+    for (const pair of found) {
+      const id = pair[0];
+      const entry = pair[1];
       if (entry === null) continue;
       this.#catalog.put(id, await this.row(id, entry));
     }
@@ -643,7 +662,9 @@ class EntryStore {
     const after = [];
     const copies = [];
     const marks = [];
-    for (const [id, entry] of touched) {
+    for (const pair of touched) {
+      const id = pair[0];
+      const entry = pair[1];
       const keeping = await this.#changing(id);
       if (keeping !== null) {
         copies.push(keeping.copy);
@@ -671,7 +692,10 @@ class EntryStore {
     // A folded id written again — a revival above its stamps, a purge, a repair: its tombstone leaves the
     // namespace in the same set.
     const unfolding = [];
-    for (const [id] of touched) if (this.#folded.has(id)) unfolding.push([TOMBSTONES, id]);
+    for (const pair of touched) {
+      const id = pair[0];
+      if (this.#folded.has(id)) unfolding.push([TOMBSTONES, id]);
+    }
     const batch = { records: rows };
     if (kv !== null || unfolding.length > 0) batch.kv = withRemovals(kv, unfolding);
     if (copies.length > 0) batch.copies = { put: copies };
@@ -679,7 +703,11 @@ class EntryStore {
     for (let i = 0; i < unfolding.length; i++) this.#folded.delete(unfolding[i][1]);
     for (let i = 0; i < marks.length; i++) marks[i]();
     for (let i = 0; i < after.length; i++) {
-      const [id, entry, kept, gen] = after[i];
+      const landed = after[i];
+      const id = landed[0];
+      const entry = landed[1];
+      const kept = landed[2];
+      const gen = landed[3];
       this.#parted(id, kept, gen);
       const held = this.#held.has(id) ? this.#cache.get(id) : undefined;
       const indexed = held !== undefined && held.data === entry.data && held.meta === entry.meta;

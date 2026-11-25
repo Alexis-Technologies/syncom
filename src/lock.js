@@ -14,7 +14,7 @@ const LOCK_FILE = 'lock.json';
 const DEFAULT_STALE = 30 * 60 * 1000;
 
 const locked = (path, why = 'is locked by another instance') =>
-  new SyncomError('LOCKED', `Storage at ${path} ${why}`, { path });
+  new SyncomError('ALX_ERR_LOCKED', `Storage at ${path} ${why}`, { path });
 
 const random = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 
@@ -58,13 +58,13 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 // Web Locks: `request` holds the lock for as long as the callback's promise
 // is pending; `ifAvailable` answers with `null` instead of waiting.
-const webLock = (locks, name, mode) =>
-  new Promise((resolve, reject) => {
-    let release = null;
-    const held = new Promise((resolve) => {
-      release = resolve;
-    });
-    const options = mode === 'fail' ? { ifAvailable: true } : {};
+const webLock = (locks, name, mode) => {
+  let release = null;
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  const options = mode === 'fail' ? { ifAvailable: true } : {};
+  return new Promise((resolve, reject) => {
     locks
       .request(name, options, (lock) => {
         if (lock === null) return void resolve(null);
@@ -73,12 +73,35 @@ const webLock = (locks, name, mode) =>
       })
       .catch(reject);
   });
+};
+
+// One try at a lock that is free or stale (`raw` the file as read, null for none): whether this opener holds it now.
+const claimLock = async (lockStore, exclusive, raw, body, id) => {
+  if (exclusive) {
+    // A stale or unreadable file is removed first — if it is still the
+    // same file: another opener may have taken the lock meanwhile, and
+    // theirs is not ours to remove. Then only one creator succeeds.
+    if (raw !== null && (await readRaw(lockStore)) === raw) await lockStore.remove(LOCK_FILE);
+    try {
+      await lockStore.create(LOCK_FILE, body);
+      return true;
+    } catch (error) {
+      if (error?.code !== 'EEXIST') throw error;
+      return false;
+    }
+  }
+  await lockStore.put(LOCK_FILE, body);
+  // Two openers racing for a free lock: the one whose write landed
+  // last owns it, the other reads that back and tries again.
+  const written = await readLock(lockStore);
+  return written?.id === id;
+};
 
 /**
  * Holds `path` for this instance: `{ release() }`. `mode` is `'fail'` (an
- * `Error` with `code: 'LOCKED'` when another instance holds it) or `'wait'`
+ * `Error` with `code: 'ALX_ERR_LOCKED'` when another instance holds it) or `'wait'`
  * (poll until it is free or stale — or `timeout` ms have passed, then
- * `LOCKED` too). A store with `create` (exclusive) makes two openers racing
+ * `ALX_ERR_LOCKED` too). A store with `create` (exclusive) makes two openers racing
  * for a free lock lose deterministically; without it the last write wins and
  * the other reads it back and tries again. `store` is the database's root
  * namespace (src/engine.js `kvNamespace`); an `fsi` with the `path` as its
@@ -111,24 +134,7 @@ const acquireLock = async ({ store, fsi, path, mode, staleAfter = DEFAULT_STALE,
     const current = parseLock(raw);
     if (current === null || stale(current, staleAfter)) {
       const body = JSON.stringify({ pid, id, since: Date.now() });
-      if (exclusive) {
-        // A stale or unreadable file is removed first — if it is still the
-        // same file: another opener may have taken the lock meanwhile, and
-        // theirs is not ours to remove. Then only one creator succeeds.
-        if (raw !== null && (await readRaw(lockStore)) === raw) await lockStore.remove(LOCK_FILE);
-        try {
-          await lockStore.create(LOCK_FILE, body);
-          return holder;
-        } catch (error) {
-          if (error?.code !== 'EEXIST') throw error;
-        }
-      } else {
-        await lockStore.put(LOCK_FILE, body);
-        // Two openers racing for a free lock: the one whose write landed
-        // last owns it, the other reads that back and tries again.
-        const written = await readLock(lockStore);
-        if (written?.id === id) return holder;
-      }
+      if (await claimLock(lockStore, exclusive, raw, body, id)) return holder;
     } else if (mode === 'fail') {
       throw locked(path);
     }

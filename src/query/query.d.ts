@@ -2,7 +2,7 @@
 // gives every collection its `select(query)` cursor, `count(query)` and
 // `watch()`; a view at a tag reads with the same cursor. The query and
 // cursor types are the core's (index.d.ts) and are re-exported here; without
-// the plugin `select()` and `count()` throw `PLUGIN_MISSING`.
+// the plugin `select()` and `count()` throw `ALX_ERR_PLUGIN_MISSING`.
 
 import type { Plugin, Cursor, QueryRow, MangoQuery, MangoMatch, MangoOperators, TextIndex } from '../../index.js';
 

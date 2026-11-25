@@ -6,6 +6,7 @@
 
 const { isPlainObject } = require('./shape.js');
 const { PENDING_MAX, createPlugins } = require('./plugin.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 const DEFAULT_CACHE = 5000;
 const DEFAULT_FLUSH_EVERY = 64;
@@ -24,29 +25,29 @@ const normalizeLock = (lock) => {
   if (lock === false) return null;
   if (lock === undefined || lock === 'fail' || lock === 'wait') return { mode: lock ?? 'fail' };
   if (!isPlainObject(lock)) {
-    throw new TypeError("createDatabase({ lock }): lock must be 'fail', 'wait', false or an object");
+    throw new ArgumentError("createDatabase({ lock }): lock must be 'fail', 'wait', false or an object");
   }
   const { mode = 'fail', ...rest } = lock;
   if (mode !== 'fail' && mode !== 'wait') {
-    throw new TypeError("createDatabase({ lock }): lock.mode must be 'fail' or 'wait'");
+    throw new ArgumentError("createDatabase({ lock }): lock.mode must be 'fail' or 'wait'");
   }
   const options = { mode };
   for (const key of LOCK_KEYS) {
     const value = rest[key];
     if (value === undefined) continue;
     if (typeof value !== 'number' || !(value > 0)) {
-      throw new TypeError(`createDatabase({ lock }): lock.${key} must be a positive number`);
+      throw new ArgumentError(`createDatabase({ lock }): lock.${key} must be a positive number`);
     }
     options[key] = value;
   }
   for (const key of Object.keys(rest)) {
-    if (!LOCK_KNOWN.has(key)) throw new TypeError(`createDatabase({ lock }): unknown key '${key}'`);
+    if (!LOCK_KNOWN.has(key)) throw new ArgumentError(`createDatabase({ lock }): unknown key '${key}'`);
   }
   return options;
 };
 
 const positiveInteger = (value, message) => {
-  if (!Number.isInteger(value) || value < 1) throw new TypeError(message);
+  if (!Number.isInteger(value) || value < 1) throw new ArgumentError(message);
   return value;
 };
 
@@ -56,16 +57,16 @@ const DEFAULT_DEFER = 16;
 const normalizeStorageOptions = (options) => {
   // `open('./path')` would otherwise open the default directory in silence.
   if (options === null || typeof options !== 'object') {
-    throw new TypeError('createDatabase() takes an options object: createDatabase({ path, ... })');
+    throw new ArgumentError('createDatabase() takes an options object: createDatabase({ path, ... })');
   }
   const { maxListeners } = options;
   if (maxListeners !== undefined && !(Number.isInteger(maxListeners) && maxListeners > 0)) {
-    throw new TypeError('createDatabase({ maxListeners }): maxListeners must be a positive integer');
+    throw new ArgumentError('createDatabase({ maxListeners }): maxListeners must be a positive integer');
   }
   const lock = normalizeLock(options.lock);
   // A follower: reads what another instance writes through the same engine, writes nothing, holds no lock.
   if (options.readOnly !== undefined && typeof options.readOnly !== 'boolean') {
-    throw new TypeError('createDatabase({ readOnly }): readOnly must be a boolean');
+    throw new ArgumentError('createDatabase({ readOnly }): readOnly must be a boolean');
   }
   // The cache keeps the last `cache.max` entries read or written (a live
   // Record pins its own); `integrity: 'lazy'` trusts a record file on the
@@ -77,13 +78,13 @@ const normalizeStorageOptions = (options) => {
       : positiveInteger(max, 'createDatabase({ cache }): cache.max must be a positive integer');
   const { integrity = 'verify' } = options;
   if (integrity !== 'verify' && integrity !== 'lazy') {
-    throw new TypeError("createDatabase({ integrity }): integrity must be 'verify' or 'lazy'");
+    throw new ArgumentError("createDatabase({ integrity }): integrity must be 'verify' or 'lazy'");
   }
   // `chain: false` keeps no hash-linked log of what this node applied —
   // a hub that only replicates has nothing to audit and saves two file
   // writes per record; with no block to check against, reads are lazy.
   if (options.chain !== undefined && typeof options.chain !== 'boolean') {
-    throw new TypeError('createDatabase({ chain }): chain must be a boolean');
+    throw new ArgumentError('createDatabase({ chain }): chain must be a boolean');
   }
   const chained = options.chain !== false;
   const every = options.catalog?.flushEvery;
@@ -92,17 +93,17 @@ const normalizeStorageOptions = (options) => {
       ? DEFAULT_FLUSH_EVERY
       : positiveInteger(every, 'createDatabase({ catalog }): catalog.flushEvery must be a positive integer');
   if (options.getId !== undefined && typeof options.getId !== 'function') {
-    throw new TypeError('createDatabase({ getId }): getId must be a function');
+    throw new ArgumentError('createDatabase({ getId }): getId must be a function');
   }
   // Who writes: a string, or a function asked per write (the signed-in
   // user). It rides on the op as a claim — see Storage#actorOf.
   if (options.actor !== undefined && typeof options.actor !== 'string' && typeof options.actor !== 'function') {
-    throw new TypeError('createDatabase({ actor }): actor must be a string or a function');
+    throw new ArgumentError('createDatabase({ actor }): actor must be a string or a function');
   }
   // The text index behind `$text`: a function asked once per searchable
   // entity — `createSearch()` from @alexify/syncom/search, or your own.
   if (options.search !== undefined && typeof options.search !== 'function') {
-    throw new TypeError(
+    throw new ArgumentError(
       'createDatabase({ search }): search must be a function (entity) => TextIndex — createSearch() from @alexify/syncom/search',
     );
   }
@@ -111,7 +112,7 @@ const normalizeStorageOptions = (options) => {
   // is refused as malformed rather than observed — see src/apply.js.
   const maxSkew = options.sync?.maxSkew;
   if (maxSkew !== undefined && !(typeof maxSkew === 'number' && maxSkew > 0)) {
-    throw new TypeError(
+    throw new ArgumentError(
       'createDatabase({ sync }): maxSkew must be a positive number of milliseconds (Infinity to disable)',
     );
   }
@@ -119,7 +120,7 @@ const normalizeStorageOptions = (options) => {
   // of what they depend on before an op is refused — see src/text/sequence.js.
   const pendingMax = options.sync?.pendingMax;
   if (pendingMax !== undefined && !((Number.isInteger(pendingMax) && pendingMax > 0) || pendingMax === Infinity)) {
-    throw new TypeError('createDatabase({ sync }): pendingMax must be a positive integer (Infinity to disable)');
+    throw new ArgumentError('createDatabase({ sync }): pendingMax must be a positive integer (Infinity to disable)');
   }
   // Record files may lag the log by this many ms (0: never; 16 by default,
   // a frame): the log is durable at once and a crash replays the batch, so
@@ -127,22 +128,22 @@ const normalizeStorageOptions = (options) => {
   // one block — see the DeferredWindow (src/defer.js).
   const defer = options.defer;
   if (defer !== undefined && !(Number.isInteger(defer) && defer >= 0)) {
-    throw new TypeError('createDatabase({ defer }): defer must be a non-negative integer of milliseconds');
+    throw new ArgumentError('createDatabase({ defer }): defer must be a non-negative integer of milliseconds');
   }
   // Signed ops: 'verify' signs this node's and checks a peer's when it
   // carries a signature; 'require' refuses unsigned ones too; false does
   // neither. The node id is the signing key in every mode — see src/apply.js.
   const signatures = options.sync?.signatures;
   if (signatures !== undefined && signatures !== 'verify' && signatures !== 'require' && signatures !== false) {
-    throw new TypeError("createDatabase({ sync }): signatures must be 'verify', 'require' or false");
+    throw new ArgumentError("createDatabase({ sync }): signatures must be 'verify', 'require' or false");
   }
   // A host that says at hello it holds more of this node's own streams than
-  // its log (REWOUND): 'report' moves them past the host's only on proof —
+  // its log (ALX_ERR_REWOUND): 'report' moves them past the host's only on proof —
   // this node's own op at that seq, signed by its key — 'adopt' on the
   // host's word. See src/sync/manager.js.
   const rewind = options.sync?.rewind;
   if (rewind !== undefined && rewind !== 'report' && rewind !== 'adopt') {
-    throw new TypeError("createDatabase({ sync }): rewind must be 'report' or 'adopt'");
+    throw new ArgumentError("createDatabase({ sync }): rewind must be 'report' or 'adopt'");
   }
   // The plugins this storage runs with — the kinds beyond registers,
   // counters and sets, and the API modules — as one registry per instance

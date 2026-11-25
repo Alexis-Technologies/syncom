@@ -91,7 +91,7 @@ expectType<Promise<void>>(replication.cancel());
 expectType<number>(replication.stats().pending);
 replication.on('received', ({ documents, applied }) => expectType<number>(documents + applied));
 replication.on('conflict', ({ id, resolved }) => expectType<string>(id + String(resolved)));
-replication.on('error', (error) => expectType<'REPLICATION_FAILED'>(error.code));
+replication.on('error', (error) => expectType<'ALX_ERR_REPLICATION_FAILED'>(error.code));
 replication.on('error', (error) => expectType<number | null>(error.retryIn));
 replication.on('error', (error) => expectType<string>(error.connector));
 replication.on('refused', ({ direction, id, reason }) => expectType<string>(direction + id + reason));

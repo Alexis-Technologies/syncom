@@ -27,6 +27,7 @@
 const { SOURCE } = require('../symbols.js');
 const { opKey } = require('../vector.js');
 const { traced } = require('../telemetry/writer.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const DAY = 24 * 60 * 60 * 1000;
 const MINIMUM_DELETED_TIME = 31 * DAY;
@@ -76,17 +77,17 @@ const cleanup = (
     now = Date.now,
   } = {},
 ) => {
-  if (!isDatabase(db)) throw new TypeError('cleanup() takes a database');
+  if (!isDatabase(db)) throw new ArgumentError('cleanup() takes a database');
   if (!Number.isFinite(minimumDeletedTime) || minimumDeletedTime < 0) {
-    throw new TypeError('cleanup(): minimumDeletedTime must be a non-negative number of milliseconds');
+    throw new ArgumentError('cleanup(): minimumDeletedTime must be a non-negative number of milliseconds');
   }
   if (!Number.isFinite(runEach) || runEach <= 0) {
-    throw new TypeError('cleanup(): runEach must be a positive number of milliseconds');
+    throw new ArgumentError('cleanup(): runEach must be a positive number of milliseconds');
   }
   if (leader !== null && !isLeader(leader)) {
-    throw new TypeError('cleanup(): leader is what openShared() answers (live, isLeader)');
+    throw new ArgumentError('cleanup(): leader is what openShared() answers (live, isLeader)');
   }
-  if (leader !== null && leader.db !== db) throw new TypeError('cleanup(): db is leader.db, its instance');
+  if (leader !== null && leader.db !== db) throw new ArgumentError('cleanup(): db is leader.db, its instance');
   const stats = { runs: 0, folded: 0, dropped: 0, skipped: 0 };
   // What stops the timer: its own, or — with `leader` — the handle's live subscription.
   let stopping = null;
@@ -124,7 +125,9 @@ const cleanup = (
       if (folding.length > 0) {
         const done = await seam.foldMany(folding);
         counts.folded += done.length;
-        if (drop) for (let i = 0; i < done.length; i++) dropping.push(done[i]);
+        if (drop) {
+          for (let i = 0; i < done.length; i++) dropping.push(done[i]);
+        }
         folding = [];
       }
       if (dropping.length > 0) {
@@ -194,7 +197,8 @@ const cleanup = (
      * `leader`, all zero where this instance does not lead (nothing swept).
      */
     run(options = {}) {
-      const target = leader === null ? db : leader.isLeader() ? leader.db : null;
+      let target = db;
+      if (leader !== null) target = leader.isLeader() ? leader.db : null;
       if (target === null) return Promise.resolve({ folded: 0, dropped: 0, skipped: 0 });
       if (running === null) running = swept(target, options).finally(() => void (running = null));
       return running;

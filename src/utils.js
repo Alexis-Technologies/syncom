@@ -7,6 +7,14 @@ const { AsyncLocalStorage } = require('node:async_hooks');
 const { Emitter } = require('./emitter.js');
 const { createLogger } = require('./logger.js');
 
+const runInFrame = async (fn, frame) => {
+  try {
+    return await fn();
+  } finally {
+    frame.active = false;
+  }
+};
+
 // A task's async context: `run(fn)` runs `fn` inside it, `inside()` says
 // whether the caller is — what tells a write made from inside a transaction's
 // function (which would wait for the queue the function holds) from one
@@ -16,17 +24,10 @@ const { createLogger } = require('./logger.js');
 // Node's AsyncLocalStorage; the browser half has none and answers false.
 const taskScope = () => {
   const store = new AsyncLocalStorage();
-  const run = async (fn, frame) => {
-    try {
-      return await fn();
-    } finally {
-      frame.active = false;
-    }
-  };
   return {
     run: (fn) => {
       const frame = { active: true };
-      return store.run(frame, () => run(fn, frame));
+      return store.run(frame, () => runInFrame(fn, frame));
     },
     inside: () => store.getStore()?.active === true,
   };

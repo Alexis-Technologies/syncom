@@ -13,9 +13,21 @@
 // ours is deleted and the rows are judged against it (a 412), as they are
 // where the last read found no file and another device has made it since. A
 // write is never unconditional: a file without an ETag is read but refused
-// (428). Requires jsonfile.js only.
+// (428). Requires jsonfile.js and errors.js only.
 
 const { jsonFile, requester } = require('./jsonfile.js');
+const { ArgumentError } = require('../argument-errors.js');
+
+const notFound = (error) => {
+  if (error?.status !== 404) throw error;
+  return null;
+};
+
+const refused = (status, message) => {
+  const error = new Error(message);
+  error.status = status;
+  return error;
+};
 
 /**
  * `{ pull, push }` for `replicate()`. `token` is the OAuth access token
@@ -37,20 +49,11 @@ const gdrive = ({
 } = {}) => {
   const request = requester(fetch, { headers, token, label: 'Google Drive' });
   if (fileId === null && (typeof name !== 'string' || name.length === 0)) {
-    throw new TypeError('gdrive(): name or fileId is required');
+    throw new ArgumentError('gdrive(): name or fileId is required');
   }
   const base = endpoint.replace(/\/+$/, '');
   let id = fileId;
 
-  const notFound = (error) => {
-    if (error?.status !== 404) throw error;
-    return null;
-  };
-  const refused = (status, message) => {
-    const error = new Error(message);
-    error.status = status;
-    return error;
-  };
   // The files of that name in the folder, the oldest first.
   const listed = async () => {
     const query = new URLSearchParams({
@@ -62,7 +65,9 @@ const gdrive = ({
     const body = await (await request(`${base}/drive/v3/files?${query}`, {}, 'files.list')).json();
     const ids = [];
     const files = Array.isArray(body.files) ? body.files : [];
-    for (let i = 0; i < files.length; i++) if (typeof files[i].id === 'string') ids.push(files[i].id);
+    for (let i = 0; i < files.length; i++) {
+      if (typeof files[i].id === 'string') ids.push(files[i].id);
+    }
     return ids;
   };
   // The file's id, the oldest by its name in the folder: null for none.
@@ -86,7 +91,7 @@ const gdrive = ({
     // A file whose metadata answers no ETag is read all the same (its write is refused): never taken for no file.
     async load() {
       if ((await resolve()) === null) return null;
-      let etag;
+      let etag = null;
       try {
         etag = await etagOf();
       } catch (error) {

@@ -16,6 +16,8 @@
 // a surrogate pair: where either string holds one, the diff runs over code
 // points and its hunks are moved to units.
 
+const { ArgumentError } = require('../argument-errors.js');
+
 const common = (a, b) => {
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) start++;
@@ -42,9 +44,8 @@ const shortestEdit = (x, y, max) => {
     // The frontier as this round found it; the round then moves `v` on.
     trace.push(v.slice());
     for (let k = -d; k <= d; k += 2) {
-      let i;
-      if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) i = v[offset + k + 1];
-      else i = v[offset + k - 1] + 1;
+      const down = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]);
+      let i = down ? v[offset + k + 1] : v[offset + k - 1] + 1;
       let j = i - k;
       while (i < n && j < m && x[i] === y[j]) {
         i++;
@@ -64,9 +65,8 @@ const backtrack = (trace, offset, n, m) => {
   for (let d = trace.length - 1; d > 0; d--) {
     const v = trace[d];
     const k = i - j;
-    let prevK;
-    if (k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1])) prevK = k + 1;
-    else prevK = k - 1;
+    const down = k === -d || (k !== d && v[offset + k - 1] < v[offset + k + 1]);
+    const prevK = down ? k + 1 : k - 1;
     const prevI = v[offset + prevK];
     const prevJ = prevI - prevK;
     while (i > prevI && j > prevJ) {
@@ -78,7 +78,8 @@ const backtrack = (trace, offset, n, m) => {
     i = prevI;
     j = prevJ;
   }
-  return steps.reverse();
+  steps.reverse();
+  return steps;
 };
 
 // Steps into hunks: deletions and insertions at one place join into one
@@ -86,7 +87,10 @@ const backtrack = (trace, offset, n, m) => {
 const hunksOf = (steps, x, y, start) => {
   const hunks = [];
   let current = null;
-  for (const [kind, i, j] of steps) {
+  for (const entry of steps) {
+    const kind = entry[0];
+    const i = entry[1];
+    const j = entry[2];
     const at = i;
     if (current !== null && current.end === at) {
       if (kind === 'd') current.end = i + 1;
@@ -103,24 +107,29 @@ const hunksOf = (steps, x, y, start) => {
     };
   }
   if (current !== null) hunks.push([start + current.index, current.count, current.text]);
-  return hunks.reverse();
+  hunks.reverse();
+  return hunks;
 };
 
 // Whether a string holds a surrogate half — a character outside the BMP,
 // two UTF-16 units that one hunk must keep together.
 const SURROGATE = /[\uD800-\uDFFF]/;
 
+const textOf = (units) => (typeof units === 'string' ? units : units.join(''));
+
 // The diff of two sequences (strings, or arrays of code points) as hunks
 // in `a`'s coordinates.
 const hunks = (a, b, max) => {
-  const [start, endA, endB] = common(a, b);
+  const bounds = common(a, b);
+  const start = bounds[0];
+  const endA = bounds[1];
+  const endB = bounds[2];
   const x = a.slice(start, endA);
   const y = b.slice(start, endB);
-  const text = (units) => (typeof units === 'string' ? units : units.join(''));
   if (x.length === 0 && y.length === 0) return [];
-  if (x.length === 0 || y.length === 0) return [[start, x.length, text(y)]];
+  if (x.length === 0 || y.length === 0) return [[start, x.length, textOf(y)]];
   const steps = shortestEdit(x, y, max);
-  if (steps === null) return [[start, x.length, text(y)]];
+  if (steps === null) return [[start, x.length, textOf(y)]];
   return hunksOf(steps, x, y, start);
 };
 
@@ -136,7 +145,8 @@ const byCodePoints = (a, b, max) => {
   }
   const out = hunks(points, [...b], max);
   for (const hunk of out) {
-    const [index, count] = hunk;
+    const index = hunk[0];
+    const count = hunk[1];
     hunk[0] = units[index];
     hunk[1] = units[index + count] - units[index];
   }
@@ -144,14 +154,19 @@ const byCodePoints = (a, b, max) => {
 };
 
 const diff = (a, b, { max = 1000 } = {}) => {
-  if (typeof a !== 'string' || typeof b !== 'string') throw new TypeError('diff() takes two strings');
+  if (typeof a !== 'string' || typeof b !== 'string') throw new ArgumentError('diff() takes two strings');
   return SURROGATE.test(a) || SURROGATE.test(b) ? byCodePoints(a, b, max) : hunks(a, b, max);
 };
 
 // Applies hunks (last first) to `a`: what the diff promises to produce.
-const patch = (a, hunks) => {
+const patch = (a, edits) => {
   let out = a;
-  for (const [index, count, text] of hunks) out = out.slice(0, index) + text + out.slice(index + count);
+  for (const entry of edits) {
+    const index = entry[0];
+    const count = entry[1];
+    const text = entry[2];
+    out = out.slice(0, index) + text + out.slice(index + count);
+  }
   return out;
 };
 

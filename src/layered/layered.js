@@ -37,6 +37,7 @@
 // Requires the backend contract only.
 
 const { checkFsi } = require('../backend.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const exists = (key) => Object.assign(new Error(`EEXIST: file already exists, ${key}`), { code: 'EEXIST' });
 
@@ -46,18 +47,21 @@ const exists = (key) => Object.assign(new Error(`EEXIST: file already exists, ${
  */
 const layered = (layers, options = {}) => {
   if (!Array.isArray(layers) || layers.length === 0) {
-    throw new TypeError('layered() takes an array of one backend or more');
+    throw new ArgumentError('layered() takes an array of one backend or more');
   }
   const stack = [];
   for (let i = 0; i < layers.length; i++) stack.push(checkFsi(layers[i], `layered() layer ${i}`));
-  if (options === null || typeof options !== 'object') throw new TypeError('layered() takes an options object');
+  if (options === null || typeof options !== 'object') throw new ArgumentError('layered() takes an options object');
   const { write = 'through', fill = true, queue = 1024, onError = null } = options;
-  if (onError !== null && typeof onError !== 'function') throw new TypeError('layered(): onError must be a function');
-  if (write !== 'through' && write !== 'back') throw new TypeError("layered(): write must be 'through' or 'back'");
-  if (typeof fill !== 'boolean') throw new TypeError('layered(): fill must be a boolean');
-  if (!Number.isInteger(queue) || queue < 1) throw new TypeError('layered(): queue must be a positive integer');
+  if (onError !== null && typeof onError !== 'function') {
+    throw new ArgumentError('layered(): onError must be a function');
+  }
+  if (write !== 'through' && write !== 'back') throw new ArgumentError("layered(): write must be 'through' or 'back'");
+  if (typeof fill !== 'boolean') throw new ArgumentError('layered(): fill must be a boolean');
+  if (!Number.isInteger(queue) || queue < 1) throw new ArgumentError('layered(): queue must be a positive integer');
   const back = write === 'back';
-  const [top, ...lower] = stack;
+  const top = stack[0];
+  const lower = stack.slice(1);
 
   // The write-back queue: one call runs at a time, in order; `waiting` is
   // what has not started, and a caller past the bound waits for room. A call
@@ -68,6 +72,25 @@ const layered = (layers, options = {}) => {
   let failed = 0;
   let failure = null;
   const room = [];
+  const runQueued = async (task) => {
+    waiting--;
+    room.shift()?.();
+    try {
+      await task();
+    } catch (error) {
+      failed++;
+      failure ??= error;
+      if (onError !== null) {
+        try {
+          onError(error);
+        } catch {
+          // The listener's own failure: the queue goes on.
+        }
+      }
+    } finally {
+      pending--;
+    }
+  };
   const enqueue = async (task) => {
     // Past the bound: wait for a queued call to start (the task wakes one waiter).
     while (true) {
@@ -76,25 +99,7 @@ const layered = (layers, options = {}) => {
     }
     waiting++;
     pending++;
-    chain = chain.then(async () => {
-      waiting--;
-      room.shift()?.();
-      try {
-        await task();
-      } catch (error) {
-        failed++;
-        failure ??= error;
-        if (onError !== null) {
-          try {
-            onError(error);
-          } catch {
-            // The listener's own failure: the queue goes on.
-          }
-        }
-      } finally {
-        pending--;
-      }
-    });
+    chain = chain.then(() => runQueued(task));
   };
   // What the queue holds, done — a failure of it stays for `drain`.
   const settle = async () => {
@@ -150,7 +155,9 @@ const layered = (layers, options = {}) => {
     async exists(dir, name) {
       if (await top.exists(dir, name)) return true;
       await settle();
-      for (const layer of lower) if (await layer.exists(dir, name)) return true;
+      for (const layer of lower) {
+        if (await layer.exists(dir, name)) return true;
+      }
       return false;
     },
     async remove(dir, name) {
@@ -159,12 +166,18 @@ const layered = (layers, options = {}) => {
     async list(dir) {
       await settle();
       const names = new Set();
-      for (const layer of stack) for (const name of await layer.list(dir)) names.add(name);
-      return [...names].sort();
+      for (const layer of stack) {
+        for (const name of await layer.list(dir)) names.add(name);
+      }
+      const sorted = [...names];
+      sorted.sort();
+      return sorted;
     },
     async create(dir, name, content) {
       await settle();
-      for (const layer of stack) if (await layer.exists(dir, name)) throw exists(`${dir}/${name}`);
+      for (const layer of stack) {
+        if (await layer.exists(dir, name)) throw exists(`${dir}/${name}`);
+      }
       for (const layer of stack) {
         if (typeof layer.create === 'function') await layer.create(dir, name, content);
         else await layer.write(dir, name, content);
@@ -177,7 +190,9 @@ const layered = (layers, options = {}) => {
     /** Flushes, then closes every layer that has a `close()`. */
     async close() {
       await drain();
-      for (const layer of stack) if (typeof layer.close === 'function') await layer.close();
+      for (const layer of stack) {
+        if (typeof layer.close === 'function') await layer.close();
+      }
     },
   };
   let anySync = false;
@@ -189,7 +204,9 @@ const layered = (layers, options = {}) => {
   if (anySync) {
     wrapped.sync = async (dir, name) => {
       await drain();
-      for (const layer of stack) if (typeof layer.sync === 'function') await layer.sync(dir, name);
+      for (const layer of stack) {
+        if (typeof layer.sync === 'function') await layer.sync(dir, name);
+      }
     };
   }
   if (allAppend) {

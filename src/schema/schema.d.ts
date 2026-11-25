@@ -4,7 +4,7 @@
 // applies them: collections on the storage, validation on the write path,
 // `schemaInfo`, `migrate()`, `check()`. The option types are the core's
 // (index.d.ts) and are re-exported here; without the plugin `open({ schema })`
-// and `open({ validator })` are `PLUGIN_MISSING`.
+// and `open({ validator })` are `ALX_ERR_PLUGIN_MISSING`.
 
 import type {
   Plugin,

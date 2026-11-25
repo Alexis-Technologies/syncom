@@ -74,12 +74,12 @@ const tablet = await createDatabase({
 });
 await writeMany(tablet, 'Before any host'); // compacted: no host was registered to wait for
 tablet.sync.on('error', (error) => {
-  if (error.code === 'UNDELIVERABLE') console.log(error.message);
+  if (error.code === 'ALX_ERR_UNDELIVERABLE') console.log(error.message);
 });
 await tablet.sync.addNode({ url: 'mem://server' });
 // #endregion undeliverable
 const undeliverable = await tablet.sync.toPromise('error');
-assert.equal(undeliverable.code, 'UNDELIVERABLE');
+assert.equal(undeliverable.code, 'ALX_ERR_UNDELIVERABLE');
 assert.ok(tablet.stats().log.floor > 1);
 const afterHello = await tablet.Task.insert({ title: 'After the hello', done: false });
 await new Promise((resolve) => setTimeout(resolve, 300));
@@ -120,11 +120,11 @@ const restored = await createDatabase({
   sync: { connect: () => new MemoryLink(unit) },
 });
 restored.sync.on('error', (error) => {
-  if (error.code === 'REWOUND') console.log(error.adopted); // { '<desk>': 2 }: moved past what the server holds
+  if (error.code === 'ALX_ERR_REWOUND') console.log(error.adopted); // { '<desk>': 2 }: moved past what the server holds
 });
 // #endregion rewound
 const rewound = await restored.sync.toPromise('error');
-assert.equal(rewound.code, 'REWOUND');
+assert.equal(rewound.code, 'ALX_ERR_REWOUND');
 assert.equal(rewound.adopted[restored.nodeId], 2);
 // It bootstraps from the server and gets back what the lost op wrote.
 await wait(async () => (await restored.Task.get(lost.id)) !== null);

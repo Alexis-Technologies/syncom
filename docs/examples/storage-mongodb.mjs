@@ -28,15 +28,15 @@ const second = mongoEngine({ client, name: unique, transactions: true });
 try {
   await createDatabase({ path: 'board', schema, engine: second });
 } catch (error) {
-  console.log(error.code); // 'LOCKED'
+  console.log(error.code); // 'ALX_ERR_LOCKED'
 }
 // #endregion locked
-await assert.rejects(() => createDatabase({ path: 'board', schema, engine: second }), { code: 'LOCKED' });
+await assert.rejects(() => createDatabase({ path: 'board', schema, engine: second }), { code: 'ALX_ERR_LOCKED' });
 
 // #region lease
 db.on('lease', ({ state }) => console.log('lease', state)); // 'renewed', 'late' or 'lost'
 db.on('error', (error) => {
-  if (error.code === 'LEASE_LOST') console.log('another instance took over; this one is read-only now');
+  if (error.code === 'ALX_ERR_LEASE_LOST') console.log('another instance took over; this one is read-only now');
 });
 console.log(db.stats().lock); // { kind: 'native', mode: 'fail', expiresAt: <ms>, lost: false }
 // #endregion lease
@@ -58,7 +58,7 @@ while ((await follower.Task.count({})) < 2 && Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 assert.equal(await follower.Task.count({}), 2);
-await assert.rejects(() => follower.Task.insert({ title: 'no', done: false }), { code: 'READ_ONLY' });
+await assert.rejects(() => follower.Task.insert({ title: 'no', done: false }), { code: 'ALX_ERR_READ_ONLY' });
 
 // #region close
 await follower.close();

@@ -16,6 +16,7 @@ const { compose, decompose } = require('../compose.js');
 const { asJson, isRecordId, invalidId, isPlainObject, own } = require('../shape.js');
 const { SOURCE, PLUGINS } = require('../symbols.js');
 const { checksum } = require('../hash.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const count = (object) => (object ? Object.keys(object).length : 0);
 
@@ -62,7 +63,9 @@ const detail = (meta, field, kind) => {
     for (const node of Object.keys(block.moves)) moves += block.moves[node].length;
     out.moves = moves;
   }
-  for (const map of ['cuts', 'ext', 'pos', 'vals', 'marks']) if (block[map] !== undefined) out[map] = count(block[map]);
+  for (const map of ['cuts', 'ext', 'pos', 'vals', 'marks']) {
+    if (block[map] !== undefined) out[map] = count(block[map]);
+  }
   return out;
 };
 
@@ -79,7 +82,7 @@ const isStorage = (value) =>
  * the hooks; nothing is written.
  */
 const inspect = async (storage, id) => {
-  if (!isStorage(storage)) throw new TypeError('inspect() takes a storage');
+  if (!isStorage(storage)) throw new ArgumentError('inspect() takes a storage');
   if (!isRecordId(id)) throw invalidId(id);
   const { log } = storage;
   const logged = log.entriesOf(id);
@@ -120,7 +123,7 @@ const inspect = async (storage, id) => {
   }
   const { meta } = entry;
   const plugins = storage[PLUGINS];
-  out.alive = meta.deleted === null && meta.purged == null;
+  out.alive = meta.deleted === null && (meta.purged === undefined || meta.purged === null);
   out.data = asJson(entry.data);
   out.reading = out.alive ? asJson(compose(entry, plugins)) : null;
   out.base = meta.base;
@@ -134,7 +137,10 @@ const inspect = async (storage, id) => {
     const keys = Object.keys(maps[i]);
     for (let j = 0; j < keys.length; j++) names.add(keys[j]);
   }
-  for (const field of [...names].sort()) {
+  const sortedNames = [...names];
+  sortedNames.sort();
+  for (let i = 0; i < sortedNames.length; i++) {
+    const field = sortedNames[i];
     const kind = kindOf(meta, field, plugins);
     out.fields.push({ field, kind, reachable: Object.hasOwn(shown, field), ...detail(meta, field, kind) });
   }
@@ -169,7 +175,7 @@ const freshSalt = () => {
  */
 const anonymize = (value, { salt, keys = true } = {}) => {
   if (salt === undefined) salt = freshSalt();
-  else if (typeof salt !== 'string') throw new TypeError('anonymize(): salt is a string');
+  else if (typeof salt !== 'string') throw new ArgumentError('anonymize(): salt is a string');
   const walk = (item) => {
     if (typeof item === 'string') return hashed(item, salt);
     if (item === null || typeof item === 'number' || typeof item === 'boolean') return item;
@@ -183,7 +189,7 @@ const anonymize = (value, { salt, keys = true } = {}) => {
       for (const key of Object.keys(item)) out[keys ? hashed(key, salt) : key] = walk(item[key]);
       return out;
     }
-    throw new TypeError(`anonymize() takes a JSON value; got ${typeof item}`);
+    throw new ArgumentError(`anonymize() takes a JSON value; got ${typeof item}`);
   };
   return walk(value);
 };
@@ -210,6 +216,13 @@ const wanted = (made) => {
   return fields.length === 0 ? null : fields;
 };
 
+const compareText = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
+
+const byAsked = (a, b) => b.queries - a.queries || compareText(a.entity, b.entity);
+
 /**
  * Watches every plan the database's cursors make from here on and suggests
  * the indexes that would serve the queries no index served (or sorted):
@@ -218,7 +231,7 @@ const wanted = (made) => {
  * takes the watch off. A plan well served asks for nothing.
  */
 const indexAdvisor = (storage) => {
-  if (!isStorage(storage)) throw new TypeError('indexAdvisor() takes a database');
+  if (!isStorage(storage)) throw new ArgumentError('indexAdvisor() takes a database');
   const asked = new Map();
   const stop = storage[SOURCE].advise((entity, made) => {
     const fields = wanted(made);
@@ -234,7 +247,7 @@ const indexAdvisor = (storage) => {
       for (const held of asked.values()) {
         out.push({ entity: held.entity, index: held.index.slice(), queries: held.queries });
       }
-      out.sort((a, b) => b.queries - a.queries || (a.entity < b.entity ? -1 : a.entity > b.entity ? 1 : 0));
+      out.sort(byAsked);
       return out;
     },
     stop,

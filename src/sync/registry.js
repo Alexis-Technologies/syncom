@@ -63,18 +63,19 @@ class NodeRegistry {
       this.#saving.set(url, state);
     }
     if (state.next) return state.next;
-    const write = state.last.then(async () => {
-      state.next = null;
-      if (!held(url)) return;
-      await this.write(node);
-    });
+    const write = state.last.then(() => this.#writeHeld(state, node, url, held));
     state.next = write;
-    state.last = write
-      .catch(() => {})
-      .then(() => {
-        if (state.next === null) this.#saving.delete(url);
-      });
+    state.last = write.catch(() => {}).then(() => this.#release(state, url));
     return write;
+  }
+
+  async #writeHeld(state, node, url, held) {
+    state.next = null;
+    if (held(url)) await this.write(node);
+  }
+
+  #release(state, url) {
+    if (state.next === null) this.#saving.delete(url);
   }
 
   /** Resolves once every save in flight is done. */

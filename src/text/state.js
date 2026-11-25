@@ -124,7 +124,9 @@ const MAPS = ['cuts', 'ext', 'pos', 'vals', 'marks'];
 const REGISTERS = ['pos', 'vals', 'marks'];
 const hasAny = (map) => {
   if (map === undefined || map === null) return false;
-  for (const key in map) if (Object.hasOwn(map, key)) return true;
+  for (const key in map) {
+    if (Object.hasOwn(map, key)) return true;
+  }
   return false;
 };
 // A register map or the marks as the record holds them: a plain object, in the order the trie walks.
@@ -161,7 +163,9 @@ const createBlock = (state) => {
   Object.defineProperty(block, 'runs', RUNS);
   if (hasAny(state.cuts)) block.cuts = state.cuts;
   if (hasAny(state.ext)) block.ext = state.ext;
-  for (const name of REGISTERS) if (state[name].size > 0) Object.defineProperty(block, name, VIEW[name]);
+  for (const name of REGISTERS) {
+    if (state[name].size > 0) Object.defineProperty(block, name, VIEW[name]);
+  }
   return stamp(block, state);
 };
 
@@ -177,7 +181,9 @@ const mapOf = (plain, owner) => {
 // A block as plain JSON, to hydrate again (a base it has not seen, a prune, a join).
 const plainOf = (block) => {
   const out = { k: block.k, ts: block.ts, runs: runsJson(block, false) };
-  for (const name of MAPS) if (block[name] !== undefined) out[name] = block[name];
+  for (const name of MAPS) {
+    if (block[name] !== undefined) out[name] = block[name];
+  }
   return out;
 };
 
@@ -239,14 +245,20 @@ const runsJson = (block, keep = true) => {
   }
   const waiting = [];
   const records = recordsOf(st);
-  for (let i = 0; i < records.length; i++) if (!records[i].placed) waiting.push(records[i]);
+  for (let i = 0; i < records.length; i++) {
+    if (!records[i].placed) waiting.push(records[i]);
+  }
   waiting.sort(byKey);
   for (let i = 0; i < waiting.length; i++) out[waiting[i].id.key] = tupleOf(st, waiting[i], keep);
   st.json = out;
   return out;
 };
-const byKey = (a, b) => (a.id.key < b.id.key ? -1 : a.id.key > b.id.key ? 1 : 0);
-const byIdKey = (a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0);
+const compareKeys = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
+const byKey = (a, b) => compareKeys(a.id.key, b.id.key);
+const byIdKey = (a, b) => compareKeys(a.key, b.key);
 
 // ---- a block in pieces ------------------------------------------------------------------------------
 
@@ -292,7 +304,9 @@ const piecesOf = (block) => {
   const st = STATE.get(block);
   const head = {};
   const names = Object.keys(block);
-  for (let i = 0; i < names.length; i++) if (names[i] !== 'runs') head[names[i]] = block[names[i]];
+  for (let i = 0; i < names.length; i++) {
+    if (names[i] !== 'runs') head[names[i]] = block[names[i]];
+  }
   const slots = [];
   if (st === undefined) {
     const keys = keysOf(block.runs);
@@ -414,15 +428,16 @@ const pushSeg = (id, off, len, vis, body, out, segs, owner) => {
     last.len += len;
     if (body !== null) {
       if (typeof body === 'string') last.body += body;
-      else for (let i = 0; i < body.length; i++) last.body.push(body[i]);
+      else {
+        for (let i = 0; i < body.length; i++) last.body.push(body[i]);
+      }
     }
     return;
   }
   if (body === null || len <= SEG_MAX || typeof body === 'string') {
     const seg = new Span(id, off, len, vis, body, 0, owner);
     out.push(seg);
-    segs.push(seg);
-    return;
+    return void segs.push(seg);
   }
   for (let at = 0; at < len; at += SEG_MAX) {
     const n = Math.min(SEG_MAX, len - at);
@@ -521,14 +536,14 @@ const eventsOf = (r) => {
 // in the version yet), what it emits, the placed copies it makes — or, when the records are the walk's
 // own (`own`: a hydration's, shared with nothing yet), the records themselves placed in place.
 class Walk {
-  constructor(st, extra, kind, pos, copies, own, owner) {
+  constructor(st, extra, kind, pos, copies, owned, owner) {
     this.st = st;
     this.extra = extra;
     this.kind = kind;
     this.pos = pos;
     this.items = [];
     this.copies = copies;
-    this.own = own;
+    this.own = owned;
     this.owner = owner;
   }
 }
@@ -597,6 +612,11 @@ const openFrame = (w, id) => {
   const r = enter(w, id);
   return new Frame(r, 0, true, eventsOf(r), startsOf(r.rle, 0));
 };
+// The frame on top done: its run left when the frame entered it.
+const popFrame = (w, stack) => {
+  const f = stack.pop();
+  if (f.first) leave(w, f.r);
+};
 // The walk of run `top` and the runs hung under it, as spans in order (the first engine's walk, frame by frame: a
 // run's continuation steps the frame in place when it is the only right child, else it is a frame of
 // its own; a run's close falls when the frame it was entered by pops).
@@ -614,8 +634,7 @@ const walkSubtree = (w, top) => {
         emitPieces(kind, pos, r.id, r.elem, r.rle, f.starts, f.off, e, items, r.segs, owner);
         f.off = e;
         if (e >= r.len) {
-          if (f.first) leave(w, r);
-          stack.pop();
+          popFrame(w, stack);
           continue;
         }
       }
@@ -641,8 +660,7 @@ const walkSubtree = (w, top) => {
       } else stack.push(openFrame(w, nextRight));
       continue;
     }
-    if (f.first) leave(w, r);
-    stack.pop();
+    popFrame(w, stack);
   }
 };
 
@@ -710,18 +728,28 @@ const hydrate = (seq, base) => {
     }
   }
   roots.sort(byRecordOrigin);
-  for (const [parent, gathered] of lefts) parent.L = childrenList(gathered.entries);
-  for (const [parent, gathered] of rights) {
+  for (const pair of lefts) {
+    const parent = pair[0];
+    const gathered = pair[1];
+    parent.L = childrenList(gathered.entries);
+  }
+  for (const pair of rights) {
+    const parent = pair[0];
+    const gathered = pair[1];
     const { entries } = gathered;
     for (let k = 0; k < entries.length; k++) {
       const { off, ids } = entries[k];
       if (off + 1 >= parent.len) continue;
-      for (let i = 0; i < ids.length; i++) if (byOrigin(parent.id, ids[i]) < 0) parent.tails++;
+      for (let i = 0; i < ids.length; i++) {
+        if (byOrigin(parent.id, ids[i]) < 0) parent.tails++;
+      }
     }
     parent.R = childrenList(entries);
   }
   let pending = C.EMPTY;
-  for (const [e, list] of waiting) {
+  for (const pair of waiting) {
+    const e = pair[0];
+    const list = pair[1];
     if (list.length > 1) list.sort(byIdKey);
     pending = C.set(pending, e.n, list, owner);
   }
@@ -784,12 +812,16 @@ const hydrate = (seq, base) => {
   st.marks = mapOf(seq.marks, owner);
   let pendingRegs = 0;
   for (const map of ['pos', 'vals']) {
-    const keys = keysOf(seq[map]);
-    for (let i = 0; i < keys.length; i++) if (!holdsElem(st, keys[i])) pendingRegs++;
+    const regKeys = keysOf(seq[map]);
+    for (let i = 0; i < regKeys.length; i++) {
+      if (!holdsElem(st, regKeys[i])) pendingRegs++;
+    }
   }
   let pendingMarks = 0;
   const markKeys = keysOf(seq.marks);
-  for (let i = 0; i < markKeys.length; i++) if (isPlaceholder(seq.marks[markKeys[i]])) pendingMarks++;
+  for (let i = 0; i < markKeys.length; i++) {
+    if (isPlaceholder(seq.marks[markKeys[i]])) pendingMarks++;
+  }
   st.pendingRegs = pendingRegs;
   st.pendingMarks = pendingMarks;
   return createBlock(st);
@@ -799,7 +831,9 @@ const byNumber = (a, b) => a.id.n - b.id.n;
 // One side's children from its entries as they were gathered: each list by origin, the entries by offset.
 const byOff = (a, b) => a.off - b.off;
 const childrenList = (entries) => {
-  for (let i = 0; i < entries.length; i++) if (entries[i].ids.length > 1) entries[i].ids.sort(byOrigin);
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i].ids.length > 1) entries[i].ids.sort(byOrigin);
+  }
   if (entries.length > 1) entries.sort(byOff);
   return C.listOf(entries);
 };
@@ -812,6 +846,15 @@ const stampOfKey = (key) => {
 // The engine's block of each plain block it was asked for, with the base it was built under.
 const HYDRATED = new WeakMap();
 
+// A plain block checked into the canonical shape and hydrated, its stamp as given or the newest it holds;
+// one that reads as nothing an empty block of its kind.
+const hydrateJson = (seq, base) => {
+  const plain = normalizeJson(seq);
+  if (plain === null) return hydrate({ k: seq.k === 'l' ? 'l' : 't', ts: 0, runs: {} }, base);
+  plain.ts = Number.isSafeInteger(seq.ts) ? seq.ts : stampsMax(plain);
+  return hydrate(plain, base);
+};
+
 // A block as the engine holds it, from whatever was given: a block of this engine (rebuilt under `base`
 // when it was built under another), or plain JSON hydrated — once per plain block and base.
 const asBlock = (seq, base = null) => {
@@ -819,13 +862,7 @@ const asBlock = (seq, base = null) => {
   if (st === undefined) {
     const hit = HYDRATED.get(seq);
     if (hit !== undefined && sameBase(hit.base, base)) return hit.block;
-    const plain = normalizeJson(seq);
-    let block;
-    if (plain === null) block = hydrate({ k: seq.k === 'l' ? 'l' : 't', ts: 0, runs: {} }, base);
-    else {
-      plain.ts = Number.isSafeInteger(seq.ts) ? seq.ts : stampsMax(plain);
-      block = hydrate(plain, base);
-    }
+    const block = hydrateJson(seq, base);
     if (seq !== null && typeof seq === 'object') HYDRATED.set(seq, { base, block });
     return block;
   }
@@ -988,7 +1025,9 @@ const valuesAt = (block, i, count) => {
     if (!span.vis) continue;
     const n = Math.min(span.len - k, count - out.length);
     if (text) out += span.body.slice(k, k + n);
-    else for (let j = k; j < k + n; j++) out.push(valueOf(st, span, j));
+    else {
+      for (let j = k; j < k + n; j++) out.push(valueOf(st, span, j));
+    }
   }
   return out;
 };
@@ -1004,6 +1043,24 @@ const assignedRuns = (st) => {
   return out;
 };
 
+// A list's visible elements made whole: a slot's value off its span, or its register where one was set.
+const renderList = (st) => {
+  counters.listRenders++;
+  const out = [];
+  const flagged = st.vals.size > 0 ? assignedRuns(st) : null;
+  const cursor = R.first(st.root);
+  for (let span = cursor === null ? null : cursor.span; span !== null; span = R.next(cursor)) {
+    if (!span.vis) continue;
+    const run = flagged === null ? null : runById(st, span.run);
+    if (run === null || (run.elem === null && !flagged.has(span.run.key))) {
+      for (let k = 0; k < span.len; k++) out.push(span.body[k]);
+    } else {
+      for (let k = 0; k < span.len; k++) out.push(valueOf(st, span, k));
+    }
+  }
+  return out;
+};
+
 // What the field reads as: the visible elements in order — kept per version; a text's from the rope's
 // own cache, a list's made whole when nothing gave it from the version before (`derive`).
 const render = (block) => {
@@ -1015,21 +1072,7 @@ const render = (block) => {
     derive(before, block, changes);
     if (st.rendered !== null) return st.rendered;
   }
-  let out;
-  if (isText(st.kind)) out = R.text(st.root);
-  else {
-    counters.listRenders++;
-    out = [];
-    const flagged = st.vals.size > 0 ? assignedRuns(st) : null;
-    const cursor = R.first(st.root);
-    for (let span = cursor === null ? null : cursor.span; span !== null; span = R.next(cursor)) {
-      if (!span.vis) continue;
-      const run = flagged === null ? null : runById(st, span.run);
-      if (run === null || (run.elem === null && !flagged.has(span.run.key))) {
-        for (let k = 0; k < span.len; k++) out.push(span.body[k]);
-      } else for (let k = 0; k < span.len; k++) out.push(valueOf(st, span, k));
-    }
-  }
+  const out = isText(st.kind) ? R.text(st.root) : renderList(st);
   st.rendered = out;
   return out;
 };

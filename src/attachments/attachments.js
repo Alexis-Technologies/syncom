@@ -6,7 +6,7 @@
 // length, encoding? }`, which replicates like any field. The bytes do not: a
 // node that holds the name but not the bytes asks the peers it dials
 // (`syncom/blob`, through the sync plugin), checks the digest and keeps
-// them; none has them, `BLOB_NOT_FOUND`. `createDatabase({ plugins:
+// them; none has them, `ALX_ERR_BLOB_NOT_FOUND`. `createDatabase({ plugins:
 // [attachments()] })` hands the core `db.attachments`: `put(id, name, bytes,
 // { type })`, `get(id, name, { fetch })`, `has`, `list(id)`, `remove(id,
 // name)` — the engine must have a `blobs` store (`capabilities.blobs`).
@@ -19,11 +19,11 @@
 // other digest of the store removed. A register is believed only as far as it is
 // one (`validEntry`: a digest, a type, a length within MAX_BLOB_BYTES, an
 // encoding the plugin knows — a peer writes registers too, and a digest is a
-// key of the store): `ATTACHMENT_INVALID` from `get`/`has`, skipped by `list`.
+// key of the store): `ALX_ERR_ATTACHMENT_INVALID` from `get`/`has`, skipped by `list`.
 // Requires errors.js, blobs.js, symbols.js, crypto/digest.js only: the id is
 // checked where it enters the core (`get`, `update`, `unset`), as every id is.
 
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { isDigest, checkBlobBytes, MAX_BLOB_BYTES } = require('../blobs.js');
 const { SOURCE } = require('../symbols.js');
 const { hashBytes } = require('../crypto/digest.js');
@@ -42,7 +42,7 @@ const encoder = new TextEncoder();
 
 const checkName = (name) => {
   if (typeof name !== 'string' || !NAME.test(name)) {
-    throw new TypeError(
+    throw new ArgumentError(
       `attachments: a name is a text of up to 128 letters, digits, '.', '_', '@' or '-' — not ${JSON.stringify(name)}`,
     );
   }
@@ -65,7 +65,7 @@ const bytesOf = (value) => {
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   if (typeof value === 'string') return encoder.encode(value);
-  throw new TypeError('attachments: the bytes are a Uint8Array, an ArrayBuffer or a string');
+  throw new ArgumentError('attachments: the bytes are a Uint8Array, an ArrayBuffer or a string');
 };
 
 const compress = async (bytes, encoding) => {
@@ -106,7 +106,9 @@ const markOf = (data, marked) => {
   if (!isPlainObject(data)) return;
   const held = data[FIELD];
   if (isPlainObject(held)) {
-    for (const name of Object.keys(held)) if (validEntry(held[name])) marked.add(held[name].digest);
+    for (const name of Object.keys(held)) {
+      if (validEntry(held[name])) marked.add(held[name].digest);
+    }
   }
   for (const key of Object.keys(data)) {
     if (key.startsWith(PREFIX) && validEntry(data[key])) marked.add(data[key].digest);
@@ -145,14 +147,14 @@ class Attachments {
 
   // The attachment's name rides as `attachment`: a field named `name` would be the error's own.
   #invalid(id, name) {
-    return new SyncomError('ATTACHMENT_INVALID', `The register of attachment ${name} of ${id} is no register`, {
+    return new SyncomError('ALX_ERR_ATTACHMENT_INVALID', `The register of attachment ${name} of ${id} is no register`, {
       id,
       attachment: name,
     });
   }
 
   // The register of a name on a record, as the record reads now: `{ digest, type, length, encoding? }`, null where
-  // the record names none — ATTACHMENT_INVALID where it names something that is no register.
+  // the record names none — ALX_ERR_ATTACHMENT_INVALID where it names something that is no register.
   async #entry(id, name) {
     const data = await this.#storage.get(id);
     const held = data?.[FIELD];
@@ -176,9 +178,9 @@ class Attachments {
   async prepare(name, bytes, { type = DEFAULT_TYPE } = {}) {
     checkName(name);
     if (typeof type !== 'string' || type.length === 0) {
-      throw new TypeError('attachments.put(): type must be a media type');
+      throw new ArgumentError('attachments.put(): type must be a media type');
     }
-    const plain = checkBlobBytes(typed, bytesOf(bytes), 'attachments.put()');
+    const plain = checkBlobBytes(bytesOf(bytes), 'attachments.put()');
     const stored = this.#encoding === null ? plain : await compress(plain, this.#encoding);
     const digest = await hashBytes(stored);
     const entry = { digest, type, length: plain.length };
@@ -196,7 +198,7 @@ class Attachments {
     const row = this.#storage[SOURCE].row(id);
     if (row !== null && row.encrypted === true) {
       throw new SyncomError(
-        'ENCRYPTED',
+        'ALX_ERR_ENCRYPTED',
         `attachments.put(): record ${id} is sealed — its bytes would lie in the clear`,
         { id },
       );
@@ -218,11 +220,11 @@ class Attachments {
   }
 
   /**
-   * Mark-and-sweep over the blobs store: every digest a live record's register names, a tag's copy names (`tags`,
-   * on by default; the pending copies among them) or a put in flight holds is kept, every other blob removed.
-   * Answers `{ blobs, marked, removed, pending }`; `dryRun` counts and removes nothing. The log is not marked: a
-   * `restore()` or `applyPatches()` that brings a swept register back names bytes a peer may still hold (fetched on
-   * the read), else `BLOB_NOT_FOUND`. The writer's alone: `READ_ONLY` on a follower, `CLOSED` after close.
+   * Mark-and-sweep over the blobs store: every digest a live record's register names, a tag's copy names (`tags`, on by
+   * default; the pending copies among them) or a put in flight holds is kept, every other blob removed. Answers `{
+   * blobs, marked, removed, pending }`; `dryRun` counts and removes nothing. The log is not marked: a `restore()` or
+   * `applyPatches()` that brings a swept register back names bytes a peer may still hold (fetched on the read), else
+   * `ALX_ERR_BLOB_NOT_FOUND`. The writer's alone: `ALX_ERR_READ_ONLY` on a follower, `ALX_ERR_CLOSED` after close.
    */
   async sweep({ dryRun = false, tags = true } = {}) {
     const seam = this.#storage[SOURCE];
@@ -268,7 +270,9 @@ class Attachments {
           // Unreadable tags are none: nothing of them to keep.
         }
         const held = Array.isArray(parsed?.tags) ? parsed.tags : [];
-        for (let i = 0; i < held.length; i++) if (typeof held[i]?.name === 'string') names.push(held[i].name);
+        for (let i = 0; i < held.length; i++) {
+          if (typeof held[i]?.name === 'string') names.push(held[i].name);
+        }
       }
       for (let i = 0; i < names.length; i++) {
         const copied = await this.#db.copies.ids(names[i]);
@@ -301,9 +305,9 @@ class Attachments {
   }
 
   /**
-   * The attachment named: `{ bytes, type, length, digest, encoding? }`, or null where the record names none. Bytes
-   * this node lacks are asked of the peers it dials (`fetch: false` to skip); none has them, `BLOB_NOT_FOUND`. The
-   * bytes are what the register says or BLOB_MISMATCH: a plain blob of another length (`reason: 'length'`), a
+   * The attachment named: `{ bytes, type, length, digest, encoding? }`, or null where the record names none. Bytes this
+   * node lacks are asked of the peers it dials (`fetch: false` to skip); none has them, `ALX_ERR_BLOB_NOT_FOUND`. The
+   * bytes are what the register says or ALX_ERR_BLOB_MISMATCH: a plain blob of another length (`reason: 'length'`), a
    * compressed one that inflates past `length` (`'inflated'`, the inflating stopped there) or to another length.
    */
   async get(id, name, { fetch = true } = {}) {
@@ -338,7 +342,8 @@ class Attachments {
     const held = data?.[FIELD];
     const out = [];
     if (!isPlainObject(held)) return out;
-    const names = Object.keys(held).sort();
+    const names = Object.keys(held);
+    names.sort();
     for (let i = 0; i < names.length; i++) {
       const entry = held[names[i]];
       if (validEntry(entry)) out.push({ name: names[i], ...entry });
@@ -362,7 +367,7 @@ class Attachments {
     this.#stats.mismatches++;
     this.#otel().recordBlob('get', 'mismatch', 0);
     return new SyncomError(
-      'BLOB_MISMATCH',
+      'ALX_ERR_BLOB_MISMATCH',
       `The bytes of attachment ${name} of ${id} (${digest}) are not what the register says (${reason})`,
       { id, attachment: name, digest, reason },
     );
@@ -371,11 +376,15 @@ class Attachments {
   #missing(id, name, digest) {
     this.#stats.missing++;
     this.#otel().recordBlob('get', 'missing', 0);
-    return new SyncomError('BLOB_NOT_FOUND', `The bytes of attachment ${name} of ${id} (${digest}) are not here`, {
-      id,
-      attachment: name,
-      digest,
-    });
+    return new SyncomError(
+      'ALX_ERR_BLOB_NOT_FOUND',
+      `The bytes of attachment ${name} of ${id} (${digest}) are not here`,
+      {
+        id,
+        attachment: name,
+        digest,
+      },
+    );
   }
 
   // The bytes asked of the peers, through the sync plugin where it runs: checked by digest and kept there (once —
@@ -392,7 +401,7 @@ class Attachments {
       // Named: a host serves a blob to a peer that names a record in its scopes holding the digest.
       return await sync.fetchBlob(digest, { id, name });
     } catch (error) {
-      if (error?.code !== 'BLOB_NOT_FOUND') throw error;
+      if (error?.code !== 'ALX_ERR_BLOB_NOT_FOUND') throw error;
       throw this.#missing(id, name, digest);
     }
   }
@@ -401,16 +410,16 @@ class Attachments {
 /** The plugin: `db.attachments`. `compression` is `'gzip'`, `'deflate'` or none. */
 const attachments = ({ compression = null } = {}) => {
   if (compression !== null && !ENCODINGS.has(compression)) {
-    throw new TypeError("attachments(): compression is 'gzip', 'deflate' or null");
+    throw new ArgumentError("attachments(): compression is 'gzip', 'deflate' or null");
   }
   if (compression !== null && typeof globalThis.CompressionStream !== 'function') {
-    throw new TypeError('attachments(): this platform has no CompressionStream');
+    throw new ArgumentError('attachments(): this platform has no CompressionStream');
   }
   return Object.freeze({
     name: 'attachments',
     setup({ db, storage, logger }) {
       if (db === null || db === undefined || db.blobs === undefined) {
-        throw new TypeError('attachments: the engine has no blobs store (capabilities.blobs)');
+        throw new ArgumentError('attachments: the engine has no blobs store (capabilities.blobs)');
       }
       return { attachments: new Attachments(storage, db, compression, logger) };
     },

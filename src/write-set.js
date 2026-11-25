@@ -5,13 +5,36 @@
 // every value a text, a record an object — refused with the member's name.
 // What the files engine checks before a key becomes a file name, and a
 // served engine (src/engines/remote.js) before a value becomes a filter.
-// Requires engine.js only.
+// Requires engine.js and errors.js only.
 
 const { isKvKey, checkKvKey } = require('./engine.js');
+const { ArgumentError } = require('./argument-errors.js');
+
+// A record row's pieces: `{ put: [[name, text]…], remove: [name…] }`, either optional.
+const checkPieces = (row, fail) => {
+  const pieces = row.pieces;
+  if (pieces === null || typeof pieces !== 'object') fail(`record ${row.id}: pieces`);
+  const made = pieces.put;
+  if (made !== undefined) {
+    if (!Array.isArray(made)) fail(`record ${row.id}: pieces.put is a list`);
+    for (let k = 0; k < made.length; k++) {
+      if (!Array.isArray(made[k]) || !isKvKey(made[k][0]) || typeof made[k][1] !== 'string') {
+        fail(`record ${row.id}: a piece is [name, text]`);
+      }
+    }
+  }
+  const dropped = pieces.remove;
+  if (dropped !== undefined) {
+    if (!Array.isArray(dropped)) fail(`record ${row.id}: pieces.remove is a list`);
+    for (let k = 0; k < dropped.length; k++) {
+      if (!isKvKey(dropped[k])) fail(`record ${row.id}: a piece's name`);
+    }
+  }
+};
 
 const checkWriteSet = (batch, isId, label) => {
   const fail = (what) => {
-    throw new TypeError(`${label}: ${what}`);
+    throw new ArgumentError(`${label}: ${what}`);
   };
   if (batch === null || typeof batch !== 'object') fail('a write set is an object');
   const puts = batch.kv?.put;
@@ -47,23 +70,7 @@ const checkWriteSet = (batch, isId, label) => {
         fail(`record ${row.id}: stored is an object`);
       }
       if (asText && typeof row.text !== 'string') fail(`record ${row.id}: text is a text`);
-      const pieces = row.pieces;
-      if (pieces === undefined) continue;
-      if (pieces === null || typeof pieces !== 'object') fail(`record ${row.id}: pieces`);
-      const made = pieces.put;
-      if (made !== undefined) {
-        if (!Array.isArray(made)) fail(`record ${row.id}: pieces.put is a list`);
-        for (let k = 0; k < made.length; k++) {
-          if (!Array.isArray(made[k]) || !isKvKey(made[k][0]) || typeof made[k][1] !== 'string') {
-            fail(`record ${row.id}: a piece is [name, text]`);
-          }
-        }
-      }
-      const dropped = pieces.remove;
-      if (dropped !== undefined) {
-        if (!Array.isArray(dropped)) fail(`record ${row.id}: pieces.remove is a list`);
-        for (let k = 0; k < dropped.length; k++) if (!isKvKey(dropped[k])) fail(`record ${row.id}: a piece's name`);
-      }
+      if (row.pieces !== undefined) checkPieces(row, fail);
     }
   }
   const removed = batch.remove;

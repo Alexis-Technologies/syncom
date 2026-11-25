@@ -46,9 +46,9 @@ const again = await migrateStorage({
   to: sqliteEngine({ file: 'board.db' }),
   path: 'board',
 }).catch((error) => error);
-console.log(again.code); // TARGET_NOT_EMPTY: a copy never writes over a database
+console.log(again.code); // ALX_ERR_TARGET_NOT_EMPTY: a copy never writes over a database
 // #endregion refused
-assert.equal(again.code, 'TARGET_NOT_EMPTY');
+assert.equal(again.code, 'ALX_ERR_TARGET_NOT_EMPTY');
 
 // #region merge
 import { memoryEngine } from '@alexify/syncom/memory';

@@ -96,7 +96,9 @@ const opOf = (header, payload, rest) => {
     }
   }
   if (rest !== null && typeof rest === 'object') {
-    for (const key of Object.keys(rest)) if (key !== '__proto__') op[key] = rest[key];
+    for (const key of Object.keys(rest)) {
+      if (key !== '__proto__') op[key] = rest[key];
+    }
   }
   return op;
 };

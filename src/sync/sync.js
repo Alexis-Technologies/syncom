@@ -6,7 +6,7 @@
 // `unit()`, the hosting side (./hosting.js) a wrpc server mounts. The
 // transport is injected (`sync.connect`, a SyncLink — `@alexify/syncom/wrpc`
 // wraps a WrpcClient into one). Without the plugin `storage.sync` is
-// PLUGIN_MISSING, and the core still takes a peer's page through
+// ALX_ERR_PLUGIN_MISSING, and the core still takes a peer's page through
 // `applyRemote` and selects what a peer lacks with `outbound` — the updates
 // API a transport of the application's own carries. The hook the core
 // takes: `sync` — the manager, built once the log is open.
@@ -17,7 +17,7 @@ const { isSyncLink } = require('./link.js');
 const sync = Object.freeze({
   name: 'sync',
   async open({ storage, options }) {
-    const manager = await new SyncManager(storage, { ...(options.sync ?? {}), maxListeners: options.maxListeners });
+    const manager = await new SyncManager(storage, { ...options.sync, maxListeners: options.maxListeners });
     return { sync: manager };
   },
 });

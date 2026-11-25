@@ -27,7 +27,7 @@
 // (a key becomes a file name there, a value a filter), `remove(path)` takes
 // what this port opened or what `allow` lists, and an answer that does not
 // clone crosses as an error. A port that closes, a worker that exits, fails
-// every call waiting and every call after as `ENGINE_UNREACHABLE`; so does a
+// every call waiting and every call after as `ALX_ERR_ENGINE_UNREACHABLE`; so does a
 // call past `timeout`. Requires engine.js, shape.js and errors.js only — the
 // port is the platform's (worker_threads, a browser's MessageChannel).
 
@@ -35,14 +35,14 @@ const { checkEngine, checkEngineDb, capabilitiesOf, isKvKey, isKvNamespace } = r
 const { isDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { packError, unpackError } = require('../wire-error.js');
 
 const LOG_GETTERS = ['journaled', 'sealedTo', 'open', 'segments', 'corrupt', 'health'];
 // A call's arguments are its own, a short fixed list: more is no call of the contract's.
 const ARGS_MAX = 4;
 
-const refused = (what) => new TypeError(`serveEngine(): ${what}`);
+const refused = (what) => new ArgumentError(`serveEngine(): ${what}`);
 // A blob's digest: hex, 64 characters (SHA-256) — the contract's `isDigest`.
 const digest = (value) => {
   if (!isDigest(value)) throw refused(`${JSON.stringify(value)} is not a digest`);
@@ -156,7 +156,7 @@ const CHECKS = Object.freeze({
     put: (name, bytes) => {
       digest(name);
       if (!(bytes instanceof Uint8Array)) throw refused('a blob is a Uint8Array');
-      checkBlobBytes(typed, bytes, 'serveEngine() blobs.put', MAX_STORED_BYTES);
+      checkBlobBytes(bytes, 'serveEngine() blobs.put', MAX_STORED_BYTES);
     },
     remove: digest,
   }),
@@ -204,7 +204,7 @@ const CHECKS = Object.freeze({
 const STORES = Object.freeze(Object.keys(CHECKS));
 
 const unreachable = (reason, fields = {}) =>
-  new SyncomError('ENGINE_UNREACHABLE', `remoteEngine(): the served engine is unreachable (${reason})`, {
+  new SyncomError('ALX_ERR_ENGINE_UNREACHABLE', `remoteEngine(): the served engine is unreachable (${reason})`, {
     reason,
     ...fields,
     cause: null,
@@ -214,7 +214,7 @@ const unreachable = (reason, fields = {}) =>
 // `on('message')` with the data, a browser's `addEventListener` with an
 // event; the other side gone is a MessagePort's `close`, a Worker's `exit`.
 const portOf = (port) => {
-  if (typeof port?.postMessage !== 'function') throw new TypeError('the port has no postMessage()');
+  if (typeof port?.postMessage !== 'function') throw new ArgumentError('the port has no postMessage()');
   const send = (message) => port.postMessage(message);
   const node = typeof port.on === 'function';
   const listen = (fn) => {
@@ -257,7 +257,7 @@ const logState = (log) => {
  */
 const serveEngine = (engine, port, { allow = null } = {}) => {
   const inner = checkEngine(engine, 'serveEngine()');
-  if (allow !== null && !Array.isArray(allow)) throw new TypeError('serveEngine(): allow is a list of paths');
+  if (allow !== null && !Array.isArray(allow)) throw new ArgumentError('serveEngine(): allow is a list of paths');
   const allowed = allow === null ? null : new Set(allow);
   const { send, listen, onClose } = portOf(port);
   const handles = new Map();
@@ -343,7 +343,9 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
   // The log store's calls that carry a callback's answer along instead of the callback.
   const logCalls = {
     async append(log, args) {
-      const [entries, headers, options] = args;
+      const entries = args[0];
+      const headers = args[1];
+      const options = args[2];
       let failure = null;
       const landed = await log.append(entries, headers, {
         ...options,
@@ -362,16 +364,20 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
       for (let i = 0; i < segments.length; i++) {
         if (segments[i].from === args[0].from && segments[i].to === args[0].to) own = segments[i];
       }
-      if (own === null) throw new TypeError('drop(segment): no such segment');
+      if (own === null) throw new ArgumentError('drop(segment): no such segment');
       await log.drop(own);
     },
     async scrub(log, args) {
-      const [seqs, options, entries] = args;
+      const seqs = args[0];
+      const options = args[1];
+      const entries = args[2];
       const held = new Map();
       for (let i = 0; i < entries.length; i++) held.set(entries[i].seq, entries[i]);
       const entriesBetween = (from, to) => {
         const out = [];
-        for (let seq = from; seq <= to; seq++) if (held.has(seq)) out.push(held.get(seq));
+        for (let seq = from; seq <= to; seq++) {
+          if (held.has(seq)) out.push(held.get(seq));
+        }
         return out;
       };
       await log.scrub(seqs, { ...options, entriesBetween });
@@ -408,7 +414,7 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
 
   const onMessage = async (message) => {
     if (stopped || message === null || typeof message !== 'object' || message.id === undefined) return;
-    let answer;
+    let answer = null;
     try {
       const ok = await call(message);
       answer = { id: message.id, ok };
@@ -432,15 +438,15 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
     }
   };
   const stop = listen(onMessage);
-  let unclose = () => {};
+  let unclose = null;
   const shutdown = async (closePort) => {
     if (stopped) return;
     stopped = true;
     stop();
-    unclose();
+    unclose?.();
     for (const unsubscribe of subscriptions.values()) unsubscribe();
     subscriptions.clear();
-    for (const stop of leases.values()) stop();
+    for (const stopLease of leases.values()) stopLease();
     leases.clear();
     for (const held of locks.values()) await held.release();
     locks.clear();
@@ -460,14 +466,18 @@ const serveEngine = (engine, port, { allow = null } = {}) => {
 /**
  * The engine served over `port`, as `{ name, capabilities }` say it is —
  * what the other side was given; `connectEngine(port)` asks instead. A call
- * past `timeout` ms (0, none, by default) fails as `ENGINE_UNREACHABLE`.
+ * past `timeout` ms (0, none, by default) fails as `ALX_ERR_ENGINE_UNREACHABLE`.
  */
 const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
   if (typeof name !== 'string' || name.length === 0) {
-    throw new TypeError('remoteEngine(): name — or connectEngine(port)');
+    throw new ArgumentError('remoteEngine(): name — or connectEngine(port)');
   }
-  if (typeof capabilities !== 'object' || capabilities === null) throw new TypeError('remoteEngine(): capabilities');
-  if (typeof timeout !== 'number' || !(timeout >= 0)) throw new TypeError('remoteEngine(): timeout is ms, 0 for none');
+  if (typeof capabilities !== 'object' || capabilities === null) {
+    throw new ArgumentError('remoteEngine(): capabilities');
+  }
+  if (typeof timeout !== 'number' || !(timeout >= 0)) {
+    throw new ArgumentError('remoteEngine(): timeout is ms, 0 for none');
+  }
   const { send, listen, onClose } = portOf(port);
   const pending = new Map();
   const listeners = new Map();
@@ -543,8 +553,8 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
   const value = async (body) => (await ask(body)).ok;
 
   const openDb = (p, h) => {
-    const method = (store, name) => {
-      return (...args) => value({ h, store, method: name, args });
+    const method = (store, methodName) => {
+      return (...args) => value({ h, store, method: methodName, args });
     };
     const kv = {
       get: method('kv', 'get'),
@@ -585,8 +595,8 @@ const remoteEngine = (port, { name, capabilities, timeout = 0 } = {}) => {
       : undefined;
     // The log store's getters are read at once by the OpLog: the last state the served side answered with.
     let state = { journaled: false, sealedTo: null, open: 0, segments: [], corrupt: 0, health: null };
-    const logCall = async (name, args) => {
-      const answer = await ask({ h, store: 'log', method: name, args });
+    const logCall = async (methodName, args) => {
+      const answer = await ask({ h, store: 'log', method: methodName, args });
       if (answer.log !== undefined) state = answer.log;
       return answer.ok;
     };

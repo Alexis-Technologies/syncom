@@ -13,9 +13,12 @@
 // open through where it can.
 
 const { idbEngine } = require('./engine.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const NOT_FOUND = 'NotFoundError';
 
+// The handlers are properties, not listeners: the `indexedDB` handed in is duck-typed, and its requests and
+// transactions may have the `on…` properties alone (tests/idb.test.js hands in such a factory).
 const request = (req) =>
   new Promise((resolve, reject) => {
     req.onsuccess = () => resolve(req.result);
@@ -38,15 +41,15 @@ const notFound = (dir, name) =>
  * browser closes it (`versionchange`); `close()` closes it. `indexedDB`
  * defaults to the global one; a test passes its own factory.
  */
-const createIdbFsi = ({ name = 'syncom', store = 'files', indexedDB = globalThis.indexedDB } = {}) => {
+const createIdbFsi = ({ name: databaseName = 'syncom', store = 'files', indexedDB = globalThis.indexedDB } = {}) => {
   if (!indexedDB || typeof indexedDB.open !== 'function') {
-    throw new TypeError('createIdbFsi: no indexedDB — pass one, or use the OPFS backend');
+    throw new ArgumentError('createIdbFsi: no indexedDB — pass one, or use the OPFS backend');
   }
   let opening = null;
 
   const open = () => {
     opening ??= new Promise((resolve, reject) => {
-      const req = indexedDB.open(name, 1);
+      const req = indexedDB.open(databaseName, 1);
       req.onupgradeneeded = () => {
         const db = req.result;
         if (!db.objectStoreNames.contains(store)) {
@@ -89,7 +92,7 @@ const createIdbFsi = ({ name = 'syncom', store = 'files', indexedDB = globalThis
       return row.content;
     },
     async write(dir, name, content) {
-      await run('readwrite', (files) => files.put({ dir, name, content: String(content) }));
+      await run('readwrite', (files) => files.put({ dir, name, content: `${content}` }));
     },
     async exists(dir, name) {
       return (await run('readonly', (files) => files.getKey([dir, name]))) !== undefined;
@@ -101,7 +104,8 @@ const createIdbFsi = ({ name = 'syncom', store = 'files', indexedDB = globalThis
       const keys = await run('readonly', (files) => files.index('dir').getAllKeys(dir));
       const names = [];
       for (let i = 0; i < keys.length; i++) names.push(keys[i][1]);
-      return names.sort();
+      names.sort();
+      return names;
     },
     async close() {
       if (opening === null) return;

@@ -18,7 +18,7 @@ expectType<boolean>(isSyncLink({}));
 const storage = await createDatabase({ plugins: [syncPlugin] });
 expectType<SyncManager>(storage.sync);
 expectType<SyncUnitOptions['authorizeWrite'] | null>(storage.sync.authorizeWrite);
-// What a REWOUND host may move of this node's own streams: on proof, or on its word.
+// What a ALX_ERR_REWOUND host may move of this node's own streams: on proof, or on its word.
 expectType<SyncManager>((await createDatabase({ plugins: [syncPlugin], sync: { rewind: 'adopt' } })).sync);
 expectError(createDatabase({ plugins: [syncPlugin], sync: { rewind: 'trust' } }));
 // The core alone has no sync property in its type.

@@ -15,6 +15,14 @@ const { under } = require('./paths.js');
 const touches = (change, path) =>
   change.field === undefined || change.field === path || under(change.field, path) || under(path, change.field);
 
+const touching = (list, path) => {
+  const mine = [];
+  for (let i = 0; i < list.length; i++) {
+    if (touches(list[i], path)) mine.push(list[i]);
+  }
+  return mine;
+};
+
 class Observers {
   #emitter;
   #logger;
@@ -59,13 +67,13 @@ class Observers {
       if (list === undefined) byId.set(change.id, (list = []));
       list.push(change);
     }
-    for (const [id, list] of byId) {
-      for (const { path, listener } of [...this.#byId.get(id)]) {
-        let mine = list;
-        if (path !== null) {
-          mine = [];
-          for (let i = 0; i < list.length; i++) if (touches(list[i], path)) mine.push(list[i]);
-        }
+    for (const entry of byId) {
+      const id = entry[0];
+      const list = entry[1];
+      // A copy: a listener may observe or let go, which changes the set walked.
+      const watches = [...this.#byId.get(id)];
+      for (const { path, listener } of watches) {
+        const mine = path === null ? list : touching(list, path);
         if (mine.length === 0) continue;
         try {
           const out = listener(mine, event);

@@ -11,7 +11,7 @@
 //   editor → field   the adapter reports a local edit as a delta; the
 //                    binding applies it to the handle at once — resolved
 //                    and stamped over the handle's reading, which is the
-//                    editor's, so nothing is ever STALE — and the handle
+//                    editor's, so nothing is ever ALX_ERR_STALE — and the handle
 //                    logs the edits a window later as one transaction,
 //                    keystrokes that continue each other as one op.
 //   field → editor   every other writer's change reaches the handle once, as
@@ -20,7 +20,7 @@
 //                    without reporting it back.
 //
 // A change no delta can say (a reset, an unset, the record gone) and a flush
-// that could not be logged (UNLOGGED: what was not logged is dropped) reload
+// that could not be logged (ALX_ERR_UNLOGGED: what was not logged is dropped) reload
 // the editor from the handle's reading (`onReset`); an editor that throws on
 // a change, or a delta the handle refuses, the same. Failures in a row stop
 // the binding at MAX_FAILURES.
@@ -38,6 +38,7 @@
 
 const { diff: myers } = require('../text/myers.js');
 const D = require('../text/quill.js');
+const { ArgumentError } = require('../argument-errors.js');
 const { push, chop } = D;
 
 // Two values alike as JSON (a marker, an attribute's value).
@@ -62,7 +63,7 @@ const isOp = (op) =>
 const checkDelta = (name, delta) => {
   let ok = Array.isArray(delta);
   for (let i = 0; ok && i < delta.length; i++) ok = isOp(delta[i]);
-  if (!ok) throw new TypeError(`${name}() takes a delta`);
+  if (!ok) throw new ArgumentError(`${name}() takes a delta`);
 };
 
 /** The delta that does `a` then `b`, as one; a document (inserts alone) composed with a delta is the document after it. */
@@ -85,14 +86,16 @@ const transform = (a, b, priority = false) => {
 
 /** Where `index` is once `delta` has applied; with `priority`, an insert at the index itself stays behind it. */
 const transformIndex = (index, delta, priority = false) => {
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('transformIndex() takes a non-negative integer index');
+  if (!Number.isInteger(index) || index < 0) {
+    throw new ArgumentError('transformIndex() takes a non-negative integer index');
+  }
   checkDelta('transformIndex', delta);
   return D.transformIndex(index, delta, priority);
 };
 
 /** `text` once `delta` has applied, an embed slot as U+FFFC. */
 const applyToText = (text, delta) => {
-  if (typeof text !== 'string') throw new TypeError('applyToText() takes a string');
+  if (typeof text !== 'string') throw new ArgumentError('applyToText() takes a string');
   checkDelta('applyToText', delta);
   // One pass: `at` is where the delta stands in `text`, `out` what it made before there.
   let at = 0;
@@ -117,7 +120,7 @@ const marksOf = (span) => (span.marks !== undefined && Object.keys(span.marks).l
 
 /** A reading's typed spans as a document delta: text with its marks as attributes, a slot as `{ insert: { embed } }`. */
 const spansToDelta = (spans) => {
-  if (!Array.isArray(spans)) throw new TypeError('spansToDelta() takes spans');
+  if (!Array.isArray(spans)) throw new ArgumentError('spansToDelta() takes spans');
   const ops = [];
   for (const span of spans) {
     const op = span.type === 'text' ? { insert: span.text } : { insert: { embed: span.value } };
@@ -133,7 +136,7 @@ const deltaToSpans = (ops) => {
   checkDelta('deltaToSpans', ops);
   const spans = [];
   for (const op of ops) {
-    if (op.insert === undefined) throw new TypeError('deltaToSpans() takes a document: inserts alone');
+    if (op.insert === undefined) throw new ArgumentError('deltaToSpans() takes a document: inserts alone');
     const marks = op.attributes ?? {};
     if (typeof op.insert === 'string') spans.push({ type: 'text', text: op.insert, marks });
     else if (op.insert.embed !== null && op.insert.embed.isEmbed === false) {
@@ -145,7 +148,7 @@ const deltaToSpans = (ops) => {
 
 /** Typed spans cut at the block markers: `{ index, type, parents, attrs, spans }` per block, a leading block of type `null` for text before the first marker. */
 const spansToBlocks = (spans) => {
-  if (!Array.isArray(spans)) throw new TypeError('spansToBlocks() takes spans');
+  if (!Array.isArray(spans)) throw new ArgumentError('spansToBlocks() takes spans');
   const blocks = [];
   let block = null;
   let index = 0;
@@ -169,14 +172,14 @@ const spansToBlocks = (spans) => {
 
 /** Blocks back to typed spans: a marker per block of a type, then its spans. */
 const blocksToSpans = (blocks) => {
-  if (!Array.isArray(blocks)) throw new TypeError('blocksToSpans() takes blocks');
+  if (!Array.isArray(blocks)) throw new ArgumentError('blocksToSpans() takes blocks');
   const spans = [];
   for (const block of blocks) {
     if (block.type !== null) {
       const value = {
         type: block.type,
         parents: [...(block.parents ?? [])],
-        attrs: { ...(block.attrs ?? {}) },
+        attrs: { ...block.attrs },
         isEmbed: false,
       };
       spans.push({ type: 'block', value });
@@ -211,8 +214,12 @@ const flatten = (spans) => {
 // The attributes that take `a`'s marks to `b`'s: a value changed or added, null for one gone.
 const attributesBetween = (a, b) => {
   const out = {};
-  if (b !== undefined) for (const key of Object.keys(b)) if (!same(a?.[key], b[key])) out[key] = b[key];
-  if (a !== undefined) for (const key of Object.keys(a)) if (b === undefined || b[key] === undefined) out[key] = null;
+  if (b !== undefined) {
+    for (const key of Object.keys(b)) if (!same(a?.[key], b[key])) out[key] = b[key];
+  }
+  if (a !== undefined) {
+    for (const key of Object.keys(a)) if (b === undefined || b[key] === undefined) out[key] = null;
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 };
 
@@ -223,7 +230,7 @@ const attributesBetween = (a, b) => {
  * stays as attributes.
  */
 const diffSpans = (before, after) => {
-  if (!Array.isArray(before) || !Array.isArray(after)) throw new TypeError('diffSpans() takes two readings');
+  if (!Array.isArray(before) || !Array.isArray(after)) throw new ArgumentError('diffSpans() takes two readings');
   const a = flatten(before);
   const b = flatten(after);
   // Myers hands its hunks back last first: read from the end, they come in order.
@@ -238,7 +245,7 @@ const diffSpans = (before, after) => {
       const changed = marker !== undefined && !same(marker, b.markers[bi + i]);
       const op = { retain: 1 };
       if (attributes !== undefined || changed) {
-        op.attributes = { ...(attributes ?? {}), ...(changed ? { embed: b.markers[bi + i] } : {}) };
+        op.attributes = { ...attributes, ...(changed ? { embed: b.markers[bi + i] } : {}) };
       }
       push(ops, op);
     }
@@ -246,7 +253,10 @@ const diffSpans = (before, after) => {
     bi += count;
   };
   for (let h = hunks.length - 1; h >= 0; h--) {
-    const [index, count, text] = hunks[h];
+    const hunk = hunks[h];
+    const index = hunk[0];
+    const count = hunk[1];
+    const text = hunk[2];
     retain(index - ai);
     if (count > 0) {
       push(ops, { delete: count });
@@ -272,7 +282,7 @@ const diffBlocks = (before, after) => diffSpans(blocksToSpans(before), blocksToS
 
 const checkStorage = (name, storage) => {
   if (!storage || typeof storage.cursor !== 'function' || typeof storage.positions !== 'function') {
-    throw new TypeError(`${name}() takes a storage with the text plugin`);
+    throw new ArgumentError(`${name}() takes a storage with the text plugin`);
   }
 };
 
@@ -280,7 +290,7 @@ const checkStorage = (name, storage) => {
 const selectionToTokens = async (storage, id, path, selection) => {
   checkStorage('selectionToTokens', storage);
   if (!selection || !Number.isInteger(selection.anchor)) {
-    throw new TypeError('selectionToTokens() takes { anchor, head? }');
+    throw new ArgumentError('selectionToTokens() takes { anchor, head? }');
   }
   const { anchor, head = anchor } = selection;
   const a = await storage.cursor(id, path, anchor);
@@ -293,18 +303,22 @@ const selectionToTokens = async (storage, id, path, selection) => {
 const tokensToSelection = async (storage, tokens) => {
   checkStorage('tokensToSelection', storage);
   if (!tokens || typeof tokens.anchor !== 'string') {
-    throw new TypeError('tokensToSelection() takes { id, field, anchor, head }');
+    throw new ArgumentError('tokensToSelection() takes { id, field, anchor, head }');
   }
   const head = tokens.head ?? tokens.anchor;
-  const [a, h] = await storage.positions(tokens.id, tokens.field, [tokens.anchor, head]);
+  const places = await storage.positions(tokens.id, tokens.field, [tokens.anchor, head]);
+  const a = places[0];
+  const h = places[1];
   return a === null || h === null ? null : { anchor: a.index, head: h.index };
 };
 
 /** The cursors a presence room holds on `path` of `id` — each state's `key` (`cursor`) as tokens — resolved to indices now. */
 const presenceCursors = async (presence, storage, id, path, { key = 'cursor' } = {}) => {
-  if (!presence || typeof presence.states !== 'function') throw new TypeError('presenceCursors() takes a presence');
+  if (!presence || typeof presence.states !== 'function') throw new ArgumentError('presenceCursors() takes a presence');
   const out = [];
-  for (const [node, state] of presence.states()) {
+  for (const entry of presence.states()) {
+    const node = entry[0];
+    const state = entry[1];
     const tokens = state?.[key];
     if (!tokens || tokens.id !== id || tokens.field !== path || typeof tokens.anchor !== 'string') continue;
     if (tokens.head !== undefined && typeof tokens.head !== 'string') continue;
@@ -336,10 +350,10 @@ const presenceCursors = async (presence, storage, id, path, { key = 'cursor' } =
  */
 const createTextBinding = (storage, id, path, adapter, options = {}) => {
   if (!storage || typeof storage.openText !== 'function') {
-    throw new TypeError('createTextBinding() takes a storage with the text plugin');
+    throw new ArgumentError('createTextBinding() takes a storage with the text plugin');
   }
   if (typeof id !== 'string' || typeof path !== 'string') {
-    throw new TypeError('createTextBinding() takes an id and a field');
+    throw new ArgumentError('createTextBinding() takes an id and a field');
   }
   if (
     !adapter ||
@@ -347,7 +361,7 @@ const createTextBinding = (storage, id, path, adapter, options = {}) => {
     typeof adapter.updateContents !== 'function' ||
     typeof adapter.onChange !== 'function'
   ) {
-    throw new TypeError('createTextBinding() takes an adapter: setContents, updateContents, onChange');
+    throw new ArgumentError('createTextBinding() takes an adapter: setContents, updateContents, onChange');
   }
   const { source = Symbol('editor'), window, onError = null, onReset = null, onStop = null } = options;
   let handle = null;
@@ -511,7 +525,9 @@ class Fit {
 
 /** A fit over the document `read()` reads, `diff(from, to)` the delta between two of its readings. */
 const createFit = (read, diff) => {
-  if (typeof read !== 'function' || typeof diff !== 'function') throw new TypeError('createFit() takes read and diff');
+  if (typeof read !== 'function' || typeof diff !== 'function') {
+    throw new ArgumentError('createFit() takes read and diff');
+  }
   return new Fit(read, diff);
 };
 
@@ -524,7 +540,7 @@ const createFit = (read, diff) => {
  */
 const undoSteps = (manager, binding, report) => {
   if (!manager || typeof manager.undo !== 'function' || typeof manager.redo !== 'function') {
-    throw new TypeError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
+    throw new ArgumentError('commands() takes an undo manager: createUndo() from @alexify/syncom/undo');
   }
   const step = (name, can) => (run) => {
     if (!manager[can]) return false;

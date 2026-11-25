@@ -15,7 +15,7 @@ try {
 const refused = await createDatabase({ path: 'board', schema: { entities: { Task: { indexes: ['done'] } } } }).catch(
   (error) => error,
 );
-assert.equal(refused.name, 'TypeError');
+assert.equal(refused.name, 'ArgumentError');
 assert.match(refused.message, /entity Task: unknown key 'indexes' \(expected schema, idField/);
 
 const db = await createDatabase({ path: 'board', schema: { entities: { Task: { index: ['done'] } } } });
@@ -28,7 +28,7 @@ try {
 }
 // #endregion query
 assert.throws(() => db.Task.select({ votes: { $greater: 2 } }), {
-  name: 'TypeError',
+  name: 'ArgumentError',
   message: 'select(): unknown operator $greater',
 });
 
@@ -37,13 +37,13 @@ await db.Task.insert({ id: 'write-docs', title: 'Write the docs', done: false })
 try {
   await db.Task.insert({ id: 'write-docs', title: 'Write the docs again', done: false });
 } catch (error) {
-  if (error.code !== 'EXISTS') throw error;
+  if (error.code !== 'ALX_ERR_EXISTS') throw error;
   console.log(error.message); // 'Record write-docs exists already'
 }
 // #endregion code
 await assert.rejects(() => db.Task.insert({ id: 'write-docs', title: 'x' }), {
   name: 'SyncomError',
-  code: 'EXISTS',
+  code: 'ALX_ERR_EXISTS',
   message: 'Record write-docs exists already',
 });
 

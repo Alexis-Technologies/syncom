@@ -49,6 +49,7 @@ const { deepEqual, isPlainObject, own } = require('./shape.js');
 const { isJsonValue, jsonValue, fieldNames, setElements } = require('./args.js');
 const { isPath } = require('./paths.js');
 const { EMPTY, HOME, missing } = require('./plugin.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 const asKeys = (elements) => {
   const keys = new Map();
@@ -89,7 +90,9 @@ const diffViews = (
     return from === null ? [] : [{ action: 'delete' }];
   }
   const registers = {};
-  for (const field of Object.keys(toKinds)) if (toKinds[field] === 'register') registers[field] = to[field];
+  for (const field of Object.keys(toKinds)) {
+    if (toKinds[field] === 'register') registers[field] = to[field];
+  }
   const patches = [];
   // A record that was not there: the registers written, the rest made again.
   if (from === null) {
@@ -136,9 +139,13 @@ const diffViews = (
       const before = asKeys(previous ?? []);
       const after = asKeys(value ?? []);
       const added = [];
-      for (const entry of after) if (!before.has(entry[0])) added.push(entry[1]);
+      for (const entry of after) {
+        if (!before.has(entry[0])) added.push(entry[1]);
+      }
       const removed = [];
-      for (const entry of before) if (!after.has(entry[0])) removed.push(entry[1]);
+      for (const entry of before) {
+        if (!after.has(entry[0])) removed.push(entry[1]);
+      }
       if (added.length > 0) patches.push({ action: 'add', field, elements: added });
       if (removed.length > 0) patches.push({ action: 'remove', field, elements: removed });
     } else {
@@ -177,18 +184,18 @@ const isRemovals = (list) => {
  * A patch as the op the write path takes: `[type, payload]`, checked as the
  * method of the same name checks its arguments (src/args.js). A patch of the
  * wrong shape is a TypeError — it is the caller's data; one of a plugin's
- * action with no plugin registered is PLUGIN_MISSING.
+ * action with no plugin registered is ALX_ERR_PLUGIN_MISSING.
  */
 const realize = (patch, plugins = EMPTY) => {
-  if (patch === null || typeof patch !== 'object') throw new TypeError('applyPatches(): a patch is an object');
+  if (patch === null || typeof patch !== 'object') throw new ArgumentError('applyPatches(): a patch is an object');
   const { action, field } = patch;
   const mod = typeof action === 'string' ? own(plugins.byAction, action) : undefined;
   if (!ACTIONS.has(action) && mod === undefined) {
     if (typeof action === 'string' && own(HOME, action) !== undefined) throw missing(`a ${action} patch`, HOME[action]);
-    throw new TypeError(`applyPatches(): unknown action ${action}`);
+    throw new ArgumentError(`applyPatches(): unknown action ${action}`);
   }
   const named = action !== 'write' && action !== 'delete' && action !== 'purge';
-  if (named && !isField(field)) throw new TypeError(`applyPatches(): ${action} needs a field`);
+  if (named && !isField(field)) throw new ArgumentError(`applyPatches(): ${action} needs a field`);
   const method = 'applyPatches';
   if (mod !== undefined) return mod.realize(action, patch, method);
   switch (action) {
@@ -197,17 +204,17 @@ const realize = (patch, plugins = EMPTY) => {
     case 'unset':
       return ['unset', { value: fieldNames(method, field) }];
     case 'write':
-      if (!isPlainObject(patch.data)) throw new TypeError('applyPatches(): write needs data: a plain object');
+      if (!isPlainObject(patch.data)) throw new ArgumentError('applyPatches(): write needs data: a plain object');
       return ['write', { data: patch.data }];
     case 'inc':
-      if (!Number.isFinite(patch.value)) throw new TypeError('applyPatches(): inc needs a finite value');
+      if (!Number.isFinite(patch.value)) throw new ArgumentError('applyPatches(): inc needs a finite value');
       return ['inc', { key: field, value: patch.value }];
     case 'add':
       return ['add', { key: field, value: setElements(method, field, patch.elements) }];
     case 'remove': {
       if (patch.removals !== undefined) {
         if (!isRemovals(patch.removals)) {
-          throw new TypeError('applyPatches(): remove needs removals as [[element, { origin: addTs }]]');
+          throw new ArgumentError('applyPatches(): remove needs removals as [[element, { origin: addTs }]]');
         }
         return ['remove', { key: field, value: [], removals: patch.removals }];
       }

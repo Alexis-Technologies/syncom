@@ -99,12 +99,12 @@ await links.phone.reconnect();
 await settle([server, laptop, phone]);
 assert.equal(await laptop.get(task.id), null);
 assert.equal(await phone.get(task.id), null);
-await assert.rejects(phone.inc(task.id, 'votes', 1), { code: 'NOT_FOUND' });
+await assert.rejects(phone.inc(task.id, 'votes', 1), { code: 'ALX_ERR_NOT_FOUND' });
 
 // #region revived
 console.log(await laptop.Task.get(task.id)); // null: the delete wins over Bob's later edits
 console.log(await phone.Task.get(task.id)); // null on Bob's device too
-await phone.Task.update(task.id, { done: true }).catch((error) => console.log(error.code)); // NOT_FOUND
+await phone.Task.update(task.id, { done: true }).catch((error) => console.log(error.code)); // ALX_ERR_NOT_FOUND
 
 await phone.Task.set(task.id, { title: 'Write the docs', done: false }); // a whole-record write brings it back
 // #endregion revived

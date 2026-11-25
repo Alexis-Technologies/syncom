@@ -10,6 +10,7 @@ const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.j
 const { isRecordId, invalidId } = require('../shape.js');
 const { floorOf } = require('../vector.js');
 const { blockOf, revisionOf, markerAt, markerArgs, wholeCharacters } = require('./kind.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 /**
  * Who inserted the element at `index` of list or text field `key`:
@@ -17,7 +18,7 @@ const { blockOf, revisionOf, markerAt, markerArgs, wholeCharacters } = require('
  * or `null` out of range, or when the field is not a list or a text.
  */
 const editorOf = async (core, id, key, index) => {
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('editorOf() takes a non-negative integer index');
+  if (!Number.isInteger(index) || index < 0) throw new ArgumentError('editorOf() takes a non-negative integer index');
   const field = await held(core, 'editorOf', id, key);
   if (field === null) return null;
   const elem = S.elemAt(S.indexOf(field.entry, key), index);
@@ -44,7 +45,7 @@ const RESOLVED = Promise.resolve();
  * merge by position (Fugue): two nodes inserting at one spot both keep
  * theirs, each run whole, and a deleted element keeps its place for the
  * anchors into it. Creates the field, and the record, when absent;
- * rejects with `OUT_OF_RANGE` past the field's length.
+ * rejects with `ALX_ERR_OUT_OF_RANGE` past the field's length.
  */
 const splice = (core, id, key, index, count = 0, content, options) =>
   core.write('splice', id, spliceArgs('splice', key, index, count, content), { actor: options?.actor });
@@ -63,7 +64,7 @@ const push = (core, id, key, content, options) =>
  */
 const updateText = async (core, id, key, text, { actor } = {}) => {
   fieldName('updateText', key);
-  if (typeof text !== 'string') throw new TypeError('updateText() takes a string');
+  if (typeof text !== 'string') throw new ArgumentError('updateText() takes a string');
   if (!isRecordId(id)) throw invalidId(id);
   return core.run(async () => {
     const current = await core.current(id);
@@ -71,9 +72,10 @@ const updateText = async (core, id, key, text, { actor } = {}) => {
     // Another kind under the field: the first splice is refused for it.
     const hunks = myers(typeof before === 'string' ? before : '', text);
     // The slots the text keeps stay, markers and all; a new one has no marker to carry.
-    for (const [, , content] of hunks) {
+    for (const entry of hunks) {
+      const content = entry[2];
       if (content.includes(EMBED)) {
-        throw new TypeError(
+        throw new ArgumentError(
           'updateText() takes text; an embed (U+FFFC) is inserted with insertEmbed() or splitBlock()',
         );
       }
@@ -81,7 +83,10 @@ const updateText = async (core, id, key, text, { actor } = {}) => {
     let ops = 0;
     const landings = [];
     try {
-      for (const [index, count, content] of hunks) {
+      for (const entry of hunks) {
+        const index = entry[0];
+        const count = entry[1];
+        const content = entry[2];
         const payload = { key, index, count };
         if (content.length > 0) payload.content = content;
         const { op, done } = await core.commitNow('splice', id, payload, { actor });
@@ -131,7 +136,7 @@ const unmark = async (core, id, key, start, end, name, { expand = 'after', actor
  */
 const unmarkById = async (core, id, key, markId, { actor } = {}) => {
   fieldName('unmarkById', key);
-  if (!S.isRunKey(markId)) throw new TypeError('unmarkById() takes a mark id');
+  if (!S.isRunKey(markId)) throw new ArgumentError('unmarkById() takes a mark id');
   await core.commit('mark', id, { key, off: markId }, { actor });
 };
 
@@ -197,7 +202,7 @@ const revision = async (core, id, key) => {
  * embed, or the field is not a text.
  */
 const block = async (core, id, key, index) => {
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('block() takes a non-negative integer index');
+  if (!Number.isInteger(index) || index < 0) throw new ArgumentError('block() takes a non-negative integer index');
   const field = await held(core, 'block', id, key);
   if (field === null || field.seq.k !== 't') return null;
   const idx = S.indexOf(field.entry, key);
@@ -253,19 +258,19 @@ const insertEmbed = async (core, id, key, index, embed, { actor } = {}) => {
  * its `parents` — in one slot (U+FFFC), the text after it up to the next
  * marker its content. A `splice` op carrying the marker in `vals`.
  */
-const splitBlock = async (core, id, key, index, block, { actor } = {}) => {
+const splitBlock = async (core, id, key, index, marker, { actor } = {}) => {
   const payload = spliceArgs('splitBlock', key, index, 0, EMBED, { embeds: true });
-  payload.vals = [[0, markerArgs('splitBlock', block, false)]];
+  payload.vals = [[0, markerArgs('splitBlock', marker, false)]];
   await core.commit('splice', id, payload, { actor });
 };
 
 /**
  * Removes the block marker at `index` of text field `key`, joining its
  * content to the block before (a `splice` cutting the slot); rejects with
- * `NOT_FOUND` when the slot there is no marker.
+ * `ALX_ERR_NOT_FOUND` when the slot there is no marker.
  */
 const joinBlock = async (core, id, key, index, { actor } = {}) => {
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('joinBlock() takes a non-negative integer index');
+  if (!Number.isInteger(index) || index < 0) throw new ArgumentError('joinBlock() takes a non-negative integer index');
   const payload = spliceArgs('joinBlock', key, index, 1);
   payload.marker = true;
   await core.commit('splice', id, payload, { actor });
@@ -274,12 +279,14 @@ const joinBlock = async (core, id, key, index, { actor } = {}) => {
 /**
  * Replaces the marker at `index` of text field `key` with `{ type, parents,
  * attrs, isEmbed? }` (an `assign` op: last writer wins); rejects with
- * `NOT_FOUND` when the slot there is no marker.
+ * `ALX_ERR_NOT_FOUND` when the slot there is no marker.
  */
-const updateBlock = async (core, id, key, index, block, { actor } = {}) => {
+const updateBlock = async (core, id, key, index, marker, { actor } = {}) => {
   fieldName('updateBlock', key);
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('updateBlock() takes a non-negative integer index');
-  await core.commit('assign', id, { key, index, value: markerArgs('updateBlock', block) }, { actor });
+  if (!Number.isInteger(index) || index < 0) {
+    throw new ArgumentError('updateBlock() takes a non-negative integer index');
+  }
+  await core.commit('assign', id, { key, index, value: markerArgs('updateBlock', marker) }, { actor });
 };
 
 /**
@@ -290,7 +297,7 @@ const updateBlock = async (core, id, key, index, block, { actor } = {}) => {
  * field is not a list or a text.
  */
 const cursor = async (core, id, key, index, { side = 'before' } = {}) => {
-  if (side !== 'before' && side !== 'after') throw new TypeError("cursor() takes side: 'before' or 'after'");
+  if (side !== 'before' && side !== 'after') throw new ArgumentError("cursor() takes side: 'before' or 'after'");
   const field = await held(core, 'cursor', id, key);
   if (field === null) return null;
   const idx = S.indexOf(field.entry, key);
@@ -304,7 +311,7 @@ const cursor = async (core, id, key, index, { side = 'before' } = {}) => {
  * name across moves. `null` out of range or when the field is not a list.
  */
 const elementName = async (core, id, key, index) => {
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('elementAt() takes a non-negative integer index');
+  if (!Number.isInteger(index) || index < 0) throw new ArgumentError('elementAt() takes a non-negative integer index');
   const field = await held(core, 'elementAt', id, key);
   if (field === null || field.seq.k !== 'l') return null;
   return S.elemAt(S.indexOf(field.entry, key), index);
@@ -317,34 +324,34 @@ const elements = async (core, id, key) => {
 };
 
 /** Where `cursor` is now in list or text field `key`; `null` once its place is gone (a reset, a field no longer a sequence). */
-const index = async (core, id, key, cursor) => {
-  if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('index() takes a cursor');
+const index = async (core, id, key, token) => {
+  if (typeof token !== 'string' || !S.isAnchor(token)) throw new ArgumentError('index() takes a cursor');
   const field = await held(core, 'index', id, key);
-  return field === null ? null : S.indexOfCursor(S.indexOf(field.entry, key), cursor);
+  return field === null ? null : S.indexOfCursor(S.indexOf(field.entry, key), token);
 };
 
 // A cursor token's side: the head keeps after nothing, the end before
 // nothing, an anchor the side it names.
-const sideOf = (cursor) => (cursor === S.HEAD || cursor.startsWith('>') ? 'after' : 'before');
+const sideOf = (token) => (token === S.HEAD || token.startsWith('>') ? 'after' : 'before');
 
 /**
  * Where `cursor` is now and which side it keeps to: `{ index, side }` — what
  * a selection is restored from after edits around it — or `null` once its
  * place is gone.
  */
-const position = async (core, id, key, cursor) => {
-  if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('position() takes a cursor');
+const position = async (core, id, key, token) => {
+  if (typeof token !== 'string' || !S.isAnchor(token)) throw new ArgumentError('position() takes a cursor');
   const field = await held(core, 'position', id, key);
   if (field === null) return null;
-  const at = S.indexOfCursor(S.indexOf(field.entry, key), cursor);
-  return at === null ? null : { index: at, side: sideOf(cursor) };
+  const at = S.indexOfCursor(S.indexOf(field.entry, key), token);
+  return at === null ? null : { index: at, side: sideOf(token) };
 };
 
 /** `position()` of several cursors at once, in one read of the field: an array, `null` per cursor whose place is gone. */
 const positions = async (core, id, key, cursors) => {
-  if (!Array.isArray(cursors)) throw new TypeError('positions() takes an array of cursors');
-  for (const cursor of cursors) {
-    if (typeof cursor !== 'string' || !S.isAnchor(cursor)) throw new TypeError('positions() takes cursors');
+  if (!Array.isArray(cursors)) throw new ArgumentError('positions() takes an array of cursors');
+  for (const token of cursors) {
+    if (typeof token !== 'string' || !S.isAnchor(token)) throw new ArgumentError('positions() takes cursors');
   }
   const field = await held(core, 'positions', id, key);
   if (field === null) {
@@ -366,13 +373,13 @@ const positions = async (core, id, key, cursors) => {
  * `assign` op): a register per element, last writer wins, and the value
  * follows the element through a concurrent move. On a text, the marker of
  * the embed slot at `index` (`{ type, parents, attrs, isEmbed }`, or null);
- * rejects with `NOT_FOUND` for a slot that is no embed.
+ * rejects with `ALX_ERR_NOT_FOUND` for a slot that is no embed.
  */
-const setAt = (core, id, key, index, value, options) => {
+const setAt = (core, id, key, at, value, options) => {
   fieldName('setAt', key);
-  if (!Number.isInteger(index) || index < 0) throw new TypeError('setAt() takes a non-negative integer index');
+  if (!Number.isInteger(at) || at < 0) throw new ArgumentError('setAt() takes a non-negative integer index');
   jsonValue('setAt', value);
-  return core.write('assign', id, { key, index, value }, { actor: options?.actor });
+  return core.write('assign', id, { key, index: at, value }, { actor: options?.actor });
 };
 
 /**
@@ -384,7 +391,7 @@ const setAt = (core, id, key, index, value, options) => {
 const move = (core, id, key, from, to, options) => {
   fieldName('move', key);
   if (!Number.isInteger(from) || from < 0 || !Number.isInteger(to) || to < 0) {
-    throw new TypeError('move() takes non-negative integer indices');
+    throw new ArgumentError('move() takes non-negative integer indices');
   }
   if (from === to) return RESOLVED;
   return core.write('move', id, { key, index: from, to }, { actor: options?.actor });

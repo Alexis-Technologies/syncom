@@ -49,7 +49,7 @@ const { diffViews } = require('./patch.js');
 const UNPERSISTED_NAMED = 32;
 const { COMMIT, REFRESH, SOURCE, PLUGINS, CURSOR, SIGNER, REWIND, DB, CREATE } = require('./symbols.js');
 const { missing, HOME } = require('./plugin.js');
-const { SyncomError, typed, isQuotaError } = require('./errors.js');
+const { SyncomError, isQuotaError, ArgumentError, DataError } = require('./errors.js');
 const { loadIdentity } = require('./identity.js');
 
 // What a storage without the schema plugin runs with: no entities, version 1.
@@ -73,9 +73,20 @@ const attempt = (fn) => {
 // every node hashes; a peer's past the bound is malformed), null for nobody.
 const actorName = (actor) => {
   if (actor === null || actor === undefined) return null;
+  // What the caller or its actor function handed in may be any value, a symbol too: String() names it.
   const name = String(actor);
-  if (name.length > MAX_ACTOR) throw new TypeError(`actor must be at most ${MAX_ACTOR} characters`);
+  if (name.length > MAX_ACTOR) throw new ArgumentError(`actor must be at most ${MAX_ACTOR} characters`);
   return name;
+};
+
+// What `addCollections()` takes, by name: a Map as it is, a plain object's own keys in their order; null otherwise.
+const definitionsOf = (defs) => {
+  if (defs instanceof Map) return defs;
+  if (!isPlainObject(defs)) return null;
+  const given = new Map();
+  const names = Object.keys(defs);
+  for (let i = 0; i < names.length; i++) given.set(names[i], defs[names[i]]);
+  return given;
 };
 
 // The ops that leave a record's whole state behind them — where a repair
@@ -136,7 +147,7 @@ class Database extends Emitter {
   // How the database is held: through a lock key, or the engine's own lease — and the lease's renewals heard.
   #lockKind = 'kv';
   #unleash = null;
-  // A follower (`readOnly: true`), or a writer whose lease was lost: every write is READ_ONLY.
+  // A follower (`readOnly: true`), or a writer whose lease was lost: every write is ALX_ERR_READ_ONLY.
   #readOnly = false;
   #leaseLost = false;
   // The engine's own blobs store, past the wrapper that refuses a follower's writes (the `[SOURCE]` seam's
@@ -151,6 +162,9 @@ class Database extends Emitter {
   #heardEarly = [];
   #schema = null;
   #entities = null;
+  // The names of the collections removeCollection() took away: their property is undefined now, never deleted from the
+  // instance, and free for addCollections() to take again.
+  #removed = new Set();
   // The collections, by name, as one frozen object (`db.collections`); made again when one is added or removed.
   #collections = Object.freeze({});
   // Who hears of every plan a cursor makes (`indexAdvisor` of @alexify/syncom/inspect).
@@ -231,7 +245,7 @@ class Database extends Emitter {
   #hooks;
   #inHook = 0;
   // The async context a transaction's (or a `modify()`'s) function runs in: a write made through the
-  // database from inside it would wait for the queue the function holds (IN_TRANSACTION); one made
+  // database from inside it would wait for the queue the function holds (ALX_ERR_IN_TRANSACTION); one made
   // meanwhile by anyone else queues. Node's async context; the browser half tells neither apart.
   #task = taskScope();
   #queued = 0;
@@ -301,7 +315,7 @@ class Database extends Emitter {
   #engineOf(options) {
     if (options.engine !== undefined) {
       if (options.fsi !== undefined) {
-        throw new TypeError('createDatabase({ engine, fsi }): an engine or a backend, not both');
+        throw new ArgumentError('createDatabase({ engine, fsi }): an engine or a backend, not both');
       }
       return checkEngine(options.engine, 'createDatabase({ engine })');
     }
@@ -326,9 +340,11 @@ class Database extends Emitter {
     // already answers to — a method, a getter, anything up its prototype
     // chain — would replace it or break the open. Refused before anything
     // is opened; so is a method or a static named like a member.
-    for (const [name, def] of normalized.entities) {
+    for (const item of normalized.entities) {
+      const name = item[0];
+      const def = item[1];
       if (name in this) {
-        throw new TypeError(`createDatabase({ schema }): entity name '${name}' is taken by the storage itself`);
+        throw new ArgumentError(`createDatabase({ schema }): entity name '${name}' is taken by the storage itself`);
       }
       checkOrm(def, 'createDatabase({ schema })');
     }
@@ -360,7 +376,9 @@ class Database extends Emitter {
     const retention = options.sync?.retention;
     const retained = retention === 'all' ? Infinity : retention?.ops;
     if (this.#ahead === 'hold' && retained !== undefined && retained > 0 && retained < 1000) {
-      throw new TypeError("createDatabase({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0");
+      throw new ArgumentError(
+        "createDatabase({ schema }): ahead 'hold' needs sync.retention.ops of 1000 or more, or 0",
+      );
     }
   }
 
@@ -369,11 +387,11 @@ class Database extends Emitter {
     if (def.search.length === 0) return null;
     if (this.#search === null) {
       const hint = 'give createDatabase() an index — createSearch() from @alexify/syncom/search';
-      throw new TypeError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
+      throw new ArgumentError(`createDatabase({ search }): entity ${def.name} declares search fields; ${hint}`);
     }
     const index = this.#search(def.name);
     if (!isTextIndex(index)) {
-      throw new TypeError(
+      throw new ArgumentError(
         `createDatabase({ search }): the index for ${def.name} must have put(), remove() and query()`,
       );
     }
@@ -387,7 +405,7 @@ class Database extends Emitter {
     // are one instance's: a second reader there would load a group the
     // writer is still writing.
     if (this.#readOnly && this.#engine.capabilities.shared !== true) {
-      throw new TypeError(
+      throw new ArgumentError(
         `createDatabase({ readOnly }): the ${this.#engine.name} engine is not shared — one instance per database`,
       );
     }
@@ -439,7 +457,7 @@ class Database extends Emitter {
     // hooks the core takes; what the options ask for and no plugin provides
     // is refused here, naming the subpath. They reach the stores through `db`.
     if (this.#readOnly && typeof this.#options.sync?.connect === 'function') {
-      throw new TypeError('createDatabase({ readOnly }): a read-only database does not dial — it reads and serves');
+      throw new ArgumentError('createDatabase({ readOnly }): a read-only database does not dial — it reads and serves');
     }
     const ctx = {
       fsi,
@@ -767,7 +785,9 @@ class Database extends Emitter {
       return;
     }
     const touched = new Set();
-    for (const { op } of tail) if (typeof op.id === 'string') touched.add(op.id);
+    for (const { op } of tail) {
+      if (typeof op.id === 'string') touched.add(op.id);
+    }
     for (const id of touched) await this.#entries.index(id);
     if (touched.size > 0 && !this.#readOnly) await this.#catalog.save(this.#log.lastEventId);
   }
@@ -799,17 +819,17 @@ class Database extends Emitter {
 
   // The error a write meets on a read-only database: a follower's, or a
   // writer's whose lease was lost (nothing of it is written any more: what
-  // was logged but not landed is held as UNPERSISTED).
+  // was logged but not landed is held as ALX_ERR_UNPERSISTED).
   #refused(what) {
     const why = this.#leaseLost ? 'its lease was lost' : 'it was opened with readOnly: true';
-    return new SyncomError('READ_ONLY', `Database at ${this.#path} is read-only (${why}): ${what} refused`, {
+    return new SyncomError('ALX_ERR_READ_ONLY', `Database at ${this.#path} is read-only (${why}): ${what} refused`, {
       path: this.#path,
       lease: this.#leaseLost,
     });
   }
 
   // The engine's lease on this database went to another instance (not
-  // renewed in time, or taken): from here on every write is READ_ONLY, and
+  // renewed in time, or taken): from here on every write is ALX_ERR_READ_ONLY, and
   // the application hears it once.
   #lostLease(cause) {
     if (this.#closed || this.#leaseLost) return;
@@ -818,13 +838,13 @@ class Database extends Emitter {
     // Nothing of this instance reaches the engine from here on: the stores
     // refuse as a follower's do, the log's medium with them (a group fails,
     // a seal, a drop and the index are nothing, close() seals nothing), and
-    // every landing — in flight or deferred — is held, UNPERSISTED. The
+    // every landing — in flight or deferred — is held, ALX_ERR_UNPERSISTED. The
     // engine's own fence refuses what is already on its way.
     this.#db = readOnlyDb(this.#db, (what) => this.#refused(what));
     this.#log?.readOnly(this.#db.log);
     this.#logger.error({ event: 'storage.lease.lost', path: this.#path, err: cause });
     const message = `Database at ${this.#path} lost its lease: read-only from here on`;
-    notify(this, this.#logger, 'error', new SyncomError('LEASE_LOST', message, { path: this.#path, cause }));
+    notify(this, this.#logger, 'error', new SyncomError('ALX_ERR_LEASE_LOST', message, { path: this.#path, cause }));
     notify(this, this.#logger, 'lease', { state: 'lost', path: this.#path });
   }
 
@@ -853,19 +873,21 @@ class Database extends Emitter {
     if (!Array.isArray(message.records)) return;
     const ids = message.records;
     this.#followStats.heard += ids.length;
-    this.#heard = this.#heard.then(async () => {
-      // The records heard, read in one call; one by one where the engine cannot (a record gone reads as null).
-      let found = null;
-      try {
-        found = await this.#db.records.getMany(ids);
-      } catch (error) {
-        this.#logger.warn({ event: 'follow.failed', id: null, err: error });
-      }
-      for (let i = 0; i < ids.length; i++) {
-        if (this.#closed) return;
-        await this.#reread(ids[i], found === null ? undefined : (found.get(ids[i]) ?? null));
-      }
-    });
+    this.#heard = this.#heard.then(() => this.#rereadHeard(ids));
+  }
+
+  // The records heard, read in one call; one by one where the engine cannot (a record gone reads as null).
+  async #rereadHeard(ids) {
+    let found = null;
+    try {
+      found = await this.#db.records.getMany(ids);
+    } catch (error) {
+      this.#logger.warn({ event: 'follow.failed', id: null, err: error });
+    }
+    for (let i = 0; i < ids.length; i++) {
+      if (this.#closed) return;
+      await this.#reread(ids[i], found === null ? undefined : (found.get(ids[i]) ?? null));
+    }
   }
 
   // One record as the engine holds it now: the cache dropped, the row made
@@ -884,7 +906,7 @@ class Database extends Emitter {
   }
 
   // The change stream ended — an error, a close — and what the writer landed
-  // meanwhile was not heard: the application is told once (FOLLOW_LOST),
+  // meanwhile was not heard: the application is told once (ALX_ERR_FOLLOW_LOST),
   // the stream is subscribed again FIRST (so nothing landed from here on is
   // missed), and every record is read again, after what was heard before.
   #followLost(cause) {
@@ -893,7 +915,7 @@ class Database extends Emitter {
     this.#unhear = null;
     this.#logger.warn({ event: 'follow.lost', path: this.#path, err: cause });
     const message = `Database at ${this.#path} lost the writer's change stream: every record is read again`;
-    notify(this, this.#logger, 'error', new SyncomError('FOLLOW_LOST', message, { path: this.#path, cause }));
+    notify(this, this.#logger, 'error', new SyncomError('ALX_ERR_FOLLOW_LOST', message, { path: this.#path, cause }));
     try {
       this.#subscribeChanges();
     } catch (error) {
@@ -911,14 +933,13 @@ class Database extends Emitter {
     let after = null;
     for (;;) {
       if (this.#closed) return;
-      let ids;
-      let found;
+      let ids = null;
+      let found = null;
       try {
         ids = await this.#db.records.ids({ after, limit: page });
         found = await this.#db.records.getMany(ids);
       } catch (error) {
-        this.#logger.warn({ event: 'follow.failed', id: null, err: error });
-        return;
+        return void this.#logger.warn({ event: 'follow.failed', id: null, err: error });
       }
       for (let i = 0; i < ids.length; i++) {
         seen.add(ids[i]);
@@ -930,7 +951,9 @@ class Database extends Emitter {
     // The catalog's ids are shared: taken before any row goes.
     const held = this.#catalog.all();
     const gone = [];
-    for (let i = 0; i < held.length; i++) if (!seen.has(held[i])) gone.push(held[i]);
+    for (let i = 0; i < held.length; i++) {
+      if (!seen.has(held[i])) gone.push(held[i]);
+    }
     for (let i = 0; i < gone.length; i++) await this.#reread(gone[i]);
     this.#followStats.caughtUp++;
   }
@@ -974,7 +997,9 @@ class Database extends Emitter {
     const lost = this.#log.droppedHeld;
     const held = this.#log.held();
     const entries = [];
-    for (let i = 0; i < held.length; i++) if (held[i].held <= this.#version) entries.push(held[i]);
+    for (let i = 0; i < held.length; i++) {
+      if (held[i].held <= this.#version) entries.push(held[i]);
+    }
     if (entries.length === 0 && lost === 0) return;
     const touched = await this.#fold(entries);
     if (touched.size > 0) {
@@ -1052,7 +1077,9 @@ class Database extends Emitter {
   // schema) is left alone — that flag is what keeps it from landing here.
   async #replay(tail) {
     const applied = [];
-    for (let i = 0; i < tail.length; i++) if (!tail[i].skipped) applied.push(tail[i]);
+    for (let i = 0; i < tail.length; i++) {
+      if (!tail[i].skipped) applied.push(tail[i]);
+    }
     const touched = await this.#fold(applied);
     if (touched.size > 0) await this.#persistBatch(touched, tail[0].seq, tail[tail.length - 1].seq);
     this.#log.applied(tail[0].seq, tail[tail.length - 1].seq);
@@ -1067,7 +1094,7 @@ class Database extends Emitter {
     const touched = new Map();
     for (const { seq, op } of entries) {
       this.#clock.observe(op.ts);
-      let current;
+      let current = null;
       try {
         current = touched.get(op.id) ?? (await this.#entries.load(op.id));
       } catch (error) {
@@ -1118,17 +1145,21 @@ class Database extends Emitter {
    * the application adds them after every open, and the schema's hash in
    * hello does not move. Every definition is checked before any is taken —
    * a name defined already or taken by the database, a malformed definition
-   * — and that is a TypeError. The schema plugin's (`PLUGIN_MISSING` without it).
+   * — and that is a TypeError. The schema plugin's (`ALX_ERR_PLUGIN_MISSING` without it).
    */
   async addCollections(defs) {
     if (this.#schemaHook === null) throw missing('addCollections()', 'schema');
-    const given = defs instanceof Map ? defs : isPlainObject(defs) ? new Map(Object.entries(defs)) : null;
-    if (given === null) throw new TypeError('addCollections() takes an object or a Map of definitions');
+    const given = definitionsOf(defs);
+    if (given === null) throw new ArgumentError('addCollections() takes an object or a Map of definitions');
     const added = [];
-    for (const [name, def] of given) {
-      if (this.#entities.has(name)) throw new TypeError(`addCollections(): collection '${name}' is defined already`);
-      if (name in this) {
-        throw new TypeError(`addCollections(): collection name '${name}' is taken by the database itself`);
+    for (const item of given) {
+      const name = item[0];
+      const def = item[1];
+      if (this.#entities.has(name)) {
+        throw new ArgumentError(`addCollections(): collection '${name}' is defined already`);
+      }
+      if (name in this && !this.#removed.has(name)) {
+        throw new ArgumentError(`addCollections(): collection name '${name}' is taken by the database itself`);
       }
       const defined = this.#schemaHook.define(name, def, this.#entities.keys());
       checkOrm(defined, 'addCollections()');
@@ -1136,10 +1167,18 @@ class Database extends Emitter {
       added.push([defined, this.#textIndexOf(defined)]);
     }
     for (let i = 0; i < added.length; i++) {
-      const [def, index] = added[i];
+      const pair = added[i];
+      const def = pair[0];
+      const index = pair[1];
       this.#entities.set(def.name, def);
       this.#catalog.define(def.name, def, index);
-      this[def.name] = new Collection(this, def.name);
+      this.#removed.delete(def.name);
+      Object.defineProperty(this, def.name, {
+        value: new Collection(this, def.name),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
       // The records of the type the catalog holds, indexed under the definition: pages of 500, each read in one
       // call of the engine, inside the queue behind the landings — a record in flight lands first, so no stale row
       // is laid over it; the queue is free between the pages.
@@ -1159,10 +1198,13 @@ class Database extends Emitter {
    * unknown name is a TypeError.
    */
   removeCollection(name) {
-    if (!this.#entities.has(name)) throw new TypeError(`removeCollection(): no collection '${name}'`);
+    if (!this.#entities.has(name)) throw new ArgumentError(`removeCollection(): no collection '${name}'`);
     this.#entities.delete(name);
     this.#catalog.define(name, null);
-    delete this[name];
+    // A collection is an own property of the database (`db.Task`); a removed one reads undefined and is no longer
+    // listed, the instance keeping its shape.
+    Object.defineProperty(this, name, { value: undefined, writable: true, enumerable: false, configurable: true });
+    this.#removed.add(name);
     this.#collected();
     this.#flushCatalog();
     this.#logger.info({ event: 'collection.removed', entity: name });
@@ -1195,7 +1237,7 @@ class Database extends Emitter {
   }
 
   // The cursor over a source seam (this storage's by default; a tag's for a
-  // view at a tag): the query plugin's, PLUGIN_MISSING without it. Sealed records are left out unless asked
+  // view at a tag): the query plugin's, ALX_ERR_PLUGIN_MISSING without it. Sealed records are left out unless asked
   // (`sealed: true`): the facade's collections ask — the key holder reads its own — while a host's query, an
   // agent's tool and a connector read through the seam as it is, and no sealed record leaves the key holder by them.
   get [CURSOR]() {
@@ -1245,7 +1287,7 @@ class Database extends Emitter {
       blobStore: () => (this.#leaseLost ? null : this.#rawBlobs),
       // A plugin's own write (a local document) refused as the queue would refuse a write: closed, or read-only.
       guard: (what) => {
-        if (this.#closed) throw new SyncomError('CLOSED', 'Storage is closed');
+        if (this.#closed) throw new SyncomError('ALX_ERR_CLOSED', 'Storage is closed');
         if (this.#readOnly || this.#leaseLost) throw this.#refused(what);
       },
       advise: (fn) => {
@@ -1295,7 +1337,9 @@ class Database extends Emitter {
       loadMany: async (ids) => {
         const entries = await this.#entries.loadMany(ids);
         const out = new Map();
-        for (const [id, entry] of entries) {
+        for (const pair of entries) {
+          const id = pair[0];
+          const entry = pair[1];
           if (entry === null) out.set(id, null);
           else if (entry.encrypted) out.set(id, entry.data === null ? null : asJson(entry.data));
           else out.set(id, isAlive(entry) ? await this.#view(id, entry) : null);
@@ -1352,7 +1396,9 @@ class Database extends Emitter {
       if (text === null) continue;
       const ids = this.#inflightKeys.get(`${def.name}\0${key.join(',')}\0${text}`);
       if (ids === undefined) continue;
-      for (const other of ids) if (other !== id) collide(other, key);
+      for (const other of ids) {
+        if (other !== id) collide(other, key);
+      }
     }
     // The few a lens has not composed yet: by hand, as the catalog would.
     for (const other of this.#inflightUnkeyed) {
@@ -1384,10 +1430,7 @@ class Database extends Emitter {
     const def = this.#definitionOf(entry.data);
     if (!def || def.unique.length === 0) return;
     const view = this.#viewNow(entry);
-    if (view === undefined) {
-      this.#inflightUnkeyed.add(id);
-      return;
-    }
+    if (view === undefined) return void this.#inflightUnkeyed.add(id);
     const pairs = [];
     for (let k = 0; k < def.unique.length; k++) {
       const key = def.unique[k];
@@ -1505,7 +1548,7 @@ class Database extends Emitter {
     return this.#otel;
   }
 
-  /** The sync manager — the `sync` plugin's; PLUGIN_MISSING without it. */
+  /** The sync manager — the `sync` plugin's; ALX_ERR_PLUGIN_MISSING without it. */
   get sync() {
     if (this.#sync === null) throw missing('storage.sync', 'sync');
     return this.#sync;
@@ -1546,7 +1589,9 @@ class Database extends Emitter {
   stats() {
     let pinned = 0;
     // #live deletes the slot it reads when its Record is gone: safe mid-walk.
-    for (const id of this.#records.keys()) if (this.#live(id) !== undefined) pinned++;
+    for (const id of this.#records.keys()) {
+      if (this.#live(id) !== undefined) pinned++;
+    }
     const observers = this.#observers.count;
     const log = this.#log;
     const health = log.health;
@@ -1693,7 +1738,9 @@ class Database extends Emitter {
   // A group of appends failed: every in-flight entry at or past `from` was
   // built on seqs taken back, and goes before any ticket rejects.
   #takenBack(from) {
-    for (const [id, stack] of this.#inflight) {
+    for (const item of this.#inflight) {
+      const id = item[0];
+      const stack = item[1];
       const { items } = stack;
       let taken = 0;
       while (items.length > stack.head && items[items.length - 1].position >= from) {
@@ -1732,7 +1779,7 @@ class Database extends Emitter {
   // log's seq counter and a record's entry are all read-then-written, and two
   // interleaved writers would race all three.
   #run(task) {
-    if (this.#closed) return Promise.reject(new SyncomError('CLOSED', 'Storage is closed'));
+    if (this.#closed) return Promise.reject(new SyncomError('ALX_ERR_CLOSED', 'Storage is closed'));
     if (this.#readOnly) return Promise.reject(this.#refused('a write'));
     // A write or apply hook runs inside the queue; a write it issues would
     // wait for the hook that waits for it. Refused here, where the deadlock
@@ -1741,7 +1788,7 @@ class Database extends Emitter {
     if (this.#inHook > 0) {
       return Promise.reject(
         new SyncomError(
-          'IN_HOOK',
+          'ALX_ERR_IN_HOOK',
           'Cannot write to the storage from inside a hook: the write would wait for the hook that waits for it',
         ),
       );
@@ -1749,7 +1796,7 @@ class Database extends Emitter {
     if (this.#task.inside()) {
       return Promise.reject(
         new SyncomError(
-          'IN_TRANSACTION',
+          'ALX_ERR_IN_TRANSACTION',
           'Cannot write to the database from inside a transaction or modify(): write through tx, or return the record',
         ),
       );
@@ -1786,22 +1833,17 @@ class Database extends Emitter {
   #emitUpdate(id, data, delta, source = null, entry = null) {
     const record = this.#live(id);
     if (!record) return;
-    const lensed =
-      data !== null && entry !== null && !entry.encrypted && this.#lens !== null && (entry.meta.v ?? 1) < this.#version;
+    const plain = entry !== null && !entry.encrypted;
+    const lensed = data !== null && plain && this.#lens !== null && (entry.meta.v ?? 1) < this.#version;
     const hooked = this.#hooks.beforeRead !== null || this.#hooks.afterRead !== null;
     // The Record reads as get() does: the paths composed (`profile/city` under
     // `profile`, a list element's fields on it), never the fields apart.
-    const shown =
-      data === null
-        ? null
-        : entry !== null && !entry.encrypted
-          ? (entry.composed ??= compose(entry, this.#plugins))
-          : composeData(data);
+    let shown = null;
+    if (data !== null) shown = plain ? (entry.composed ??= compose(entry, this.#plugins)) : composeData(data);
     if (!lensed && !hooked && this.#refreshing === 0) {
       // The reading itself: the Record may lay the delta's fields over what it
       // holds rather than copy the whole record again.
-      record[REFRESH](shown, delta, source, entry !== null && !entry.encrypted);
-      return;
+      return void record[REFRESH](shown, delta, source, plain);
     }
     this.#refreshing += 1;
     this.#refreshed = this.#refreshed.then(async () => {
@@ -1812,10 +1854,10 @@ class Database extends Emitter {
           const replaced = await runHook(this.#hooks, 'afterRead', { id }, view);
           if (replaced !== undefined) view = replaced;
         }
-        record[REFRESH](view, delta, source);
+        return void record[REFRESH](view, delta, source);
       } catch (error) {
         // A read hook that refuses leaves the Record as it was.
-        this.#logger.warn({ event: 'record.refresh', id, err: error });
+        return void this.#logger.warn({ event: 'record.refresh', id, err: error });
       } finally {
         this.#refreshing -= 1;
       }
@@ -1826,7 +1868,9 @@ class Database extends Emitter {
     const scope = this.#scopeOf(id, composeData(data));
     if (typeof scope !== 'string' || scope.length === 0 || scope === GLOBAL_SCOPE) return GLOBAL_SCOPE;
     if (!isStreamName(scope)) {
-      throw new TypeError(`sync.scope(${id}) returned ${JSON.stringify(scope)}: a scope is a short name without '@'`);
+      throw new ArgumentError(
+        `sync.scope(${id}) returned ${JSON.stringify(scope)}: a scope is a short name without '@'`,
+      );
     }
     return scope;
   }
@@ -1835,7 +1879,7 @@ class Database extends Emitter {
   // newest stamp there — unless it lies beyond the skew allowed: a peer's
   // meta taken before merge metas were checked, or under `maxSkew: Infinity`.
   // Observed, it would carry every later stamp of this node, on any record,
-  // past what its peers take (SKEW everywhere, for good: the log seeds the
+  // past what its peers take (ALX_ERR_SKEW everywhere, for good: the log seeds the
   // clock at the next open). Left out, a write to that record stamps below
   // it and loses the fields it holds until the wall clock gets there. Told
   // once per record.
@@ -1895,7 +1939,11 @@ class Database extends Emitter {
   }
 
   async #unpersisted(touched, error) {
-    for (const [id, entry] of touched) await this.#entries.hold(id, entry);
+    for (const item of touched) {
+      const id = item[0];
+      const entry = item[1];
+      await this.#entries.hold(id, entry);
+    }
     const ids = [...touched.keys()];
     // The ids by name up to a bound, and how many: a batch of thousands is one line, not a page.
     const named = ids.length > UNPERSISTED_NAMED ? ids.slice(0, UNPERSISTED_NAMED) : ids;
@@ -1904,13 +1952,17 @@ class Database extends Emitter {
     const fields = { ids, cause: error };
     // A medium that is full: said on the error, so the application can ask for room (`quota()`, `persist()`).
     if (isQuotaError(error)) fields.quota = true;
-    notify(this, this.#logger, 'error', new SyncomError('UNPERSISTED', message, fields));
+    notify(this, this.#logger, 'error', new SyncomError('ALX_ERR_UNPERSISTED', message, fields));
   }
 
   async #persistBatch(touched, fromSeq, toSeq) {
     if (this.#chain) {
       const records = {};
-      for (const [id, entry] of touched) records[id] = await sha256(entry.data);
+      for (const item of touched) {
+        const id = item[0];
+        const entry = item[1];
+        records[id] = await sha256(entry.data);
+      }
       const from = this.#log.formatId(fromSeq);
       const to = this.#log.formatId(toSeq);
       const block = await this.#chain.block({ records, from, to });
@@ -2004,7 +2056,7 @@ class Database extends Emitter {
       const why = this.#plugins.names.includes('chain')
         ? 'createDatabase({ chain: false })'
         : "the chain plugin is not registered (createDatabase({ plugins: [chain] }) from '@alexify/syncom/chain')";
-      throw typed('NO_CHAIN', `${why}: this storage keeps no chain to validate against`);
+      throw new DataError('ALX_ERR_NO_CHAIN', `${why}: this storage keeps no chain to validate against`);
     }
     if (isChainValidation) {
       return await this.#chain.validate(idOrOptions);
@@ -2040,14 +2092,17 @@ class Database extends Emitter {
   // id from the declared fields, the id field's value — with the data the
   // record is written as (the id field leaves it); null when the data names
   // none, and the id is minted. A derived id outside the id class, or a
-  // composite with a field missing, is INVALID_ID.
+  // composite with a field missing, is ALX_ERR_INVALID_ID.
   #named(data) {
     const def = this.#definitionOf(data);
     if (def === undefined) return null;
     const named = namedId(def, data);
     if (named === null) return null;
     if (named.id === null) {
-      throw typed('INVALID_ID', `A ${def.name} ${idReason(named)}`, { entity: def.name, field: named.field });
+      throw new DataError('ALX_ERR_INVALID_ID', `A ${def.name} ${idReason(named)}`, {
+        entity: def.name,
+        field: named.field,
+      });
     }
     if (!isRecordId(named.id)) throw invalidId(named.id);
     return named;
@@ -2067,11 +2122,11 @@ class Database extends Emitter {
   /**
    * Writes a new record: under the id its data names — its entity's
    * composite id, or the id field's value — when it names one (a live record
-   * there already is `EXISTS`, decided inside the queue), else under a
+   * there already is `ALX_ERR_EXISTS`, decided inside the queue), else under a
    * minted one. Resolves to the id.
    */
   async insert(data, options = {}) {
-    if (!isPlainObject(data)) throw new TypeError('insert() takes a plain object');
+    if (!isPlainObject(data)) throw new ArgumentError('insert() takes a plain object');
     const named = this.#named(data);
     if (named === null) {
       const id = await this.#mint();
@@ -2079,11 +2134,12 @@ class Database extends Emitter {
       return id;
     }
     const { id } = named;
-    // A live record there already is EXISTS, decided inside the queue (`expect: ABSENT`) — an encrypted write too.
+    // A live record there already is ALX_ERR_EXISTS, decided inside the queue (`expect: ABSENT`) — an encrypted write
+    // too.
     try {
       await this.saveData(id, named.data, { ...options, expect: ABSENT });
     } catch (error) {
-      if (error?.code === 'EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
+      if (error?.code === 'ALX_ERR_EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
       throw error;
     }
     if (this.#otel.enabled) this.#otel.recordInsertNamed('ok');
@@ -2150,7 +2206,9 @@ class Database extends Emitter {
 
   #handleStats() {
     let pending = 0;
-    for (const handle of this.#edits) if (handle.pending) pending++;
+    for (const handle of this.#edits) {
+      if (handle.pending) pending++;
+    }
     let extents = 0;
     for (const runs of this.#extents.values()) extents += runs.size;
     return { open: this.#edits.size, pending, extents };
@@ -2159,7 +2217,9 @@ class Database extends Emitter {
   // The handles open on `id` flushed, or null where there is none.
   #flushEditsOf(id) {
     let any = false;
-    for (const handle of this.#edits) if (handle.id === id) any = true;
+    for (const handle of this.#edits) {
+      if (handle.id === id) any = true;
+    }
     return any ? this.#flushEdits(id) : null;
   }
 
@@ -2169,7 +2229,7 @@ class Database extends Emitter {
   }
 
   // Every open handle's edits logged (src/text/handle.js), every handle tried
-  // whatever another's flush did; one UNLOGGED for them all, naming how many
+  // whatever another's flush did; one ALX_ERR_UNLOGGED for them all, naming how many
   // handles and edits were not logged, with the first cause.
   async #flushEdits(id = null) {
     let handles = 0;
@@ -2187,7 +2247,7 @@ class Database extends Emitter {
     }
     if (cause === null) return;
     const message = `Edits of ${handles} text handle${handles === 1 ? '' : 's'} could not be logged`;
-    throw new SyncomError('UNLOGGED', message, { handles, edits, cause });
+    throw new SyncomError('ALX_ERR_UNLOGGED', message, { handles, edits, cause });
   }
 
   // A handle's listener of the `transaction` event, kept by record id; the
@@ -2285,7 +2345,7 @@ class Database extends Emitter {
   }
 
   async set(id, data, options = {}) {
-    if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
+    if (!isPlainObject(data)) throw new ArgumentError('set() takes a plain object');
     await this.saveData(id, data, options);
   }
 
@@ -2320,7 +2380,7 @@ class Database extends Emitter {
    * engine — the identity, the records, the log, the tags, the chain
    * (`engine.remove(path)`) — under the lock, before it is let go of, so
    * nothing opens the directory meanwhile. A follower, or a writer whose
-   * lease was lost, is refused (READ_ONLY): the database is another
+   * lease was lost, is refused (ALX_ERR_READ_ONLY): the database is another
    * instance's to drop. A node opened at the path again is a new node.
    * `dropDatabase(path, { engine })` does the same for a closed one — and is
    * what a database closed already drops through.
@@ -2341,12 +2401,12 @@ class Database extends Emitter {
    * catalog row with them, every entry of it in this node's log scrubbed and
    * flagged skipped (a replay applies none of them again; the stream keeps
    * its headers, so no peer sees a gap). Nothing reaches a peer: what a node
-   * does with the records of a scope a host took back (`REVOKED`), where a
+   * does with the records of a scope a host took back (`ALX_ERR_REVOKED`), where a
    * `delete` would be an op the host refuses. A later op of the record from
    * a peer makes it again. Idempotent.
    */
   async forget(id) {
-    if (!isRecordId(id)) throw typed('INVALID_ID', `forget(): ${String(id)} is not a record id`);
+    if (!isRecordId(id)) throw new DataError('ALX_ERR_INVALID_ID', `forget(): ${String(id)} is not a record id`);
     // One turn of the queue: the deferred slot goes with the record (a flush after would lay it back as a file),
     // then the log's entries are scrubbed and flagged skipped — before the next turn can write the id again.
     await this.#run(async () => {
@@ -2382,7 +2442,7 @@ class Database extends Emitter {
   update(id, delta, options) {
     const ifMatch = options?.ifMatch ?? null;
     if (isRecordId(id) && isPlainObject(delta)) {
-      let operators;
+      let operators = false;
       try {
         operators = isOperators(delta);
       } catch (error) {
@@ -2408,18 +2468,18 @@ class Database extends Emitter {
    * that take the record there (a field changed, a field gone; `null`
    * deletes). Two `modify()` calls on one record compose: each reads what
    * the one before it left. A write through the database from inside `fn`
-   * is IN_TRANSACTION. Resolves to the record as it reads after, or null.
+   * is ALX_ERR_IN_TRANSACTION. Resolves to the record as it reads after, or null.
    */
   modify(id, fn, options = {}) {
-    if (typeof fn !== 'function') return Promise.reject(new TypeError('modify() takes a function'));
+    if (typeof fn !== 'function') return Promise.reject(new ArgumentError('modify() takes a function'));
     const { actor, message, source } = options;
     return this.transact((tx) => modifyIn(tx, id, fn, { actor }), { actor, message, source });
   }
 
   async #update(id, delta, actor) {
     if (!isRecordId(id)) throw invalidId(id);
-    if (!(await this.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
-    if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
+    if (!(await this.has(id))) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+    if (!isPlainObject(delta)) throw new ArgumentError('update() takes a plain object');
     await this[COMMIT]('set', id, { data: delta }, { actor });
   }
 
@@ -2427,7 +2487,7 @@ class Database extends Emitter {
   // The field kinds beyond registers: counters and sets from src/fields.js,
   // one delegate each; a plugin's methods — lists, texts, trees — through
   // its module (src/plugin.js). A method of a plugin this storage was not
-  // opened with rejects with PLUGIN_MISSING naming the subpath.
+  // opened with rejects with ALX_ERR_PLUGIN_MISSING naming the subpath.
 
   // A plugin's method the facade has no stub for (a plugin of the
   // application's) goes on this storage as it is on a transaction's: called
@@ -2439,7 +2499,7 @@ class Database extends Emitter {
       // A stub of the facade reaches the registry already.
       if (Object.hasOwn(HOME, name) && name in this) continue;
       if (name in this || name === 'then') {
-        throw new TypeError(`createDatabase(): a plugin's method ${name}() is a member of the storage already`);
+        throw new ArgumentError(`createDatabase(): a plugin's method ${name}() is a member of the storage already`);
       }
       const method = methods[name];
       Object.defineProperty(this, name, {
@@ -2487,7 +2547,7 @@ class Database extends Emitter {
   }
 
   // The hot writes call their method at once, without an async frame of
-  // their own: a refusal of the arguments — or PLUGIN_MISSING — is a
+  // their own: a refusal of the arguments — or ALX_ERR_PLUGIN_MISSING — is a
   // rejection all the same.
   splice(id, key, index, count, content, options) {
     return attempt(() => this.#api('splice')(this.#core, id, key, index, count, content, options));
@@ -2595,13 +2655,13 @@ class Database extends Emitter {
 
   /**
    * Rebuilds the record `id` from what this node's log holds of it — for a
-   * file that fails its integrity check (`INTEGRITY`) or is torn. The
+   * file that fails its integrity check (`ALX_ERR_INTEGRITY`) or is torn. The
    * retained entries are replayed from the first whole-record op among
    * them (a `write`, `merge`, `delete` or `purge`; a scrubbed one is a
    * no-op), the result written through the usual seam with a chain block of
    * its own. What comes out is what a peer replaying this log from that op
    * would hold; an id with no such op retained — compacted away, never
-   * written here, encrypted — rejects with `UNRECOVERABLE`. Returns how many
+   * written here, encrypted — rejects with `ALX_ERR_UNRECOVERABLE`. Returns how many
    * ops went in and whether the record is alive.
    */
   repair(id) {
@@ -2623,7 +2683,7 @@ class Database extends Emitter {
     }
     if (start === -1) {
       const message = `Record ${id} cannot be rebuilt: the log holds no whole-record op for it`;
-      throw new SyncomError('UNRECOVERABLE', message, { id });
+      throw new SyncomError('ALX_ERR_UNRECOVERABLE', message, { id });
     }
     let entry = null;
     for (let i = start; i < entries.length; i++) {
@@ -2652,7 +2712,7 @@ class Database extends Emitter {
    * concurrent swaps on one expectation cannot both pass.
    */
   async swap(id, changes, prev, { actor } = {}) {
-    if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
+    if (!isPlainObject(changes) || !isPlainObject(prev)) throw new ArgumentError('swap() takes two plain objects');
     const op = await this[COMMIT]('set', id, { data: changes }, { actor, expect: prev });
     return op !== MISMATCH;
   }
@@ -2669,9 +2729,9 @@ class Database extends Emitter {
    * Resolves to what `fn` returned once the transaction has landed.
    */
   async transact(fn, options = {}) {
-    if (typeof fn !== 'function') throw new TypeError('transact() takes a function');
+    if (typeof fn !== 'function') throw new ArgumentError('transact() takes a function');
     // While `fn` runs the queue is this transaction's: a write made through the database meanwhile is
-    // refused (IN_TRANSACTION) where it would otherwise wait for itself.
+    // refused (ALX_ERR_IN_TRANSACTION) where it would otherwise wait for itself.
     const guarded = (tx) => this.#task.run(() => fn(this.#transaction(tx)));
     const run = () => transact(this.#core, guarded, options);
     const otel = this.#otel;
@@ -2691,10 +2751,13 @@ class Database extends Emitter {
    * record's (a delete, a purge). Returns the function that stops watching.
    */
   observe(id, path, listener) {
-    if (typeof path === 'function' && listener === undefined) [path, listener] = [null, path];
+    if (typeof path === 'function' && listener === undefined) {
+      listener = path;
+      path = null;
+    }
     if (!isRecordId(id)) throw invalidId(id);
     if (path !== null && path !== undefined) fieldName('observe', path);
-    if (typeof listener !== 'function') throw new TypeError('observe() takes a listener');
+    if (typeof listener !== 'function') throw new ArgumentError('observe() takes a listener');
     return this.#observers.add(id, path ?? null, listener);
   }
 
@@ -2722,7 +2785,7 @@ class Database extends Emitter {
       return entry !== null && (entry.encrypted || isAlive(entry));
     };
     api.insert = async (data, options = {}) => {
-      if (!isPlainObject(data)) throw new TypeError('insert() takes a plain object');
+      if (!isPlainObject(data)) throw new ArgumentError('insert() takes a plain object');
       const named = this.#named(data);
       if (named === null) {
         const id = await this.#mint();
@@ -2732,18 +2795,18 @@ class Database extends Emitter {
       try {
         await tx.commit('write', named.id, { data: named.data }, { actor: options.actor, expect: ABSENT });
       } catch (error) {
-        if (error?.code === 'EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
+        if (error?.code === 'ALX_ERR_EXISTS' && this.#otel.enabled) this.#otel.recordInsertNamed('exists');
         throw error;
       }
       if (this.#otel.enabled) this.#otel.recordInsertNamed('ok');
       return named.id;
     };
     api.set = async (id, data, options = {}) => {
-      if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
+      if (!isPlainObject(data)) throw new ArgumentError('set() takes a plain object');
       await tx.commit('write', id, { data }, { actor: options.actor });
     };
     api.update = async (id, delta, options = {}) => {
-      if (!isPlainObject(delta)) throw new TypeError('update() takes a plain object');
+      if (!isPlainObject(delta)) throw new ArgumentError('update() takes a plain object');
       const operators = isOperators(delta);
       const ifMatch = options.ifMatch ?? null;
       // The condition compiled first: a malformed query is a TypeError before anything is read.
@@ -2758,12 +2821,12 @@ class Database extends Emitter {
           await tx.commit(dead ? 'write' : 'set', id, { data: delta }, { actor: options.actor });
           return undefined;
         }
-        if (!(await api.has(id))) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+        if (!(await api.has(id))) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
         await tx.commit('set', id, { data: delta }, { actor: options.actor });
         return undefined;
       }
       const view = await api.get(id);
-      if (view === null) throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id });
+      if (view === null) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
       // The record's id laid last: a data field named `id` is not the record's.
       if (test !== null && !test({ ...view, id })) return false;
       // The operators decided over the view read once here.
@@ -2772,7 +2835,7 @@ class Database extends Emitter {
       return test === null ? undefined : true;
     };
     api.swap = async (id, changes, prev, options = {}) => {
-      if (!isPlainObject(changes) || !isPlainObject(prev)) throw new TypeError('swap() takes two plain objects');
+      if (!isPlainObject(changes) || !isPlainObject(prev)) throw new ArgumentError('swap() takes two plain objects');
       const op = await tx.commit('set', id, { data: changes }, { actor: options.actor, expect: prev });
       return op !== MISMATCH;
     };
@@ -2781,11 +2844,11 @@ class Database extends Emitter {
       this.#records.delete(id);
     };
     api.modify = (id, fn, options = {}) => {
-      if (typeof fn !== 'function') throw new TypeError('modify() takes a function');
+      if (typeof fn !== 'function') throw new ArgumentError('modify() takes a function');
       return modifyIn(api, id, fn, { actor: options.actor });
     };
     api.purge = () => {
-      throw new TypeError('purge() is not transactional: it scrubs the log; call it on the storage');
+      throw new ArgumentError('purge() is not transactional: it scrubs the log; call it on the storage');
     };
     return Object.freeze(api);
   }
@@ -2844,7 +2907,9 @@ class Database extends Emitter {
     const from = alive ? decompose(await this.#view(id, entry), entry, plugins) : null;
     // A field under a member that is not shown is unreachable (as `compact` reads it): not this revert's.
     if (from !== null) {
-      for (const field of Object.keys(fromKinds)) if (!Object.hasOwn(from, field)) delete fromKinds[field];
+      for (const field of Object.keys(fromKinds)) {
+        if (!Object.hasOwn(from, field)) delete fromKinds[field];
+      }
     }
     const kindThere = (field) => (Object.hasOwn(kinds, field) ? kinds[field] : 'register');
     const to = {};
@@ -2902,7 +2967,7 @@ class Database extends Emitter {
     return this.#run(() => adopt(this.#core, vector, { via: options.via, from: options.from }));
   }
 
-  // The streams of this node's own a host holds more of (REWOUND), moved
+  // The streams of this node's own a host holds more of (ALX_ERR_REWOUND), moved
   // past it — for the sync manager alone, once the host proved it or the
   // application said to take its word (`sync.rewind`), with the ops the
   // proof carried (`proofs`): what each stream chains on from. The advance

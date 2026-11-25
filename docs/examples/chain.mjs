@@ -28,10 +28,10 @@ const reopened = await createDatabase({ path: 'books', defer: 0 });
 try {
   await reopened.get(id);
 } catch (error) {
-  console.log(error.code); // INTEGRITY: the file no longer hashes to what its block recorded
+  console.log(error.code); // ALX_ERR_INTEGRITY: the file no longer hashes to what its block recorded
 }
 // #endregion tampered
-await assert.rejects(reopened.get(id), { code: 'INTEGRITY' });
+await assert.rejects(reopened.get(id), { code: 'ALX_ERR_INTEGRITY' });
 assert.deepEqual(await reopened.repair(id), { ops: 2, alive: true });
 assert.deepEqual(await reopened.get(id), { title: 'Invoice 7', total: 12 });
 await reopened.close();
@@ -41,10 +41,10 @@ const hub = await createDatabase({ path: 'hub', chain: false }); // a node that 
 try {
   await hub.validate();
 } catch (error) {
-  console.log(error.code); // NO_CHAIN
+  console.log(error.code); // ALX_ERR_NO_CHAIN
 }
 // #endregion off
-await assert.rejects(hub.validate(), { code: 'NO_CHAIN' });
+await assert.rejects(hub.validate(), { code: 'ALX_ERR_NO_CHAIN' });
 await hub.close();
 
 // #region blockchain
@@ -58,4 +58,4 @@ console.log(await audit.validate()); // true
 // #endregion blockchain
 assert.deepEqual((await audit.readBlock(hash)).data, { event: 'release approved', by: 'ada' });
 assert.equal(audit.tailHash, hash);
-await assert.rejects(audit.readBlock('0'.repeat(64)), { code: 'BLOCK_NOT_FOUND' });
+await assert.rejects(audit.readBlock('0'.repeat(64)), { code: 'ALX_ERR_BLOCK_NOT_FOUND' });

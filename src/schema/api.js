@@ -6,7 +6,7 @@
 // lends (src/database.js #lend). The core applies the definitions; nothing
 // here reaches the storage's state but through `core`.
 
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { isPlainObject, deepEqual } = require('../shape.js');
 const { compose } = require('../compose.js');
 const { project } = require('./entity.js');
@@ -25,12 +25,12 @@ const loadVersion = async ({ db, logger, hash: sha256 }, { version, snapshot, ah
   let stored = null;
   const text = await db.kv.get('', SCHEMA_FILE);
   if (text !== null) {
-    let raw;
+    let raw = null;
     try {
       raw = JSON.parse(text);
     } catch (error) {
       const message = `${SCHEMA_FILE} is unreadable (${error.message}); restore it or remove the directory`;
-      throw new SyncomError('CORRUPT', message, { cause: error });
+      throw new SyncomError('ALX_ERR_CORRUPT', message, { cause: error });
     }
     if (isPlainObject(raw) && Number.isInteger(raw.version)) {
       stored = { version: raw.version, hash: typeof raw.hash === 'string' ? raw.hash : null, migrated: raw.migrated };
@@ -44,7 +44,7 @@ const loadVersion = async ({ db, logger, hash: sha256 }, { version, snapshot, ah
     logger[stored.version > version ? 'warn' : 'info']({ event, from: stored.version, to: version });
     if (stored.version > version && ahead === 'hold') {
       throw new SyncomError(
-        'DOWNGRADE',
+        'ALX_ERR_DOWNGRADE',
         `Schema version ${version} is below the ${stored.version} this directory ran; ahead 'hold' cannot downgrade`,
       );
     }
@@ -180,10 +180,10 @@ const migrateRecord = async (core, id, entry, options, result = null) => {
  * laid again.
  */
 const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
-  if (core.version === null) throw new TypeError('migrate() needs createDatabase({ schema })');
+  if (core.version === null) throw new ArgumentError('migrate() needs createDatabase({ schema })');
   const names = entityNames(entities);
-  if (names === undefined) throw new TypeError('migrate({ entities }) takes an array of entity names');
-  if (!Number.isInteger(batch) || batch < 1) throw new TypeError('migrate({ batch }) takes a positive integer');
+  if (names === undefined) throw new ArgumentError('migrate({ entities }) takes an array of entity names');
+  if (!Number.isInteger(batch) || batch < 1) throw new ArgumentError('migrate({ batch }) takes a positive integer');
   const result = { migrated: 0, counters: 0, sets: 0, lists: 0, texts: 0, trees: 0 };
   const due = (entry) =>
     entry !== null &&
@@ -218,8 +218,8 @@ const migrate = async (core, { entities = null, batch = 100, actor } = {}) => {
 /** Runs an entity's validator as a write would and resolves to its value; writes nothing. */
 const check = async (core, entity, data) => {
   const def = core.entities.get(entity);
-  if (!def) throw new TypeError(`Unknown entity ${entity}`);
-  if (!isPlainObject(data)) throw new TypeError('check() takes a plain object');
+  if (!def) throw new ArgumentError(`Unknown entity ${entity}`);
+  if (!isPlainObject(data)) throw new ArgumentError('check() takes a plain object');
   if (!def.validator) return data;
   const id = def.idField !== false && typeof data[def.idField] === 'string' ? data[def.idField] : null;
   return def.validator(project(def, id, data));

@@ -9,7 +9,7 @@
 // its updates through the node's identity (`SIGNER`: `{ id, signMessage,
 // verifyMessage }` of the signing plugin, or null), and so does the sync
 // manager a host's proof of this node's own op; the manager moves this
-// node's own streams past a host's (`REWIND`, REWOUND) — the one way they
+// node's own streams past a host's (`REWIND`, ALX_ERR_REWOUND) — the one way they
 // move but by this node's writes. Symbols keep them off the public surface.
 // No requires: shared by both halves.
 
@@ -29,8 +29,8 @@ const ENTRIES = Symbol('syncom.entries');
 const DB = Symbol('syncom.db');
 // An option of a transaction's `update(id, delta, { [CREATE]: true })` (src/state/state.js): a record absent here is
 // made by the `set` — two nodes that make it keep each other's fields — and a deleted one is brought back by a
-// whole-record write, the one op that revives; never NOT_FOUND. The registry's symbol, so /shared — which requires
-// nothing of the core — carries it across a follower's recorded transaction by name.
+// whole-record write, the one op that revives; never ALX_ERR_NOT_FOUND. The registry's symbol, so /shared — which
+// requires nothing of the core — carries it across a follower's recorded transaction by name.
 const CREATE = Symbol.for('syncom.create');
 
 module.exports = { COMMIT, REFRESH, SOURCE, CURSOR, PLUGINS, SIGNER, REWIND, ENTRIES, DB, CREATE };

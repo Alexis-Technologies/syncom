@@ -12,6 +12,7 @@ const { Live } = require('./live.js');
 const { keyOf } = require('./cache.js');
 const { plan } = require('./plan.js');
 const { DISTANCES, isVector } = require('../search/distance.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 const MAX_REGEX = 1000;
@@ -24,7 +25,9 @@ const withSealed = (found, sealed) => {
     out.push(id);
     seen.add(id);
   }
-  for (let i = 0; i < sealed.length; i++) if (!seen.has(sealed[i])) out.push(sealed[i]);
+  for (let i = 0; i < sealed.length; i++) {
+    if (!seen.has(sealed[i])) out.push(sealed[i]);
+  }
   return out;
 };
 const MAX_TEXT = 1000;
@@ -83,7 +86,9 @@ const aboveId = (sorted, id) => {
 const matches = (actual, expected) => {
   if (deepEqual(actual, expected)) return true;
   if (!Array.isArray(actual) || Array.isArray(expected)) return false;
-  for (let i = 0; i < actual.length; i++) if (deepEqual(actual[i], expected)) return true;
+  for (let i = 0; i < actual.length; i++) {
+    if (deepEqual(actual[i], expected)) return true;
+  }
   return false;
 };
 
@@ -91,19 +96,23 @@ const matches = (actual, expected) => {
 const allOf = (tests) => {
   if (tests.length === 1) return tests[0];
   return (value) => {
-    for (let i = 0; i < tests.length; i++) if (!tests[i](value)) return false;
+    for (let i = 0; i < tests.length; i++) {
+      if (!tests[i](value)) return false;
+    }
     return true;
   };
 };
 
 const anyOf = (tests) => (value) => {
-  for (let i = 0; i < tests.length; i++) if (tests[i](value)) return true;
+  for (let i = 0; i < tests.length; i++) {
+    if (tests[i](value)) return true;
+  }
   return false;
 };
 
 const comparison = (op, expected) => {
   const rank = rankOf(expected);
-  if (rank === 0 || rank === 4) throw new TypeError(`select(): ${op} takes a number, a string or a boolean`);
+  if (rank === 0 || rank === 4) throw new ArgumentError(`select(): ${op} takes a number, a string or a boolean`);
   const holds = (value) => {
     if (rankOf(value) !== rank) return false;
     if (op === '$gt') return value > expected;
@@ -113,7 +122,9 @@ const comparison = (op, expected) => {
   };
   return (value) => {
     if (!Array.isArray(value)) return holds(value);
-    for (let i = 0; i < value.length; i++) if (holds(value[i])) return true;
+    for (let i = 0; i < value.length; i++) {
+      if (holds(value[i])) return true;
+    }
     return false;
   };
 };
@@ -121,14 +132,14 @@ const comparison = (op, expected) => {
 const regexOf = (expected, options) => {
   const flags = (options ?? (expected instanceof RegExp ? expected.flags : '')).replaceAll(/[gy]/g, '');
   const source = expected instanceof RegExp ? expected.source : expected;
-  if (typeof source !== 'string') throw new TypeError('select(): $regex takes a RegExp or a string');
+  if (typeof source !== 'string') throw new ArgumentError('select(): $regex takes a RegExp or a string');
   // A query is the application's, but a pattern the size of a document is
   // never one: a bound keeps a pasted-in pattern from being a denial.
-  if (source.length > MAX_REGEX) throw new TypeError(`select(): $regex is longer than ${MAX_REGEX} characters`);
+  if (source.length > MAX_REGEX) throw new ArgumentError(`select(): $regex is longer than ${MAX_REGEX} characters`);
   try {
     return new RegExp(source, flags);
   } catch (error) {
-    throw new TypeError(`select(): $regex is invalid — ${error.message}`, { cause: error });
+    throw new ArgumentError(`select(): $regex is invalid — ${error.message}`, { cause: error });
   }
 };
 
@@ -143,20 +154,24 @@ const typeOf = (value) => {
 // `$elemMatch`: a query over an element — an object element matched by a
 // query of its fields, a scalar one by the operators as a field's value.
 const elemMatch = (condition, depth) => {
-  if (!isObject(condition)) throw new TypeError('select(): $elemMatch takes a query');
+  if (!isObject(condition)) throw new ArgumentError('select(): $elemMatch takes a query');
   let operators = 0;
-  for (const key of Object.keys(condition)) if (key.startsWith('$')) operators++;
+  for (const key of Object.keys(condition)) {
+    if (key.startsWith('$')) operators++;
+  }
   const sub = operators > 0 ? compileField('', condition, depth + 1) : compileQuery(condition, true, depth + 1);
   const test = operators > 0 ? (element) => sub({ '': element }) : sub;
   return (value) => {
     if (!Array.isArray(value)) return false;
-    for (let i = 0; i < value.length; i++) if (test(value[i])) return true;
+    for (let i = 0; i < value.length; i++) {
+      if (test(value[i])) return true;
+    }
     return false;
   };
 };
 
 const compileField = (path, condition, depth = 0) => {
-  if (depth > MAX_QUERY_DEPTH) throw new TypeError(`select(): a query nests deeper than ${MAX_QUERY_DEPTH} levels`);
+  if (depth > MAX_QUERY_DEPTH) throw new ArgumentError(`select(): a query nests deeper than ${MAX_QUERY_DEPTH} levels`);
   if (!isObject(condition)) return (row) => matches(valueOf(row, path), condition);
   const tests = [];
   const options = typeof condition.$options === 'string' ? condition.$options : undefined;
@@ -168,48 +183,55 @@ const compileField = (path, condition, depth = 0) => {
     if (op === '$eq') tests.push((value) => matches(value, expected));
     else if (op === '$ne') tests.push((value) => !matches(value, expected));
     else if (op === '$in' || op === '$nin') {
-      if (!Array.isArray(expected)) throw new TypeError(`select(): ${op} takes an array`);
+      if (!Array.isArray(expected)) throw new ArgumentError(`select(): ${op} takes an array`);
       const hit = (value) => {
-        for (let i = 0; i < expected.length; i++) if (matches(value, expected[i])) return true;
+        for (let i = 0; i < expected.length; i++) {
+          if (matches(value, expected[i])) return true;
+        }
         return false;
       };
       tests.push(op === '$in' ? hit : (value) => !hit(value));
     } else if (op === '$gt' || op === '$gte' || op === '$lt' || op === '$lte') tests.push(comparison(op, expected));
     else if (op === '$exists') {
-      if (typeof expected !== 'boolean') throw new TypeError('select(): $exists takes a boolean');
+      if (typeof expected !== 'boolean') throw new ArgumentError('select(): $exists takes a boolean');
       tests.push((value) => (value !== undefined) === expected);
     } else if (op === '$regex') {
       const regex = regexOf(expected, options);
       const hit = (value) => typeof value === 'string' && regex.test(value);
       tests.push((value) => {
         if (!Array.isArray(value)) return hit(value);
-        for (let i = 0; i < value.length; i++) if (hit(value[i])) return true;
+        for (let i = 0; i < value.length; i++) {
+          if (hit(value[i])) return true;
+        }
         return false;
       });
     } else if (op === '$type') {
       if (!TYPES.has(expected)) {
-        throw new TypeError('select(): $type takes null, boolean, number, string, array or object');
+        throw new ArgumentError('select(): $type takes null, boolean, number, string, array or object');
       }
       tests.push((value) => value !== undefined && typeOf(value) === expected);
     } else if (op === '$size') {
       if (!Number.isInteger(expected) || expected < 0) {
-        throw new TypeError('select(): $size takes a non-negative integer');
+        throw new ArgumentError('select(): $size takes a non-negative integer');
       }
       tests.push((value) => Array.isArray(value) && value.length === expected);
     } else if (op === '$mod') {
       const ok = Array.isArray(expected) && expected.length === 2 && Number.isFinite(expected[0]) && expected[0] !== 0;
-      if (!ok || !Number.isFinite(expected[1])) throw new TypeError('select(): $mod takes [divisor, remainder]');
-      const [divisor, remainder] = expected;
+      if (!ok || !Number.isFinite(expected[1])) throw new ArgumentError('select(): $mod takes [divisor, remainder]');
+      const divisor = expected[0];
+      const remainder = expected[1];
       tests.push((value) => typeof value === 'number' && value % divisor === remainder);
     } else if (op === '$all') {
-      if (!Array.isArray(expected)) throw new TypeError('select(): $all takes an array');
+      if (!Array.isArray(expected)) throw new ArgumentError('select(): $all takes an array');
       tests.push((value) => {
         if (!Array.isArray(value)) return false;
-        for (let i = 0; i < expected.length; i++) if (!matches(value, expected[i])) return false;
+        for (let i = 0; i < expected.length; i++) {
+          if (!matches(value, expected[i])) return false;
+        }
         return true;
       });
     } else if (op === '$elemMatch') tests.push(elemMatch(expected, depth));
-    else if (op !== '$options') throw new TypeError(`select(): unknown operator ${op}`);
+    else if (op !== '$options') throw new ArgumentError(`select(): unknown operator ${op}`);
   }
   if (operators === 0) return (row) => matches(valueOf(row, path), condition);
   const test = allOf(tests);
@@ -219,8 +241,8 @@ const compileField = (path, condition, depth = 0) => {
 // `$text` is a string, bounded like a pattern; it is the catalog's to
 // answer (the text index ranks the candidates), so it compiles to no test.
 const checkText = (value) => {
-  if (typeof value !== 'string') throw new TypeError('select(): $text takes a string');
-  if (value.length > MAX_TEXT) throw new TypeError(`select(): $text is longer than ${MAX_TEXT} characters`);
+  if (typeof value !== 'string') throw new ArgumentError('select(): $text takes a string');
+  if (value.length > MAX_TEXT) throw new ArgumentError(`select(): $text is longer than ${MAX_TEXT} characters`);
 };
 
 /**
@@ -231,13 +253,13 @@ const checkText = (value) => {
  * A malformed query is a TypeError here, at `select()`, not at `fetch()`.
  */
 const compileQuery = (query = {}, nested = false, depth = 0) => {
-  if (depth > MAX_QUERY_DEPTH) throw new TypeError(`select(): a query nests deeper than ${MAX_QUERY_DEPTH} levels`);
-  if (!isObject(query)) throw new TypeError('select() takes a query object');
+  if (depth > MAX_QUERY_DEPTH) throw new ArgumentError(`select(): a query nests deeper than ${MAX_QUERY_DEPTH} levels`);
+  if (!isObject(query)) throw new ArgumentError('select() takes a query object');
   const tests = [];
   for (const key of Object.keys(query)) {
     const value = query[key];
     if (key === '$and' || key === '$or' || key === '$nor') {
-      if (!Array.isArray(value)) throw new TypeError(`select(): ${key} takes an array of queries`);
+      if (!Array.isArray(value)) throw new ArgumentError(`select(): ${key} takes an array of queries`);
       const subs = [];
       for (let i = 0; i < value.length; i++) subs.push(compileQuery(value[i], true, depth + 1));
       if (key === '$and') tests.push(allOf(subs));
@@ -251,9 +273,9 @@ const compileQuery = (query = {}, nested = false, depth = 0) => {
       tests.push((row) => !sub(row));
     } else if (key === '$text') {
       // Inside $and/$or/$not it could neither narrow nor keep a rank order.
-      if (nested) throw new TypeError('select(): $text is only allowed at the top level of the query');
+      if (nested) throw new ArgumentError('select(): $text is only allowed at the top level of the query');
       checkText(value);
-    } else if (key.startsWith('$')) throw new TypeError(`select(): unknown operator ${key}`);
+    } else if (key.startsWith('$')) throw new ArgumentError(`select(): unknown operator ${key}`);
     else tests.push(compileField(key, value, depth));
   }
   return allOf(tests);
@@ -263,8 +285,9 @@ const compileQuery = (query = {}, nested = false, depth = 0) => {
 // the catalog alone can answer it. `$text` reads no field.
 const fieldsOf = (query, into = new Set()) => {
   for (const key of Object.keys(query)) {
-    if (key === '$and' || key === '$or' || key === '$nor') for (const sub of query[key]) fieldsOf(sub, into);
-    else if (key === '$not') fieldsOf(query[key], into);
+    if (key === '$and' || key === '$or' || key === '$nor') {
+      for (const sub of query[key]) fieldsOf(sub, into);
+    } else if (key === '$not') fieldsOf(query[key], into);
     else if (key !== '$text') into.add(key);
   }
   return into;
@@ -285,12 +308,13 @@ const compareFully = (keys) => {
   return (a, b) => {
     const order = byKeys(a, b);
     if (order !== 0) return order;
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    if (a.id < b.id) return -1;
+    return a.id > b.id ? 1 : 0;
   };
 };
 
 const count = (name, value) => {
-  if (!Number.isInteger(value) || value < 0) throw new TypeError(`${name}() takes a non-negative integer`);
+  if (!Number.isInteger(value) || value < 0) throw new ArgumentError(`${name}() takes a non-negative integer`);
   return value;
 };
 
@@ -353,8 +377,8 @@ class TopK {
   #compare;
   #k;
 
-  constructor(compare, k) {
-    this.#compare = compare;
+  constructor(byOrder, k) {
+    this.#compare = byOrder;
     this.#k = k;
   }
 
@@ -425,7 +449,7 @@ class Cursor {
     this.#cache = cache;
     this.#withSealed = sealed === true;
     if (predicate === null && query.$text !== undefined && !source.searches(entity)) {
-      throw new TypeError(`select(): $text needs search fields on ${entity} (schema.entities.${entity}.search)`);
+      throw new ArgumentError(`select(): $text needs search fields on ${entity} (schema.entities.${entity}.search)`);
     }
   }
 
@@ -467,8 +491,10 @@ class Cursor {
    */
   after(next) {
     const valid = isObject(next) && Array.isArray(next.keys) && typeof next.id === 'string';
-    if (!valid || next.keys.length !== this.#order.length) throw new TypeError('after() takes the next of a page()');
-    if (this.#ranked()) throw new TypeError('after(): a $text query without an order has no edge to page by');
+    if (!valid || next.keys.length !== this.#order.length) {
+      throw new ArgumentError('after() takes the next of a page()');
+    }
+    if (this.#ranked()) throw new ArgumentError('after(): a $text query without an order has no edge to page by');
     const copy = this.#clone();
     copy.#after = { keys: next.keys.slice(), id: next.id };
     copy.#offset = 0;
@@ -482,7 +508,7 @@ class Cursor {
    */
   async page() {
     if (this.#ranked() && this.#limit !== Infinity) {
-      throw new TypeError('page(): a $text query without an order has no edge to page by');
+      throw new ArgumentError('page(): a $text query without an order has no edge to page by');
     }
     const top = await this.#top();
     const rows = top.slice(this.#offset);
@@ -510,7 +536,7 @@ class Cursor {
   }
 
   async #groups(field, method) {
-    if (typeof field !== 'string' || field.length === 0) throw new TypeError(`${method}() takes a field name`);
+    if (typeof field !== 'string' || field.length === 0) throw new ArgumentError(`${method}() takes a field name`);
     const { rows } = await this.projection([field]).#matching(true, Infinity);
     const groups = new Map();
     for (let i = 0; i < rows.length; i++) {
@@ -535,14 +561,14 @@ class Cursor {
    * at most 4096 numbers): a scan that holds `k` rows, never every match.
    */
   async nearest(field, vector, k, { distance = 'cosine' } = {}) {
-    if (typeof field !== 'string' || field.length === 0) throw new TypeError('nearest() takes a field name');
+    if (typeof field !== 'string' || field.length === 0) throw new ArgumentError('nearest() takes a field name');
     if (!isVector(vector) || vector.length > MAX_VECTOR) {
-      throw new TypeError(`nearest() takes a vector: an array of 1 to ${MAX_VECTOR} finite numbers`);
+      throw new ArgumentError(`nearest() takes a vector: an array of 1 to ${MAX_VECTOR} finite numbers`);
     }
-    if (count('nearest', k) > MAX_NEAREST) throw new TypeError(`nearest() takes k of at most ${MAX_NEAREST}`);
+    if (count('nearest', k) > MAX_NEAREST) throw new ArgumentError(`nearest() takes k of at most ${MAX_NEAREST}`);
     const metric = typeof distance === 'function' ? distance : DISTANCES[distance];
     if (typeof metric !== 'function') {
-      throw new TypeError("nearest(): distance is 'cosine', 'euclidean', 'manhattan', 'dot' or a function");
+      throw new ArgumentError("nearest(): distance is 'cosine', 'euclidean', 'manhattan', 'dot' or a function");
     }
     // The records themselves: a catalog row (a covered projection) holds no vector.
     const whole = this.#clone();
@@ -558,7 +584,7 @@ class Cursor {
   }
 
   #key(field, desc) {
-    if (typeof field !== 'string' || field.length === 0) throw new TypeError('order() takes a field name');
+    if (typeof field !== 'string' || field.length === 0) throw new ArgumentError('order() takes a field name');
     const copy = this.#clone();
     copy.#order.push({ field, desc });
     return copy;
@@ -586,7 +612,7 @@ class Cursor {
 
   /** A predicate over the loaded row — the query reaches the record, this reaches the code. */
   filter(fn) {
-    if (typeof fn !== 'function') throw new TypeError('filter() takes a function');
+    if (typeof fn !== 'function') throw new ArgumentError('filter() takes a function');
     const copy = this.#clone();
     copy.#filter = fn;
     return copy;
@@ -596,7 +622,7 @@ class Cursor {
   projection(fields) {
     let valid = Array.isArray(fields);
     for (let i = 0; valid && i < fields.length; i++) valid = typeof fields[i] === 'string' && fields[i] !== '__proto__';
-    if (!valid) throw new TypeError('projection() takes an array of field names');
+    if (!valid) throw new ArgumentError('projection() takes an array of field names');
     const copy = this.#clone();
     copy.#projection = fields;
     return copy;
@@ -604,7 +630,7 @@ class Cursor {
 
   /** Whether `doc` — a record's data, with or without `id` — matches the cursor's query (the filter aside). */
   matches(doc) {
-    if (!isObject(doc)) throw new TypeError('matches() takes an object');
+    if (!isObject(doc)) throw new ArgumentError('matches() takes an object');
     return this.#predicate(doc);
   }
 
@@ -617,11 +643,11 @@ class Cursor {
   populate(fields) {
     let valid = Array.isArray(fields) && fields.length > 0;
     for (let i = 0; valid && i < fields.length; i++) valid = typeof fields[i] === 'string';
-    if (!valid) throw new TypeError('populate() takes an array of field names');
+    if (!valid) throw new ArgumentError('populate() takes an array of field names');
     const def = this.#source.definition?.(this.#entity) ?? null;
     for (let i = 0; i < fields.length; i++) {
       if (def === null || def.refs === null || !Object.hasOwn(def.refs, fields[i])) {
-        throw new TypeError(`populate(): ${fields[i]} is not a declared reference of ${this.#entity} (refs)`);
+        throw new ArgumentError(`populate(): ${fields[i]} is not a declared reference of ${this.#entity} (refs)`);
       }
     }
     const copy = this.#clone();
@@ -645,8 +671,9 @@ class Cursor {
       };
       for (let i = 0; i < rows.length; i++) {
         const value = rows[i][field];
-        if (many && Array.isArray(value)) for (let k = 0; k < value.length; k++) want(value[k]);
-        else want(value);
+        if (many && Array.isArray(value)) {
+          for (let k = 0; k < value.length; k++) want(value[k]);
+        } else want(value);
       }
       const found = await this.#source.loadMany(ids);
       // The record the id names — of the declared collection; another collection's record is not it, nor a sealed
@@ -774,9 +801,15 @@ class Cursor {
     if (needsRows && this.#projection === null) return false;
     const indexed = this.#source.indexed(this.#entity);
     if (this.#fields === null) this.#fields = fieldsOf(this.#query);
-    for (const field of this.#fields) if (!indexed.has(field)) return false;
-    for (const { field } of this.#order) if (!indexed.has(field)) return false;
-    if (needsRows) for (const field of this.#projection) if (!indexed.has(field)) return false;
+    for (const field of this.#fields) {
+      if (!indexed.has(field)) return false;
+    }
+    for (const { field } of this.#order) {
+      if (!indexed.has(field)) return false;
+    }
+    if (needsRows) {
+      for (const field of this.#projection) if (!indexed.has(field)) return false;
+    }
     return true;
   }
 
@@ -813,7 +846,7 @@ class Cursor {
     const merged = byIndex && hasSealed;
     const enough = needsRows && (!ordered || byIndex) ? wanted : Infinity;
     const windowed = enough !== Infinity && !byIndex && !this.#ranked();
-    let next;
+    let next = null;
     let byId = false;
     if (scanned !== null && !windowed && (!hasSealed || merged)) next = scanned.next;
     else {
@@ -824,7 +857,10 @@ class Cursor {
       // order without keys — so what it stops at is the window a run of every candidate would give: a
       // scan's ids come in key order and a posting set in none, both are sorted by id first; the
       // collection's list is in id order already.
-      if (windowed && (scanned !== null || !Array.isArray(found) || hasSealed)) found = [...found].sort();
+      if (windowed && (scanned !== null || !Array.isArray(found) || hasSealed)) {
+        found = [...found];
+        found.sort();
+      }
       byId = windowed && !ordered;
       // After a page's edge, by id: the first id above it.
       const start = byId && this.#after !== null ? aboveId(found, this.#after.id) : 0;
@@ -848,7 +884,9 @@ class Cursor {
       if (merged && sealedSet.has(id)) return false;
       if (hidden !== null && hidden.has(id)) return false;
       if (narrowed === null || sealedSet?.has(id) === true) return true;
-      for (let i = 0; i < narrowed.length; i++) if (!narrowed[i].has(id)) return false;
+      for (let i = 0; i < narrowed.length; i++) {
+        if (!narrowed[i].has(id)) return false;
+      }
       return true;
     };
     // The rows go into the sink given (`nearest()`'s), else a TopK where one page of an order no index serves is
@@ -892,7 +930,9 @@ class Cursor {
     const inOrder = sink instanceof TopK || byIndex || byId;
     // What a run answers: the sink's rows, the sealed rows not laid yet after them while the window has room.
     const answer = () => {
-      if (sealedRows !== null) while (laid < sealedRows.length && sink.size < enough) sink.push(sealedRows[laid++]);
+      if (sealedRows !== null) {
+        while (laid < sealedRows.length && sink.size < enough) sink.push(sealedRows[laid++]);
+      }
       return { rows: sink.rows, sorted: inOrder };
     };
     if (this.#covered(needsRows)) {
@@ -919,7 +959,9 @@ class Cursor {
       const pending = [];
       for (let i = 0; i < batch.length; i++) pending.push(load(batch[i]));
       const records = await Promise.all(pending);
-      for (let i = 0; i < batch.length; i++) if (records[i] !== null) take(rowOf(batch[i], records[i]));
+      for (let i = 0; i < batch.length; i++) {
+        if (records[i] !== null) take(rowOf(batch[i], records[i]));
+      }
       batch.length = 0;
     };
     for (let id = next(); id !== null && sink.size < enough; id = next()) {
@@ -1027,10 +1069,10 @@ class Cursor {
   // skipped (`written` counts the rest). A view at a tag reads alone.
   async #write(method, options, write) {
     const { transact } = this.#source;
-    if (typeof transact !== 'function') throw new TypeError(`${method}(): a cursor at a tag is read-only`);
+    if (typeof transact !== 'function') throw new ArgumentError(`${method}(): a cursor at a tag is read-only`);
     const ids = await this.#ids();
     if (ids.length > MAX_BATCH) {
-      throw new TypeError(
+      throw new ArgumentError(
         `${method}(): ${ids.length} matches, at most ${MAX_BATCH} in one transaction — narrow the query or limit() the cursor`,
       );
     }
@@ -1058,7 +1100,7 @@ class Cursor {
 
   /** Every match changed by `fn` (see `modify()`), as one transaction: `{ matched, written }`. */
   modify(fn, options = {}) {
-    if (typeof fn !== 'function') return Promise.reject(new TypeError('modify() takes a function'));
+    if (typeof fn !== 'function') return Promise.reject(new ArgumentError('modify() takes a function'));
     return this.#write('modify', options, (tx, id) => tx.modify(id, fn, { actor: options.actor }));
   }
 
@@ -1069,8 +1111,8 @@ class Cursor {
   }
 
   async one() {
-    const [row = null] = await this.#fetch(Math.min(this.#limit, 1));
-    return row;
+    const rows = await this.#fetch(Math.min(this.#limit, 1));
+    return rows.length === 0 ? null : rows[0];
   }
 
   // What a live run (./live.js) of this cursor is made of: how a record
@@ -1114,7 +1156,7 @@ class Cursor {
   // `watch()` of the key — or this call's own where the cursor has no key.
   #live(listener, onError, mode) {
     if (typeof listener !== 'function') {
-      throw new TypeError(`${mode === 'count' ? 'watchCount' : 'watch'}() takes a listener`);
+      throw new ArgumentError(`${mode === 'count' ? 'watchCount' : 'watch'}() takes a listener`);
     }
     const key = this.#cacheKey();
     if (key === null) {
@@ -1171,7 +1213,7 @@ class Cursor {
    */
   async *stream({ batch = 100 } = {}) {
     const size = count('stream', batch);
-    if (size === 0) throw new TypeError('stream() takes a batch of one or more');
+    if (size === 0) throw new ArgumentError('stream() takes a batch of one or more');
     // A `$text` query without an order has no edge; an order no index sorts would cost a run of the result a page:
     // one run, handed out `batch` at a time (an unordered cursor pages by id; `indexAdvisor` names the key).
     if (this.#ranked() || (this.#order.length > 0 && !this.#plan().sortedByIndex)) {

@@ -8,8 +8,10 @@
 // subscribe, store.getSnapshot)` (the snapshot keeps its identity until a
 // change). Vue and Solid wrap the same object (docs/guide/frameworks.md).
 // The source is watched from the first subscriber to the last, and a store
-// with none answers the last value it saw. No requires: no framework is
+// with none answers the last value it saw. Requires argument-errors.js only: no framework is
 // imported, and the sources are duck-typed.
+
+const { ArgumentError } = require('../argument-errors.js');
 
 const createStore = (start, { initial, onError = null } = {}) => {
   let value = initial;
@@ -19,14 +21,16 @@ const createStore = (start, { initial, onError = null } = {}) => {
   // watch is dropped.
   let generation = 0;
   const runs = new Set();
-  let resolveReady;
+  let resolveReady = null;
   const ready = new Promise((resolve) => (resolveReady = resolve));
   const set = (mine) => (next) => {
     if (mine !== generation) return;
     value = next;
     error = null;
     resolveReady(next);
-    for (const run of [...runs]) run(value);
+    // A run may subscribe or unsubscribe as it is told: the runs of the moment are told, each once.
+    const told = [...runs];
+    for (let i = 0; i < told.length; i++) told[i](value);
   };
   const fail = (mine) => (err) => {
     if (mine !== generation) return;
@@ -35,7 +39,7 @@ const createStore = (start, { initial, onError = null } = {}) => {
   };
   const store = {
     subscribe(run) {
-      if (typeof run !== 'function') throw new TypeError('subscribe() takes a function');
+      if (typeof run !== 'function') throw new ArgumentError('subscribe() takes a function');
       if (stop === null) {
         const mine = ++generation;
         stop = start(set(mine), fail(mine));
@@ -122,7 +126,8 @@ const fromRecord = (record, options) =>
     };
     record.on('update', update);
     record.data().then((data) => {
-      if (!updated) set(data === null ? null : { ...data });
+      if (updated) return;
+      return void set(data === null ? null : { ...data });
     }, fail);
     return () => record.off('update', update);
   }, options);
@@ -130,13 +135,14 @@ const fromRecord = (record, options) =>
 // A record as `get()` reads it — the lens and the read hooks applied — read
 // again after every turn that changed it; the newest read wins.
 const fromGet = (storage, id, { path = null, ...options } = {}) => {
-  if (path !== null && typeof path !== 'string') throw new TypeError('toStore() takes a path as a string');
+  if (path !== null && typeof path !== 'string') throw new ArgumentError('toStore() takes a path as a string');
   return createStore((set, fail) => {
     let reads = 0;
     const read = () => {
       const mine = ++reads;
       storage.get(id).then((data) => {
-        if (mine === reads) set(at(data, path));
+        if (mine !== reads) return;
+        return void set(at(data, path));
       }, fail);
     };
     const stop = storage.observe(id, path, read);
@@ -157,7 +163,7 @@ const toStore = (source, ...args) => {
   if (isState(source)) return fromObserved(source, typeof args[0] === 'string' ? args[0] : null, args[1]);
   if (isRecord(source)) return fromRecord(source, args[0]);
   if (isStorage(source) && typeof args[0] === 'string') return fromGet(source, args[0], args[1]);
-  throw new TypeError(
+  throw new ArgumentError(
     'toStore() takes a cursor, a Record, a presence, a local store and a key, a state, or a storage and a record id',
   );
 };
@@ -165,10 +171,10 @@ const toStore = (source, ...args) => {
 /** A store over any emitter: `read()` (a value or a promise of one) at the start and after each of `events`. */
 const fromEvents = (emitter, events, read, options) => {
   if (!emitter || typeof emitter.on !== 'function' || typeof emitter.off !== 'function') {
-    throw new TypeError('fromEvents() takes an emitter');
+    throw new ArgumentError('fromEvents() takes an emitter');
   }
   if (!Array.isArray(events) || typeof read !== 'function') {
-    throw new TypeError('fromEvents() takes events and a reader');
+    throw new ArgumentError('fromEvents() takes events and a reader');
   }
   return createStore((set, fail) => {
     const changed = () => deliver(read, set, fail);
@@ -183,6 +189,12 @@ const fromEvents = (emitter, events, read, options) => {
 // RxJS's interop key: `Symbol.observable` where a library defined it, '@@observable' otherwise — `from()` reads either.
 const OBSERVABLE = typeof Symbol.observable === 'symbol' ? Symbol.observable : '@@observable';
 
+const nextOf = (observer) => {
+  if (typeof observer === 'function') return observer;
+  if (typeof observer?.next === 'function') return (value) => observer.next(value);
+  return null;
+};
+
 /**
  * An interop Observable over a store — what Angular's `async` pipe and `toSignal()`, RxJS's `from()` and anything
  * else that reads `subscribe({ next })` take: `next` per value the store gives (the first at once), never `error`
@@ -191,16 +203,11 @@ const OBSERVABLE = typeof Symbol.observable === 'symbol' ? Symbol.observable : '
  */
 const toObservable = (store) => {
   if (store === null || typeof store !== 'object' || typeof store.subscribe !== 'function') {
-    throw new TypeError('toObservable() takes a store');
+    throw new ArgumentError('toObservable() takes a store');
   }
   const observable = {
     subscribe(observer) {
-      const next =
-        typeof observer === 'function'
-          ? observer
-          : typeof observer?.next === 'function'
-            ? (value) => observer.next(value)
-            : null;
+      const next = nextOf(observer);
       let closed = false;
       const stop = store.subscribe((value) => {
         if (!closed && next !== null) next(value);

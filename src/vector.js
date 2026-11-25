@@ -21,6 +21,9 @@ const compareClock = (a, b) => {
 
 const maxClock = (a, b) => (compareClock(a, b) >= 0 ? a : b);
 
+// The clock a map of the meta holds at a key, by its own keys alone; null for none.
+const held = (map, key) => (map && Object.hasOwn(map, key) ? map[key] : null);
+
 // The floor under a field of a record: the record's reset watermark
 // (`meta.base`), the field's own (`meta.gone[field]`, an `unset`), and —
 // for a path — the floor of every prefix above it: its unset, or the write
@@ -29,7 +32,6 @@ const maxClock = (a, b) => (compareClock(a, b) >= 0 ? a : b);
 // above to count, and what the field's state is pruned under.
 const floorOf = (meta, field) => {
   const { gone, clock } = meta;
-  const held = (map, key) => (map && Object.hasOwn(map, key) ? map[key] : null);
   let floor = maxClock(meta.base ?? null, held(gone, field));
   for (let at = field.indexOf('/'); at !== -1; at = field.indexOf('/', at + 1)) {
     const prefix = field.slice(0, at);
@@ -59,7 +61,8 @@ const compareVectors = (a = {}, b = {}) => {
     else if (x < y) behind = true;
   }
   if (ahead && behind) return undefined;
-  return ahead ? 1 : behind ? -1 : 0;
+  if (ahead) return 1;
+  return behind ? -1 : 0;
 };
 
 // A peer's vector is the peer's word: its own keys alone, a seq a safe

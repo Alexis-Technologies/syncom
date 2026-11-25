@@ -14,7 +14,7 @@
 // everything a validator returns or throws is normalized here, once, so the
 // write path sees `async (record) => validated` and nothing else.
 
-const { ValidationError } = require('../errors.js');
+const { ValidationError, ArgumentError } = require('../errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -36,7 +36,7 @@ const ENTITY_KEYS = [
 ];
 const ENTITY_KEY = new Set(ENTITY_KEYS);
 
-const fail = (entity, text) => new TypeError(`createDatabase({ schema }): entity ${entity}: ${text}`);
+const fail = (entity, text) => new ArgumentError(`createDatabase({ schema }): entity ${entity}: ${text}`);
 
 // One issue as syncom keeps it, from either shape it meets: a Standard
 // Schema issue (`path` of keys or `{ key }` segments) or an ajv error
@@ -56,6 +56,7 @@ const pointer = (text) => {
 };
 
 const toIssue = (issue) => {
+  // What a validator handed back may be anything, a symbol too: String() names it where a template would throw.
   if (!isObject(issue)) return { path: [], message: String(issue) };
   let path = [];
   if (Array.isArray(issue.path)) {
@@ -94,7 +95,7 @@ const isThenable = (value) => Boolean(value) && typeof value.then === 'function'
 const isStandard = (schema) => isObject(schema) && '~standard' in schema;
 
 const fromStandard = (standard, entity) => async (data) => {
-  let result;
+  let result = undefined;
   try {
     result = standard.validate(data);
     if (isThenable(result)) result = await result;
@@ -110,7 +111,7 @@ const fromStandard = (standard, entity) => async (data) => {
 // carrying `errors`), an assertion that throws, or a transformer that returns
 // the value. `true` and `undefined` both mean "as given".
 const fromFunction = (fn, entity) => async (data) => {
-  let result;
+  let result = undefined;
   try {
     result = fn(data);
     if (isThenable(result)) result = await result;
@@ -206,7 +207,9 @@ const explicitIndex = (value, entity) => {
 const indexSet = (keys) => {
   const index = new Set();
   const indexes = dedupe(keys);
-  for (let i = 0; i < indexes.length; i++) for (let j = 0; j < indexes[i].length; j++) index.add(indexes[i][j]);
+  for (let i = 0; i < indexes.length; i++) {
+    for (let j = 0; j < indexes[i].length; j++) index.add(indexes[i][j]);
+  }
   return { index: [...index], indexes };
 };
 
@@ -300,7 +303,8 @@ const explicitRefs = (value, entity) => {
     const field = fields[i];
     const spec = value[field];
     const many = Array.isArray(spec);
-    const target = many ? (spec.length === 1 ? spec[0] : null) : spec;
+    let target = spec;
+    if (many) target = spec.length === 1 ? spec[0] : null;
     if (!isField(field) || !isField(target)) throw fail(entity, `refs.${field} must name an entity, or [entity]`);
     refs[field] = { entity: target, many };
   }
@@ -390,7 +394,7 @@ const normalizeEntity = (name, def, validator) => {
 };
 
 const addEntity = (entities, name, def, compiler) => {
-  if (!isField(name)) throw new TypeError('createDatabase({ schema }): entity names must be non-empty strings');
+  if (!isField(name)) throw new ArgumentError('createDatabase({ schema }): entity names must be non-empty strings');
   entities.set(name, normalizeEntity(name, def, compiler));
 };
 
@@ -403,16 +407,16 @@ const isMigration = (value) =>
 const normalizeMigrations = (migrations, version) => {
   if (migrations === undefined) return null;
   if (!isObject(migrations)) {
-    throw new TypeError('createDatabase({ schema }): migrations must be an object keyed by version');
+    throw new ArgumentError('createDatabase({ schema }): migrations must be an object keyed by version');
   }
   const chain = new Map();
   for (const key of Object.keys(migrations)) {
     const to = Number(key);
-    if (!Number.isInteger(to) || to < 2 || String(to) !== key) {
-      throw new TypeError(`createDatabase({ schema }): migrations: '${key}' is not a version of 2 or more`);
+    if (!Number.isInteger(to) || to < 2 || `${to}` !== key) {
+      throw new ArgumentError(`createDatabase({ schema }): migrations: '${key}' is not a version of 2 or more`);
     }
     if (to > version) {
-      throw new TypeError(`createDatabase({ schema }): migrations: ${key} is beyond version ${version}`);
+      throw new ArgumentError(`createDatabase({ schema }): migrations: ${key} is beyond version ${version}`);
     }
     const value = migrations[key];
     if (isMigration(value)) {
@@ -420,7 +424,7 @@ const normalizeMigrations = (migrations, version) => {
       continue;
     }
     if (!isObject(value)) {
-      throw new TypeError(`createDatabase({ schema }): migrations[${key}] must be { up } or { [entity]: { up } }`);
+      throw new ArgumentError(`createDatabase({ schema }): migrations[${key}] must be { up } or { [entity]: { up } }`);
     }
     const perEntity = new Map();
     const entities = Object.keys(value);
@@ -428,7 +432,7 @@ const normalizeMigrations = (migrations, version) => {
       const entity = entities[i];
       const migration = value[entity];
       if (!isMigration(migration)) {
-        throw new TypeError(`createDatabase({ schema }): migrations[${key}].${entity} must be { up }`);
+        throw new ArgumentError(`createDatabase({ schema }): migrations[${key}].${entity} must be { up }`);
       }
       perEntity.set(entity, { up: migration.up });
     }
@@ -441,7 +445,7 @@ const normalizeMigrations = (migrations, version) => {
 // each normalized as one of the schema's would be. The validator is the one
 // `createDatabase({ validator })` gave, read once at setup.
 const defineEntity = (name, def, validator, names = new Set()) => {
-  if (!isField(name)) throw new TypeError('addCollections(): collection names must be non-empty strings');
+  if (!isField(name)) throw new ArgumentError('addCollections(): collection names must be non-empty strings');
   const known = new Set(names);
   known.add(name);
   return deriveRefs(normalizeEntity(name, def, validator === undefined ? null : validator), known);
@@ -460,45 +464,51 @@ const defineEntity = (name, def, validator, names = new Set()) => {
  */
 const normalizeSchema = (schema, { validator } = {}) => {
   if (validator !== undefined && (!isObject(validator) || typeof validator.compile !== 'function')) {
-    throw new TypeError('createDatabase({ validator }): validator must have a compile() method');
+    throw new ArgumentError('createDatabase({ validator }): validator must have a compile() method');
   }
   const compiler = validator === undefined ? null : validator;
   const entities = new Map();
   if (schema === undefined || schema === null) {
     return { version: 1, entities, snapshot: undefined, migrations: null, ahead: 'apply', lens: 'both' };
   }
-  if (!isObject(schema)) throw new TypeError('createDatabase({ schema }): schema must be an object');
+  if (!isObject(schema)) throw new ArgumentError('createDatabase({ schema }): schema must be an object');
   for (const key of Object.keys(schema)) {
-    if (!SCHEMA_KEYS.has(key)) throw new TypeError(`createDatabase({ schema }): unknown key '${key}'`);
+    if (!SCHEMA_KEYS.has(key)) throw new ArgumentError(`createDatabase({ schema }): unknown key '${key}'`);
   }
   const version = schema.version === undefined ? 1 : schema.version;
   if (!Number.isInteger(version) || version < 1) {
-    throw new TypeError('createDatabase({ schema }): version must be a positive integer');
+    throw new ArgumentError('createDatabase({ schema }): version must be a positive integer');
   }
   const ahead = schema.ahead === undefined ? 'apply' : schema.ahead;
-  if (!AHEAD.has(ahead)) throw new TypeError("createDatabase({ schema }): ahead must be 'apply' or 'hold'");
+  if (!AHEAD.has(ahead)) throw new ArgumentError("createDatabase({ schema }): ahead must be 'apply' or 'hold'");
   const lens = schema.lens === undefined ? 'both' : schema.lens;
   if (!LENS.has(lens)) {
-    throw new TypeError("createDatabase({ schema }): lens must be 'migrations', 'validate' or 'both'");
+    throw new ArgumentError("createDatabase({ schema }): lens must be 'migrations', 'validate' or 'both'");
   }
   const migrations = normalizeMigrations(schema.migrations, version);
   if (lens === 'validate' && migrations !== null) {
-    throw new TypeError("createDatabase({ schema }): lens 'validate' skips the migrations the schema declares");
+    throw new ArgumentError("createDatabase({ schema }): lens 'validate' skips the migrations the schema declares");
   }
   const source = schema.entities;
   if (source !== undefined && source !== null) {
     if (typeof source.entries === 'function') {
-      for (const [name, def] of source.entries()) addEntity(entities, name, def, compiler);
+      for (const entry of source.entries()) {
+        const name = entry[0];
+        const def = entry[1];
+        addEntity(entities, name, def, compiler);
+      }
     } else if (isObject(source)) {
       const names = Object.keys(source);
       for (let i = 0; i < names.length; i++) addEntity(entities, names[i], source[names[i]], compiler);
-    } else {
-      throw new TypeError('createDatabase({ schema }): entities must be an object or a Map');
-    }
+    } else throw new ArgumentError('createDatabase({ schema }): entities must be an object or a Map');
   }
   // A schema's relations name entities of the model: read once every name is known.
   const names = new Set(entities.keys());
-  for (const [name, def] of entities) entities.set(name, deriveRefs(def, names));
+  for (const entry of entities) {
+    const name = entry[0];
+    const def = entry[1];
+    entities.set(name, deriveRefs(def, names));
+  }
   return { version, entities, snapshot: schema.snapshot, migrations, ahead, lens };
 };
 

@@ -23,6 +23,7 @@
 // client's own `getStream`/`createStream` — wrpc's binary streams.
 
 const { isSyncLink } = require('../sync/link.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const UNIT = 'syncom';
 
@@ -57,9 +58,7 @@ const isWrpcClient = (client) =>
  * than `syncom`.
  */
 const createWrpcLink = (client, { unit = UNIT } = {}) => {
-  if (!isWrpcClient(client)) {
-    throw new TypeError('createWrpcLink: expected a WrpcClient (call/use/on/off/close)');
-  }
+  if (!isWrpcClient(client)) throw new ArgumentError('createWrpcLink: expected a WrpcClient (call/use/on/off/close)');
   client.use({ [unit]: SYNC_INTROSPECTION[UNIT] });
   const target = (method) => {
     const slash = method.indexOf('/');
@@ -74,7 +73,7 @@ const createWrpcLink = (client, { unit = UNIT } = {}) => {
       const name = target(method).slice(unit.length + 1);
       const procedure = client.api?.[unit]?.[name];
       if (!procedure || typeof procedure.subscribe !== 'function') {
-        throw new TypeError(`createWrpcLink: ${unit}/${name} is not a subscription on this client`);
+        throw new ArgumentError(`createWrpcLink: ${unit}/${name} is not a subscription on this client`);
       }
       const handle = procedure.subscribe(args, {
         lastEventId,
@@ -119,9 +118,11 @@ const createWrpcLink = (client, { unit = UNIT } = {}) => {
  */
 const createSharedChannel = (client, { unit = 'syncom-db' } = {}) => {
   if (!client || typeof client.call !== 'function' || typeof client.close !== 'function') {
-    throw new TypeError('createSharedChannel: expected a WrpcClient (call/close)');
+    throw new ArgumentError('createSharedChannel: expected a WrpcClient (call/close)');
   }
-  if (typeof unit !== 'string' || unit.length === 0) throw new TypeError('createSharedChannel: unit must be a name');
+  if (typeof unit !== 'string' || unit.length === 0) {
+    throw new ArgumentError('createSharedChannel: unit must be a name');
+  }
   return {
     call: (method, args) => client.call(`${unit}/${method}`, args),
     close: () => client.close(),

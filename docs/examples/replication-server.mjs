@@ -54,13 +54,13 @@ assert.deepEqual(await laptop.Task.get(fromServer.id), { title: 'Written on the 
 
 // #region write-rule
 laptop.sync.on('error', (error) => {
-  if (error.code === 'WRITE_REFUSED') console.log(error.message);
+  if (error.code === 'ALX_ERR_WRITE_REFUSED') console.log(error.message);
   // ws://127.0.0.1:8200/api refused <op> on <id>; reverted to what it holds
 });
 await laptop.Task.delete(fromServer.id);
 // #endregion write-rule
 const refusedWrite = await laptop.sync.toPromise('error');
-assert.equal(refusedWrite.code, 'WRITE_REFUSED');
+assert.equal(refusedWrite.code, 'ALX_ERR_WRITE_REFUSED');
 await waitUntil(async () => (await laptop.Task.get(fromServer.id)) !== null);
 assert.deepEqual(await laptop.Task.get(fromServer.id), { title: 'Written on the server', done: false, $type: 'Task' });
 assert.notEqual(await server.Task.get(fromServer.id), null);

@@ -16,9 +16,9 @@
 // database as the leader in its place — the same node id, the same log —
 // and every live thing made through this facade (`live`, `document`) is made
 // again over the new instance; an elected instance that cannot open says
-// PROMOTE_FAILED, yields the lock and asks again after a backoff. A write a
+// ALX_ERR_PROMOTE_FAILED, yields the lock and asks again after a backoff. A write a
 // follower sent while the leader went is tried again once a leader answers,
-// within `failover` ms; past it, `LEADER_LOST`. `openShared({ createDatabase,
+// within `failover` ms; past it, `ALX_ERR_LEADER_LOST`. `openShared({ createDatabase,
 // ...options, channel, election })` — the database options are what
 // `createDatabase` takes, `createDatabase` the one of the flavour in use (the
 // core's or `/all`'s: nothing of the core is bundled here, as /branch opens
@@ -26,7 +26,7 @@
 // hooks.js, election.js, channel.js only.
 
 const { Emitter } = require('../emitter.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 const { elect } = require('./election.js');
 const { isChannel, answerOf, unwrap, describe, revive } = require('./channel.js');
@@ -150,18 +150,21 @@ const callOf = (payload) => {
 
 const notLeader = (path, what, hint = null) =>
   new SyncomError(
-    'NOT_LEADER',
+    'ALX_ERR_NOT_LEADER',
     `${what} is the leader's: the instance at ${path} follows${hint === null ? '' : ` — ${hint}`}`,
     hint === null ? { path, what } : { path, what, hint },
   );
-const noCollection = (name) => new TypeError(`collection(): no collection ${String(name)}`);
+const noCollection = (name) => new ArgumentError(`collection(): no collection ${String(name)}`);
 
 // The procedures beside the writers, as the leader runs them: a collection's writer by name, a local write, a blob
 // fetched into the shared store — the arguments as the wire carries them, the answer a value that crosses it.
-const collectionWrite = async (db, [name, method, args]) => {
+const collectionWrite = async (db, params) => {
+  const name = params[0];
+  const method = params[1];
+  const args = params[2];
   const collection = db.collections[name];
   if (collection === undefined) throw noCollection(name);
-  if (!COLLECTION_WRITERS.includes(method)) throw new TypeError(`collection: ${String(method)} is not a writer`);
+  if (!COLLECTION_WRITERS.includes(method)) throw new ArgumentError(`collection: ${String(method)} is not a writer`);
   const out = await Reflect.apply(collection[method], collection, Array.isArray(args) ? args : []);
   if (ANSWER_ID.has(method)) return out.id;
   if (BULK.has(method)) {
@@ -171,13 +174,22 @@ const collectionWrite = async (db, [name, method, args]) => {
   }
   return out;
 };
-const localWrite = (db, [method, args]) => {
-  if (!LOCAL_WRITERS.has(method)) throw new TypeError(`local: ${String(method)} is not a writer`);
-  const [key, value] = Array.isArray(args) ? args : [];
-  if (method === 'set' && typeof value === 'function') throw new TypeError('local.set(key, fn) does not cross a wire');
+const localWrite = (db, params) => {
+  const method = params[0];
+  const args = params[1];
+  if (!LOCAL_WRITERS.has(method)) throw new ArgumentError(`local: ${method} is not a writer`);
+  const entry = Array.isArray(args) ? args : [];
+  const key = entry[0];
+  const value = entry[1];
+  if (method === 'set' && typeof value === 'function') {
+    throw new ArgumentError('local.set(key, fn) does not cross a wire');
+  }
   return method === 'set' ? db.local.set(key, value) : db.local.delete(key);
 };
-const fetchBlob = async (db, [digest, id, name]) => {
+const fetchBlob = async (db, params) => {
+  const digest = params[0];
+  const id = params[1];
+  const name = params[2];
   const bytes = await db.sync.fetchBlob(digest, { id, name });
   return { length: bytes.length };
 };
@@ -191,7 +203,7 @@ const revived = (verdicts) => {
   }
   return { success: verdicts.success, error };
 };
-const closed = (path) => new SyncomError('CLOSED', `The shared database at ${path} is closed`, { path });
+const closed = (path) => new SyncomError('ALX_ERR_CLOSED', `The shared database at ${path} is closed`, { path });
 
 // A live Document of the current instance, made again over the next: `data()`, the `update` event (data, delta)
 // — and once after a failover, with the data as the new instance reads it (delta null). A bind that failed is
@@ -233,7 +245,7 @@ class SharedDocument extends Emitter {
   /** The record as the current instance reads it; what the bind threw where it failed. */
   async data() {
     await this.#ready;
-    if (this.#doc === null) throw this.#error ?? new TypeError(`document(${this.#id}): not bound`);
+    if (this.#doc === null) throw this.#error ?? new ArgumentError(`document(${this.#id}): not bound`);
     return this.#doc.data();
   }
   /** The instance's Document behind this one (null until the first is read). */
@@ -249,7 +261,7 @@ class SharedDocument extends Emitter {
 // failover changes nothing), its writers the leader's — run here where this instance leads, forwarded else — and
 // answered the same on both roles: `insert`/`upsert`/`insertIfAbsent` the id, a bulk its verdicts with the errors
 // made again. `modify()` and `remove()` are the leader's alone: a function does not cross, a write by query is a
-// read-modify-write the leader makes — NOT_LEADER on a follower, with the hint.
+// read-modify-write the leader makes — ALX_ERR_NOT_LEADER on a follower, with the hint.
 class SharedCollection {
   #shared;
   #name;
@@ -270,14 +282,14 @@ class SharedCollection {
     const answer = await this.#shared[CALL]('collection', [this.#name, method, args]);
     return BULK.has(method) ? revived(answer) : answer;
   }
-  /** `fn` over the record, inside the leader's queue: the leader's; on a follower NOT_LEADER — `update()` the fields instead. */
+  /** `fn` over the record, inside the leader's queue: the leader's; on a follower ALX_ERR_NOT_LEADER — `update()` the fields instead. */
   modify(id, fn, options) {
     if (!this.#shared.leader) {
       return Promise.reject(notLeader(this.#shared.path, 'modify()', 'read the record and update() its fields'));
     }
     return this.collection.modify(id, fn, options);
   }
-  /** Every record of the collection removed: the leader's; on a follower NOT_LEADER. */
+  /** Every record of the collection removed: the leader's; on a follower ALX_ERR_NOT_LEADER. */
   remove(options) {
     if (!this.#shared.leader) {
       return Promise.reject(notLeader(this.#shared.path, 'a write by query', 'delete() the ids on the leader'));
@@ -326,7 +338,7 @@ class SharedAttachments {
     try {
       return await this.#attachments.get(id, name, { fetch: false });
     } catch (error) {
-      if (error?.code !== 'BLOB_NOT_FOUND' || fetch !== true || this.#shared.leader) throw error;
+      if (error?.code !== 'ALX_ERR_BLOB_NOT_FOUND' || fetch !== true || this.#shared.leader) throw error;
       await this.#shared[CALL]('fetchBlob', [error.digest, id, name]);
       return this.#attachments.get(id, name, { fetch: false });
     }
@@ -337,7 +349,7 @@ class SharedAttachments {
   list(id) {
     return this.#attachments.list(id);
   }
-  /** The leader's sweep over the shared store; READ_ONLY on a follower (its puts in flight are not the leader's to see). */
+  /** The leader's sweep over the shared store; ALX_ERR_READ_ONLY on a follower (its puts in flight are not the leader's to see). */
   sweep(options) {
     return this.#attachments.sweep(options);
   }
@@ -367,7 +379,7 @@ class SharedLocal {
     return store;
   }
   #full(key) {
-    if (typeof key !== 'string') throw new TypeError('local: a key is a text');
+    if (typeof key !== 'string') throw new ArgumentError('local: a key is a text');
     return this.#prefixes.length === 0 ? key : `${this.#prefixes.join('.')}.${key}`;
   }
   get(key) {
@@ -379,7 +391,7 @@ class SharedLocal {
   set(key, value) {
     if (typeof value === 'function') {
       return Promise.reject(
-        new TypeError('shared.local.set(key, fn) is not offered: set(key, value), or db.local.set on the leader'),
+        new ArgumentError('shared.local.set(key, fn) is not offered: set(key, value), or db.local.set on the leader'),
       );
     }
     return this.#shared[CALL]('local', ['set', [this.#full(key), value]]);
@@ -394,13 +406,14 @@ class SharedLocal {
 }
 
 // What `live()`'s `make` answered: the stop function, or a promise of one — stopped when it is there.
-const stopOf = (stop, logger) => {
+const stopOf = async (stop, logger) => {
   if (stop === null || stop === undefined) return;
-  Promise.resolve(stop)
-    .then((fn) => {
-      if (typeof fn === 'function') fn();
-    })
-    .catch((error) => logger().warn({ event: 'tabs.rebind.failed', err: error }));
+  try {
+    const fn = await stop;
+    if (typeof fn === 'function') fn();
+  } catch (error) {
+    logger().warn({ event: 'tabs.rebind.failed', err: error });
+  }
 };
 
 class Shared extends Emitter {
@@ -436,7 +449,9 @@ class Shared extends Emitter {
 
   constructor(options) {
     super();
-    if (options === null || typeof options !== 'object') throw new TypeError('openShared() takes an options object');
+    if (options === null || typeof options !== 'object') {
+      throw new ArgumentError('openShared() takes an options object');
+    }
     const {
       createDatabase,
       channel = null,
@@ -446,20 +461,22 @@ class Shared extends Emitter {
       ...database
     } = options;
     if (typeof createDatabase !== 'function') {
-      throw new TypeError('openShared(): createDatabase is required — the one of the flavour in use');
+      throw new ArgumentError('openShared(): createDatabase is required — the one of the flavour in use');
     }
     if (typeof database.path !== 'string' || database.path.length === 0) {
-      throw new TypeError('openShared(): path is required');
+      throw new ArgumentError('openShared(): path is required');
     }
     if (channel !== null && typeof channel !== 'function') {
-      throw new TypeError('openShared(): channel must be a function answering the channel to the leader');
+      throw new ArgumentError('openShared(): channel must be a function answering the channel to the leader');
     }
     if (election === null || typeof election !== 'object') {
-      throw new TypeError('openShared(): election must be an object');
+      throw new ArgumentError('openShared(): election must be an object');
     }
-    if (!Number.isFinite(grace) || grace < 0) throw new TypeError('openShared(): grace must be a non-negative number');
+    if (!Number.isFinite(grace) || grace < 0) {
+      throw new ArgumentError('openShared(): grace must be a non-negative number');
+    }
     if (!Number.isFinite(failover) || failover < 0) {
-      throw new TypeError('openShared(): failover must be a non-negative number');
+      throw new ArgumentError('openShared(): failover must be a non-negative number');
     }
     this.#make = createDatabase;
     this.#dial = channel;
@@ -526,8 +543,8 @@ class Shared extends Emitter {
   }
 
   // A follower: read-only over the same engine, nothing of `sync` (a follower neither dials nor hosts), no lock. A
-  // fresh path reads as READ_ONLY until the elected instance writes the identity — tried again every step while
-  // this instance is not the one elected, within `failover` ms; past it, LEADER_LOST (reason `fresh`).
+  // fresh path reads as ALX_ERR_READ_ONLY until the elected instance writes the identity — tried again every step while
+  // this instance is not the one elected, within `failover` ms; past it, ALX_ERR_LEADER_LOST (reason `fresh`).
   async #follow(first) {
     const options = { readOnly: true };
     for (const key of Object.keys(this.#options)) {
@@ -541,10 +558,10 @@ class Shared extends Emitter {
       try {
         db = await this.#make(options);
       } catch (error) {
-        if (error?.code !== 'READ_ONLY') throw error;
+        if (error?.code !== 'ALX_ERR_READ_ONLY') throw error;
         if (Date.now() >= deadline) {
           throw new SyncomError(
-            'LEADER_LOST',
+            'ALX_ERR_LEADER_LOST',
             `No leader wrote the database at ${this.#path} within ${this.#failover} ms`,
             {
               path: this.#path,
@@ -569,8 +586,8 @@ class Shared extends Emitter {
 
   // Granted the lock: the database opened as the leader beside the follower (which holds no lock), the facade
   // moved to it, the live things made again, the follower closed. The database's own lock may still be the old
-  // leader's for a moment: `LOCKED` is tried again, LOCKED_RETRIES times. An open that fails past the first is
-  // PROMOTE_FAILED on `error`: the lock yielded (the next in line leads), asked for again after a backoff.
+  // leader's for a moment: `ALX_ERR_LOCKED` is tried again, LOCKED_RETRIES times. An open that fails past the first is
+  // ALX_ERR_PROMOTE_FAILED on `error`: the lock yielded (the next in line leads), asked for again after a backoff.
   async #promote(first) {
     if (this.#closed || this.#leader || this.#promoting) return;
     this.#promoting = true;
@@ -585,7 +602,7 @@ class Shared extends Emitter {
         try {
           writer = await this.#make(this.#options);
         } catch (error) {
-          if (error?.code !== 'LOCKED' || attempt >= LOCKED_RETRIES) throw error;
+          if (error?.code !== 'ALX_ERR_LOCKED' || attempt >= LOCKED_RETRIES) throw error;
           await sleep(LOCKED_STEP);
         }
       }
@@ -615,7 +632,7 @@ class Shared extends Emitter {
       if (first) throw error;
       const attempt = this.#attempts++;
       const failed = new SyncomError(
-        'PROMOTE_FAILED',
+        'ALX_ERR_PROMOTE_FAILED',
         `Elected, but the database at ${this.#path} could not be opened as the leader (attempt ${attempt + 1})`,
         { path: this.#path, attempt, cause: error },
       );
@@ -650,8 +667,7 @@ class Shared extends Emitter {
     try {
       await this.#follow(false);
     } catch (error) {
-      notify(this, this.#logger(), 'error', error);
-      return;
+      return void notify(this, this.#logger(), 'error', error);
     }
     if (this.#closed) return;
     this.#generation++;
@@ -706,7 +722,7 @@ class Shared extends Emitter {
   get nodeId() {
     return this.db.nodeId;
   }
-  /** Replication is the leader's: `NOT_LEADER` on a follower. */
+  /** Replication is the leader's: `ALX_ERR_NOT_LEADER` on a follower. */
   get sync() {
     this.#check();
     if (!this.#leader) throw notLeader(this.#path, 'sync');
@@ -725,7 +741,9 @@ class Shared extends Emitter {
         'abort',
         () => {
           const kept = [];
-          for (let i = 0; i < this.#waiters.length; i++) if (this.#waiters[i] !== waiter) kept.push(this.#waiters[i]);
+          for (let i = 0; i < this.#waiters.length; i++) {
+            if (this.#waiters[i] !== waiter) kept.push(this.#waiters[i]);
+          }
           this.#waiters = kept;
           reject(aborted());
         },
@@ -741,7 +759,7 @@ class Shared extends Emitter {
   /**
    * The collection named: its readers the current instance's, its writers the leader's — `insert`, `upsert` and
    * `insertIfAbsent` answer the id on both roles, a bulk its verdicts; `modify()` and `remove()` on a follower are
-   * NOT_LEADER. A collection that is not there is a TypeError.
+   * ALX_ERR_NOT_LEADER. A collection that is not there is a TypeError.
    */
   collection(name) {
     if (this.db.collections[name] === undefined) throw noCollection(name);
@@ -749,14 +767,14 @@ class Shared extends Emitter {
   }
   /** The attachments: `put` from either role (the blob into the shared store, the register the leader's), `get` fetching through the leader. */
   get attachments() {
-    // PLUGIN_MISSING where the instance lacks the plugin, as `db.attachments` says it.
-    if (this.db.attachments === undefined) throw new TypeError('shared.attachments: no attachments plugin');
+    // ALX_ERR_PLUGIN_MISSING where the instance lacks the plugin, as `db.attachments` says it.
+    if (this.db.attachments === undefined) throw new ArgumentError('shared.attachments: no attachments plugin');
     this.#attachments ??= new SharedAttachments(this);
     return this.#attachments;
   }
   /** The local documents: reads this instance's, `set`/`delete` the leader's. */
   get local() {
-    if (this.db.local === undefined) throw new TypeError('shared.local: no local plugin');
+    if (this.db.local === undefined) throw new ArgumentError('shared.local: no local plugin');
     this.#local ??= new SharedLocal(this);
     return this.#local;
   }
@@ -766,11 +784,11 @@ class Shared extends Emitter {
     if (this.#raw === null) {
       const engine = this.#options.engine;
       if (engine === undefined || engine === null) {
-        throw new TypeError('shared.attachments.put() on a follower needs the engine (openShared({ engine }))');
+        throw new ArgumentError('shared.attachments.put() on a follower needs the engine (openShared({ engine }))');
       }
       this.#raw = await engine.open(this.#path, { logger: this.#logger() });
       if (this.#raw.blobs === undefined) {
-        throw new TypeError('shared.attachments: the engine has no blobs store (capabilities.blobs)');
+        throw new ArgumentError('shared.attachments: the engine has no blobs store (capabilities.blobs)');
       }
     }
     return this.#raw.blobs;
@@ -781,7 +799,7 @@ class Shared extends Emitter {
    * stops it (or a promise of it). Answers the function that stops it for good.
    */
   live(make) {
-    if (typeof make !== 'function') throw new TypeError('live() takes a function over the current database');
+    if (typeof make !== 'function') throw new ArgumentError('live() takes a function over the current database');
     this.#check();
     const entry = { make, stop: null };
     entry.stop = make(this.#db) ?? null;
@@ -839,12 +857,13 @@ class Shared extends Emitter {
 
   // A follower's write: carried to the leader as a CALL — `{ id: '<token>:<n>', args, retry }` — tried again while a
   // leader comes within `failover` ms (this instance's own, where the election made it so meanwhile), then
-  // `LEADER_LOST`. At-least-once, deduplicated by the id: a call whose answer was lost goes again with `retry`, and
-  // the leader that saw it answers from what it kept; one no leader saw (the leader changed) is CALL_UNKNOWN there,
-  // LEADER_LOST with `maybeApplied` here — never run twice. A dial that fails sent nothing (`retry` stays off); a call
-  // that rejects — a transport's error, a `TypeError` of a fetch among them — may have reached the leader (`sent`,
-  // unless the transport says `sent: false`); a NOT_LEADER, LEADER_LOST or CLOSED answer is from an instance that
-  // follows, or is going: tried again, and it never marks a call sent.
+  // `ALX_ERR_LEADER_LOST`. At-least-once, deduplicated by the id: a call whose answer was lost goes again with `retry`,
+  // and the leader that saw it answers from what it kept; one no leader saw (the leader changed) is
+  // ALX_ERR_CALL_UNKNOWN there, ALX_ERR_LEADER_LOST with `maybeApplied` here — never run twice. A dial that fails sent
+  // nothing (`retry` stays off); a call that rejects — a transport's error, a `TypeError` of a fetch among them — may
+  // have reached the leader (`sent`, unless the transport says `sent: false`); a ALX_ERR_NOT_LEADER,
+  // ALX_ERR_LEADER_LOST or ALX_ERR_CLOSED answer is from an instance that follows, or is going: tried again, and it
+  // never marks a call sent.
   async #forward(name, args) {
     if (this.#dial === null) throw notLeader(this.#path, `${name}() without a channel to the leader`);
     const deadline = Date.now() + this.#failover;
@@ -867,38 +886,38 @@ class Shared extends Emitter {
       }
       if (channel !== null && !isChannel(channel)) {
         this.#channel = null;
-        throw new TypeError('openShared(): channel() must answer { call(method, args) }');
+        throw new ArgumentError('openShared(): channel() must answer { call(method, args) }');
       }
+      let answer = null;
       if (channel !== null) {
-        let answer = null;
         try {
           answer = await channel.call(name, { id, args, retry: sent });
         } catch (error) {
           cause = error;
           sent = sent || error?.sent !== false;
         }
-        if (answer !== null) {
-          try {
-            const value = unwrap(answer, name);
-            this.#answered();
-            return value;
-          } catch (error) {
-            const code = error?.code;
-            if (code === 'CALL_UNKNOWN') {
-              this.#lost();
-              throw new SyncomError(
-                'LEADER_LOST',
-                `${name}() was tried again at a leader that never saw it: the leader changed, the first may have landed`,
-                { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: true, cause: error },
-              );
-            }
-            // The instance that answered follows now, or is closing: the leader is another, dialed again.
-            if (code !== 'NOT_LEADER' && code !== 'LEADER_LOST' && code !== 'CLOSED') {
-              this.#answered();
-              throw error;
-            }
-            cause = error;
+      }
+      if (answer !== null) {
+        try {
+          const value = unwrap(answer, name);
+          this.#answered();
+          return value;
+        } catch (error) {
+          const code = error?.code;
+          if (code === 'ALX_ERR_CALL_UNKNOWN') {
+            this.#lost();
+            throw new SyncomError(
+              'ALX_ERR_LEADER_LOST',
+              `${name}() was tried again at a leader that never saw it: the leader changed, the first may have landed`,
+              { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: true, cause: error },
+            );
           }
+          // The instance that answered follows now, or is closing: the leader is another, dialed again.
+          if (code !== 'ALX_ERR_NOT_LEADER' && code !== 'ALX_ERR_LEADER_LOST' && code !== 'ALX_ERR_CLOSED') {
+            this.#answered();
+            throw error;
+          }
+          cause = error;
         }
       }
       // The leader went: the channel dropped, a new one dialed once a leader answers.
@@ -906,7 +925,7 @@ class Shared extends Emitter {
       if (Date.now() >= deadline) {
         this.#lost();
         throw new SyncomError(
-          'LEADER_LOST',
+          'ALX_ERR_LEADER_LOST',
           `${name}() reached no leader of ${this.#path} within ${this.#failover} ms`,
           { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: sent, cause },
         );
@@ -933,7 +952,7 @@ class Shared extends Emitter {
    * would be the leader's); `set(id, data)` with an id of your own instead.
    */
   async transact(fn, options = {}) {
-    if (typeof fn !== 'function') throw new TypeError('transact() takes a function');
+    if (typeof fn !== 'function') throw new ArgumentError('transact() takes a function');
     this.#check();
     if (this.#leader) return this.#db.transact(fn, options);
     const ops = [];
@@ -941,7 +960,7 @@ class Shared extends Emitter {
       get: (id) => this.#db.get(id),
       has: (id) => this.#db.has(id),
       insert: async () => {
-        throw new TypeError(
+        throw new ArgumentError(
           "transact() on a follower cannot insert(): the id would be the leader's — set(id, data) instead",
         );
       },
@@ -957,13 +976,13 @@ class Shared extends Emitter {
   }
 
   /**
-   * The procedures a leader mounts for its followers (`defineRouter({ 'syncom-db': shared.serve() })`): one per
-   * writer and `transact`, each taking a call `{ id, args, retry }` and answering a value — the result, or the error
-   * described — never throwing; an instance that follows again answers `NOT_LEADER`. The answers are kept by call
-   * id, ANSWERS_KEPT per follower and TOKENS_KEPT followers (in memory, this `serve()`'s): a call tried again is
-   * answered from what was kept, in flight or done, and one tried again that this leader never saw is
-   * CALL_UNKNOWN — never run. `NOT_LEADER` here on a follower. `access` is wrpc's: `'session'` by default — the
-   * leader's writers are the application's own tabs', never a router's public face.
+   * The procedures a leader mounts for its followers (`defineRouter({ 'syncom-db': shared.serve() })`): one per writer
+   * and `transact`, each taking a call `{ id, args, retry }` and answering a value — the result, or the error described
+   * — never throwing; an instance that follows again answers `ALX_ERR_NOT_LEADER`. The answers are kept by call id,
+   * ANSWERS_KEPT per follower and TOKENS_KEPT followers (in memory, this `serve()`'s): a call tried again is answered
+   * from what was kept, in flight or done, and one tried again that this leader never saw is ALX_ERR_CALL_UNKNOWN —
+   * never run. `ALX_ERR_NOT_LEADER` here on a follower. `access` is wrpc's: `'session'` by default — the leader's
+   * writers are the application's own tabs', never a router's public face.
    */
   serve({ access = 'session' } = {}) {
     this.#check();
@@ -982,7 +1001,7 @@ class Shared extends Emitter {
     const run = (method, fn) => async (context, payload) => {
       const call = callOf(payload);
       if (call === null) {
-        return { ok: false, error: describe(new TypeError(`${method}: a call is { id, args, retry? }`)) };
+        return { ok: false, error: describe(new ArgumentError(`${method}: a call is { id, args, retry? }`)) };
       }
       const held = answers.get(call.token)?.get(call.id);
       if (held !== undefined) {
@@ -995,7 +1014,7 @@ class Shared extends Emitter {
       }
       if (call.retry) {
         const unknown = new SyncomError(
-          'CALL_UNKNOWN',
+          'ALX_ERR_CALL_UNKNOWN',
           `${method}: the call ${call.id} was tried again, and this leader never saw it`,
           { id: call.id, method },
         );
@@ -1015,13 +1034,18 @@ class Shared extends Emitter {
     }
     procedures.transact = {
       access,
-      handler: run('transact', ([ops, options]) => {
-        if (!Array.isArray(ops)) throw new TypeError('transact: a list of [method, args]');
+      handler: run('transact', (params) => {
+        const ops = params[0];
+        const options = params[1];
+        if (!Array.isArray(ops)) throw new ArgumentError('transact: a list of [method, args]');
         return this.#db.transact(async (tx) => {
           for (let i = 0; i < ops.length; i++) {
-            const [name, args, flags] = ops[i];
+            const op = ops[i];
+            const name = op[0];
+            const args = op[1];
+            const flags = op[2];
             if (!TX_WRITERS.includes(name) || typeof tx[name] !== 'function') {
-              throw new TypeError(`transact: ${String(name)} is not a transaction writer`);
+              throw new ArgumentError(`transact: ${String(name)} is not a transaction writer`);
             }
             const list = Array.isArray(args) ? args : [];
             if (name === 'update' && flags?.create === true) list[2] = { ...list[2], [CREATE]: true };
@@ -1034,8 +1058,8 @@ class Shared extends Emitter {
   }
 
   /**
-   * The live things stopped, the leadership waiters rejected (`CLOSED`), the channel closed, a promotion in flight
-   * waited for, the instance closed — and the election let go of LAST, so the next leader opens after this one's
+   * The live things stopped, the leadership waiters rejected (`ALX_ERR_CLOSED`), the channel closed, a promotion in
+   * flight waited for, the instance closed — and the election let go of LAST, so the next leader opens after this one's
    * lock is gone.
    */
   async close() {

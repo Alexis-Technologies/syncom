@@ -14,7 +14,7 @@
 // The `telemetry` plugin builds the writer from `createDatabase({ telemetry })` —
 // `{ api }` or `{ tracer, meter }` — and hands it to the core, which records
 // through the contract of src/telemetry/writer.js (DISABLED, `traced`). Without the
-// plugin `createDatabase({ telemetry: { api } })` is PLUGIN_MISSING; a writer given as
+// plugin `createDatabase({ telemetry: { api } })` is ALX_ERR_PLUGIN_MISSING; a writer given as
 // it is the core takes without the plugin. Every recording path is
 // contained — a tracer, meter, span or instrument that throws must never
 // break a write.
@@ -59,7 +59,7 @@ const resolveTracerAndMeter = (telemetry) => {
 const startSpanWith = (tracer, name, options, handle, fn) => {
   if (hasMethod(tracer, 'startActiveSpan')) {
     let invoked = false;
-    let value;
+    let value = undefined;
     try {
       tracer.startActiveSpan(name, options, (span) => {
         if (invoked) return value;
@@ -92,7 +92,7 @@ const recordSpanError = (handle, error, includeIdentity) => {
     // A message such as "Record <id> is invalid" is identity too: without
     // it, the status says what kind of failure, not whose.
     if (includeIdentity) span.recordException?.(error);
-    const message = includeIdentity ? error?.message : String(error?.code ?? error?.name ?? 'error');
+    const message = includeIdentity ? error?.message : `${error?.code ?? error?.name ?? 'error'}`;
     span.setStatus?.({ code: SPAN_STATUS_ERROR, message });
     if (error?.name) span.setAttribute?.('error.type', error.name);
   } catch {
@@ -143,6 +143,18 @@ const OUTCOME_MALFORMED = Object.freeze({ 'syncom.outcome': 'malformed' });
 const OUTCOME_REFUSED = Object.freeze({ 'syncom.outcome': 'refused' });
 const SEGMENT_SEALED = Object.freeze({ 'syncom.log.event': 'sealed' });
 const SEGMENT_DROPPED = Object.freeze({ 'syncom.log.event': 'dropped' });
+
+const add = (instrument, value, attributes) => {
+  try {
+    instrument?.add(value, attributes);
+  } catch {}
+};
+
+const record = (instrument, value, attributes) => {
+  try {
+    instrument?.record(value, attributes);
+  } catch {}
+};
 
 /**
  * Builds the writer once from the `telemetry` option. Idempotent on a writer:
@@ -386,7 +398,10 @@ const createTelemetry = (telemetry) => {
       if (hasMethod(meter, 'createObservableGauge')) {
         const made = [];
         for (let i = 0; i < GAUGES.length; i++) {
-          const [name, key, description] = GAUGES[i];
+          const gauge = GAUGES[i];
+          const name = gauge[0];
+          const key = gauge[1];
+          const description = gauge[2];
           const unit = key === 'log' || key === 'catalog' ? '{entry}' : '{op}';
           made.push([meter.createObservableGauge(name, { unit, description }), key]);
         }
@@ -415,17 +430,6 @@ const createTelemetry = (telemetry) => {
     }
   }
 
-  const add = (instrument, value, attributes) => {
-    try {
-      instrument?.add(value, attributes);
-    } catch {}
-  };
-  const record = (instrument, value, attributes) => {
-    try {
-      instrument?.record(value, attributes);
-    } catch {}
-  };
-
   return contained({
     enabled: true,
 
@@ -439,7 +443,9 @@ const createTelemetry = (telemetry) => {
     withSpan(name, attributes, fn) {
       const handle = { span: null, error: false };
       if (!tracer) return fn(handle);
-      if (!includeIdentity) for (const key of IDENTITY_KEYS) delete attributes[key];
+      if (!includeIdentity) {
+        for (const key of IDENTITY_KEYS) delete attributes[key];
+      }
       return startSpanWith(tracer, name, { attributes }, handle, fn);
     },
 
@@ -466,9 +472,9 @@ const createTelemetry = (telemetry) => {
       if (skipped > 0) add(opsReceived, skipped, OUTCOME_SKIPPED);
       if (result.duplicates > 0) add(opsReceived, result.duplicates, OUTCOME_DUPLICATE);
       if (result.gaps > 0) add(opsReceived, result.gaps, OUTCOME_GAP);
-      const refused =
+      const refusedOps =
         (result.forged ?? 0) + (result.unsigned ?? 0) + (result.outOfScope ?? 0) + (result.equivocations ?? 0);
-      if (refused > 0) add(opsReceived, refused, OUTCOME_REFUSED);
+      if (refusedOps > 0) add(opsReceived, refusedOps, OUTCOME_REFUSED);
       record(writeDuration, elapsed, PATH_APPLY);
     },
 
@@ -537,7 +543,7 @@ const createTelemetry = (telemetry) => {
     },
 
     recordRefusal(code, reason) {
-      add(refused, 1, { 'syncom.code': String(code), 'syncom.reason': String(reason ?? 'unknown') });
+      add(refused, 1, { 'syncom.code': `${code}`, 'syncom.reason': `${reason ?? 'unknown'}` });
     },
 
     recordPresenceRefused(reason, count) {
@@ -632,7 +638,9 @@ const createTelemetry = (telemetry) => {
      */
     gauges(read) {
       if (!gauges) return;
-      for (const [gauge, key] of gauges) {
+      for (const entry of gauges) {
+        const gauge = entry[0];
+        const key = entry[1];
         try {
           gauge.addCallback((result) => {
             try {

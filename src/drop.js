@@ -10,20 +10,21 @@ const { filesEngine } = require('./files/files.js');
 const { checkFsi } = require('./backend.js');
 const defaultFsi = require('./fsi.js');
 const { acquireLock } = require('./lock.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 const NOOP = () => {};
 
 /**
  * Drops a closed database: every store of it removed from the engine — the
  * one given, or the files engine over `fsi` (the platform's by default).
- * Held while it is taken: another instance's open database is `LOCKED`,
+ * Held while it is taken: another instance's open database is `ALX_ERR_LOCKED`,
  * never emptied under it. A path that holds nothing is nothing to do; one
  * that holds no database (no identity) is refused.
  */
 const dropDatabase = async (path, options = {}) => {
-  if (typeof path !== 'string' || path.length === 0) throw new TypeError('dropDatabase() takes a path');
+  if (typeof path !== 'string' || path.length === 0) throw new ArgumentError('dropDatabase() takes a path');
   if (options.engine !== undefined && options.fsi !== undefined) {
-    throw new TypeError('dropDatabase({ engine, fsi }): an engine or a backend, not both');
+    throw new ArgumentError('dropDatabase({ engine, fsi }): an engine or a backend, not both');
   }
   const engine =
     options.engine !== undefined
@@ -36,7 +37,7 @@ const dropDatabase = async (path, options = {}) => {
     // not ours to empty, and a path that holds nothing is nothing to do.
     if (!(await db.kv.has('', 'node.json'))) {
       const stray = (await db.kv.list('')).length > 0 || (await db.records.ids({ limit: 1 })).length > 0;
-      if (stray) throw new TypeError(`dropDatabase(): no database at ${path}`);
+      if (stray) throw new ArgumentError(`dropDatabase(): no database at ${path}`);
       return;
     }
     const native = db.capabilities.lock === 'native' && typeof db.lock === 'function';

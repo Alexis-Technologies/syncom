@@ -16,9 +16,9 @@ const markDone = async (id) => {
   } catch (error) {
     if (!(error instanceof SyncomError)) throw error;
     switch (error.code) {
-      case 'NOT_FOUND':
+      case 'ALX_ERR_NOT_FOUND':
         return `task ${error.id} is gone`; // deleted here, or by another node
-      case 'CLOSED':
+      case 'ALX_ERR_CLOSED':
         return 'the database is closed';
       default:
         throw error;
@@ -33,43 +33,45 @@ assert.equal(await markDone('no-such-task'), 'task no-such-task is gone');
 try {
   await createDatabase({ path: 'board' }); // the same directory, while `board` holds it
 } catch (error) {
-  console.log(error.code, error.path); // LOCKED board
+  console.log(error.code, error.path); // ALX_ERR_LOCKED board
 }
 // #endregion locked
-await assert.rejects(createDatabase({ path: 'board' }), { name: 'SyncomError', code: 'LOCKED', path: 'board' });
+await assert.rejects(createDatabase({ path: 'board' }), { name: 'SyncomError', code: 'ALX_ERR_LOCKED', path: 'board' });
 
 // #region exists
 await board.Task.insert({ id: 'write-docs', key: 'T-1', title: 'Write the docs' });
 try {
   await board.Task.insert({ id: 'write-docs', key: 'T-2', title: 'Write them again' });
 } catch (error) {
-  console.log(error.code, error.id, error.entity); // EXISTS write-docs Task
+  console.log(error.code, error.id, error.entity); // ALX_ERR_EXISTS write-docs Task
 }
 // #endregion exists
 await assert.rejects(board.Task.insert({ id: 'write-docs', key: 'T-2', title: 'again' }), {
-  code: 'EXISTS',
+  code: 'ALX_ERR_EXISTS',
   id: 'write-docs',
   entity: 'Task',
 });
 
 // #region type-error
+import { ArgumentError, DataError } from '@alexify/syncom/all';
+
 try {
   await board.Task.insert('Write the docs'); // a string, not a record
 } catch (error) {
-  console.log(error instanceof TypeError, error.code); // true undefined: fix the call
+  console.log(error instanceof ArgumentError, error.code); // true ALX_ERR_INVALID_ARGUMENT: fix the call
 }
 
 const fromUser = 'my task #1'; // an id typed by a user: spaces and # are not allowed
 try {
   await board.set(fromUser, { title: 'From a form' });
 } catch (error) {
-  console.log(error instanceof TypeError, error.code); // true INVALID_ID: tell the user
+  console.log(error instanceof DataError, error.code); // true ALX_ERR_INVALID_ID: tell the user
 }
 // #endregion type-error
 await assert.rejects(board.Task.insert('Write the docs'), (error) => {
-  return error instanceof TypeError && error.code === undefined;
+  return error instanceof ArgumentError && error instanceof TypeError && error.code === 'ALX_ERR_INVALID_ARGUMENT';
 });
-await assert.rejects(board.set(fromUser, { title: 'x' }), { name: 'TypeError', code: 'INVALID_ID' });
+await assert.rejects(board.set(fromUser, { title: 'x' }), { name: 'DataError', code: 'ALX_ERR_INVALID_ID' });
 
 // #region plugin-missing
 // The core alone, without the text plugin
@@ -78,10 +80,13 @@ try {
   await lean.splice('note-1', 'body', 0, 0, 'Hello');
 } catch (error) {
   console.log(error.code, error.message);
-  // PLUGIN_MISSING splice() needs the text plugin: createDatabase({ plugins: [text] }) from '@alexify/syncom/text'
+  // ALX_ERR_PLUGIN_MISSING splice() needs the text plugin: createDatabase({ plugins: [text] }) from '@alexify/syncom/text'
 }
 // #endregion plugin-missing
-await assert.rejects(lean.splice('note-1', 'body', 0, 0, 'Hello'), { name: 'TypeError', code: 'PLUGIN_MISSING' });
+await assert.rejects(lean.splice('note-1', 'body', 0, 0, 'Hello'), {
+  name: 'DataError',
+  code: 'ALX_ERR_PLUGIN_MISSING',
+});
 await lean.close();
 
 // #region hook
@@ -96,13 +101,13 @@ const checked = await createDatabase({
 try {
   await checked.insert({ done: false });
 } catch (error) {
-  console.log(error.name, error.code, error.hook); // HookError HOOK_FAILED beforeWrite
+  console.log(error.name, error.code, error.hook); // HookError ALX_ERR_HOOK_FAILED beforeWrite
   console.log(error.cause.message); // title is required
 }
 // #endregion hook
 await assert.rejects(checked.insert({ done: false }), (error) => {
   assert.equal(error.name, 'HookError');
-  assert.equal(error.code, 'HOOK_FAILED');
+  assert.equal(error.code, 'ALX_ERR_HOOK_FAILED');
   assert.equal(error.hook, 'beforeWrite');
   assert.equal(error.cause.message, 'title is required');
   assert.ok(error instanceof SyncomError);
@@ -125,7 +130,7 @@ try {
 // #endregion validation
 await assert.rejects(board.Task.insert({ key: 'T-1', title: 'x' }), (error) => {
   assert.ok(error instanceof ValidationError);
-  assert.equal(error.code, 'VALIDATION_FAILED');
+  assert.equal(error.code, 'ALX_ERR_VALIDATION_FAILED');
   assert.equal(error.entity, 'Task');
   assert.deepEqual(error.issues, [
     { path: ['key'], message: 'is not unique (held by write-docs)', code: 'unique', conflict: 'write-docs' },
@@ -146,14 +151,14 @@ const refused = [];
 // #region database-error
 phone.on('error', (error) => {
   // A peer's op this node could not apply: logged and relayed all the same, never thrown at anyone
-  console.log(error.code, error.rejected); // OP_REFUSED [ { field: 'notes', reason: 'kind', kind: 'text' } ]
+  console.log(error.code, error.rejected); // ALX_ERR_OP_REFUSED [ { field: 'notes', reason: 'kind', kind: 'text' } ]
 });
 // #endregion database-error
 phone.on('error', (error) => refused.push(error));
 await peers.get('laptop').splice('task-1', 'notes', 0, 0, 'Bring the charger');
 await settle(peers.storages);
 await waitUntil(() => refused.length > 0);
-assert.equal(refused[0].code, 'OP_REFUSED');
+assert.equal(refused[0].code, 'ALX_ERR_OP_REFUSED');
 assert.deepEqual(refused[0].rejected, [{ field: 'notes', reason: 'kind', kind: 'text' }]);
 await peers.close();
 

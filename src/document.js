@@ -9,6 +9,7 @@ const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
 const { isPlainObject } = require('./shape.js');
 const { COMMIT, REFRESH, SOURCE } = require('./symbols.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 // A field of a declared reference, as a Document holds it: a string made a
 // Reference to the declared collection, an array of them where the reference
@@ -121,7 +122,7 @@ class Document extends Emitter {
   async populate(field) {
     const refs = this.#refs();
     if (refs === null || !Object.hasOwn(refs, field)) {
-      throw new TypeError(`populate(): ${field} is not a declared reference (refs)`);
+      throw new ArgumentError(`populate(): ${field} is not a declared reference (refs)`);
     }
     const value = this.#data[field];
     if (!refs[field].many) return value instanceof Reference ? value.document() : null;
@@ -139,7 +140,9 @@ class Document extends Emitter {
   #patch(data, delta) {
     if (this.#data === null || !isPlainObject(delta)) return false;
     const keys = Object.keys(delta);
-    for (let i = 0; i < keys.length; i++) if (keys[i].includes('/')) return false;
+    for (let i = 0; i < keys.length; i++) {
+      if (keys[i].includes('/')) return false;
+    }
     let added = false;
     for (let i = 0; i < keys.length; i++) {
       const key = keys[i];

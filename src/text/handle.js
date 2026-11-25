@@ -18,10 +18,10 @@
 // resolves its indices against the storage's reading: flush first to write
 // by the handle's. A failed flush drops what was not logged: the observers
 // are told to read the field again (`reset`), and `flushed` rejects with
-// UNLOGGED.
+// ALX_ERR_UNLOGGED.
 
 const { Emitter } = require('../emitter.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { spliceArgs, markArgs, jsonValue, fieldName, EMBED } = require('../args.js');
 const { isRecordId, invalidId, isPlainObject, asJson, deepEqual } = require('../shape.js');
 const { floorOf } = require('../vector.js');
@@ -111,7 +111,7 @@ class TextHandle extends Emitter {
     return this.#pending.length > 0 || this.#unsettled > 0;
   }
 
-  /** Settles once every edit made so far is logged and landed; rejects with UNLOGGED when it could not be. */
+  /** Settles once every edit made so far is logged and landed; rejects with ALX_ERR_UNLOGGED when it could not be. */
   get flushed() {
     // Nothing waiting: the flush in flight, if one is — it rejects when its edits could not be logged.
     if (this.#pending.length === 0) return this.#unsettled > 0 ? this.#flushing : RESOLVED;
@@ -129,7 +129,7 @@ class TextHandle extends Emitter {
 
   /** Inserts `text` at `index`, marked with `attributes` (Quill's: a name, a value; null takes a style off). */
   insert(index, text, attributes) {
-    if (typeof text !== 'string') throw new TypeError('insert() takes a string');
+    if (typeof text !== 'string') throw new ArgumentError('insert() takes a string');
     if (text.length === 0) return;
     this.#edit('splice', spliceArgs('insert', this.field, index, 0, text));
     if (attributes !== undefined) this.#styled(index, text.length, attributes);
@@ -155,8 +155,8 @@ class TextHandle extends Emitter {
    * style off, and `embed` sets the marker of every embed slot there.
    */
   format(index, count, attributes) {
-    if (!Number.isInteger(count) || count < 0) throw new TypeError('format() takes a count');
-    if (!isPlainObject(attributes)) throw new TypeError('format() takes attributes');
+    if (!Number.isInteger(count) || count < 0) throw new ArgumentError('format() takes a count');
+    if (!isPlainObject(attributes)) throw new ArgumentError('format() takes attributes');
     for (const name of Object.keys(attributes)) {
       if (name === 'embed') this.#embed(index, index + count, attributes.embed);
       else this.#mark(index, index + count, name, attributes[name]);
@@ -170,15 +170,15 @@ class TextHandle extends Emitter {
    */
   applyDelta(delta) {
     const shape = 'applyDelta() takes a delta: [{ retain, attributes? } | { insert, attributes? } | { delete }]';
-    if (!Array.isArray(delta)) throw new TypeError(shape);
+    if (!Array.isArray(delta)) throw new ArgumentError(shape);
     // Checked whole before anything is made — its shape, its markers, and that it fits the text — so a delta
     // refused leaves nothing of itself behind, as the storage's applyDelta() does.
     let end = 0;
     for (let i = 0; i < delta.length; i++) {
       const op = delta[i];
-      if (!isDeltaOp(op)) throw new TypeError(shape);
+      if (!isDeltaOp(op)) throw new ArgumentError(shape);
       if (op.retain !== undefined) {
-        if (op.attributes !== undefined && !isPlainObject(op.attributes)) throw new TypeError(shape);
+        if (op.attributes !== undefined && !isPlainObject(op.attributes)) throw new ArgumentError(shape);
         end += op.retain;
       } else if (op.delete !== undefined) end += op.delete;
       else if (isPlainObject(op.insert)) {
@@ -189,7 +189,13 @@ class TextHandle extends Emitter {
     const length = this.length;
     if (end > length) {
       const message = `Index ${end} is out of range for field ${this.field} of record ${this.id} (length ${length})`;
-      throw new SyncomError('OUT_OF_RANGE', message, { id: this.id, field: this.field, index: end, count: 0, length });
+      throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, {
+        id: this.id,
+        field: this.field,
+        index: end,
+        count: 0,
+        length,
+      });
     }
     let at = 0;
     for (const op of delta) {
@@ -216,7 +222,7 @@ class TextHandle extends Emitter {
    * stops it.
    */
   observe(listener) {
-    if (typeof listener !== 'function') throw new TypeError('observe() takes a function');
+    if (typeof listener !== 'function') throw new ArgumentError('observe() takes a function');
     this.#observers.add(listener);
     return () => this.#observers.delete(listener);
   }
@@ -266,7 +272,7 @@ class TextHandle extends Emitter {
       () => {
         this.#unsettled--;
         core.otel.recordHandleFlush('ok');
-        waiting?.resolve();
+        return void waiting?.resolve();
       },
       (error) => {
         this.#unsettled--;
@@ -312,7 +318,7 @@ class TextHandle extends Emitter {
   // changed — and kept to log, grown into the one before where the two are
   // one; the observers told.
   #edit(type, payload) {
-    if (this.#closed) throw new SyncomError('CLOSED', `The handle on ${this.field} of ${this.id} is closed`);
+    if (this.#closed) throw new SyncomError('ALX_ERR_CLOSED', `The handle on ${this.field} of ${this.id} is closed`);
     const { editing } = this.#core;
     const from = this.#overlay;
     const op = editing.makeOp(type, this.id, payload, from, this.#actor);
@@ -321,7 +327,7 @@ class TextHandle extends Emitter {
     if (applied === null) {
       // Nothing to edit: the record is gone (a delete or a purge heard) — said, never a keystroke that vanishes.
       if (from !== null && !this.#core.alive(from)) {
-        throw new SyncomError('NOT_FOUND', `Record ${this.id} is gone: nothing to edit`, { id: this.id });
+        throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${this.id} is gone: nothing to edit`, { id: this.id });
       }
       return;
     }
@@ -397,7 +403,9 @@ class TextHandle extends Emitter {
     const idx = S.indexOf(entry, this.field);
     const have = idx === null ? {} : marksAt(idx, start, floorOf(entry.meta, this.field));
     const want = { ...attributes };
-    for (const name of Object.keys(have)) if (want[name] === undefined && name !== 'embed') want[name] = null;
+    for (const name of Object.keys(have)) {
+      if (want[name] === undefined && name !== 'embed') want[name] = null;
+    }
     for (const name of Object.keys(want)) {
       if (name === 'embed') this.#embed(start, start + length, want.embed);
       else if (!deepEqual(have[name] ?? null, want[name])) this.#mark(start, start + length, name, want[name]);
@@ -420,11 +428,10 @@ class TextHandle extends Emitter {
     if (this.#timer !== null) return;
     if (this.#window === 0) {
       this.#timer = true;
-      queueMicrotask(() => {
+      return void queueMicrotask(() => {
         this.#timer = null;
         void this.flush().catch(() => {});
       });
-      return;
     }
     // Not unref'd: what waits for `flushed` must see it, the window is short.
     this.#timer = setTimeout(() => {
@@ -445,8 +452,7 @@ class TextHandle extends Emitter {
       this.#heardTurns++;
       this.#base = event.entry;
       this.#overlay = event.entry;
-      this.#unlogged(null, new Error(`Record ${this.id} was made again from the log (repair)`));
-      return;
+      return void this.#unlogged(null, new Error(`Record ${this.id} was made again from the log (repair)`));
     }
     // The turn of the oldest flush still out — its ops are that flush's
     // (grown, or fewer: a moot one is not logged). The base it leaves is the
@@ -460,11 +466,15 @@ class TextHandle extends Emitter {
       this.#landings.shift();
       if (left !== undefined) this.#base = left;
       else if (landing.heard === this.#heardTurns) this.#base = landing.overlay;
-      else for (const op of event.ops) this.#base = editing.applyTo(this.#base, op).entry;
+      else {
+        for (const op of event.ops) this.#base = editing.applyTo(this.#base, op).entry;
+      }
       return;
     }
     let touched = false;
-    for (const op of event.ops) if (op.id === this.id) touched = true;
+    for (const op of event.ops) {
+      if (op.id === this.id) touched = true;
+    }
     if (!touched) return;
     this.#heardTurns++;
     // Nothing of the handle's on top: the overlay is the base, the storage's reading taken as it is, and
@@ -537,7 +547,7 @@ class TextHandle extends Emitter {
       edits += later.batch.length;
       cancelled.push(later);
     }
-    const error = new SyncomError('UNLOGGED', `Edits of ${this.field} of ${this.id} could not be logged`, {
+    const error = new SyncomError('ALX_ERR_UNLOGGED', `Edits of ${this.field} of ${this.id} could not be logged`, {
       id: this.id,
       field: this.field,
       edits,
@@ -568,12 +578,12 @@ class TextHandle extends Emitter {
 const openText = async (core, id, key, { window, actor, source } = {}) => {
   // A transaction's core makes its ops in one turn of the queue; a handle logs its own.
   if (core.commitResolved !== undefined) {
-    throw new TypeError('openText() opens on the storage, not inside a transaction');
+    throw new ArgumentError('openText() opens on the storage, not inside a transaction');
   }
   fieldName('openText', key);
   if (!isRecordId(id)) throw invalidId(id);
   if (window !== undefined && (!Number.isFinite(window) || window < 0)) {
-    throw new TypeError('openText() takes window as a number of milliseconds');
+    throw new ArgumentError('openText() takes window as a number of milliseconds');
   }
   let who = core.actorOf(actor);
   if (who !== null && typeof who === 'object') who = await who;
@@ -582,13 +592,16 @@ const openText = async (core, id, key, { window, actor, source } = {}) => {
   const base = await core.run(async () => {
     await core.drain();
     const entry = await core.current(id);
-    if (entry?.encrypted === true) throw new SyncomError('ENCRYPTED', `Record ${id} is encrypted`, { id });
+    if (entry?.encrypted === true) throw new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is encrypted`, { id });
     return entry;
   });
   // A field of another kind would refuse every edit: refused here, once.
   const kind = base === null || !core.alive(base) ? undefined : core.kindOf(base, key);
   if (kind !== undefined && kind !== 'text') {
-    throw new SyncomError('FIELD_KIND', `Field ${key} of record ${id} is a ${kind}, not a text`, { field: key, kind });
+    throw new SyncomError('ALX_ERR_FIELD_KIND', `Field ${key} of record ${id} is a ${kind}, not a text`, {
+      field: key,
+      kind,
+    });
   }
   return new TextHandle(core, id, key, base, {
     window: window ?? core.defer,

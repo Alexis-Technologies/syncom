@@ -31,7 +31,7 @@ export function serveEngine(engine: Engine, port: EnginePort, options?: ServeEng
 export interface RemoteEngineOptions {
   name: string;
   capabilities: EngineCapabilities;
-  /** A call waiting longer than this many ms fails as `ENGINE_UNREACHABLE` (`reason: 'timeout'`); 0, the default, waits. */
+  /** A call waiting longer than this many ms fails as `ALX_ERR_ENGINE_UNREACHABLE` (`reason: 'timeout'`); 0, the default, waits. */
   timeout?: number;
 }
 
@@ -48,7 +48,7 @@ export type RemoteEngine = Engine & { close(): Promise<void>; stats(): RemoteEng
 
 /**
  * The engine served over `port`, as `name` and `capabilities` say it is (what the other side was given). A port that
- * closes or a worker that exits fails every call waiting and every call after as `ENGINE_UNREACHABLE`.
+ * closes or a worker that exits fails every call waiting and every call after as `ALX_ERR_ENGINE_UNREACHABLE`.
  */
 export function remoteEngine(port: EnginePort, options: RemoteEngineOptions): RemoteEngine;
 
@@ -77,7 +77,7 @@ export interface CopyEngineResult {
 /**
  * The database at `path` copied from one engine to another — records with their pieces, a tag's copies, every kv text,
  * the op log with its index — so the node opens on the new engine as itself; both databases closed and held for the
- * copy, the target empty (`TARGET_NOT_EMPTY` otherwise). The identity lands last, and a copy that fails takes what it
- * wrote away again (a lease lost on the way is `LEASE_LOST`).
+ * copy, the target empty (`ALX_ERR_TARGET_NOT_EMPTY` otherwise). The identity lands last, and a copy that fails takes what it
+ * wrote away again (a lease lost on the way is `ALX_ERR_LEASE_LOST`).
  */
 export function copyEngine(from: Engine, to: Engine, options: CopyEngineOptions): Promise<CopyEngineResult>;

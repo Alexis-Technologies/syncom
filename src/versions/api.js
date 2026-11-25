@@ -21,7 +21,7 @@ const { diffViews } = require('../patch.js');
 const { runHook } = require('../hooks.js');
 const { traced } = require('../telemetry/writer.js');
 const { asJson, isRecordId, invalidId } = require('../shape.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError, DataError } = require('../errors.js');
 const { sealed, reading, applyPatches } = require('../patches.js');
 
 // The record at a tag, as an entry: its file as it was — the tag's copy,
@@ -65,7 +65,9 @@ const applied = async (core, id) => {
     entries.push(entry);
     if (purge === null && entry.op.type === 'purge') purge = entry;
   }
-  const purged = purge !== null ? purge.seq : current?.meta?.purged ? 0 : null;
+  let purged = null;
+  if (purge !== null) purged = purge.seq;
+  else if (current?.meta?.purged) purged = 0;
   return { entries, purged, current };
 };
 
@@ -80,15 +82,15 @@ const present = async (core, id, folded) => {
 };
 
 // The entries of `id` inside `version`, and where to fold them from; null
-// when the record was not there (or was purged). Throws HISTORY_GONE when
-// the log cannot give the version exactly, INVALID_VERSION for a seq this
+// when the record was not there (or was purged). Throws ALX_ERR_HISTORY_GONE when
+// the log cannot give the version exactly, ALX_ERR_INVALID_VERSION for a seq this
 // log has not reached.
 const past = async (core, id, version) => {
   const { log } = core;
   if (version.kind === 'event') {
     if (version.epoch !== log.epoch) throw gone(id, 'epoch');
     if (version.seq >= log.next) {
-      throw typed('INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
+      throw new DataError('ALX_ERR_INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
     }
   }
   const { entries, purged, current } = await applied(core, id);
@@ -187,10 +189,10 @@ const sourceAt = (core, name) => {
     live: (entity) => catalog().live(entity),
     posting: (entity, field, values) => catalog().posting(entity, field, values),
     searches: () => {
-      throw new TypeError(`select(): $text is not served at tag ${name}: a tag keeps no text index`);
+      throw new ArgumentError(`select(): $text is not served at tag ${name}: a tag keeps no text index`);
     },
     subscribe: () => {
-      throw new TypeError(`watch(): tag ${name} does not change`);
+      throw new ArgumentError(`watch(): tag ${name} does not change`);
     },
     load: async (id) => {
       const entry = await entryAt(core, name, id);
@@ -210,25 +212,32 @@ const sourceAt = (core, name) => {
  * there as a `write` of the registers plus the other kinds made again. In
  * the terms the application writes (through the lens); a text's marks are
  * not diffed. Raw: no read hooks. Rejects as `get(id, { at })`
- * would for either version; `ENCRYPTED` for an encrypted record.
+ * would for either version; `ALX_ERR_ENCRYPTED` for an encrypted record.
  */
 const diff = async (core, id, from, to) => {
   if (!isRecordId(id)) throw invalidId(id);
-  const [was, now] = await Promise.all([entryOf(core, id, from), entryOf(core, id, to)]);
+  const entries = await Promise.all([entryOf(core, id, from), entryOf(core, id, to)]);
+  const was = entries[0];
+  const now = entries[1];
   if (was?.encrypted || now?.encrypted) throw sealed(id);
   // Each reading in the op model's terms: flat, every path a field.
   const live = async (entry) => {
-    if (entry === null || !isAlive(entry)) return [null, {}];
+    if (entry === null || !isAlive(entry)) return { flat: null, kinds: {} };
     const kinds = kindsOf(entry, core.plugins);
     const flat = decompose(await core.view(id, entry), entry, core.plugins);
     // A field not in the reading — under a member that is not shown — is no field of it.
-    for (const field of Object.keys(kinds)) if (!Object.hasOwn(flat, field)) delete kinds[field];
-    return [flat, kinds];
+    for (const field of Object.keys(kinds)) {
+      if (!Object.hasOwn(flat, field)) delete kinds[field];
+    }
+    return { flat, kinds };
   };
-  const [[before, beforeKinds], [after, afterKinds]] = await Promise.all([live(was), live(now)]);
-  const purged = now?.meta.purged != null;
+  const readings = await Promise.all([live(was), live(now)]);
+  const before = readings[0];
+  const after = readings[1];
+  const purged = now?.meta.purged !== undefined && now.meta.purged !== null;
   const context = { from: { entry: was }, to: { entry: now } };
-  return asJson(diffViews(before, beforeKinds, after, afterKinds, { purged, plugins: core.plugins, context }));
+  const options = { purged, plugins: core.plugins, context };
+  return asJson(diffViews(before.flat, before.kinds, after.flat, after.kinds, options));
 };
 
 /**
@@ -237,7 +246,7 @@ const diff = async (core, id, from, to) => {
  * and merges like any write. Resolves to how many ops it took.
  */
 const restore = async (core, id, at, { actor, source = null } = {}) => {
-  if (at === undefined) throw new TypeError('restore() takes a version');
+  if (at === undefined) throw new ArgumentError('restore() takes a version');
   return applyPatches(core, id, await diff(core, id, undefined, at), { actor, source });
 };
 
@@ -249,10 +258,10 @@ const restore = async (core, id, at, { actor, source = null } = {}) => {
  * each record's file made before its first change after the tag; a tag
  * costs nothing per record until the record changes. `name` is a
  * [record id](../guide/database#custom-identifiers); rejects with
- * `TAG_EXISTS`.
+ * `ALX_ERR_TAG_EXISTS`.
  */
 const tag = async (core, name) => {
-  if (!isRecordId(name)) throw new TypeError('tag() takes a name of the record-id form');
+  if (!isRecordId(name)) throw new ArgumentError('tag() takes a name of the record-id form');
   // What is in flight lands first (outside the queue), then the deferred
   // files (inside it); what is held after that failed to write.
   await core.drain();
@@ -264,7 +273,7 @@ const tag = async (core, name) => {
     if (held.size > 0) {
       const ids = [...held];
       const message = `tag(): ${ids.join(', ')}: logged, but not written; take the tag once they land`;
-      throw new SyncomError('UNPERSISTED', message, { ids });
+      throw new SyncomError('ALX_ERR_UNPERSISTED', message, { ids });
     }
     const rows = core.catalog.rows();
     const take = () =>
@@ -281,9 +290,9 @@ const tag = async (core, name) => {
   });
 };
 
-/** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
+/** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `ALX_ERR_TAG_NOT_FOUND`. */
 const untag = async (core, name) => {
-  if (typeof name !== 'string') throw new TypeError('untag() takes a name');
+  if (typeof name !== 'string') throw new ArgumentError('untag() takes a name');
   const drop = () => core.tags.drop(name);
   const { otel } = core;
   return core.run(() => (otel.enabled ? traced(otel, 'syncom.untag', {}, drop, () => ({})) : drop()));
@@ -293,12 +302,12 @@ const untag = async (core, name) => {
  * A view of the storage at tag `name`: the tag's fields plus `get(id)` —
  * the record as it was, through the lens and the read hooks (`at: { tag }`)
  * — and `has(id)`, whether it was a live record then. Throws
- * `TAG_NOT_FOUND` for a tag this node has not; the tag's catalog is read
+ * `ALX_ERR_TAG_NOT_FOUND` for a tag this node has not; the tag's catalog is read
  * at the view's first read, and a reader of a tag whose catalog is gone is
- * told `TAG_NOT_FOUND` then.
+ * told `ALX_ERR_TAG_NOT_FOUND` then.
  */
 const at = (core, name) => {
-  if (typeof name !== 'string') throw new TypeError('at() takes a name');
+  if (typeof name !== 'string') throw new ArgumentError('at() takes a name');
   const { tags } = core;
   const info = tags.info(name);
   const ready = () => tags.ensure(name);
@@ -333,7 +342,7 @@ const at = (core, name) => {
       return [...tags.catalogOf(name).ids()];
     },
     collection: (entity) => {
-      if (!core.entities.has(entity)) throw new TypeError(`collection(): unknown entity ${entity}`);
+      if (!core.entities.has(entity)) throw new ArgumentError(`collection(): unknown entity ${entity}`);
       return {
         name: entity,
         get: async (id) => {
@@ -356,7 +365,7 @@ const at = (core, name) => {
 // — read out of the log: every record folded to it, the vector of the ops
 // within it, and the pages another storage joins to stand there
 // (`branch(parent, { from: { at } })`). Exact only while the log retains
-// what the version needs: a record compacted past it is HISTORY_GONE on
+// what the version needs: a record compacted past it is ALX_ERR_HISTORY_GONE on
 // the read, and so is a stream cut by compaction with nothing of it inside
 // the version — under `retention: 'all'`, never.
 const atVersion = (core, given) => {
@@ -366,7 +375,7 @@ const atVersion = (core, given) => {
   if (version.kind === 'event') {
     if (version.epoch !== log.epoch) throw gone(null, 'epoch');
     if (version.seq >= log.next) {
-      throw typed('INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
+      throw new DataError('ALX_ERR_INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
     }
   }
   // Everything the log retains, from its floor: below it is compacted.
@@ -401,7 +410,11 @@ const atVersion = (core, given) => {
     else if (stream.within > 0) vector[key] = stream.within;
     else if (log.floor > 1) throw gone(null, 'compacted');
   }
-  for (const [key, seq] of adopted) vector[key] = Math.max(vector[key] ?? 0, seq);
+  for (const pair of adopted) {
+    const key = pair[0];
+    const seq = pair[1];
+    vector[key] = Math.max(vector[key] ?? 0, seq);
+  }
   const last = inside.length > 0 ? inside[inside.length - 1] : null;
   const eventId = version.kind === 'event' ? log.formatId(version.seq) : log.formatId(last === null ? 0 : last.seq);
   const ts = last === null ? 0 : last.op.ts;
@@ -410,7 +423,8 @@ const atVersion = (core, given) => {
   for (let i = 0; i < logged.length; i++) known.add(logged[i]);
   const listed = core.catalog.all();
   for (let i = 0; i < listed.length; i++) known.add(listed[i]);
-  const ids = [...known].sort();
+  const ids = [...known];
+  ids.sort();
   // Each record folded once for the view: `has`, `list` and the snapshot's
   // pages ask again and again (a failed fold is asked anew).
   const folded = new Map();
@@ -445,7 +459,9 @@ const atVersion = (core, given) => {
     has: live,
     list: async () => {
       const out = [];
-      for (const id of ids) if (await live(id)) out.push(id);
+      for (const id of ids) {
+        if (await live(id)) out.push(id);
+      }
       return out;
     },
     snapshot: (options) => snapshotPage(paging, options),
@@ -504,6 +520,13 @@ const versions = async (core, id, limit, cut) => {
   return { versions: out, complete: droppedTs === 0 && first === 0, exact, folded: entries.length };
 };
 
+// The span attributes of a history read.
+const historyAttributes = (result) => ({
+  'syncom.ops.count': result.folded,
+  'syncom.versions': result.versions.length,
+  'syncom.exact': result.exact,
+});
+
 /**
  * The record's past as this node's log holds it: one version per op of
  * the record this node applied, newest first — `{ eventId, seq, ts,
@@ -514,26 +537,23 @@ const versions = async (core, id, limit, cut) => {
  * depends on), `complete` that the list reaches the first op the node
  * ever applied to the record (nothing dropped, nothing cut by `limit`).
  * `before`, an event id of this log, pages back: the versions older than
- * it. Rejects with ENCRYPTED for an encrypted record.
+ * it. Rejects with ALX_ERR_ENCRYPTED for an encrypted record.
  */
 const history = async (core, id, { limit = 50, before } = {}) => {
   if (!(Number.isInteger(limit) && limit > 0) && limit !== Infinity) {
-    throw new TypeError('history({ limit }) takes a positive integer');
+    throw new ArgumentError('history({ limit }) takes a positive integer');
   }
   let cut = null;
   if (before !== undefined) {
     cut = parseVersion(before);
-    if (cut.kind !== 'event') throw new TypeError('history({ before }) takes an event id');
+    if (cut.kind !== 'event') throw new ArgumentError('history({ before }) takes an event id');
     if (cut.epoch !== core.log.epoch) throw gone(id, 'epoch');
   }
   const read = () => versions(core, id, limit, cut);
   const { otel } = core;
-  const after = (result) => ({
-    'syncom.ops.count': result.folded,
-    'syncom.versions': result.versions.length,
-    'syncom.exact': result.exact,
-  });
-  const { folded, ...result } = otel.enabled ? await traced(otel, 'syncom.history', {}, read, after) : await read();
+  const { folded, ...result } = otel.enabled
+    ? await traced(otel, 'syncom.history', {}, read, historyAttributes)
+    : await read();
   return result;
 };
 

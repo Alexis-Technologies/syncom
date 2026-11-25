@@ -101,11 +101,13 @@ assert.equal(await server.Task.get(local.id), null);
 // #region revoke
 // On the laptop: the host's word arrives as an error event.
 laptop.sync.on('error', (error) => {
-  if (error.code === 'REVOKED') console.log('lost', error.scopes); // lost [ 'design' ]
+  if (error.code === 'ALX_ERR_REVOKED') console.log('lost', error.scopes); // lost [ 'design' ]
 });
 
 // On the server: Ada left the design team, so every node she signed in from loses the scope.
-for (const [node, token] of tokenOf) if (token === 'ada') server.sync.revoke(node, ['design']);
+for (const [node, token] of tokenOf) {
+  if (token === 'ada') server.sync.revoke(node, ['design']);
+}
 // #endregion revoke
 await waitUntil(async () => (await laptop.Task.get(logo.id)) === null);
 
@@ -126,7 +128,9 @@ assert.deepEqual(await laptop.Task.get(retro.id), { title: 'Book the retro', don
 
 // #region last
 // Bob moves off the mobile team: the phone loses the last scope it asked for.
-for (const [node, token] of tokenOf) if (token === 'bob') server.sync.revoke(node, ['mobile']);
+for (const [node, token] of tokenOf) {
+  if (token === 'bob') server.sync.revoke(node, ['mobile']);
+}
 // #endregion last
 await waitUntil(async () => (await phone.Task.get(login.id)) === null);
 assert.deepEqual(phone.sync.listNodes()[0].scopes, []);

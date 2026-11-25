@@ -74,10 +74,14 @@ const weakKey = (value) => {
   bytes[31] &= 0x7f;
   let hex = '';
   for (let i = 0; i < 32; i++) hex += (bytes[i] < 16 ? '0' : '') + bytes[i].toString(16);
-  for (let i = 0; i < SMALL_ORDER.length; i++) if (hex === SMALL_ORDER[i]) return true;
+  for (let i = 0; i < SMALL_ORDER.length; i++) {
+    if (hex === SMALL_ORDER[i]) return true;
+  }
   // y ≥ p: the top byte 0x7f, the 30 below it 0xff, the lowest at least 0xed.
   if (bytes[31] !== 0x7f || bytes[0] < 0xed) return false;
-  for (let i = 1; i < 31; i++) if (bytes[i] !== 0xff) return false;
+  for (let i = 1; i < 31; i++) {
+    if (bytes[i] !== 0xff) return false;
+  }
   return true;
 };
 

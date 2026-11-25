@@ -18,7 +18,7 @@ const { toBase64, fromBase64 } = require('../crypto/pem.js');
 const { DIRS, tagDirs } = require('../layout.js');
 const { checkWriteSet } = require('../write-set.js');
 const { isRecordId } = require('../shape.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { createJournalStore, isAbsent } = require('./journal.js');
 
 const DATA = 'data';
@@ -34,7 +34,7 @@ const WRITES_AT_ONCE = 8;
 
 // A name that becomes a file's: checked before it reaches the backend (src/engine.js isKvKey).
 const named = (value, what) => {
-  if (!isKvKey(value)) throw new TypeError(`filesEngine: ${JSON.stringify(value)} is not a ${what}`);
+  if (!isKvKey(value)) throw new ArgumentError(`filesEngine: ${JSON.stringify(value)} is not a ${what}`);
   return value;
 };
 
@@ -58,7 +58,7 @@ const readOrNull = async (fsi, dir, name) => {
 const tagNames = async (fsi, path) => {
   const text = await readOrNull(fsi, path, TAGS_FILE);
   if (text === null) return [];
-  let parsed;
+  let parsed = null;
   try {
     parsed = JSON.parse(text);
   } catch {
@@ -69,8 +69,8 @@ const tagNames = async (fsi, path) => {
   for (let i = 0; i < tags.length; i++) {
     const tag = tags[i];
     // A name that is no kv key (a `/`, a `..`) would name a directory outside the path: not a tag's.
-    const named = tag !== null && typeof tag === 'object' && typeof tag.name === 'string' && isKvKey(tag.name);
-    if (named) names.push(tag.name);
+    const isTagName = tag !== null && typeof tag === 'object' && typeof tag.name === 'string' && isKvKey(tag.name);
+    if (isTagName) names.push(tag.name);
   }
   return names;
 };
@@ -85,7 +85,9 @@ const emptyDir = async (fsi, dir, keep = null) => {
     if (isAbsent(error)) return;
     throw error;
   }
-  for (let i = 0; i < names.length; i++) if (names[i] !== keep) await fsi.remove(dir, names[i]);
+  for (let i = 0; i < names.length; i++) {
+    if (names[i] !== keep) await fsi.remove(dir, names[i]);
+  }
 };
 
 const openDb = (fsi, path, capabilities, logger) => {
@@ -104,7 +106,7 @@ const openDb = (fsi, path, capabilities, logger) => {
     get: async (ns, key) => readOrNull(fsi, where(ns, key), key),
     has: async (ns, key) => fsi.exists(where(ns, key), key),
     async list(ns) {
-      if (!isKvNamespace(ns)) throw new TypeError(`filesEngine: ${JSON.stringify(ns)} is not a namespace`);
+      if (!isKvNamespace(ns)) throw new ArgumentError(`filesEngine: ${JSON.stringify(ns)} is not a namespace`);
       return fsi.list(dirOf(path, ns));
     },
     put: async (ns, key, value, options) => fsi.write(where(ns, key), key, value, options),
@@ -115,7 +117,7 @@ const openDb = (fsi, path, capabilities, logger) => {
   }
 
   const records = {
-    /** The stored record — `{ data, meta, encrypted, timestamp, block, gen? }` — or null; a file that does not parse is INTEGRITY. */
+    /** The stored record — `{ data, meta, encrypted, timestamp, block, gen? }` — or null; a file that does not parse is ALX_ERR_INTEGRITY. */
     async get(id) {
       const text = await records.raw(id);
       if (text === null) return null;
@@ -192,13 +194,15 @@ const openDb = (fsi, path, capabilities, logger) => {
     },
     has: async (digest) => fsi.exists(blobsDir, checkDigest(digest, 'blobs.has')),
     async list() {
-      return (await fsi.list(blobsDir)).sort();
+      const digests = await fsi.list(blobsDir);
+      digests.sort();
+      return digests;
     },
     put: async (digest, bytes) =>
       fsi.write(
         blobsDir,
         checkDigest(digest, 'blobs.put'),
-        toBase64(checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES)),
+        toBase64(checkBlobBytes(bytes, 'blobs.put', MAX_STORED_BYTES)),
       ),
     remove: async (digest) => fsi.remove(blobsDir, checkDigest(digest, 'blobs.remove')),
   };
@@ -215,7 +219,8 @@ const openDb = (fsi, path, capabilities, logger) => {
       for (let i = 0; i < names.length; i++) {
         if (names[i].endsWith(RECORD)) ids.push(names[i].slice(0, -RECORD.length));
       }
-      return ids.sort();
+      ids.sort();
+      return ids;
     },
     put: async (tag, id, text) => fsi.write(copiesDir(tag), recordFile(id), text),
     remove: async (tag, id) => fsi.remove(copiesDir(tag), recordFile(id)),
@@ -232,7 +237,11 @@ const openDb = (fsi, path, capabilities, logger) => {
     const puts = batch.kv?.put;
     if (puts !== undefined) {
       for (let i = 0; i < puts.length; i++) {
-        const [ns, key, value, options] = puts[i];
+        const put = puts[i];
+        const ns = put[0];
+        const key = put[1];
+        const value = put[2];
+        const options = put[3];
         await fsi.write(dirOf(path, ns), key, value, options);
       }
     }
@@ -249,10 +258,14 @@ const openDb = (fsi, path, capabilities, logger) => {
     if (rows !== undefined) {
       const landRecord = async (row) => {
         const made = row.pieces?.put;
-        if (made !== undefined) for (let k = 0; k < made.length; k++) await fsi.write(data, made[k][0], made[k][1]);
+        if (made !== undefined) {
+          for (let k = 0; k < made.length; k++) await fsi.write(data, made[k][0], made[k][1]);
+        }
         await fsi.write(data, recordFile(row.id), typeof row.text === 'string' ? row.text : JSON.stringify(row.stored));
         const dropped = row.pieces?.remove;
-        if (dropped !== undefined) for (let k = 0; k < dropped.length; k++) await fsi.remove(data, dropped[k]);
+        if (dropped !== undefined) {
+          for (let k = 0; k < dropped.length; k++) await fsi.remove(data, dropped[k]);
+        }
       };
       for (let from = 0; from < rows.length; from += WRITES_AT_ONCE) {
         const pending = [];
@@ -261,7 +274,9 @@ const openDb = (fsi, path, capabilities, logger) => {
       }
     }
     const removed = batch.remove;
-    if (removed !== undefined) for (let i = 0; i < removed.length; i++) await fsi.remove(data, recordFile(removed[i]));
+    if (removed !== undefined) {
+      for (let i = 0; i < removed.length; i++) await fsi.remove(data, recordFile(removed[i]));
+    }
     const uncopied = batch.copies?.remove;
     if (uncopied !== undefined) {
       for (let i = 0; i < uncopied.length; i++) await fsi.remove(copiesDir(uncopied[i][0]), recordFile(uncopied[i][1]));

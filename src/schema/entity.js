@@ -11,6 +11,7 @@
 
 const { deepEqual } = require('../shape.js');
 const { valueAt, ancestorsOf } = require('../paths.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -21,7 +22,7 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 // the value of the id field when the data carries a string there; null when
 // the data names none (the id is minted). A composite that cannot be derived
 // is `{ id: null, field, reason }` — `missing`, `kind` or `separator` — the
-// caller's INVALID_ID (`idReason` says why); a derived id outside the id
+// caller's ALX_ERR_INVALID_ID (`idReason` says why); a derived id outside the id
 // class is the caller's too.
 const namedId = (def, data) => {
   const composite = def.id ?? null;
@@ -34,7 +35,7 @@ const namedId = (def, data) => {
       const kind = typeof value;
       const scalar = kind === 'string' || kind === 'number' || kind === 'boolean';
       if (!scalar) return { id: null, data, field, reason: 'kind' };
-      const text = kind === 'string' ? value : String(value);
+      const text = kind === 'string' ? value : `${value}`;
       if (text.includes(composite.separator)) return { id: null, data, field, reason: 'separator' };
       parts.push(text);
     }
@@ -43,11 +44,13 @@ const namedId = (def, data) => {
   const field = def.idField;
   if (field === false || typeof data[field] !== 'string') return null;
   const rest = {};
-  for (const key of Object.keys(data)) if (key !== field) rest[key] = data[key];
+  for (const key of Object.keys(data)) {
+    if (key !== field) rest[key] = data[key];
+  }
   return { id: data[field], data: rest, field: null, reason: null };
 };
 
-/** Why a composite id could not be derived (`namedId` with `id: null`), for the INVALID_ID's message. */
+/** Why a composite id could not be derived (`namedId` with `id: null`), for the ALX_ERR_INVALID_ID's message. */
 const idReason = (named) => {
   if (named.reason === 'separator') return `${named.field} holds the id's separator`;
   if (named.reason === 'kind') return `${named.field} must be a string, a number or a boolean for its id`;
@@ -59,7 +62,9 @@ const idReason = (named) => {
 const project = (def, id, data) => {
   const projected = {};
   if (def.idField !== false && id !== null) projected[def.idField] = id;
-  for (const key of Object.keys(data)) if (key !== '$type') projected[key] = data[key];
+  for (const key of Object.keys(data)) {
+    if (key !== '$type') projected[key] = data[key];
+  }
   return projected;
 };
 
@@ -69,10 +74,12 @@ const project = (def, id, data) => {
 // (a Date from a decoder) is what the cache, the disk and the peers all see.
 const unproject = (def, output, type) => {
   if (!isObject(output)) {
-    throw new TypeError(`createDatabase({ schema }): entity ${def.name}: the validator must return an object`);
+    throw new ArgumentError(`createDatabase({ schema }): entity ${def.name}: the validator must return an object`);
   }
   const plain = {};
-  for (const key of Object.keys(output)) if (key !== '$type' && key !== def.idField) plain[key] = output[key];
+  for (const key of Object.keys(output)) {
+    if (key !== '$type' && key !== def.idField) plain[key] = output[key];
+  }
   const data = JSON.parse(JSON.stringify(plain));
   data.$type = type;
   return data;

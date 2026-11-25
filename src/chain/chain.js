@@ -38,12 +38,12 @@ class Blockchain {
       this.tailHash = await this.writeBlock(block);
       await this.writeChain();
     } else {
-      let chain;
+      let chain = null;
       try {
         chain = JSON.parse(raw);
       } catch (error) {
         const message = `${BLOCKCHAIN} is unreadable (${error.message}); restore it or remove the directory`;
-        throw new SyncomError('CORRUPT', message, { cause: error });
+        throw new SyncomError('ALX_ERR_CORRUPT', message, { cause: error });
       }
       this.tailHash = chain.tailHash;
     }
@@ -95,7 +95,7 @@ class Blockchain {
 
   async readBlock(hash) {
     const raw = await this.#store.get(`${hash}.json`);
-    if (raw === null) throw new SyncomError('BLOCK_NOT_FOUND', `Block not found: ${hash}`, { hash });
+    if (raw === null) throw new SyncomError('ALX_ERR_BLOCK_NOT_FOUND', `Block not found: ${hash}`, { hash });
     return JSON.parse(raw);
   }
 

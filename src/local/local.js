@@ -10,21 +10,21 @@
 // collection's prefix. Values are JSON; a key is a kv key (no `/`). The
 // changes of one key go one at a time (`set(key, fn)` reads the value the
 // write before it left), an observer that throws is contained, a document
-// that does not parse is CORRUPT, and a write after `close()` or a lost
-// lease is refused as the queue refuses one (CLOSED, READ_ONLY). `observe`
+// that does not parse is ALX_ERR_CORRUPT, and a write after `close()` or a lost
+// lease is refused as the queue refuses one (ALX_ERR_CLOSED, ALX_ERR_READ_ONLY). `observe`
 // is this instance's: another instance over one engine hears nothing (a
 // local document is one node's). Requires engine.js, errors.js, hooks.js
 // and symbols.js only: it ships to the browser.
 
 const { kvNamespace, isKvKey } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 const { SOURCE } = require('../symbols.js');
 
 const NAMESPACE = 'local';
 
 const keyed = (method, key) => {
-  if (!isKvKey(key)) throw new TypeError(`${method}() takes a key: a text of at most 255 characters, no '/'`);
+  if (!isKvKey(key)) throw new ArgumentError(`${method}() takes a key: a text of at most 255 characters, no '/'`);
   return key;
 };
 
@@ -33,7 +33,7 @@ const parse = (key, text) => {
   try {
     return JSON.parse(text);
   } catch (cause) {
-    throw new SyncomError('CORRUPT', `Local document ${key} is unreadable`, { key, cause });
+    throw new SyncomError('ALX_ERR_CORRUPT', `Local document ${key} is unreadable`, { key, cause });
   }
 };
 
@@ -88,7 +88,9 @@ class LocalStore {
   #wake(full, value) {
     const fns = this.#watchers.get(full);
     if (fns !== undefined) {
-      for (const fn of [...fns]) {
+      // A copy: an observer may stop, or start another, while the loop goes.
+      const observers = [...fns];
+      for (const fn of observers) {
         try {
           fn(value);
         } catch (err) {
@@ -123,12 +125,12 @@ class LocalStore {
       const given = typeof value === 'function' ? value(current) : value;
       if (given === undefined && typeof value === 'function') return current;
       if (given === undefined || given === null) {
-        throw new TypeError(
+        throw new ArgumentError(
           'set() takes a JSON value, or a function of the value that answers one; delete() removes one',
         );
       }
       const text = JSON.stringify(given);
-      if (typeof text !== 'string') throw new TypeError('set() takes a JSON value');
+      if (typeof text !== 'string') throw new ArgumentError('set() takes a JSON value');
       await this.#store.put(full, text, { atomic: true });
       const held = JSON.parse(text);
       this.#wake(full, held);
@@ -154,12 +156,13 @@ class LocalStore {
     for (let i = 0; i < names.length; i++) {
       if (names[i].startsWith(this.#prefix)) out.push(names[i].slice(this.#prefix.length));
     }
-    return out.sort();
+    out.sort();
+    return out;
   }
 
   /** Calls `listener(value)` after every `set`/`delete` of `key` here (null once deleted); returns the stop. */
   observe(key, listener) {
-    if (typeof listener !== 'function') throw new TypeError('observe() takes a listener');
+    if (typeof listener !== 'function') throw new ArgumentError('observe() takes a listener');
     const full = this.#full('observe', key);
     let fns = this.#watchers.get(full);
     if (fns === undefined) this.#watchers.set(full, (fns = new Set()));
@@ -172,7 +175,7 @@ class LocalStore {
 
   /** The same store under `prefix` — a collection's: keys `<prefix>.<key>`. */
   scoped(prefix) {
-    if (!isKvKey(prefix)) throw new TypeError('scoped() takes a prefix: a kv key');
+    if (!isKvKey(prefix)) throw new ArgumentError('scoped() takes a prefix: a kv key');
     const full = `${this.#prefix}${prefix}.`;
     return new LocalStore(this.#store, full, this.#told, this.#logger, this.#guard, this.#watchers, this.#lanes);
   }

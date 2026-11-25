@@ -30,12 +30,11 @@ const createSdk = () => {
   const versions = new Map();
   const listeners = new Set();
   let clock = 0;
-  const copy = (value) =>
-    value instanceof Timestamp || value === null || typeof value !== 'object'
-      ? value
-      : Array.isArray(value)
-        ? value.map(copy)
-        : Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, copy(inner)]));
+  const copy = (value) => {
+    if (value instanceof Timestamp || value === null || typeof value !== 'object') return value;
+    if (Array.isArray(value)) return value.map(copy);
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, copy(inner)]));
+  };
   const commit = (id, data) => {
     const stamped = copy(data);
     for (const key of Object.keys(stamped)) {

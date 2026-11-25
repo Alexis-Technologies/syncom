@@ -21,7 +21,7 @@
 const { Emitter } = require('../emitter.js');
 const { isPlainObject, isStreamName, isKeyId, canonical } = require('../shape.js');
 const { SIGNER } = require('../symbols.js');
-const { typed } = require('../errors.js');
+const { ArgumentError, DataError } = require('../argument-errors.js');
 const { GLOBAL_SCOPE } = require('../scope.js');
 
 const FORMAT = 1;
@@ -141,14 +141,22 @@ class Presence extends Emitter {
   /** Every state by node, this node's included. */
   states() {
     const out = new Map();
-    for (const [node, held] of this.#states) if (held.state !== null) out.set(node, held.state);
+    for (const pair of this.#states) {
+      const node = pair[0];
+      const held = pair[1];
+      if (held.state !== null) out.set(node, held.state);
+    }
     return out;
   }
 
   /** The nodes with a state, this one included. */
   nodes() {
     const out = [];
-    for (const [node, held] of this.#states) if (held.state !== null) out.push(node);
+    for (const pair of this.#states) {
+      const node = pair[0];
+      const held = pair[1];
+      if (held.state !== null) out.push(node);
+    }
     return out;
   }
 
@@ -159,11 +167,11 @@ class Presence extends Emitter {
    * `delete()` or `destroy()`. Resolves to the update sent.
    */
   async set(state) {
-    if (this.#destroyed) throw new TypeError('presence was destroyed');
+    if (this.#destroyed) throw new ArgumentError('presence was destroyed');
     const text = state === null ? null : boundedJson(state);
     if (state !== null && text === null) {
-      throw typed(
-        'PRESENCE_SIZE',
+      throw new DataError(
+        'ALX_ERR_PRESENCE_SIZE',
         `A presence state is a JSON object of at most ${MAX_KEYS} keys, ${MAX_DEPTH} deep, ${MAX_STATE_BYTES} bytes`,
       );
     }
@@ -229,7 +237,9 @@ class Presence extends Emitter {
   #expire() {
     const floor = Date.now() - this.#timeout;
     const removed = [];
-    for (const [node, held] of this.#states) {
+    for (const pair of this.#states) {
+      const node = pair[0];
+      const held = pair[1];
       if (held.ts >= floor || (node === this.#node && held.state !== null)) continue;
       this.#states.delete(node);
       if (held.state !== null) removed.push(node);
@@ -244,7 +254,9 @@ class Presence extends Emitter {
   encode(nodes = null) {
     const wanted = nodes === null ? null : new Set(nodes);
     const s = [];
-    for (const [node, held] of this.#states) {
+    for (const pair of this.#states) {
+      const node = pair[0];
+      const held = pair[1];
       if (held.state === null || (wanted !== null && !wanted.has(node))) continue;
       const entry = [node, held.clock, held.ts, held.state];
       if (held.sig !== undefined) entry.push(held.sig);
@@ -273,7 +285,11 @@ class Presence extends Emitter {
         out.refused++;
         continue;
       }
-      const [node, clock, ts, state, sig] = entry;
+      const node = entry[0];
+      const clock = entry[1];
+      const ts = entry[2];
+      const state = entry[3];
+      const sig = entry[4];
       if (node === this.#node) continue;
       if (sig === undefined) {
         if (this.#require) {
@@ -337,11 +353,11 @@ class Presence extends Emitter {
  * a renewal.
  */
 const createPresence = (storage, { scope = GLOBAL_SCOPE, timeout = DEFAULT_TIMEOUT } = {}) => {
-  if (!storage || typeof storage.nodeId !== 'string') throw new TypeError('createPresence() takes a storage');
+  if (!storage || typeof storage.nodeId !== 'string') throw new ArgumentError('createPresence() takes a storage');
   if (typeof scope !== 'string' || !isStreamName(scope)) {
-    throw new TypeError('createPresence(): scope is a stream name');
+    throw new ArgumentError('createPresence(): scope is a stream name');
   }
-  if (!Number.isFinite(timeout) || timeout <= 0) throw new TypeError('createPresence(): timeout is ms > 0');
+  if (!Number.isFinite(timeout) || timeout <= 0) throw new ArgumentError('createPresence(): timeout is ms > 0');
   return new Presence(storage, { scope, timeout });
 };
 

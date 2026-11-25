@@ -1,6 +1,6 @@
 'use strict';
 
-const { SyncomError, isQuotaError } = require('./errors.js');
+const { SyncomError, isQuotaError, ArgumentError } = require('./errors.js');
 
 // The persisted operation log: every op this node applied — its own and the
 // ones it accepted from peers — in the order they landed here. Two things read
@@ -43,6 +43,14 @@ const DEFAULT_RETENTION_OPS = 10_000;
 const FINGERPRINT = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 const DONE = Promise.resolve();
+
+const ascending = (a, b) => a - b;
+
+// The fingerprint an append is handed for its op at `i`: by index (`byIndex`), by op, or none.
+const fpAt = (fps, byIndex, i, op) => {
+  if (fps === null) return undefined;
+  return byIndex ? fps[i] : fps.get(op);
+};
 
 class OpLog {
   // The medium: the files engine's journals and segments (src/files/journal.js),
@@ -113,7 +121,7 @@ class OpLog {
     // The medium: an engine's log store (src/engine.js `db.log` — the files
     // engine's journal, a native engine's rows). The log builds none itself.
     if (typeof options.store !== 'object' || options.store === null) {
-      throw new TypeError('OpLog: store — the log store of an engine (src/engine.js)');
+      throw new ArgumentError('OpLog: store — the log store of an engine (src/engine.js)');
     }
     this.#store = options.store;
     this.#rollAfter = options.rollAfter ?? DEFAULT_ROLL_AFTER;
@@ -159,7 +167,9 @@ class OpLog {
     // with each; the streams are made from the sorted entries, once.
     this.#take(loaded.entries);
     // An open group's seqs a segment does not hold yet wait for their records.
-    if (this.#sealApplied) for (let i = 0; i < loaded.groups.length; i++) this.#hold(loaded.groups[i].unsealed);
+    if (this.#sealApplied) {
+      for (let i = 0; i < loaded.groups.length; i++) this.#hold(loaded.groups[i].unsealed);
+    }
     // A position handed out is never handed out again in its epoch: where the
     // newest file did not read, the counter the index kept is the floor of
     // the next — a peer that resumes from an id of this epoch gets no reused seq.
@@ -240,7 +250,7 @@ class OpLog {
     if (seqs.size === 0) this.#prints.delete(key);
   }
 
-  // Heads as the index or a REWOUND proof hands them — `{ key: [seq, fp] }`
+  // Heads as the index or a ALX_ERR_REWOUND proof hands them — `{ key: [seq, fp] }`
   // — own keys, a positive safe seq, a fingerprint's shape; newer than what
   // is held.
   #takeHeads(heads) {
@@ -311,7 +321,11 @@ class OpLog {
    * its entries in log order from index `from` on — read, never changed.
    */
   *streams() {
-    for (const [key, stream] of this.#streams) yield [key, stream.entries, stream.head];
+    for (const pair of this.#streams) {
+      const key = pair[0];
+      const stream = pair[1];
+      yield [key, stream.entries, stream.head];
+    }
   }
 
   /** The retained entry of stream `key` at seq `seq` (its op's), or undefined — a binary search. */
@@ -402,7 +416,7 @@ class OpLog {
 
   /**
    * Heads of streams whose ops this log does not hold — this node's own, taken
-   * back from a host on its proof (REWOUND) — `{ key: [seq, fingerprint] }`;
+   * back from a host on its proof (ALX_ERR_REWOUND) — `{ key: [seq, fingerprint] }`;
    * persisted with the next index. A head older than the one held is left.
    */
   adoptHeads(heads) {
@@ -455,7 +469,9 @@ class OpLog {
   // The first seq of the oldest open file not applied whole, or Infinity.
   get #unappliedFrom() {
     const pending = this.#pending;
-    for (let i = this.#pendingHead; i < pending.length; i++) if (pending[i].left.size > 0) return pending[i].first;
+    for (let i = this.#pendingHead; i < pending.length; i++) {
+      if (pending[i].left.size > 0) return pending[i].first;
+    }
     return Infinity;
   }
 
@@ -526,7 +542,7 @@ class OpLog {
       // Logged as a scrub leaves it (the caller took the payload): no rewrite to come.
       if (scrubbed?.has(op)) entry.scrubbed = true;
       if (held?.has(op)) entry.held = held.get(op);
-      const fp = fps === null ? undefined : byIndex ? fps[i] : fps.get(op);
+      const fp = fpAt(fps, byIndex, i, op);
       entries.push(entry);
       group.entries.push(entry);
       // The header texts a writer made (`link`): the group's line takes them as they are.
@@ -636,8 +652,7 @@ class OpLog {
       try {
         await Promise.all(group.ready);
       } catch (error) {
-        this.#fail(group, error);
-        return;
+        return void this.#fail(group, error);
       }
     }
     // The medium writes the group — a journal line, a file of its own, rows —
@@ -705,19 +720,23 @@ class OpLog {
     this.#next = group.from;
     // The later group first: the seqs and heads before the first are the ones kept.
     for (const failed of later === null ? [group] : [later, group]) {
-      for (const [stream, seq] of failed.undo) {
+      for (const pair of failed.undo) {
+        const stream = pair[0];
+        const seq = pair[1];
         if (seq === undefined) delete this.#vector[stream];
         else this.#vector[stream] = seq;
       }
       for (const entry of failed.entries) this.#unprint(entry);
-      for (const [key, head] of failed.heads) {
+      for (const pair of failed.heads) {
+        const key = pair[0];
+        const head = pair[1];
         if (head === undefined) this.#heads.delete(key);
         else this.#heads.set(key, head);
       }
     }
-    // A medium that is full is said as such: the writer hears QUOTA, with the platform's error as the cause.
+    // A medium that is full is said as such: the writer hears ALX_ERR_QUOTA, with the platform's error as the cause.
     const reported = isQuotaError(error)
-      ? new SyncomError('QUOTA', 'The medium is full: nothing more can be appended', { cause: error })
+      ? new SyncomError('ALX_ERR_QUOTA', 'The medium is full: nothing more can be appended', { cause: error })
       : error;
     if (this.#onFail !== null) {
       try {
@@ -821,7 +840,9 @@ class OpLog {
     for (const entry of this.#entries) {
       if (entry.seq > to) return false;
       if (this.#keep !== null && this.#keep(entry)) return true;
-      for (const pin of this.#pins) if (pin(entry)) return true;
+      for (const pin of this.#pins) {
+        if (pin(entry)) return true;
+      }
     }
     return false;
   }
@@ -833,7 +854,7 @@ class OpLog {
    * to the sync manager.
    */
   pin(keep) {
-    if (typeof keep !== 'function') throw new TypeError('pin(keep): keep must be a function');
+    if (typeof keep !== 'function') throw new ArgumentError('pin(keep): keep must be a function');
     this.#pins.add(keep);
     return () => void this.#pins.delete(keep);
   }
@@ -851,7 +872,7 @@ class OpLog {
    */
   retain(keep) {
     if (keep !== null && typeof keep !== 'function') {
-      throw new TypeError('retain(keep): keep must be a function or null');
+      throw new ArgumentError('retain(keep): keep must be a function or null');
     }
     this.#keep = keep;
   }
@@ -912,7 +933,9 @@ class OpLog {
    */
   get health() {
     let unapplied = 0;
-    for (let i = this.#pendingHead; i < this.#pending.length; i++) if (this.#pending[i].left.size > 0) unapplied++;
+    for (let i = this.#pendingHead; i < this.#pending.length; i++) {
+      if (this.#pending[i].left.size > 0) unapplied++;
+    }
     const { journaled, open, torn, lost } = this.#store.health;
     return { journaled, open, unapplied, torn, lost, appendFailures: this.#appendFailures };
   }
@@ -1028,8 +1051,8 @@ class OpLog {
     // The medium writes the files (or rows) holding what was taken again, as
     // the entries are now, each once; a copy kept as evidence that names one
     // of the ids goes whole.
-    const sorted = taken.sort((a, b) => a - b);
-    await this.#store.scrub(sorted, {
+    taken.sort(ascending);
+    await this.#store.scrub(taken, {
       id: ids.length === 1 ? ids[0] : null,
       ids: ids.slice(),
       sealedTo: this.#sealedTo,
@@ -1056,10 +1079,9 @@ class OpLog {
    * resumed: another epoch, or compacted past.
    */
   read(eventId, { scopes = null, limit = Infinity } = {}) {
-    let after;
+    let after = 0;
     if (eventId === undefined || eventId === null) {
       if (this.#floor > 1) return null;
-      after = 0;
     } else {
       const parsed = parseEventId(eventId);
       if (!parsed || parsed.epoch !== this.#epoch) return null;
@@ -1095,8 +1117,10 @@ class OpLog {
     const seqs = this.#byId.get(id);
     if (!seqs) return [];
     const entries = [];
-    for (const seq of [...seqs].sort((a, b) => a - b)) {
-      const entry = this.#entryAt(seq);
+    const sorted = [...seqs];
+    sorted.sort(ascending);
+    for (let i = 0; i < sorted.length; i++) {
+      const entry = this.#entryAt(sorted[i]);
       if (entry !== undefined) entries.push(entry);
     }
     return entries;

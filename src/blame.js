@@ -74,7 +74,9 @@ const editorsOf = async (core, id) => {
     const slots = meta.sets[field];
     for (const element of Object.keys(slots)) {
       for (const origin of Object.keys(slots[element])) {
-        const [added, removed] = slots[element][origin];
+        const slot = slots[element][origin];
+        const added = slot[0];
+        const removed = slot[1];
         if (added > removed) origins.add(origin);
       }
     }
@@ -85,7 +87,9 @@ const editorsOf = async (core, id) => {
     if (typeof mod?.editors !== 'function') continue;
     for (const origin of mod.editors(entry, field).all) origins.add(origin);
   }
-  return [...origins].sort();
+  const sorted = [...origins];
+  sorted.sort();
+  return sorted;
 };
 
 module.exports = { lastEditorOf, editorsOf };

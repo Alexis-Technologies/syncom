@@ -10,8 +10,11 @@
 // THIRD_PARTY_NOTICES.md). No requires.
 
 const lengthOf = (op) => op.delete ?? op.retain ?? (typeof op.insert === 'string' ? op.insert.length : 1);
-const typeOf = (op) =>
-  op === undefined ? 'retain' : op.delete !== undefined ? 'delete' : op.retain !== undefined ? 'retain' : 'insert';
+const typeOf = (op) => {
+  if (op === undefined) return 'retain';
+  if (op.delete !== undefined) return 'delete';
+  return op.retain !== undefined ? 'retain' : 'insert';
+};
 
 // Two attribute sets alike whatever the order of their keys: `{ a, b }` and
 // `{ b, a }` are one style (JSON.stringify told them apart, so two ops of
@@ -88,9 +91,13 @@ const chop = (ops) => {
 // The attributes of a retain composed over an insert's or a retain's: the
 // later ones win, a null one removes (kept over a retain: it says so).
 const composeAttributes = (a, b, keepNull) => {
-  const out = { ...(b ?? {}) };
-  if (a !== undefined) for (const key of Object.keys(a)) if (out[key] === undefined) out[key] = a[key];
-  if (!keepNull) for (const key of Object.keys(out)) if (out[key] === null) delete out[key];
+  const out = { ...b };
+  if (a !== undefined) {
+    for (const key of Object.keys(a)) if (out[key] === undefined) out[key] = a[key];
+  }
+  if (!keepNull) {
+    for (const key of Object.keys(out)) if (out[key] === null) delete out[key];
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 };
 
@@ -134,7 +141,9 @@ const compose = (a, b) => {
 const transformAttributes = (a, b, priority) => {
   if (a === undefined || b === undefined || !priority) return b;
   const out = {};
-  for (const key of Object.keys(b)) if (a[key] === undefined) out[key] = b[key];
+  for (const key of Object.keys(b)) {
+    if (a[key] === undefined) out[key] = b[key];
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 };
 

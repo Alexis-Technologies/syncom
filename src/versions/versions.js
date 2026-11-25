@@ -6,7 +6,7 @@
 // way back, and the tags (`tag`, `untag`, `tags`, `at`): named versions kept
 // on this node, copy-on-write at the EntryStore seam (./tags.js). The present
 // and its patches — `applyPatches`, `compact` — are the core's. Without the
-// plugin those methods throw PLUGIN_MISSING, `stats().tags` is null, and a
+// plugin those methods throw ALX_ERR_PLUGIN_MISSING, `stats().tags` is null, and a
 // directory that holds tags is refused at createDatabase(): its copies would not be
 // kept. The hook the core takes: `versions` — `tags`, the store the write
 // path copies into before a change; the methods are stubs on the facade.

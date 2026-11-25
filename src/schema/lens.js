@@ -13,8 +13,15 @@
 // Requires the core's projections (src/schema/entity.js) only.
 
 const { project, unproject } = require('./entity.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
+
+// A step's migration for the entity: a step keyed by entity, or one for every record.
+const migrationOf = (step, entity) => {
+  if (!(step instanceof Map)) return step;
+  return entity === null ? undefined : step.get(entity);
+};
 
 const createLens = ({ version, entities, migrations, lens }, logger) => {
   const chain = lens === 'validate' ? null : migrations;
@@ -23,15 +30,17 @@ const createLens = ({ version, entities, migrations, lens }, logger) => {
     const type = data.$type;
     const entity = typeof type === 'string' ? type : null;
     let out = {};
-    for (const key of Object.keys(data)) if (key !== '$type') out[key] = data[key];
+    for (const key of Object.keys(data)) {
+      if (key !== '$type') out[key] = data[key];
+    }
     if (chain !== null) {
       for (let to = from + 1; to <= version; to++) {
         const step = chain.get(to);
-        const migration = step instanceof Map ? (entity === null ? undefined : step.get(entity)) : step;
+        const migration = migrationOf(step, entity);
         if (!migration) continue;
         out = await migration.up(out, { entity, id, from: to - 1, to });
         if (!isObject(out)) {
-          throw new TypeError(`createDatabase({ schema }): migrations[${to}] must return an object (${id})`);
+          throw new ArgumentError(`createDatabase({ schema }): migrations[${to}] must return an object (${id})`);
         }
       }
     }

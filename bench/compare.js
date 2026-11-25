@@ -233,7 +233,7 @@ const writeResults = (report) => {
       if (!fresh) return old;
       // A library measured now replaces its old failure, and the reverse.
       const failed = { ...old?.failed };
-      for (const id of Object.keys(fresh.results)) delete failed[id];
+      for (const key of Object.keys(fresh.results)) delete failed[key];
       return {
         ...fresh,
         results: { ...old?.results, ...fresh.results },

@@ -4,7 +4,7 @@
 // mounts. The options (`open({ sync })`), the hooks, the link contract and
 // the apply path are the core's (index.d.ts); the manager, its events and
 // what it reports are declared here. Without the plugin `storage.sync` is
-// `PLUGIN_MISSING`.
+// `ALX_ERR_PLUGIN_MISSING`.
 
 import type {
   Plugin,
@@ -114,7 +114,7 @@ export interface SyncUnitOptions {
    * is here (`current`, null for none) and as the op would leave it (`after`): `false` refuses the op — logged as a
    * withheld scrub (skipped, scrubbed, `withheld`), relayed as a no-op that applies nowhere, a purge included, no gap
    * in its stream — and names it in the push's answer (`refused`, `reason: 'rule'`), with `current` and the kinds of
-   * its fields that are no registers, for the pusher to set itself straight (`WRITE_REFUSED`, a revert of its own). A throw fails the page: the pusher offers it again.
+   * its fields that are no registers, for the pusher to set itself straight (`ALX_ERR_WRITE_REFUSED`, a revert of its own). A throw fails the page: the pusher offers it again.
    */
   authorizeWrite?: (context: {
     op: SyncOp;
@@ -125,7 +125,7 @@ export interface SyncUnitOptions {
   /**
    * Ask every peer to prove it holds the key that is its node id before anything is taken or handed to it: hello
    * answers a `challenge`, the peer signs it (`syncom/prove`), and until then push, snapshot and changes are 403
-   * `UNPROVEN`. On by default under `sync.signatures: 'require'`; needs the signing plugin.
+   * `ALX_ERR_UNPROVEN`. On by default under `sync.signatures: 'require'`; needs the signing plugin.
    */
   prove?: boolean;
   /**
@@ -243,10 +243,10 @@ export interface SyncEvents {
   }) => void;
   /**
    * A failure on the way to a peer; `url` names it. A page of the feed that
-   * could not be applied comes as `code: 'PAGE_FAILED'` (with `cursor`, the
+   * could not be applied comes as `code: 'ALX_ERR_PAGE_FAILED'` (with `cursor`, the
    * last position saved, and `attempt`), and is retried from that cursor;
-   * the third failure in a row is `code: 'STUCK'`. A host that answers 428
-   * to five fresh hellos in a row is `code: 'HANDSHAKE_LOOP'`. A refusal the
+   * the third failure in a row is `code: 'ALX_ERR_STUCK'`. A host that answers 428
+   * to five fresh hellos in a row is `code: 'ALX_ERR_HANDSHAKE_LOOP'`. A refusal the
    * host answered with comes as the link delivered it: a numeric `code`.
    */
   error: (error: Error & { url: string; code?: string | number; cursor?: string | null; attempt?: number }) => void;
@@ -317,7 +317,7 @@ export interface SyncManager {
    * A grant of everything (`'*'`) is not narrowed by a scope: revoke what hello granted.
    */
   revoke(node: string, scopes: string[]): void;
-  /** The bytes of an attachment's blob asked of the connected peers by digest (`syncom/blob`), checked and kept here; `BLOB_NOT_FOUND` where none holds them. */
+  /** The bytes of an attachment's blob asked of the connected peers by digest (`syncom/blob`), checked and kept here; `ALX_ERR_BLOB_NOT_FOUND` where none holds them. */
   fetchBlob(digest: string, named?: { id: string; name: string }): Promise<Uint8Array>;
   /** The shared log as this hub stands to it (`sync.sharedLog`), or null without one. */
   shared(): SharedStats | null;
@@ -345,11 +345,11 @@ export interface SharedStats {
   behind: boolean;
   /** A topic whose entry a rule refused three times (a hook that throws, a bug): nothing past it is taken until `stop()` and `start()`. */
   stuck: { topic: boolean; inbox: boolean };
-  /** A topic whose entry the engine refused: tried again, backed off, until it lands (`SHARED_LOG_FAILED` `apply`, once per run). */
+  /** A topic whose entry the engine refused: tried again, backed off, until it lands (`ALX_ERR_SHARED_LOG_FAILED` `apply`, once per run). */
   retrying: { topic: boolean; inbox: boolean };
   /** A read-only hub keeps the vector as the log moved it. */
   shadow: boolean;
-  /** Ops this hub appended; entries read from the topic and the inbox; ops applied from them; ops forwarded to the inbox; entries that did not read; holes passed (a number whose entry never came, told as `SHARED_LOG_FAILED` `hole`). */
+  /** Ops this hub appended; entries read from the topic and the inbox; ops applied from them; ops forwarded to the inbox; entries that did not read; holes passed (a number whose entry never came, told as `ALX_ERR_SHARED_LOG_FAILED` `hole`). */
   relayed: number;
   entries: number;
   applied: number;

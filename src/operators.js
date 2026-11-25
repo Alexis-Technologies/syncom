@@ -4,7 +4,7 @@
 // $push, $pop, $min, $max, $rename })`), each laid onto the write API by the
 // kind of the field it names — the op model has a method per kind, and an
 // operator is only ever a name for one of them: `$inc` is `inc()` on a
-// counter (a register refuses it, FIELD_KIND), `$addToSet`/`$pull` are
+// counter (a register refuses it, ALX_ERR_FIELD_KIND), `$addToSet`/`$pull` are
 // `add()`/`remove()` on a set and a last-writer-wins rewrite of an array
 // held by a register, `$push`/`$pop` a `push()`/`splice()` on a list and
 // a rewrite of a register's array, `$min`/`$max` a `set` only where the
@@ -17,6 +17,7 @@
 const { fieldName, fieldNames, jsonValue } = require('./args.js');
 const { isPlainObject, canonical } = require('./shape.js');
 const { valueAt } = require('./paths.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 const OPERATORS = new Set(['$set', '$unset', '$inc', '$addToSet', '$pull', '$push', '$pop', '$min', '$max', '$rename']);
 
@@ -27,21 +28,23 @@ const OPERATORS = new Set(['$set', '$unset', '$inc', '$addToSet', '$pull', '$pus
 const isOperators = (delta) => {
   const keys = Object.keys(delta);
   let operators = 0;
-  for (let i = 0; i < keys.length; i++) if (OPERATORS.has(keys[i])) operators++;
+  for (let i = 0; i < keys.length; i++) {
+    if (OPERATORS.has(keys[i])) operators++;
+  }
   if (operators === 0) return false;
-  if (operators !== keys.length) throw new TypeError('update() takes operators ($set, $inc…) or fields, not both');
+  if (operators !== keys.length) throw new ArgumentError('update() takes operators ($set, $inc…) or fields, not both');
   return true;
 };
 
 const object = (op, value) => {
-  if (!isPlainObject(value)) throw new TypeError(`update(): ${op} takes an object of fields`);
+  if (!isPlainObject(value)) throw new ArgumentError(`update(): ${op} takes an object of fields`);
   return value;
 };
 
 // The elements an operator names: one value, or `{ $each: [...] }` (`$in` for `$pull`).
 const elementsOf = (op, value, many) => {
   if (isPlainObject(value) && Object.hasOwn(value, many)) {
-    if (!Array.isArray(value[many])) throw new TypeError(`update(): ${op} ${many} takes an array`);
+    if (!Array.isArray(value[many])) throw new ArgumentError(`update(): ${op} ${many} takes an array`);
     const out = [];
     for (let i = 0; i < value[many].length; i++) out.push(jsonValue('update', value[many][i]));
     return out;
@@ -72,7 +75,7 @@ const better = (op, current, value) => {
   if (current === undefined || current === null) return true;
   const kind = comparable(value);
   if (kind === 0 || kind !== comparable(current)) {
-    throw new TypeError(`update(): ${op} compares a number, a string or a boolean with a value of the same type`);
+    throw new ArgumentError(`update(): ${op} compares a number, a string or a boolean with a value of the same type`);
   }
   return op === '$min' ? value < current : value > current;
 };
@@ -106,17 +109,41 @@ const expand = (delta, view, kindAt) => {
     claim: (op, field) => {
       const by = named.get(field);
       if (by !== undefined && by !== op) {
-        throw new TypeError(`update(): ${by} and ${op} both name ${field}: one operator per field`);
+        throw new ArgumentError(`update(): ${by} and ${op} both name ${field}: one operator per field`);
       }
       named.set(field, op);
     },
   };
   for (const op of Object.keys(delta)) {
-    if (!Object.hasOwn(HANDLERS, op)) throw new TypeError(`update(): unknown operator ${op}`);
+    if (!Object.hasOwn(HANDLERS, op)) throw new ArgumentError(`update(): unknown operator ${op}`);
     HANDLERS[op](ctx, delta[op]);
   }
   if (setting > 0) calls.push(['update', sets]);
   return calls;
+};
+
+// A register's array less the elements `$pull` names.
+const pulledFrom = (array, elements) => {
+  const next = [];
+  const pulled = setOf(elements);
+  for (let i = 0; i < array.length; i++) {
+    if (!pulled.has(textOf(array[i]))) next.push(array[i]);
+  }
+  return next;
+};
+
+// A register's array with the elements `$addToSet` names that it does not hold yet, in the order named.
+const addedTo = (array, elements) => {
+  const next = [];
+  const held = setOf(array);
+  for (let i = 0; i < array.length; i++) next.push(array[i]);
+  for (let i = 0; i < elements.length; i++) {
+    const text = textOf(elements[i]);
+    if (held.has(text)) continue;
+    held.add(text);
+    next.push(elements[i]);
+  }
+  return next;
 };
 
 // `$addToSet`/`$pull`: `add()`/`remove()` on a set or an absent field; a register's array rewritten whole, last
@@ -129,20 +156,7 @@ const setOp = (ctx, op, given) => {
     const elements = elementsOf(op, fields[field], op === '$pull' ? '$in' : '$each');
     const array = ctx.current(field);
     if (ctx.kindAt(field) === 'register' && Array.isArray(array)) {
-      const next = [];
-      if (op === '$pull') {
-        const pulled = setOf(elements);
-        for (let i = 0; i < array.length; i++) if (!pulled.has(textOf(array[i]))) next.push(array[i]);
-      } else {
-        const held = setOf(array);
-        for (let i = 0; i < array.length; i++) next.push(array[i]);
-        for (let i = 0; i < elements.length; i++) {
-          const text = textOf(elements[i]);
-          if (held.has(text)) continue;
-          held.add(text);
-          next.push(elements[i]);
-        }
-      }
+      const next = op === '$pull' ? pulledFrom(array, elements) : addedTo(array, elements);
       if (next.length !== array.length) ctx.set(field, next);
     } else ctx.calls.push([op === '$pull' ? 'remove' : 'add', field, elements]);
   }
@@ -181,7 +195,7 @@ const HANDLERS = {
     for (const field of Object.keys(fields)) {
       fieldName('update', field);
       ctx.claim('$inc', field);
-      if (!Number.isFinite(fields[field])) throw new TypeError('update(): $inc takes finite numbers');
+      if (!Number.isFinite(fields[field])) throw new ArgumentError('update(): $inc takes finite numbers');
       ctx.calls.push(['inc', field, fields[field]]);
     }
   },
@@ -219,7 +233,7 @@ const HANDLERS = {
       fieldName('update', field);
       ctx.claim('$pop', field);
       const side = fields[field];
-      if (side !== 1 && side !== -1) throw new TypeError('update(): $pop takes 1 (the last) or -1 (the first)');
+      if (side !== 1 && side !== -1) throw new ArgumentError('update(): $pop takes 1 (the last) or -1 (the first)');
       const array = ctx.current(field);
       if (!Array.isArray(array) || array.length === 0) continue;
       if (ctx.kindAt(field) === 'list') ctx.calls.push(['splice', field, side === 1 ? array.length - 1 : 0, 1]);
@@ -245,7 +259,7 @@ const HANDLERS = {
       ctx.claim('$rename', to);
       const kind = ctx.kindAt(field);
       if (kind !== undefined && kind !== 'register') {
-        throw new TypeError(`update(): $rename takes a register (${field} holds a ${kind})`);
+        throw new ArgumentError(`update(): $rename takes a register (${field} holds a ${kind})`);
       }
       const value = ctx.current(field);
       if (value === undefined) continue;

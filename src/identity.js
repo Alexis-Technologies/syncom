@@ -7,18 +7,18 @@
 // vector, which survives compaction, so a seq is durable the moment its op
 // is appended. A directory from before signing (a UUID in node.json) is
 // rekeyed once, with a warning, when the plugin arrives; node.json naming
-// ANOTHER key is refused (IDENTITY_MISMATCH): an id that changed in silence
+// ANOTHER key is refused (ALX_ERR_IDENTITY_MISMATCH): an id that changed in silence
 // would break SELF detection and every peer's echo filter. node.json also
 // names the kind plugins the directory ran with: a reopen without one of
 // them would hold fields it cannot apply and lose them at the next write,
-// so it is refused (PLUGIN_MISSING, naming the plugin); more plugins than
+// so it is refused (ALX_ERR_PLUGIN_MISSING, naming the plugin); more plugins than
 // before is fine and is recorded. A directory whose database was moved by
 // `rotateAtRest` (src/encryption) carries `moved.json` naming where: it is
-// refused (MOVED) until `dropDatabase` takes it — the same node never writes
+// refused (ALX_ERR_MOVED) until `dropDatabase` takes it — the same node never writes
 // in two places. `store` is the database's root namespace (node.json a key
 // of it). Requires errors.js and shape.js only.
 
-const { SyncomError, typed } = require('./errors.js');
+const { SyncomError, ArgumentError, DataError } = require('./errors.js');
 const { isStreamName, isKeyId } = require('./shape.js');
 
 const NODE_FILE = 'node.json';
@@ -36,7 +36,7 @@ const moved = async (store) => {
   }
   const where = to === null ? '' : ` to ${to.path} on the ${to.engine} engine`;
   throw new SyncomError(
-    'MOVED',
+    'ALX_ERR_MOVED',
     `This database was moved${where} (rotateAtRest): open it there, and dropDatabase this one`,
     {
       to,
@@ -46,9 +46,13 @@ const moved = async (store) => {
 
 // A service file a storage wrote itself and cannot read any more.
 const corruptFile = (file, cause) =>
-  new SyncomError('CORRUPT', `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
-    cause,
-  });
+  new SyncomError(
+    'ALX_ERR_CORRUPT',
+    `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`,
+    {
+      cause,
+    },
+  );
 
 /**
  * The node id of the storage at `path`: `keyId` the signing plugin's key
@@ -60,7 +64,7 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
   let nodeId = null;
   const text = await store.get(NODE_FILE);
   if (text !== null) {
-    let stored;
+    let stored = null;
     try {
       stored = JSON.parse(text);
     } catch (error) {
@@ -78,7 +82,7 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
       if (typeof name !== 'string') continue;
       if (!known.has(name)) {
         const message = `${NODE_FILE} says this storage runs with the ${name} plugin: createDatabase({ plugins }) with it from '@alexify/syncom/${name}'`;
-        throw typed('PLUGIN_MISSING', message);
+        throw new DataError('ALX_ERR_PLUGIN_MISSING', message);
       }
       count++;
     }
@@ -88,7 +92,7 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
       if (same) return nodeId;
     } else if (isKeyId(id)) {
       const message = `${NODE_FILE} names node ${id}, but keys/sign-public.pem is ${keyId}`;
-      throw new SyncomError('IDENTITY_MISMATCH', message, { id, key: keyId });
+      throw new SyncomError('ALX_ERR_IDENTITY_MISMATCH', message, { id, key: keyId });
     } else {
       logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
       nodeId = keyId;
@@ -98,7 +102,7 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
   } else {
     const minted = await getId();
     if (!isStreamName(minted)) {
-      throw new TypeError(
+      throw new ArgumentError(
         `createDatabase({ getId }): ${JSON.stringify(minted)} cannot be a node id (a short name without '@')`,
       );
     }

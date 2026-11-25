@@ -16,6 +16,7 @@ const { CURSOR, DB, SOURCE } = require('../symbols.js');
 const { toBase64 } = require('../crypto/pem.js');
 const { streams, sendAll } = require('./chunks.js');
 const { isDigest } = require('../blobs.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 // `unit({ query })`: false (the default: no `query`, no `count` mounted), true, or `{ regex }` — whether a `$regex`
 // is taken from the wire: false (the default under true: refused, 400 REGEX), 'safe' (one `safeRegex` passes), or
@@ -26,13 +27,13 @@ const normalizeQuery = (query) => {
   if (query === undefined || query === false) return false;
   if (query === true) return { regex: false };
   if (!isPlainObject(query)) {
-    throw new TypeError("unit({ query }): query must be a boolean or { regex: false | true | 'safe' }");
+    throw new ArgumentError("unit({ query }): query must be a boolean or { regex: false | true | 'safe' }");
   }
   for (const key of Object.keys(query)) {
-    if (key !== 'regex') throw new TypeError(`unit({ query }): unknown key '${key}'`);
+    if (key !== 'regex') throw new ArgumentError(`unit({ query }): unknown key '${key}'`);
   }
   const { regex = false } = query;
-  if (!REGEX_MODES.has(regex)) throw new TypeError("unit({ query }): regex must be false, true or 'safe'");
+  if (!REGEX_MODES.has(regex)) throw new ArgumentError("unit({ query }): regex must be false, true or 'safe'");
   return { regex };
 };
 
@@ -84,7 +85,7 @@ const cursorOf = (host, args, procedure, state) => {
   // A pattern from the wire runs on this host's event loop: refused unless the unit takes them (REGEX).
   const refused = regexRefusal(query, host.query.regex);
   if (refused !== null) throw refuseCall(host, procedure, refused, 400, 'REGEX', state.node);
-  let cursor;
+  let cursor = null;
   try {
     // Through the seam as it is: the collection's sealed records are the key holder's and never a peer's.
     cursor = host.storage[CURSOR](args.entity, query);
@@ -94,7 +95,7 @@ const cursorOf = (host, args, procedure, state) => {
         if (typeof key === 'string') cursor = cursor.order(key);
         else if (isPlainObject(key) && typeof key.field === 'string') {
           cursor = key.desc === true ? cursor.desc(key.field) : cursor.order(key.field);
-        } else throw new TypeError('order: a field name or { field, desc }');
+        } else throw new ArgumentError('order: a field name or { field, desc }');
       }
     }
   } catch (error) {
@@ -137,7 +138,7 @@ const walkScoped = async (host, cursor, scopes, { limit, offset, budget }) => {
   for await (const candidate of bounded.stream({ batch: SCOPED_BATCH })) {
     read++;
     if (row(candidate.id)?.encrypted === true) continue;
-    let scope;
+    let scope = undefined;
     try {
       scope = host.scopeOf(candidate.id, candidate);
     } catch (error) {
@@ -212,7 +213,7 @@ const blobNamed = async (host, state, digest, id, name) => {
   const { row, load } = host.storage[SOURCE];
   const held = row(id);
   if (held === null || held.gone === true || held.encrypted === true) return false;
-  let data;
+  let data = null;
   try {
     data = await load(id);
   } catch {

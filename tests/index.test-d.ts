@@ -136,7 +136,7 @@ expectType<Promise<unknown>>(storage.check('Project', { title: 'a' }));
 const validationError = new syncom.ValidationError('Project', [
   { path: ['title'], message: 'is required', code: 'required' },
 ]);
-expectType<'VALIDATION_FAILED'>(validationError.code);
+expectType<'ALX_ERR_VALIDATION_FAILED'>(validationError.code);
 expectType<string | null>(validationError.entity);
 expectType<syncom.ValidationIssue[]>(validationError.issues);
 expectAssignable<Error>(validationError);
@@ -217,7 +217,7 @@ expectAssignable<syncom.TreeBlock>({ k: 'tree', ts: 1, moves: {} });
 expectError<syncom.TreeBlock>({ ts: 1, moves: {} });
 expectAssignable<syncom.TreeNode[]>([{ id: 'n1', children: [] }]);
 expectAssignable<syncom.FieldKind>('tree');
-expectAssignable<syncom.SyncomErrorCode>('CYCLE');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_CYCLE');
 expectType<Promise<void>>(storage.delete('id', { actor: 'u2' }));
 expectType<Promise<void>>(storage.purge('id', { actor: 'u2' }));
 expectType<Promise<number>>(log.scrub('id'));
@@ -382,21 +382,39 @@ expectType<unknown>(telemetryStorage.telemetry);
 
 // hooks
 const hookError = new syncom.HookError('beforeWrite', new Error('x'));
-expectType<'HOOK_FAILED'>(hookError.code);
+expectType<'ALX_ERR_HOOK_FAILED'>(hookError.code);
 expectType<string>(hookError.hook);
 expectType<unknown>(hookError.cause);
 expectAssignable<SyncomError>(hookError);
 expectAssignable<SyncomError>(validationError);
 
 // errors: operational ones carry a code from the union
-const coded = new syncom.SyncomError('NOT_FOUND', 'Record x not found', { cause: new Error('y'), id: 'x' });
+const coded = new syncom.SyncomError('ALX_ERR_NOT_FOUND', 'Record x not found', { cause: new Error('y'), id: 'x' });
 expectType<SyncomErrorCode>(coded.code);
 expectAssignable<Error>(coded);
-expectAssignable<SyncomErrorCode>('LOCKED');
-expectAssignable<SyncomErrorCode>('BLOB_UPLOAD_FAILED');
-expectAssignable<SyncomErrorCode>('IDENTITY_MISMATCH');
-expectAssignable<SyncomErrorCode>('BAD_SIGNATURE');
-expectAssignable<SyncomErrorCode>('UNSIGNED');
+expectAssignable<SyncomErrorCode>('ALX_ERR_LOCKED');
+expectAssignable<SyncomErrorCode>('ALX_ERR_BLOB_UPLOAD_FAILED');
+expectAssignable<SyncomErrorCode>('ALX_ERR_IDENTITY_MISMATCH');
+expectAssignable<SyncomErrorCode>('ALX_ERR_BAD_SIGNATURE');
+expectAssignable<SyncomErrorCode>('ALX_ERR_UNSIGNED');
+
+// errors: a wrong argument is an ArgumentError, a value of data a DataError — TypeErrors both, with a code
+const wrong = new syncom.ArgumentError('createDatabase(): path is a string');
+expectAssignable<TypeError>(wrong);
+expectType<'ALX_ERR_INVALID_ARGUMENT'>(wrong.code);
+expectType<'ArgumentError'>(wrong.name);
+const outOfRange = new syncom.ArgumentRangeError('between(): the bounds are not in order');
+expectAssignable<RangeError>(outOfRange);
+expectType<'ALX_ERR_INVALID_ARGUMENT'>(outOfRange.code);
+const badId = new syncom.DataError('ALX_ERR_INVALID_ID', 'Invalid record id', { entity: 'Task', field: 'key' });
+expectAssignable<TypeError>(badId);
+expectType<syncom.DataErrorCode>(badId.code);
+expectType<syncom.DataErrorDetails | null>(badId.details);
+expectError(new syncom.DataError('ALX_ERR_NOT_FOUND', 'not a data code'));
+expectAssignable<syncom.ErrorCode>('ALX_ERR_INVALID_ARGUMENT');
+expectAssignable<syncom.ErrorCode>('ALX_ERR_INVALID_ID');
+expectAssignable<syncom.ErrorCode>('ALX_ERR_NOT_FOUND');
+expectNotAssignable<syncom.ErrorCode>('NOT_FOUND');
 expectAssignable<StorageOptions>({ sync: { signatures: 'require' } });
 expectAssignable<StorageOptions>({ sync: { signatures: false } });
 expectError(syncom.createDatabase({ sync: { signatures: 'yes' } }));
@@ -503,9 +521,10 @@ storage.once('apply', (batch) => {
   expectType<syncom.SyncOp[]>(batch.ops);
 });
 storage.on('error', (error) => {
-  if (error.code === 'UNPERSISTED') return void expectType<string[]>(error.ids);
-  if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') return void expectType<string>(error.path);
-  if (error.code === 'EQUIVOCATION') {
+  if (error.code === 'ALX_ERR_UNPERSISTED') return void expectType<string[]>(error.ids);
+  if (error.code === 'ALX_ERR_LEASE_LOST' || error.code === 'ALX_ERR_FOLLOW_LOST')
+    return void expectType<string>(error.path);
+  if (error.code === 'ALX_ERR_EQUIVOCATION') {
     expectType<'seq' | 'chain'>(error.reason);
     expectType<string>(error.held);
     expectType<string | null>(error.received);
@@ -516,7 +535,7 @@ storage.on('error', (error) => {
   expectType<syncom.ValidationIssue[] | undefined>(error.issues);
   expectType<syncom.RefusalReason | undefined>(error.rejected?.[0]?.reason);
   expectType<number | undefined>(error.count);
-  if (error.code === 'BAD_SIGNATURE' || error.code === 'UNSIGNED') expectType<syncom.SyncOp>(error.op);
+  if (error.code === 'ALX_ERR_BAD_SIGNATURE' || error.code === 'ALX_ERR_UNSIGNED') expectType<syncom.SyncOp>(error.op);
 });
 storage.applyRemote([]).then((result) => {
   expectType<number>(result.unsigned);
@@ -603,9 +622,16 @@ storage.applyRemote([], { bound: ['Doc'] }).then((result) => {
 expectError(storage.applyRemote([], { bound: 'Doc' }));
 storage.on('error', (error) => {
   expectAssignable<SyncomError>(error);
-  if (error.code === 'UNPERSISTED' || error.code === 'EQUIVOCATION') return;
-  if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') return;
-  expectType<'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED'>(error.code);
+  if (error.code === 'ALX_ERR_UNPERSISTED' || error.code === 'ALX_ERR_EQUIVOCATION') return;
+  if (error.code === 'ALX_ERR_LEASE_LOST' || error.code === 'ALX_ERR_FOLLOW_LOST') return;
+  expectType<
+    | 'ALX_ERR_OP_REFUSED'
+    | 'ALX_ERR_OP_INVALID'
+    | 'ALX_ERR_OP_UNREADABLE'
+    | 'ALX_ERR_SKEW'
+    | 'ALX_ERR_BAD_SIGNATURE'
+    | 'ALX_ERR_UNSIGNED'
+  >(error.code);
   expectType<string>(error.op.origin);
 });
 expectAssignable<Fsi>({
@@ -633,7 +659,7 @@ expectAssignable<StorageOptions>({ chain: false });
 expectError(syncom.createDatabase({ chain: 'no' }));
 expectType<number>(log.seqOf('origin@scope'));
 // The per-stream hash chain: fingerprints, heads, the op's link.
-expectAssignable<SyncomErrorCode>('EQUIVOCATION');
+expectAssignable<SyncomErrorCode>('ALX_ERR_EQUIVOCATION');
 expectType<string | undefined>(log.fingerprintOf('origin@scope', 3));
 expectType<[number, string] | undefined>(log.headOf('origin'));
 log.adoptHeads({ origin: [3, `${'f'.repeat(42)}A`] });
@@ -644,7 +670,7 @@ expectType<string | undefined>(({} as syncom.LogEntry).fp);
 // E5b: introspection
 expectType<syncom.StorageStats>(storage.stats());
 expectType<Promise<{ ops: number; alive: boolean }>>(storage.repair('r1'));
-expectAssignable<SyncomErrorCode>('UNRECOVERABLE');
+expectAssignable<SyncomErrorCode>('ALX_ERR_UNRECOVERABLE');
 expectType<{ entries: syncom.LogEntry[]; last: number | null } | null>(log.read('e.1', { scopes: ['a'], limit: 5 }));
 expectType<syncom.LogEntry[] | null>(log.since('e.1'));
 expectType<syncom.LogEntry[]>(log.entriesOf('r1'));
@@ -676,9 +702,9 @@ storage.on('lease', (event) => {
   expectType<'renewed' | 'late' | 'lost'>(event.state);
   expectType<string>(event.path);
 });
-expectAssignable<syncom.SyncomErrorCode>('READ_ONLY');
-expectAssignable<syncom.SyncomErrorCode>('LEASE_LOST');
-expectAssignable<syncom.SyncomErrorCode>('FOLLOW_LOST');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_READ_ONLY');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_LEASE_LOST');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_FOLLOW_LOST');
 engineDb.changes?.subscribe((message) => expectType<Error | undefined>(message.error));
 expectType<{ tail: string } | null>(storage.stats().chain);
 expectType<{ count: number; corrupt: boolean } | null>(storage.stats().tags);
@@ -714,12 +740,12 @@ expectType<Promise<RecordData | null>>(posts.get('id', { at: 'epoch.5' }));
 expectType<Promise<RecordData | null>>(posts.get('id', { at: { tag: 'v1' } }));
 expectAssignable<syncom.ReadContext>({ id: 'x', at: 'epoch.1' });
 expectAssignable<syncom.ReadContext>({ id: 'x', history: true });
-expectAssignable<syncom.SyncomErrorCode>('HISTORY_GONE');
-expectAssignable<syncom.TypedErrorCode>('INVALID_VERSION');
-expectNotAssignable<syncom.SyncomErrorCode>('INVALID_VERSION');
-expectAssignable<syncom.TypedErrorCode>('PRESENCE_SIZE');
-expectAssignable<syncom.SyncomErrorCode>('TAG_EXISTS');
-expectAssignable<syncom.SyncomErrorCode>('TAG_NOT_FOUND');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_HISTORY_GONE');
+expectAssignable<syncom.DataErrorCode>('ALX_ERR_INVALID_VERSION');
+expectNotAssignable<syncom.SyncomErrorCode>('ALX_ERR_INVALID_VERSION');
+expectAssignable<syncom.DataErrorCode>('ALX_ERR_PRESENCE_SIZE');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_TAG_EXISTS');
+expectAssignable<syncom.SyncomErrorCode>('ALX_ERR_TAG_NOT_FOUND');
 declare const version: syncom.HistoryVersion;
 expectType<string[]>(version.fields);
 expectType<true | undefined>(version.scrubbed);
@@ -859,8 +885,8 @@ expectType<number>(typedLog.pins);
 expectType<syncom.ApplyResult>(syncom.applyOp(null, {} as syncom.SyncOp, { pendingMax: 10 }));
 declare const typedStorage: syncom.Database;
 typedStorage.on('error', (error) => {
-  if (error.code === 'UNPERSISTED') expectType<string[]>(error.ids);
-  else if (error.code === 'LEASE_LOST' || error.code === 'FOLLOW_LOST') expectType<string>(error.path);
+  if (error.code === 'ALX_ERR_UNPERSISTED') expectType<string[]>(error.ids);
+  else if (error.code === 'ALX_ERR_LEASE_LOST' || error.code === 'ALX_ERR_FOLLOW_LOST') expectType<string>(error.path);
   else expectType<syncom.SyncOp>(error.op);
 });
 declare const removal: syncom.WriteContext;
@@ -1119,10 +1145,10 @@ storage.document<Post>('id').then((record) => {
   const reference = null as unknown as Reference;
   expectType<string>(reference.id);
   expectType<Promise<syncom.SyncomDocument<RecordData> | null>>(reference.document());
-  const code: syncom.SyncomErrorCode = 'EXISTS';
-  const inTx: syncom.SyncomErrorCode = 'IN_TRANSACTION';
-  expectType<'EXISTS'>(code);
-  expectType<'IN_TRANSACTION'>(inTx);
+  const code: syncom.SyncomErrorCode = 'ALX_ERR_EXISTS';
+  const inTx: syncom.SyncomErrorCode = 'ALX_ERR_IN_TRANSACTION';
+  expectType<'ALX_ERR_EXISTS'>(code);
+  expectType<'ALX_ERR_IN_TRANSACTION'>(inTx);
 }
 
 // The engine contract: an fsi becomes the files engine.

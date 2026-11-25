@@ -15,7 +15,7 @@ const LAZY = new WeakMap();
 
 const lazyField = (data, field, render) => {
   let made = false;
-  let value;
+  let value = undefined;
   const descriptor = {
     configurable: true,
     enumerable: true,

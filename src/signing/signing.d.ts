@@ -6,7 +6,7 @@
 // default) checks what carries a signature, 'require' refuses what carries
 // none. Without the plugin the node id is what `open({ getId })` mints (a
 // UUID by default), nothing is signed and nothing is checked; 'require'
-// without it is `PLUGIN_MISSING`. The key functions the plugin stands on are
+// without it is `ALX_ERR_PLUGIN_MISSING`. The key functions the plugin stands on are
 // exported for the application's own use (a message signed by the node, a
 // pair made ahead of time). Under the browser condition `calculateHash`,
 // `sign` and `verify` return promises (signing.browser.d.ts).

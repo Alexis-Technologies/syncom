@@ -149,7 +149,7 @@ const main = async () => {
     await bench(`storage.treeMove — a random tree of ${size.toLocaleString('en-US')} nodes (memory fsi)`, async () => {
       const move = anyMove(size);
       await storage.treeMove(rid, 'outline', move.node, move.parent).catch((error) => {
-        if (error.code !== 'CYCLE' && error.code !== 'OUT_OF_RANGE') throw error;
+        if (error.code !== 'ALX_ERR_CYCLE' && error.code !== 'ALX_ERR_OUT_OF_RANGE') throw error;
       });
     });
   }

@@ -11,6 +11,7 @@ const { notify } = require('../hooks.js');
 const { proveMessage } = require('./protocol.js');
 const { GLOBAL_SCOPE } = require('../scope.js');
 const { SIGNER } = require('../symbols.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 // `unit({ allow })`: which procedures this unit serves; a peer asking for one it does not is refused by code
 // (403): `push` as READ_ONLY — the host takes nothing — `snapshot`, `changes` and `blob` as NOT_SERVED. `blob` is
@@ -23,18 +24,18 @@ const BLOB_MODES = new Set([false, 'named', 'any']);
 const normalizeAllow = (allow) => {
   const normalized = { push: true, changes: true, snapshot: true, blob: 'named' };
   if (allow === undefined || allow === null) return normalized;
-  if (typeof allow !== 'object') throw new TypeError('unit({ allow }): allow must be an object');
+  if (typeof allow !== 'object') throw new ArgumentError('unit({ allow }): allow must be an object');
   for (const key of Object.keys(allow)) {
-    if (!ALLOW_KEYS.has(key)) throw new TypeError(`unit({ allow }): unknown procedure '${key}'`);
+    if (!ALLOW_KEYS.has(key)) throw new ArgumentError(`unit({ allow }): unknown procedure '${key}'`);
     const value = allow[key];
     if (value === undefined) continue;
     if (key === 'blob') {
       const mode = value === true ? 'named' : value;
-      if (!BLOB_MODES.has(mode)) throw new TypeError("unit({ allow }): blob is false, true ('named') or 'any'");
+      if (!BLOB_MODES.has(mode)) throw new ArgumentError("unit({ allow }): blob is false, true ('named') or 'any'");
       normalized.blob = mode;
       continue;
     }
-    if (typeof value !== 'boolean') throw new TypeError(`unit({ allow }): ${key} must be a boolean`);
+    if (typeof value !== 'boolean') throw new ArgumentError(`unit({ allow }): ${key} must be a boolean`);
     normalized[key] = value;
   }
   return normalized;
@@ -70,13 +71,13 @@ const DEFAULT_OPS_PER_PUSH = 10_000;
 const normalizeLimits = (limits) => {
   const normalized = { opsPerPush: DEFAULT_OPS_PER_PUSH, rowsPerQuery: DEFAULT_ROWS_PER_QUERY };
   if (limits === undefined || limits === null) return normalized;
-  if (typeof limits !== 'object') throw new TypeError('unit({ limits }): limits must be an object');
+  if (typeof limits !== 'object') throw new ArgumentError('unit({ limits }): limits must be an object');
   for (const key of Object.keys(limits)) {
-    if (!LIMIT_KEYS.has(key)) throw new TypeError(`unit({ limits }): unknown limit '${key}'`);
+    if (!LIMIT_KEYS.has(key)) throw new ArgumentError(`unit({ limits }): unknown limit '${key}'`);
     const value = limits[key];
     if (value === undefined) continue;
     if (typeof value !== 'number' || Number.isNaN(value) || value <= 0) {
-      throw new TypeError(`unit({ limits }): ${key} must be a positive number`);
+      throw new ArgumentError(`unit({ limits }): ${key} must be a positive number`);
     }
     normalized[key] = value;
   }
@@ -104,7 +105,10 @@ const grant = (asked, granted) => {
     else if (scope === GLOBAL_SCOPE) return granted;
     else if (held.has(scope)) scopes.push(scope);
   }
-  if (named === 0) return Array.isArray(asked) ? [] : everything ? null : granted;
+  if (named === 0) {
+    if (Array.isArray(asked)) return [];
+    return everything ? null : granted;
+  }
   if (held === null) return scopes;
   if (scopes.length === 0) throw coded('Scopes not granted', 403, 'SCOPES');
   return scopes;
@@ -206,13 +210,17 @@ const remember = (host, context, state) => {
   const { client, server } = context;
   let sessions = host.sessions.get(state.node);
   if (sessions === undefined) host.sessions.set(state.node, (sessions = new Set()));
-  for (const session of sessions) if (session.client === client) sessions.delete(session);
+  for (const session of sessions) {
+    if (session.client === client) sessions.delete(session);
+  }
   const session = {
     client,
     revoke(scopes) {
       const taken = new Set(scopes);
       const kept = [];
-      for (let i = 0; i < state.scopes.length; i++) if (!taken.has(state.scopes[i])) kept.push(state.scopes[i]);
+      for (let i = 0; i < state.scopes.length; i++) {
+        if (!taken.has(state.scopes[i])) kept.push(state.scopes[i]);
+      }
       state.scopes = kept;
       state.generation++;
       if (server && typeof server.sendTo === 'function' && client?.id !== undefined) {
@@ -274,7 +282,9 @@ const handPresence = (host, context, scopes) => {
     const room = rooms.get(scope);
     if (room === undefined) continue;
     const s = [];
-    for (const entry of room.values()) if (entry[2] >= floor && entry[0] !== self) s.push(entry);
+    for (const entry of room.values()) {
+      if (entry[2] >= floor && entry[0] !== self) s.push(entry);
+    }
     if (s.length > 0) server.sendTo(client.id, 'syncom/presence', { p: 1, scope, s });
   }
 };

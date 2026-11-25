@@ -39,7 +39,7 @@ const { usage, quota } = await board.quota(); // bytes the origin uses and may u
 const kept = await board.persist(); // true once the browser agrees not to evict the origin
 board.on('error', (error) => {
   // The write resolved and replicates; its record could not be stored and is held in memory.
-  if (error.code === 'UNPERSISTED' && error.quota) showStorageFull();
+  if (error.code === 'ALX_ERR_UNPERSISTED' && error.quota) showStorageFull();
 });
 // #endregion quota
 assert.ok(usage === null || typeof usage === 'number');
@@ -71,11 +71,11 @@ refuse = 'records';
 const kept1 = await tight.Task.insert({ title: 'Held in memory', done: false });
 assert.equal((await tight.Task.get(kept1.id)).title, 'Held in memory');
 assert.equal(errors.length, 1);
-assert.equal(errors[0].code, 'UNPERSISTED');
+assert.equal(errors[0].code, 'ALX_ERR_UNPERSISTED');
 assert.equal(errors[0].quota, true);
 
-// The log is refused: nothing was written, and the write rejects with QUOTA.
+// The log is refused: nothing was written, and the write rejects with ALX_ERR_QUOTA.
 refuse = 'log';
-await assert.rejects(() => tight.Task.insert({ title: 'Not logged', done: false }), { code: 'QUOTA' });
+await assert.rejects(() => tight.Task.insert({ title: 'Not logged', done: false }), { code: 'ALX_ERR_QUOTA' });
 refuse = null;
 await tight.close();

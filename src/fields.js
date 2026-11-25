@@ -6,9 +6,10 @@
 // its arguments checked first in src/args.js. The kinds a plugin brings
 // (lists, texts, trees) bring their methods with them (src/plugin.js
 // `methods`); Storage keeps one delegate per method here, and a stub that
-// refuses with PLUGIN_MISSING for a plugin's method it was not opened with.
+// refuses with ALX_ERR_PLUGIN_MISSING for a plugin's method it was not opened with.
 
 const { fieldName, fieldNames, setElements } = require('./args.js');
+const { ArgumentError } = require('./argument-errors.js');
 
 // Each returns the commit's promise as it is (`core.write`, no async frame
 // of its own): an argument it refuses is a throw, which the storage's
@@ -17,7 +18,7 @@ const { fieldName, fieldNames, setElements } = require('./args.js');
 /** Adds `value` to counter field `key` — the commutative alternative to update(). */
 const inc = (core, id, key, value = 1, options) => {
   fieldName('inc', key);
-  if (!Number.isFinite(value)) throw new TypeError('inc() takes a finite number');
+  if (!Number.isFinite(value)) throw new ArgumentError('inc() takes a finite number');
   return core.write('inc', id, { key, value }, { actor: options?.actor });
 };
 
@@ -25,7 +26,7 @@ const inc = (core, id, key, value = 1, options) => {
  * Adds `elements` to set field `key` — an observed-remove set: two nodes
  * that add concurrently both keep theirs, and an add a remove did not
  * observe survives it. Creates the field, and the record, when absent; a
- * deleted record is NOT_FOUND, as for every field op (delete wins: only a
+ * deleted record is ALX_ERR_NOT_FOUND, as for every field op (delete wins: only a
  * whole-record write brings one back — src/commit.js prepareOp).
  */
 const add = (core, id, key, elements, options) =>

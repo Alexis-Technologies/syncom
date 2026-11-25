@@ -38,13 +38,13 @@ try {
   await board.Task.insert({ done: false });
 } catch (error) {
   console.log(error instanceof HookError); // true
-  console.log(error.code, error.hook); // 'HOOK_FAILED' 'beforeWrite'
+  console.log(error.code, error.hook); // 'ALX_ERR_HOOK_FAILED' 'beforeWrite'
   console.log(error.cause.message); // 'a task needs a title'
 }
 // #endregion hook-error
 await assert.rejects(board.Task.insert({ done: false }), (error) => {
   assert.ok(error instanceof HookError);
-  assert.equal(error.code, 'HOOK_FAILED');
+  assert.equal(error.code, 'ALX_ERR_HOOK_FAILED');
   assert.equal(error.hook, 'beforeWrite');
   assert.equal(error.cause.message, 'a task needs a title');
   return true;

@@ -1,6 +1,6 @@
 'use strict';
 
-const { SyncomError } = require('./errors.js');
+const { SyncomError, ArgumentError } = require('./errors.js');
 // Hooks and the contained event path. No requires beyond ./errors.js: this
 // file is reached from the browser bundle, and scripts/size.js fails on any
 // import that is not a relative file.
@@ -13,7 +13,7 @@ const { SyncomError } = require('./errors.js');
 
 class HookError extends SyncomError {
   constructor(hook, cause) {
-    super('HOOK_FAILED', `The ${hook} hook failed: ${cause?.message ?? cause}`, { cause, hook });
+    super('ALX_ERR_HOOK_FAILED', `The ${hook} hook failed: ${cause?.message ?? cause}`, { cause, hook });
     this.name = 'HookError';
   }
 }
@@ -25,13 +25,13 @@ const normalizeHooks = (hooks, allowed, label) => {
   const result = {};
   for (const name of allowed) result[name] = null;
   if (hooks === undefined || hooks === null) return result;
-  if (typeof hooks !== 'object' || Array.isArray(hooks)) throw new TypeError(`${label}: hooks must be an object`);
+  if (typeof hooks !== 'object' || Array.isArray(hooks)) throw new ArgumentError(`${label}: hooks must be an object`);
   const known = new Set(allowed);
   for (const key of Object.keys(hooks)) {
-    if (!known.has(key)) throw new TypeError(`${label}: unknown hook '${key}'`);
+    if (!known.has(key)) throw new ArgumentError(`${label}: unknown hook '${key}'`);
     const fn = hooks[key];
     if (fn === undefined || fn === null) continue;
-    if (typeof fn !== 'function') throw new TypeError(`${label}: hooks.${key} must be a function`);
+    if (typeof fn !== 'function') throw new ArgumentError(`${label}: hooks.${key} must be a function`);
     result[key] = fn;
   }
   return result;

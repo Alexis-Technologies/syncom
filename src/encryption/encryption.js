@@ -6,7 +6,7 @@
 //   THIS node's RSA pair (`keys/public.pem`, `keys/private.pem`, made at the
 //   first open), written outside the op log, never replicated. The core
 //   calls the hooks `seal.encrypt(data)` and `seal.decrypt(text)`; without
-//   the plugin an encrypted write is PLUGIN_MISSING. The envelope is
+//   the plugin an encrypted write is ALX_ERR_PLUGIN_MISSING. The envelope is
 //   ./rsa.js's (node:crypto) or ./rsa.browser.js's (Web Crypto) — the same
 //   bytes on both.
 // - `atRest(fsi | engine, { key | password, salt })` — a backend wrapper, the way
@@ -19,7 +19,7 @@
 //   never written. Web Crypto on both platforms. The engine knows nothing of
 //   it: a storage opened over the wrapper reads its own files, one opened
 //   over the bare backend reads `enc1:…` and refuses the file
-//   (DECRYPT_FAILED, reason 'plain' the other way round). Given an engine
+//   (ALX_ERR_DECRYPT_FAILED, reason 'plain' the other way round). Given an engine
 //   (memory, IndexedDB, SQLite, MongoDB), the same over its stores — every
 //   record, piece, copy, kv text and log entry a ciphertext bound to its
 //   place, a blob's bytes as bytes (iv ‖ ciphertext, no base64:
@@ -28,12 +28,12 @@
 // - `rotateAtRest(engine | { fsi, filesEngine }, { path, from, to, into })` —
 //   the key rotated by a copy (engines/copy.js) into another path, engine or
 //   backend; the source is then fenced with `moved.json` (createDatabase
-//   refuses it as MOVED, naming where it went) until it is dropped.
+//   refuses it as ALX_ERR_MOVED, naming where it went) until it is dropped.
 
 const { generateKeys, encrypt, decrypt, loadKeys } = require('./rsa.js');
 const { checkFsi } = require('../backend.js');
 const { isEngine } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { atRestEngine } = require('./at-rest-engine.js');
 const { copyEngine } = require('../engines/copy.js');
 const { toBase64, fromBase64 } = require('../crypto/pem.js');
@@ -61,14 +61,14 @@ const PREFIX = 'enc1:';
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 const IV_BYTES = 12;
 const TAG_BYTES = 16;
-// The fence a rotated source carries in its root namespace (src/identity.js reads it: MOVED).
+// The fence a rotated source carries in its root namespace (src/identity.js reads it: ALX_ERR_MOVED).
 const MOVED_FILE = 'moved.json';
 const DEFAULT_ITERATIONS = 600_000;
 const subtle = () => globalThis.crypto.subtle;
 
 const failed = (where, reason, cause) =>
   new SyncomError(
-    'DECRYPT_FAILED',
+    'ALX_ERR_DECRYPT_FAILED',
     `${where}: ${reason === 'plain' ? 'not encrypted' : 'cannot be decrypted (the wrong key, or a torn file)'}`,
     { path: where, reason, cause },
   );
@@ -76,23 +76,23 @@ const failed = (where, reason, cause) =>
 // The options, checked when the wrapper is made (a TypeError then, not at
 // the first file): the key given, or what derives one.
 const checkOptions = (options) => {
-  if (options === null || typeof options !== 'object') throw new TypeError('atRest() takes an options object');
+  if (options === null || typeof options !== 'object') throw new ArgumentError('atRest() takes an options object');
   const { key, password, salt, iterations = DEFAULT_ITERATIONS } = options;
   if (key !== undefined) {
     const isKey = typeof CryptoKey === 'function' && key instanceof CryptoKey;
     if (!isKey && !(key instanceof Uint8Array && key.length === 32)) {
-      throw new TypeError('atRest(): key must be 32 bytes (a Uint8Array) or a CryptoKey');
+      throw new ArgumentError('atRest(): key must be 32 bytes (a Uint8Array) or a CryptoKey');
     }
     return { key };
   }
   if (typeof password !== 'string' || password.length === 0) {
-    throw new TypeError('atRest(): give a key (32 bytes) or a password with a salt');
+    throw new ArgumentError('atRest(): give a key (32 bytes) or a password with a salt');
   }
   if (typeof salt !== 'string' || salt.length < 8) {
-    throw new TypeError('atRest(): a password needs a salt of 8 characters or more, kept by the caller');
+    throw new ArgumentError('atRest(): a password needs a salt of 8 characters or more, kept by the caller');
   }
   if (!Number.isInteger(iterations) || iterations < 1000) {
-    throw new TypeError('atRest(): iterations must be an integer of 1000 or more');
+    throw new ArgumentError('atRest(): iterations must be an integer of 1000 or more');
   }
   return { password, salt, iterations };
 };
@@ -110,7 +110,7 @@ const keyOf = async ({ key, password, salt, iterations }) => {
 
 // The cipher of one key: `sealBytes(name, bytes)` → iv ‖ ciphertext (the tag
 // inside) bound to `name` (the additional data of AES-GCM), `openBytes(where,
-// name, bytes)` the bytes back or DECRYPT_FAILED `key` naming `where` — what a
+// name, bytes)` the bytes back or ALX_ERR_DECRYPT_FAILED `key` naming `where` — what a
 // blob is sealed as, its size its own; `seal(name, text)` → `enc1:` and the
 // base64 of the same, `open(where, name, text)` the text back ('plain' for a
 // text without the prefix, 'torn' for one that is no base64). The key is
@@ -195,58 +195,58 @@ const atRest = (target, options = {}) => {
 };
 
 /**
- * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole — every record,
- * piece, copy, kv text, log entry and blob — into `into` (`{ path }` on the same engine or backend, `{ engine }`,
- * `{ fsi }`, or a path with either) sealed under `to`; the same node (its identity, epoch, vector and heads go with
- * it), so a peer resumes where it was. Over an engine (memory, IndexedDB, SQLite, MongoDB) `rotateAtRest(engine, …)`;
- * over a backend — the files engine, wrapped at its backend — `rotateAtRest({ fsi, filesEngine }, …)` with the files
- * engine's factory (`filesEngine` of the main entry: nothing of it is bundled here). Never in place: a copy cut short
- * leaves the source as it was and the target marked (`copy.json`), which the next copy takes away first
- * (`TARGET_NOT_EMPTY` for a target that holds a database). Once copied, the source is FENCED: `moved.json` in its root
- * namespace names where it went, and `createDatabase` there refuses `MOVED` until `dropDatabase` takes it — the same
- * node id never writes in two places. Open the database at its new place with `atRest(…, to)`.
+ * The at-rest key rotated by a copy: the database at `path`, sealed under `from`, copied whole — every record, piece,
+ * copy, kv text, log entry and blob — into `into` (`{ path }` on the same engine or backend, `{ engine }`, `{ fsi }`,
+ * or a path with either) sealed under `to`; the same node (its identity, epoch, vector and heads go with it), so a peer
+ * resumes where it was. Over an engine (memory, IndexedDB, SQLite, MongoDB) `rotateAtRest(engine, …)`; over a backend —
+ * the files engine, wrapped at its backend — `rotateAtRest({ fsi, filesEngine }, …)` with the files engine's factory
+ * (`filesEngine` of the main entry: nothing of it is bundled here). Never in place: a copy cut short leaves the source
+ * as it was and the target marked (`copy.json`), which the next copy takes away first (`ALX_ERR_TARGET_NOT_EMPTY` for a
+ * target that holds a database). Once copied, the source is FENCED: `moved.json` in its root namespace names where it
+ * went, and `createDatabase` there refuses `ALX_ERR_MOVED` until `dropDatabase` takes it — the same node id never
+ * writes in two places. Open the database at its new place with `atRest(…, to)`.
  */
 const rotateAtRest = async (target, { path, from, to, into, batch } = {}) => {
   const overBackend = target !== null && typeof target === 'object' && !isEngine(target) && 'fsi' in target;
   if (!overBackend && !isEngine(target)) {
-    throw new TypeError('rotateAtRest(): an engine, or { fsi, filesEngine } for a backend');
+    throw new ArgumentError('rotateAtRest(): an engine, or { fsi, filesEngine } for a backend');
   }
-  if (typeof path !== 'string' || path.length === 0) throw new TypeError('rotateAtRest(): path');
+  if (typeof path !== 'string' || path.length === 0) throw new ArgumentError('rotateAtRest(): path');
   const named = into !== null && typeof into === 'object';
   if (!named || (into.engine === undefined && into.path === undefined && into.fsi === undefined)) {
-    throw new TypeError(
+    throw new ArgumentError(
       'rotateAtRest(): into names where the rotated database lands — { path }, { engine } or { fsi }',
     );
   }
   const targetPath = into.path ?? path;
-  let source;
-  let destination;
-  let engineName;
+  let source = null;
+  let destination = null;
+  let engineName = '';
   if (overBackend) {
     const { fsi, filesEngine } = target;
     checkFsi(fsi, 'rotateAtRest({ fsi })');
     if (typeof filesEngine !== 'function') {
-      throw new TypeError(
+      throw new ArgumentError(
         "rotateAtRest({ fsi, filesEngine }): the files engine's factory — filesEngine of '@alexify/syncom'",
       );
     }
     if (into.engine !== undefined) {
-      throw new TypeError('rotateAtRest({ fsi }): into names a path or a backend (fsi), not an engine');
+      throw new ArgumentError('rotateAtRest({ fsi }): into names a path or a backend (fsi), not an engine');
     }
     const other = into.fsi === undefined ? fsi : checkFsi(into.fsi, 'rotateAtRest(into.fsi)');
     if (other === fsi && targetPath === path) {
-      throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or backend');
+      throw new ArgumentError('rotateAtRest(): a database is not rotated in place — into another path or backend');
     }
     source = filesEngine(atRestFsi(fsi, from));
     destination = filesEngine(atRestFsi(other, to));
     engineName = 'files';
   } else {
     if (into.fsi !== undefined) {
-      throw new TypeError('rotateAtRest(engine): into names a path or an engine, not a backend');
+      throw new ArgumentError('rotateAtRest(engine): into names a path or an engine, not a backend');
     }
     const engine = into.engine ?? target;
     if (engine === target && targetPath === path) {
-      throw new TypeError('rotateAtRest(): a database is not rotated in place — into another path or engine');
+      throw new ArgumentError('rotateAtRest(): a database is not rotated in place — into another path or engine');
     }
     source = atRest(target, from);
     destination = atRest(engine, to);

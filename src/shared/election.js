@@ -15,7 +15,9 @@
 // go and `request()` asks for it again — an instance that could not open as
 // the leader steps aside and comes back. Two leaders at once never write at once: the database's own
 // lock is the last word, and a claimant it refuses tries again. A
-// `follower` never leads (a tab beside a SharedWorker that does). No requires.
+// `follower` never leads (a tab beside a SharedWorker that does). Requires argument-errors.js only.
+
+const { ArgumentError } = require('../argument-errors.js');
 
 const DEFAULT_HEARTBEAT = 1000;
 const DEFAULT_MISSES = 3;
@@ -27,8 +29,10 @@ const listen = (channel, listener) => {
     channel.addEventListener('message', listener);
     return () => channel.removeEventListener?.('message', listener);
   }
+  // A channel without addEventListener takes its one handler as `onmessage`, which also starts a port.
   channel.onmessage = listener;
   return () => {
+    // The same fallback: only the handler this listen set is taken off.
     if (channel.onmessage === listener) channel.onmessage = null;
   };
 };
@@ -49,12 +53,12 @@ const elect = ({
   misses = DEFAULT_MISSES,
   token = randomToken(),
 } = {}) => {
-  if (typeof name !== 'string' || name.length === 0) throw new TypeError('elect(): name is required');
+  if (typeof name !== 'string' || name.length === 0) throw new ArgumentError('elect(): name is required');
   if (!Number.isFinite(heartbeat) || heartbeat <= 0) {
-    throw new TypeError('elect(): heartbeat must be a positive number');
+    throw new ArgumentError('elect(): heartbeat must be a positive number');
   }
-  if (!Number.isInteger(misses) || misses < 1) throw new TypeError('elect(): misses must be a positive integer');
-  if (typeof follower !== 'boolean') throw new TypeError('elect(): follower must be a boolean');
+  if (!Number.isInteger(misses) || misses < 1) throw new ArgumentError('elect(): misses must be a positive integer');
+  if (typeof follower !== 'boolean') throw new ArgumentError('elect(): follower must be a boolean');
   let leader = false;
   let released = false;
   const leads = new Set();
@@ -156,6 +160,8 @@ const elect = ({
     let suspended = false;
     const say = (t) => {
       try {
+        // A BroadcastChannel's postMessage takes no target origin.
+        // oxlint-disable-next-line unicorn/require-post-message-target-origin
         channel.postMessage({ syncom: name, t, token });
       } catch {
         // A closed channel: the next beat tells.

@@ -21,7 +21,7 @@ console.log(kept, usage, quota);
 try {
   await createDatabase({ path: 'board' }); // a second instance: another tab, or this one again
 } catch (error) {
-  console.log(error.code); // 'LOCKED': the first instance holds the database through Web Locks
+  console.log(error.code); // 'ALX_ERR_LOCKED': the first instance holds the database through Web Locks
 }
 // #endregion locked
 

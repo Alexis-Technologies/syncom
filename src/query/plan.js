@@ -75,7 +75,9 @@ const ordered = (value) => {
 };
 
 const allOrdered = (values) => {
-  for (let i = 0; i < values.length; i++) if (!ordered(values[i])) return false;
+  for (let i = 0; i < values.length; i++) {
+    if (!ordered(values[i])) return false;
+  }
   return true;
 };
 
@@ -186,7 +188,9 @@ const plan = ({
   const uses = { equalities: [], ranges: [], order: [] };
   // The indexed fields the query holds an equality or a `$in` on: what narrows a scan, or the posting lists.
   const narrowing = [];
-  for (const [field, test] of found.fields) {
+  for (const entry of found.fields) {
+    const field = entry[0];
+    const test = entry[1];
     if (test.eq !== undefined || test.in !== null) uses.equalities.push(field);
     if (test.lower !== null || test.upper !== null) uses.ranges.push(field);
     if (indexed.has(field) && (test.eq !== undefined || test.in !== null)) {
@@ -259,7 +263,9 @@ const plan = ({
     let left = found.other;
     const narrowed = new Set();
     for (let n = 0; n < best.narrow.length; n++) narrowed.add(best.narrow[n].field);
-    for (const [field, test] of found.fields) {
+    for (const entry of found.fields) {
+      const field = entry[0];
+      const test = entry[1];
       const at = best.index.indexOf(field);
       const plain = test.lower === null && test.upper === null && test.more === 0;
       const byPrefix = at >= 0 && at < best.prefix.length && test.in === null && plain;

@@ -15,8 +15,10 @@
 // is `{ chunk, offset }`, the end `{ chunk: last, offset: its length }`.
 // `compare`/`rankOf` are the one order of values the catalog, the cursor and
 // the planner share: nothing, then booleans, numbers, strings, then
-// everything else (equal among themselves, left where it was). No requires:
+// everything else (equal among themselves, left where it was). Requires argument-errors.js only:
 // it ships to the browser.
+
+const { ArgumentError } = require('./argument-errors.js');
 
 const CHUNK = 512;
 
@@ -33,12 +35,18 @@ const rankOf = (value) => {
   return 4;
 };
 
+// Two values of one ordered kind (or two ids), three ways.
+const threeWay = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
+
 const compare = (a, b) => {
   const rank = rankOf(a);
   const other = rankOf(b);
   if (rank !== other) return rank - other;
   if (rank === 0 || rank === 4) return 0;
-  return a < b ? -1 : a > b ? 1 : 0;
+  return threeWay(a, b);
 };
 
 // Two entries `{ keys, id }`: by each key, then by id.
@@ -47,7 +55,7 @@ const compareEntries = (a, b) => {
     const order = compare(a.keys[i], b.keys[i]);
     if (order !== 0) return order;
   }
-  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  return threeWay(a.id, b.id);
 };
 
 const empty = () => ({ ids: [], keys: [] });
@@ -61,7 +69,7 @@ class SortedIndex {
   #size = 0;
 
   constructor(k) {
-    if (!Number.isInteger(k) || k < 1) throw new TypeError('SortedIndex takes the number of keys an entry holds');
+    if (!Number.isInteger(k) || k < 1) throw new ArgumentError('SortedIndex takes the number of keys an entry holds');
     this.#k = k;
   }
 
@@ -100,7 +108,7 @@ class SortedIndex {
     }
     if (id === null) return 0;
     const own = chunk.ids[offset];
-    return own < id ? -1 : own > id ? 1 : 0;
+    return threeWay(own, id);
   }
 
   /**
@@ -169,7 +177,9 @@ class SortedIndex {
     const other = this.#chunks[b.chunk];
     const baseA = a.offset * this.#k;
     const baseB = b.offset * this.#k;
-    for (let i = 0; i < this.#k; i++) if (compare(one.keys[baseA + i], other.keys[baseB + i]) !== 0) return false;
+    for (let i = 0; i < this.#k; i++) {
+      if (compare(one.keys[baseA + i], other.keys[baseB + i]) !== 0) return false;
+    }
     return true;
   }
 

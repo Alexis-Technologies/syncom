@@ -62,6 +62,11 @@ const normalizeCuts = (raw, seq) => {
   }
 };
 
+const extContent = (kind, given) => {
+  if (!present(kind, given) || given.length === 0) return null;
+  return isText(kind) ? given : given.slice();
+};
+
 // The extensions parked ahead of their run: `[offset, content]` each, under a run key. One that would
 // take its run past MAX_RUN never lands and is left out, as the op would be refused; the kept ones count
 // in `count.slots` against MAX_FIELD as landed slots do — false past it.
@@ -75,7 +80,7 @@ const normalizeExt = (raw, kind, seq, count) => {
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
       if (!Array.isArray(item) || item.length !== 2 || !Number.isInteger(item[0]) || item[0] < 0) continue;
-      const content = present(kind, item[1]) && item[1].length > 0 ? (isText(kind) ? item[1] : item[1].slice()) : null;
+      const content = extContent(kind, item[1]);
       if (content === null || item[0] + content.length > MAX_RUN) continue;
       count.slots += content.length;
       if (count.slots > MAX_FIELD) return false;

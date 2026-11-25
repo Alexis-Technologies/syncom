@@ -53,7 +53,9 @@ const profile = async (run, { root = path.join(__dirname, '..', '..'), interval 
     if (count === 0) continue;
     total += count;
     const { url, functionName, lineNumber } = node.callFrame;
-    const file = url === '' ? '(native)' : url.startsWith(prefix) ? url.slice(prefix.length) : url;
+    let file = url;
+    if (url === '') file = '(native)';
+    else if (url.startsWith(prefix)) file = url.slice(prefix.length);
     tally(files, file, count);
     tally(functions, `${functionName || '(anonymous)'} ${file}:${lineNumber + 1}`, count);
   }

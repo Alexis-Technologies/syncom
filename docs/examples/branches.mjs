@@ -41,7 +41,7 @@ await drop(draft); // closed, and its files removed
 // #endregion info
 assert.equal(await branchInfo(board), null);
 assert.equal((await branchInfo(atTag)).forkedAt.tag, 'v1');
-await assert.rejects(branch(board, { path: 'board-v1', schema }), { code: 'BRANCH_EXISTS' });
+await assert.rejects(branch(board, { path: 'board-v1', schema }), { code: 'ALX_ERR_BRANCH_EXISTS' });
 await assert.rejects(drop(board), TypeError);
 await drop(atTag);
 await drop(atVersion);

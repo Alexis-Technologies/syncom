@@ -57,17 +57,19 @@ assert.deepEqual((await db.get(docs)).outline[1].children[0], {
 try {
   await db.treeMove(docs, 'outline', 'guide', 'install'); // under its own child
 } catch (error) {
-  console.log(error.code); // CYCLE
+  console.log(error.code); // ALX_ERR_CYCLE
 }
 try {
   await db.treeMove(docs, 'outline', 'faq', 'guide', { after: 'reference' }); // 'reference' is not under 'guide'
 } catch (error) {
-  console.log(error.code); // NOT_FOUND
+  console.log(error.code); // ALX_ERR_NOT_FOUND
 }
 // #endregion errors
-await assert.rejects(db.treeMove(docs, 'outline', 'guide', 'install'), { code: 'CYCLE' });
-await assert.rejects(db.treeMove(docs, 'outline', 'faq', 'guide', { after: 'reference' }), { code: 'NOT_FOUND' });
-await assert.rejects(db.update(docs, { outline: [] }), { code: 'FIELD_KIND', kind: 'tree' });
+await assert.rejects(db.treeMove(docs, 'outline', 'guide', 'install'), { code: 'ALX_ERR_CYCLE' });
+await assert.rejects(db.treeMove(docs, 'outline', 'faq', 'guide', { after: 'reference' }), {
+  code: 'ALX_ERR_NOT_FOUND',
+});
+await assert.rejects(db.update(docs, { outline: [] }), { code: 'ALX_ERR_FIELD_KIND', kind: 'tree' });
 await db.close();
 
 // #region concurrent

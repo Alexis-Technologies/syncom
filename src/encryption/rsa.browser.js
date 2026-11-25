@@ -76,7 +76,7 @@ const encrypt = async (data, publicKey) => {
 const decrypt = async (text, privateKey) => {
   const envelope = JSON.parse(text);
   if (envelope.v !== 1 || envelope.alg !== ALG) {
-    throw new SyncomError('BAD_ENVELOPE', 'Unsupported ciphertext envelope');
+    throw new SyncomError('ALX_ERR_BAD_ENVELOPE', 'Unsupported ciphertext envelope');
   }
   const rsa = await importPrivateKey(privateKey);
   const raw = await crypto.subtle.decrypt(RSA, rsa, fromBase64(envelope.key));

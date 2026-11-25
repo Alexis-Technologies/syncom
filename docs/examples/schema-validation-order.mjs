@@ -66,7 +66,7 @@ const agreed = await openBoard({ entities: { Task: {} } }, { authorizeWrite });
 agreed.phone.sync.on('error', (error) => refusals.push([error.code, error.touched]));
 console.log(await editOffline(agreed));
 // [ '5..10', '5..10', '5..10' ]: the server refused the phone's edit and the phone took `due` back
-console.log(refusals); // [ [ 'WRITE_REFUSED', [ 'due' ] ] ]
+console.log(refusals); // [ [ 'ALX_ERR_WRITE_REFUSED', [ 'due' ] ] ]
 // #endregion rule
 for (const db of agreed.all) await db.close();
 
@@ -75,13 +75,17 @@ const again = await openBoard({ entities: { Task: { schema: inOrder } } });
 const invalid = [];
 for (const db of again.all) db.on('error', (error) => invalid.push(error.code));
 assert.deepEqual(await editOffline(again), ['5..10', '5..10', '1..3']);
-assert.deepEqual(invalid, ['OP_INVALID', 'OP_INVALID', 'OP_INVALID'], 'every node skipped one op and said so');
+assert.deepEqual(
+  invalid,
+  ['ALX_ERR_OP_INVALID', 'ALX_ERR_OP_INVALID', 'ALX_ERR_OP_INVALID'],
+  'every node skipped one op and said so',
+);
 for (const db of again.all) await db.close();
 
 const ruled = await openBoard({ entities: { Task: {} } }, { authorizeWrite });
 const told = [];
 ruled.phone.sync.on('error', (error) => told.push([error.code, error.touched]));
 assert.deepEqual(await editOffline(ruled), ['5..10', '5..10', '5..10']);
-assert.deepEqual(told, [['WRITE_REFUSED', ['due']]]);
-assert.deepEqual(refusals, [['WRITE_REFUSED', ['due']]]);
+assert.deepEqual(told, [['ALX_ERR_WRITE_REFUSED', ['due']]]);
+assert.deepEqual(refusals, [['ALX_ERR_WRITE_REFUSED', ['due']]]);
 for (const db of ruled.all) await db.close();

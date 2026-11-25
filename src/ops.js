@@ -137,8 +137,10 @@ const goneOf = (meta) => meta.gone ?? EMPTY;
 // per op, for a kind check. The walk stops at the first own key; an
 // inherited one (there is none on the trusted shapes) is skipped.
 const hasAny = (object) => {
-  // oxlint-disable-next-line guard-for-in -- every key is checked to be own
-  for (const key in object) if (Object.hasOwn(object, key)) return true;
+  // every key is checked to be own
+  for (const key in object) {
+    if (Object.hasOwn(object, key)) return true;
+  }
   return false;
 };
 
@@ -216,7 +218,9 @@ const MAX_COUNT = Number.MAX_SAFE_INTEGER;
 // order they are added in, and the order of arrival differs between nodes.
 const counterValue = (perStream) => {
   let sum = 0;
-  for (const stream of Object.keys(perStream).sort()) sum += perStream[stream][1];
+  const streams = Object.keys(perStream);
+  streams.sort();
+  for (let i = 0; i < streams.length; i++) sum += perStream[streams[i]][1];
   return sum;
 };
 
@@ -289,7 +293,9 @@ const liveElements = (elements) => {
 // Whether an element's slots hold a live add.
 const isLive = (slots) => {
   if (slots === undefined) return false;
-  for (const origin of Object.keys(slots)) if (slots[origin][0] > slots[origin][1]) return true;
+  for (const origin of Object.keys(slots)) {
+    if (slots[origin][0] > slots[origin][1]) return true;
+  }
   return false;
 };
 
@@ -336,6 +342,16 @@ const isSlot = (value) =>
   value[1] >= 0 &&
   value[0] + value[1] > 0;
 
+// A set element's slots as a peer sent them: by own keys, each a well-formed `[added, removed]`, copied.
+const trustedSlots = (slotsFrom) => {
+  const slots = {};
+  for (const origin of Object.keys(slotsFrom)) {
+    const slot = slotsFrom[origin];
+    if (isKey(origin) && isSlot(slot)) slots[origin] = [slot[0], slot[1]];
+  }
+  return slots;
+};
+
 // A peer-supplied meta, rebuilt into the shape the rest of this module
 // trusts: own keys only, stamps as `[ts, origin]`, counters as `[seq, sum,
 // ts]` per stream, set slots as `[added, removed]` per element and origin
@@ -361,12 +377,16 @@ const normalizeMeta = (meta, limits = null, dropped = null) => {
   if (!SETTLED.has(meta)) return normalizeOnce(meta, bounds, dropped);
   const memo = NORMALIZED.get(meta);
   if (memo !== undefined && memo.pendingMax === bounds.pendingMax && memo.plugins === bounds.plugins) {
-    if (dropped !== null) for (let i = 0; i < memo.dropped.length; i++) dropped.push(memo.dropped[i]);
+    if (dropped !== null) {
+      for (let i = 0; i < memo.dropped.length; i++) dropped.push(memo.dropped[i]);
+    }
     return memo.normalized;
   }
   const told = [];
   const normalized = normalizeOnce(meta, bounds, told);
-  if (dropped !== null) for (let i = 0; i < told.length; i++) dropped.push(told[i]);
+  if (dropped !== null) {
+    for (let i = 0; i < told.length; i++) dropped.push(told[i]);
+  }
   NORMALIZED.set(meta, { pendingMax: bounds.pendingMax, plugins: bounds.plugins, normalized, dropped: told });
   return normalized;
 };
@@ -401,11 +421,7 @@ const normalizeOnce = (meta, bounds, dropped) => {
       for (const key of Object.keys(source)) {
         const slotsFrom = source[key];
         if (!isKey(key) || !isPlainObject(slotsFrom) || !isElementKey(key)) continue;
-        const slots = {};
-        for (const origin of Object.keys(slotsFrom)) {
-          const slot = slotsFrom[origin];
-          if (isKey(origin) && isSlot(slot)) slots[origin] = [slot[0], slot[1]];
-        }
+        const slots = trustedSlots(slotsFrom);
         if (Object.keys(slots).length > 0) elements[key] = slots;
       }
       if (Object.keys(elements).length > 0) sets[field] = elements;
@@ -451,7 +467,9 @@ const normalizeOnce = (meta, bounds, dropped) => {
     kept.sort();
     const allowed = new Set(kept.length > MAX_PATHS ? kept.slice(0, MAX_PATHS) : kept);
     for (const map of [clock, counters, sets, blocks, gone]) {
-      for (const field of Object.keys(map)) if (!allowed.has(field)) delete map[field];
+      for (const field of Object.keys(map)) {
+        if (!allowed.has(field)) delete map[field];
+      }
     }
   }
   // The version and the stamp that decided it, both or neither: a version no stamp backs would win nowhere.
@@ -615,7 +633,9 @@ const applyBase = (entry, delta, plugins) => {
 const fieldsUnder = (meta, prefix) => {
   const out = new Set();
   for (const map of [meta.clock, meta.counters, meta.sets, meta.blocks]) {
-    for (const field of Object.keys(map)) if (under(field, prefix)) out.add(field);
+    for (const field of Object.keys(map)) {
+      if (under(field, prefix)) out.add(field);
+    }
   }
   return out;
 };
@@ -672,9 +692,13 @@ const holderAbove = (entry, field, plugins) => {
 const pathsFull = (entry, field, rejected) => {
   const { meta } = entry;
   const maps = [meta.clock, meta.counters, meta.sets, meta.blocks];
-  for (const map of maps) if (own(map, field) !== undefined) return false;
+  for (const map of maps) {
+    if (own(map, field) !== undefined) return false;
+  }
   const fields = new Set();
-  for (const map of maps) for (const key of Object.keys(map)) fields.add(key);
+  for (const map of maps) {
+    for (const key of Object.keys(map)) fields.add(key);
+  }
   if (fields.size < MAX_PATHS) return false;
   rejected.push({ field, reason: 'bound', detail: 'paths', count: fields.size + 1, max: MAX_PATHS });
   return true;
@@ -892,7 +916,7 @@ const applySet = (entry, op, stamp, delta, rejected, plugins, changes) => {
   }
   added.sort();
   removed.sort();
-  let now;
+  let now = null;
   if (before === null || added.length + removed.length > SET_STEPS) {
     now = liveElements(elements);
   } else if (added.length + removed.length === 0) {
@@ -1011,6 +1035,52 @@ const moveVersion = (meta, op, stamp) => {
   meta.vs = stamp;
 };
 
+// What the tombstone carries: the fields the delete's data applied — never the payload as sent, nor a
+// field op stamped above the tombstone that the meta holds unseen. Null for none.
+const carriedBy = (entry, data, stamp) => {
+  let carried = null;
+  for (const field of Object.keys(data)) {
+    if (compareClock(own(entry.meta.clock, field), stamp) === 0) (carried ??= {})[field] = entry.data[field];
+  }
+  return carried;
+};
+
+// The fields a joined entry changed, into `delta`: each it holds otherwise than `previous` did, each it holds no
+// more (undefined).
+const joinedDelta = (previous, joined, delta) => {
+  for (const field of Object.keys(joined.data)) {
+    if (!previous || previous.data[field] !== joined.data[field]) delta[field] = joined.data[field];
+  }
+  if (!previous) return;
+  for (const field of Object.keys(previous.data)) {
+    if (!Object.hasOwn(joined.data, field)) delta[field] = undefined;
+  }
+};
+
+// An `inc` stamped above its field's floor, into the slot of the op's stream: its seq is only ever compared with
+// the seqs of that stream. A sum past MAX_COUNT is refused, and leaves no empty counter behind.
+const landInc = (entry, op, delta, rejected, plugins, changes) => {
+  const { meta } = entry;
+  const { key: field, value } = op;
+  const stream = opKey(op);
+  const perStream = own(meta.counters, field) ?? (meta.counters[field] = {});
+  const known = own(perStream, stream);
+  const sum = (known ? known[1] : 0) + value;
+  const fresh = !known || known[0] < op.seq;
+  if (fresh && !(Math.abs(sum) <= MAX_COUNT)) {
+    rejected.push({ field, reason: 'bound', detail: 'counter', count: sum, max: MAX_COUNT });
+    if (Object.keys(perStream).length === 0) delete meta.counters[field];
+  } else if (fresh) {
+    perStream[stream] = [op.seq, sum, op.ts];
+    entry.data[field] = counterValue(perStream);
+    delta[field] = entry.data[field];
+    changes.push({ action: 'inc', field, value });
+    changes.covered.add(field);
+    // A counter holds its prefix alone.
+    dropUnder(entry, field, delta, plugins);
+  }
+};
+
 /**
  * Applies one op to an entry (null for a record this node has never seen).
  * Returns `{ entry, changed, delta, rejected }` — a NEW entry, whether it
@@ -1117,11 +1187,7 @@ const applyOp = (previous, op, limits = null, lost = null) => {
       let carried = null;
       if (isPlainObject(op.data)) {
         applyFields(entry, op.data, stamp, delta, rejected, plugins, null);
-        // What the tombstone carries: the fields the delete's data applied — never the payload as sent, nor a
-        // field op stamped above the tombstone that the meta holds unseen.
-        for (const field of Object.keys(op.data)) {
-          if (compareClock(own(meta.clock, field), stamp) === 0) (carried ??= {})[field] = entry.data[field];
-        }
+        carried = carriedBy(entry, op.data, stamp);
       }
       // Delete wins: whatever a field op stamped above the tombstone left in the meta, the record is gone (EVT-5).
       changes.push(carried === null ? { action: 'delete' } : { action: 'delete', data: asJson(carried) });
@@ -1138,14 +1204,7 @@ const applyOp = (previous, op, limits = null, lost = null) => {
       // block hash and the encrypted flag.
       const same = previous && deepEqual(joined.data, previous.data) && deepEqual(joined.meta, previous.meta);
       if (!same) {
-        for (const field of Object.keys(joined.data)) {
-          if (!previous || previous.data[field] !== joined.data[field]) delta[field] = joined.data[field];
-        }
-        if (previous) {
-          for (const field of Object.keys(previous.data)) {
-            if (!Object.hasOwn(joined.data, field)) delta[field] = undefined;
-          }
-        }
+        joinedDelta(previous, joined, delta);
         const before = previous ? previous.meta : null;
         const moved =
           joined.meta.base !== (before ? before.base : null) ||
@@ -1161,27 +1220,7 @@ const applyOp = (previous, op, limits = null, lost = null) => {
     if (!isPath(field) || !isKey(op.origin) || !Number.isFinite(value)) {
       malformed(field, rejected);
     } else if (roomFor(entry, field, 'counter', stamp, delta, rejected, plugins) === null) {
-      if (compareClock(stamp, floorOf(meta, field)) >= 0) {
-        // The slot of the op's stream: its seq is only ever compared with
-        // the seqs of that stream.
-        const stream = opKey(op);
-        const perStream = own(meta.counters, field) ?? (meta.counters[field] = {});
-        const known = own(perStream, stream);
-        const sum = (known ? known[1] : 0) + value;
-        const fresh = !known || known[0] < op.seq;
-        if (fresh && !(Math.abs(sum) <= MAX_COUNT)) {
-          rejected.push({ field, reason: 'bound', detail: 'counter', count: sum, max: MAX_COUNT });
-          if (Object.keys(perStream).length === 0) delete meta.counters[field];
-        } else if (fresh) {
-          perStream[stream] = [op.seq, sum, op.ts];
-          entry.data[field] = counterValue(perStream);
-          delta[field] = entry.data[field];
-          changes.push({ action: 'inc', field, value });
-          changes.covered.add(field);
-          // A counter holds its prefix alone.
-          dropUnder(entry, field, delta, plugins);
-        }
-      }
+      if (compareClock(stamp, floorOf(meta, field)) >= 0) landInc(entry, op, delta, rejected, plugins, changes);
     }
   } else if (op.type === 'add' || op.type === 'remove') {
     applySet(entry, op, stamp, delta, rejected, plugins, changes);
@@ -1241,6 +1280,20 @@ const isAlive = (entry) => {
   if (!entry) return false;
   const { meta } = entry;
   return !meta.purged && !meta.deleted;
+};
+
+// The other side's slots of one set element joined into `slots`: per origin, the higher of each count.
+const joinSlots = (slots, theirs) => {
+  for (const origin of Object.keys(theirs)) {
+    if (!isKey(origin)) continue;
+    const slot = own(slots, origin);
+    if (!slot) {
+      slots[origin] = [theirs[origin][0], theirs[origin][1]];
+      continue;
+    }
+    if (slot[0] < theirs[origin][0]) slot[0] = theirs[origin][0];
+    if (slot[1] < theirs[origin][1]) slot[1] = theirs[origin][1];
+  }
 };
 
 /**
@@ -1307,17 +1360,7 @@ const mergeEntry = (a, b, limits = null) => {
       for (const key of Object.keys(from)) {
         if (!isKey(key)) continue;
         const slots = own(elements, key) ?? (elements[key] = {});
-        const theirs = from[key];
-        for (const origin of Object.keys(theirs)) {
-          if (!isKey(origin)) continue;
-          const slot = own(slots, origin);
-          if (!slot) {
-            slots[origin] = [theirs[origin][0], theirs[origin][1]];
-            continue;
-          }
-          if (slot[0] < theirs[origin][0]) slot[0] = theirs[origin][0];
-          if (slot[1] < theirs[origin][1]) slot[1] = theirs[origin][1];
-        }
+        joinSlots(slots, from[key]);
       }
     }
     // Two blocks of one kind join by the plugin's rule; of two kinds, the
@@ -1373,7 +1416,9 @@ const mergeEntry = (a, b, limits = null) => {
   // A counter, a set or a block that does not nest holds its prefix alone:
   // what the other side hung under it goes, as it would have on the op path.
   for (const map of [meta.counters, meta.sets]) {
-    for (const field of Object.keys(map)) if (own(map, field) !== undefined) dropUnder(entry, field, {}, plugins);
+    for (const field of Object.keys(map)) {
+      if (own(map, field) !== undefined) dropUnder(entry, field, {}, plugins);
+    }
   }
   for (const field of Object.keys(meta.blocks)) {
     if (!nests(plugins, kindOfBlock(plugins, meta.blocks[field]))) dropUnder(entry, field, {}, plugins);

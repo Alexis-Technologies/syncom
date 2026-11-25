@@ -108,7 +108,7 @@ export interface TextBindingOptions {
   source?: unknown;
   /** How long the editor's edits wait before they are logged, in ms: the storage's `defer` by default, 0 for the end of the turn. */
   window?: number;
-  /** A reload — a reset, an unset, the record gone, a flush not logged (`UNLOGGED`): what was not logged is dropped. */
+  /** A reload — a reset, an unset, the record gone, a flush not logged (`ALX_ERR_UNLOGGED`): what was not logged is dropped. */
   onReset?: () => void;
   /** A failure that reloaded the editor; logged at warn without one. */
   onError?: (error: Error) => void;

@@ -17,7 +17,9 @@ const MAX_PATH = 512;
 const MAX_PATHS = 4096;
 
 const hasControl = (value) => {
-  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) < 32) return true;
+  }
   return false;
 };
 
@@ -31,7 +33,9 @@ const isPath = (key) => {
   if (!key.includes('/')) return isSegment(key);
   const segments = key.split('/');
   if (segments.length > MAX_PATH_DEPTH) return false;
-  for (const segment of segments) if (!isSegment(segment)) return false;
+  for (const segment of segments) {
+    if (!isSegment(segment)) return false;
+  }
   return true;
 };
 

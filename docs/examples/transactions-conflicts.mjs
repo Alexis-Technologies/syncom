@@ -153,7 +153,7 @@ await settle([server, laptop, phone]);
 
 // #region unique-local
 await assert.rejects(laptop.Task.insert({ title: 'Docs again', slug: 'docs', done: false }), (error) => {
-  console.log(error.code, error.issues[0].code); // VALIDATION_FAILED unique
+  console.log(error.code, error.issues[0].code); // ALX_ERR_VALIDATION_FAILED unique
   return true;
 });
 // #endregion unique-local

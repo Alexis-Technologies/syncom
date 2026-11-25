@@ -60,8 +60,11 @@ class UploadQueue {
       if (!held(urls[i]) || !Array.isArray(rows)) continue;
       const queue = this.of(urls[i]);
       for (let j = 0; j < rows.length; j++) {
-        if (!Array.isArray(rows[j])) continue;
-        const [digest, id, name] = rows[j];
+        const row = rows[j];
+        if (!Array.isArray(row)) continue;
+        const digest = row[0];
+        const id = row[1];
+        const name = row[2];
         if (!isDigest(digest) || typeof id !== 'string' || typeof name !== 'string') continue;
         queue.set(digest, { id, name, waiting: false });
         if (queue.size > MAX_UPLOADS) queue.delete(queue.keys().next().value);
@@ -118,22 +121,30 @@ class UploadQueue {
   #save() {
     if (this.#queued || this.#frozen()) return;
     this.#queued = true;
-    this.#saving = this.#saving.then(async () => {
-      this.#queued = false;
-      const nodes = Object.create(null);
-      for (const [url, queue] of this.#nodes) {
-        if (queue.size === 0) continue;
-        const rows = [];
-        for (const [digest, entry] of queue) rows.push([digest, entry.id, entry.name]);
-        nodes[url] = rows;
+    this.#saving = this.#saving.then(() => this.#write());
+  }
+
+  async #write() {
+    this.#queued = false;
+    const nodes = Object.create(null);
+    for (const pair of this.#nodes) {
+      const url = pair[0];
+      const queue = pair[1];
+      if (queue.size === 0) continue;
+      const rows = [];
+      for (const upload of queue) {
+        const digest = upload[0];
+        const entry = upload[1];
+        rows.push([digest, entry.id, entry.name]);
       }
-      try {
-        const text = JSON.stringify({ v: UPLOADS_VERSION, nodes });
-        await this.#kv.put('', UPLOADS_FILE, text, { atomic: true });
-      } catch (error) {
-        this.#logger.warn({ event: 'sync.uploads.failed', err: error });
-      }
-    });
+      nodes[url] = rows;
+    }
+    try {
+      const text = JSON.stringify({ v: UPLOADS_VERSION, nodes });
+      await this.#kv.put('', UPLOADS_FILE, text, { atomic: true });
+    } catch (error) {
+      this.#logger.warn({ event: 'sync.uploads.failed', err: error });
+    }
   }
 
   /** Resolves once every save asked for is done. */

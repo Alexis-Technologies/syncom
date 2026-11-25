@@ -44,5 +44,5 @@ console.log((await chain.readBlock(chain.tailHash)).data);
 const failure = (await chain.readBlock(chain.tailHash)).data;
 assert.equal(failure.contract, 'publish');
 assert.equal(failure.error, 'no post no-such-post');
-await assert.rejects(SmartContract.load(chain.tailHash, { storage: db, chain }), { code: 'NOT_CONTRACT' });
+await assert.rejects(SmartContract.load(chain.tailHash, { storage: db, chain }), { code: 'ALX_ERR_NOT_CONTRACT' });
 await db.close();

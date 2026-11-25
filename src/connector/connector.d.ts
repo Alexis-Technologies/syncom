@@ -130,19 +130,19 @@ export interface ConnectorEvents {
   /**
    * A document or a row left out, and why: on pull `'collection'` (another collection's record), `'sealed'`,
    * `'value'` (no JSON), `'modifier'` (it threw) or the code of the write the engine refused (a validator's
-   * `VALIDATION_FAILED`, a `TypeError`); on push the backend's own code for a row refused by name (`'backend'`
+   * `ALX_ERR_VALIDATION_FAILED`, a `TypeError`); on push the backend's own code for a row refused by name (`'backend'`
    * without one), `'modifier'` (`modifier.push` threw on the record, or `modifier.pull` on a conflict's document),
    * `'answer'` (neither a document nor an error), `'conflict'` (a backend refusing a row that assumed exactly what
    * it holds, twice), or the code of a resolution the engine refused. A row told on push is parked.
    */
   refused: (event: { direction: 'pull' | 'push'; id: string; reason: string; cause?: unknown }) => void;
   /**
-   * A handler, or the landing of what it answered, failed (`REPLICATION_FAILED`, `direction` `'pull'` or `'push'`);
+   * A handler, or the landing of what it answered, failed (`ALX_ERR_REPLICATION_FAILED`, `direction` `'pull'` or `'push'`);
    * tried again after `retryIn` ms — `retryTime` doubled per failure in a row up to `maxRetryTime`, with jitter.
    */
   error: (
     error: Error & {
-      code: 'REPLICATION_FAILED';
+      code: 'ALX_ERR_REPLICATION_FAILED';
       direction: 'pull' | 'push' | null;
       /** The connector's `name`. */
       connector: string;

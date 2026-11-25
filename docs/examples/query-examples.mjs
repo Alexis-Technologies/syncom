@@ -144,8 +144,8 @@ assert.deepEqual(ids(await db.Task.select({ votes: { $mod: [2, 0] } }).fetch()),
 try {
   db.Task.select({ priority: { $in: 2 } });
 } catch (error) {
-  console.log(error.name); // 'TypeError': refused at select(), before anything is read
+  console.log(error.name); // 'ArgumentError': refused at select(), before anything is read
 }
 // #endregion malformed
-assert.throws(() => db.Task.select({ priority: { $in: 2 } }), { name: 'TypeError' });
+assert.throws(() => db.Task.select({ priority: { $in: 2 } }), { name: 'ArgumentError' });
 await db.close();

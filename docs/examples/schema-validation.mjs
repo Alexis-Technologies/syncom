@@ -27,14 +27,14 @@ assert.deepEqual(await board.Task.get(task.id), { title: 'Write the docs', done:
 try {
   await board.Task.insert({ title: '' });
 } catch (error) {
-  console.log(error.name, error.code); // ValidationError VALIDATION_FAILED
+  console.log(error.name, error.code); // ValidationError ALX_ERR_VALIDATION_FAILED
   console.log(error.entity, error.issues);
   // Task [ { path: [ 'title' ], message: 'value is too short', code: 'length' } ]
 }
 // #endregion refused
 const refused = await board.Task.insert({ title: '' }).catch((error) => error);
 assert.equal(refused.name, 'ValidationError');
-assert.equal(refused.code, 'VALIDATION_FAILED');
+assert.equal(refused.code, 'ALX_ERR_VALIDATION_FAILED');
 assert.deepEqual(refused.issues, [{ path: ['title'], message: 'value is too short', code: 'length' }]);
 assert.equal(await board.Task.count({}), 1, 'nothing was written');
 
@@ -54,7 +54,7 @@ assert.deepEqual(await board.Task.get(task.id), {
   votes: 1,
   tags: ['docs'],
 });
-assert.equal((await board.add(task.id, 'tags', [42]).catch((error) => error)).code, 'VALIDATION_FAILED');
+assert.equal((await board.add(task.id, 'tags', [42]).catch((error) => error)).code, 'ALX_ERR_VALIDATION_FAILED');
 
 // #region check
 const draft = await board.check('Task', { title: 'Plan the release' });
@@ -65,9 +65,9 @@ assert.equal(await board.Task.count({}), 1);
 await board.close();
 
 // #region function
-const trimmed = (task) => {
-  if (typeof task.title !== 'string') throw new Error('title must be a string');
-  return { ...task, title: task.title.trim() }; // what it returns is what is stored
+const trimmed = (input) => {
+  if (typeof input.title !== 'string') throw new Error('title must be a string');
+  return { ...input, title: input.title.trim() }; // what it returns is what is stored
 };
 
 const notes = await createDatabase({
@@ -146,14 +146,14 @@ server.on('error', (error) => console.log(error.code, error.entity, error.issues
 
 await mesh.get('laptop').Task.insert({ title: '' });
 await settle(mesh.storages);
-// OP_INVALID Task [ { path: [ 'title' ], message: 'value is too short', code: 'length' } ]
+// ALX_ERR_OP_INVALID Task [ { path: [ 'title' ], message: 'value is too short', code: 'length' } ]
 console.log(await server.Task.count({})); // 0: the server skipped the op
 // #endregion peer
 const errors = [];
 server.on('error', (error) => errors.push(error));
 const empty = await mesh.get('laptop').Task.insert({ title: '' });
 await settle(mesh.storages);
-assert.equal(errors[0].code, 'OP_INVALID');
+assert.equal(errors[0].code, 'ALX_ERR_OP_INVALID');
 assert.equal(errors[0].op.id, empty.id);
 assert.equal(await server.Task.count({}), 0);
 assert.equal(await mesh.get('laptop').Task.count({}), 2, 'the laptop keeps what it wrote');

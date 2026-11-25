@@ -9,7 +9,7 @@
 // (the validated record folded into a local op, a verdict on a peer's), the
 // catalog's indexes, `schemaInfo` for hello, `migrate()` and `check()`.
 // Without the plugin `createDatabase({ schema })` and `createDatabase({ validator })` are
-// PLUGIN_MISSING, as are `migrate()` and `check()`; records are untyped.
+// ALX_ERR_PLUGIN_MISSING, as are `migrate()` and `check()`; records are untyped.
 // The hook the core takes: `schema` — the normalized definitions plus
 // `view`, the lens as a function (null without migrations or validators to
 // read through), and `load()`, the version file read and written once the

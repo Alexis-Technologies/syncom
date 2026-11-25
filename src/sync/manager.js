@@ -33,7 +33,7 @@ const { namedBlobs } = require('./reads.js');
 const { NodeRegistry } = require('./registry.js');
 const { UploadQueue } = require('./uploads.js');
 const { SharedHub, normalizeShared } = require('./shared.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { wellFormed, VERDICT, isPlainObject } = require('../shape.js');
 const { withholdOp } = require('../header.js');
 const { SIGNER, REWIND, DB, SOURCE } = require('../symbols.js');
@@ -118,6 +118,19 @@ const scopedVector = (vector, scopes) => {
   return out;
 };
 
+// The peers a `sync(url)` pushes to: the one dialed at `url`, or every one.
+const peersAt = (peers, url) => {
+  if (!url) return [...peers.values()];
+  const peer = peers.get(url);
+  return peer ? [peer] : [];
+};
+
+// What a refusal's report says this node did about it.
+const refusalNote = (revert, current, reason) => {
+  if (revert) return current === null || current === undefined ? '; forgotten here' : '; reverted to what it holds';
+  return reason === 'scope' ? ': the record is outside this node’s scopes there' : '';
+};
+
 class SyncManager extends Emitter {
   #storage;
   #options;
@@ -162,18 +175,18 @@ class SyncManager extends Emitter {
     this.#hooks = normalizeHooks(this.#options.hooks, SYNC_HOOKS, 'SyncManager');
     const { authorizeWrite = null } = this.#options;
     if (authorizeWrite !== null && typeof authorizeWrite !== 'function') {
-      throw new TypeError('sync.authorizeWrite must be a function');
+      throw new ArgumentError('sync.authorizeWrite must be a function');
     }
     this.#authorizeWrite = authorizeWrite;
     const { maxOutbox } = this.#options;
     if (maxOutbox !== undefined && !(Number.isInteger(maxOutbox) && maxOutbox > 0)) {
-      throw new TypeError('sync.maxOutbox must be a positive integer');
+      throw new ArgumentError('sync.maxOutbox must be a positive integer');
     }
     if (maxOutbox !== undefined) this.#maxOutbox = maxOutbox;
     const { maxPageBytes } = this.#options;
     if (maxPageBytes !== undefined) {
       if (!((Number.isInteger(maxPageBytes) && maxPageBytes > 0) || maxPageBytes === Infinity)) {
-        throw new TypeError('sync.maxPageBytes must be a positive integer (Infinity to disable)');
+        throw new ArgumentError('sync.maxPageBytes must be a positive integer (Infinity to disable)');
       }
       this.#maxPageBytes = maxPageBytes;
     }
@@ -223,15 +236,17 @@ class SyncManager extends Emitter {
 
   async addNode(nodeData) {
     const { url, token, scopes, direction = 'both' } = nodeData ?? {};
-    if (typeof url !== 'string' || url.length === 0) throw new TypeError('Node URL is required');
-    if (this.#nodes.has(url)) throw new SyncomError('NODE_EXISTS', `Node with URL ${url} already exists`, { url });
+    if (typeof url !== 'string' || url.length === 0) throw new ArgumentError('Node URL is required');
+    if (this.#nodes.has(url)) {
+      throw new SyncomError('ALX_ERR_NODE_EXISTS', `Node with URL ${url} already exists`, { url });
+    }
     if (scopes !== undefined) {
-      if (!Array.isArray(scopes)) throw new TypeError('Node scopes must be an array of strings');
+      if (!Array.isArray(scopes)) throw new ArgumentError('Node scopes must be an array of strings');
       for (let i = 0; i < scopes.length; i++) {
-        if (typeof scopes[i] !== 'string') throw new TypeError('Node scopes must be an array of strings');
+        if (typeof scopes[i] !== 'string') throw new ArgumentError('Node scopes must be an array of strings');
       }
     }
-    if (!DIRECTIONS.has(direction)) throw new TypeError("Node direction must be 'both', 'pull' or 'push'");
+    if (!DIRECTIONS.has(direction)) throw new ArgumentError("Node direction must be 'both', 'pull' or 'push'");
     const node = {
       url,
       token,
@@ -250,7 +265,7 @@ class SyncManager extends Emitter {
 
   async removeNode(url) {
     const node = this.#nodes.get(url);
-    if (!node) throw new SyncomError('NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
+    if (!node) throw new SyncomError('ALX_ERR_NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
     this.#nodes.delete(url);
     this.#disconnect(url);
     this.#uploads.forget(url);
@@ -266,7 +281,7 @@ class SyncManager extends Emitter {
 
   async enableNode(url, enabled = true) {
     const node = this.#nodes.get(url);
-    if (!node) throw new SyncomError('NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
+    if (!node) throw new SyncomError('ALX_ERR_NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
     node.enabled = enabled;
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'node', { url, action: enabled ? 'enable' : 'disable' });
@@ -306,7 +321,7 @@ class SyncManager extends Emitter {
   // An entry of this node's own that an enabled registered node in its
   // scope has not acknowledged. Only registered nodes are waited for: ops
   // written before the first node was added are retained like any others
-  // (a host that lacks them is told UNDELIVERABLE). An op born from a node's
+  // (a host that lacks them is told ALX_ERR_UNDELIVERABLE). An op born from a node's
   // snapshot never travels back to it, so that node is not waited for.
   #undelivered(entry) {
     const { op } = entry;
@@ -325,7 +340,9 @@ class SyncManager extends Emitter {
   // Every waiter's check, run once more: what moved may be what one waited for.
   #settle() {
     if (this.#waiters.size === 0) return;
-    for (const waiter of [...this.#waiters]) {
+    // A copy: a waiter met leaves the set as the loop goes.
+    const waiters = [...this.#waiters];
+    for (const waiter of waiters) {
       if (!waiter.check()) continue;
       this.#waiters.delete(waiter);
       waiter.resolve();
@@ -377,7 +394,9 @@ class SyncManager extends Emitter {
    */
   awaitInSync({ signal = null } = {}) {
     return this.#await(() => {
-      for (const node of this.#nodes.values()) if (node.enabled && !this.#inSyncWith(node)) return false;
+      for (const node of this.#nodes.values()) {
+        if (node.enabled && !this.#inSyncWith(node)) return false;
+      }
       return true;
     }, signal);
   }
@@ -403,7 +422,7 @@ class SyncManager extends Emitter {
    * goes to (a node of the op's scope that takes pushes) — at once when this node made none.
    */
   awaitDocumentPushed(id, { signal = null } = {}) {
-    if (typeof id !== 'string') throw new TypeError('awaitDocumentPushed(id): id must be a string');
+    if (typeof id !== 'string') throw new ArgumentError('awaitDocumentPushed(id): id must be a string');
     const own = this.#storage.nodeId;
     let newest = null;
     const entries = this.#storage.log.entriesOf(id);
@@ -433,7 +452,7 @@ class SyncManager extends Emitter {
     if (this.#started) return;
     if (typeof this.#options.connect !== 'function') {
       if (this.#shared !== null) return;
-      throw new TypeError('sync.start() needs a connect(node) factory in the storage sync options');
+      throw new ArgumentError('sync.start() needs a connect(node) factory in the storage sync options');
     }
     this.#started = true;
     for (const node of this.#nodes.values()) {
@@ -444,7 +463,9 @@ class SyncManager extends Emitter {
 
   async stop() {
     this.#started = false;
-    for (const url of [...this.#peers.keys()]) this.#disconnect(url);
+    // A copy: a peer disconnected leaves the map as the loop goes.
+    const urls = [...this.#peers.keys()];
+    for (const url of urls) this.#disconnect(url);
     if (this.#shared !== null) await this.#shared.stop();
     await this.#registry.drain();
     await this.#uploads.drain();
@@ -467,7 +488,9 @@ class SyncManager extends Emitter {
       const scopes = parsed.nodes[node];
       if (!Array.isArray(scopes)) continue;
       const held = new Set();
-      for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') held.add(scopes[i]);
+      for (let i = 0; i < scopes.length; i++) {
+        if (typeof scopes[i] === 'string') held.add(scopes[i]);
+      }
       if (held.size > 0) this.#revocations.set(node, held);
     }
   }
@@ -475,17 +498,24 @@ class SyncManager extends Emitter {
   #saveRevoked() {
     if (this.#storage.readOnly || this.#saveRevokedQueued) return;
     this.#saveRevokedQueued = true;
-    this.#savingRevoked = this.#savingRevoked.then(async () => {
-      this.#saveRevokedQueued = false;
-      const nodes = {};
-      for (const [node, scopes] of this.#revocations) nodes[node] = [...scopes].sort();
-      try {
-        const text = JSON.stringify({ v: REVOKED_VERSION, nodes });
-        await this.#storage[DB].kv.put('', REVOKED_FILE, text, { atomic: true });
-      } catch (error) {
-        this.#storage.logger.warn({ event: 'sync.revoked.failed', err: error });
-      }
-    });
+    this.#savingRevoked = this.#savingRevoked.then(() => this.#writeRevoked());
+  }
+
+  async #writeRevoked() {
+    this.#saveRevokedQueued = false;
+    const nodes = {};
+    for (const entry of this.#revocations) {
+      const node = entry[0];
+      const scopes = [...entry[1]];
+      scopes.sort();
+      nodes[node] = scopes;
+    }
+    try {
+      const text = JSON.stringify({ v: REVOKED_VERSION, nodes });
+      await this.#storage[DB].kv.put('', REVOKED_FILE, text, { atomic: true });
+    } catch (error) {
+      this.#storage.logger.warn({ event: 'sync.revoked.failed', err: error });
+    }
   }
 
   // A revocation taken in — this hub's own, or another hub's read from the shared log: the scopes held back from
@@ -503,8 +533,9 @@ class SyncManager extends Emitter {
     if (sessions !== undefined) {
       for (const session of sessions) session.revoke(scopes);
     }
-    // Every live feed looks again: one of the node's ends.
-    for (const wake of [...this.#wakers]) wake();
+    // Every live feed looks again: one of the node's ends. A copy: a waker called leaves the set.
+    const wakers = [...this.#wakers];
+    for (const wake of wakers) wake();
     if (news > 0) this.#saveRevoked();
     return news;
   }
@@ -513,7 +544,9 @@ class SyncManager extends Emitter {
   adoptRevocation(node, scopes) {
     if (typeof node !== 'string' || !Array.isArray(scopes)) return;
     const taken = [];
-    for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') taken.push(scopes[i]);
+    for (let i = 0; i < scopes.length; i++) {
+      if (typeof scopes[i] === 'string') taken.push(scopes[i]);
+    }
     if (taken.length === 0) return;
     if (this.#adoptRevocation(node, taken) > 0) {
       this.#otel.recordRevoke('shared');
@@ -533,7 +566,11 @@ class SyncManager extends Emitter {
   /** Hosting side: the peers greeted here with a live session, and how many connections each holds. */
   sessions() {
     const out = [];
-    for (const [node, held] of this.#sessions) out.push({ node, connections: held.size });
+    for (const pair of this.#sessions) {
+      const node = pair[0];
+      const held = pair[1];
+      out.push({ node, connections: held.size });
+    }
     return out;
   }
 
@@ -545,13 +582,7 @@ class SyncManager extends Emitter {
         if (node.enabled && (url === undefined || node.url === url)) this.#connect(node);
       }
     }
-    let peers;
-    if (url) {
-      const peer = this.#peers.get(url);
-      peers = peer ? [peer] : [];
-    } else {
-      peers = [...this.#peers.values()];
-    }
+    const peers = peersAt(this.#peers, url);
     const results = [];
     for (const peer of peers) {
       if (!peer.remote) continue;
@@ -669,7 +700,7 @@ class SyncManager extends Emitter {
         if (link === NOT_DIALLED) return;
         if (peer.closed) return void link?.close?.();
         if (!isSyncLink(link)) {
-          throw new TypeError('connect(node) must return a SyncLink (call/subscribe/on/off/close)');
+          throw new ArgumentError('connect(node) must return a SyncLink (call/subscribe/on/off/close)');
         }
         peer.link = link;
         peer.handlers = {
@@ -744,6 +775,7 @@ class SyncManager extends Emitter {
 
   #fail(peer, error) {
     if (peer.closed) return;
+    // What failed may be any thrown value, a symbol too: String() names it where a template would throw.
     peer.lastError = { code: error?.code ?? null, message: error?.message ?? String(error), at: Date.now() };
     this.#storage.logger.warn({ event: 'sync.error', url: peer.node.url, err: error });
     notify(this, this.#storage.logger, 'error', Object.assign(error, { url: peer.node.url }));
@@ -792,11 +824,12 @@ class SyncManager extends Emitter {
       kinds: this.#storage.kinds,
     });
     if (peer.closed) return;
-    if (!answer || typeof answer.node !== 'string') throw new SyncomError('BAD_HELLO', `Bad hello from ${node.url}`);
+    if (!answer || typeof answer.node !== 'string') {
+      throw new SyncomError('ALX_ERR_BAD_HELLO', `Bad hello from ${node.url}`);
+    }
     if (answer.duplicate) {
       // A host may say it already dials us; one link is enough.
-      this.#disconnect(node.url);
-      return;
+      return void this.#disconnect(node.url);
     }
     // A host reinstalled since we last spoke: its log speaks another epoch,
     // so our cursor is void and the subscription will say `bootstrap`.
@@ -841,8 +874,7 @@ class SyncManager extends Emitter {
     if (!pulls) {
       // Pushed once: a push-only link has been in sync.
       peer.initial = true;
-      this.#settle();
-      return;
+      return void this.#settle();
     }
     // The state the lost ops made is in the host's: joined back, and the
     // bootstrap subscribes from where its first page was taken.
@@ -894,37 +926,41 @@ class SyncManager extends Emitter {
       if (!Object.hasOwn(adopted, stays[i])) (peer.rewound ??= new Set()).add(stays[i]);
     }
     const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, a second instance or a false claim`;
-    this.#fail(peer, new SyncomError('REWOUND', message, { local, remote, adopted }));
+    this.#fail(peer, new SyncomError('ALX_ERR_REWOUND', message, { local, remote, adopted }));
     return op !== null;
   }
 
   // The host's challenge signed under this node's key — the key that is its id — and answered: without the
-  // signing plugin there is nothing to sign with, and the host would refuse every call (UNPROVEN).
+  // signing plugin there is nothing to sign with, and the host would refuse every call (ALX_ERR_UNPROVEN).
   async #prove(peer, answer) {
     const signer = this.#storage[SIGNER];
     if (signer === null) {
       const message = `${peer.node.url} asks for proof of this node's key, and this node has none (the signing plugin)`;
-      throw new SyncomError('UNPROVEN', message, { url: peer.node.url, node: answer.node });
+      throw new SyncomError('ALX_ERR_UNPROVEN', message, { url: peer.node.url, node: answer.node });
     }
     const sig = await signer.signMessage(proveMessage(answer.challenge, answer.node, this.#storage.nodeId));
     await peer.link.call('syncom/prove', { sig });
   }
 
   // The host took scopes back (`syncom/revoke`, or hello's `revoked`): the registry entry narrows and is saved,
-  // `REVOKED` is reported, the `onRevoke` hook runs — without one, every record of those scopes is forgotten
+  // `ALX_ERR_REVOKED` is reported, the `onRevoke` hook runs — without one, every record of those scopes is forgotten
   // here (never an op: the host would refuse it) — and the feed is opened again under the new grant.
   async #revoked(peer, scopes, resubscribe = true) {
     if (!Array.isArray(scopes) || scopes.length === 0 || peer.closed) return;
     const { node } = peer;
     const taken = new Set();
-    for (let i = 0; i < scopes.length; i++) if (typeof scopes[i] === 'string') taken.add(scopes[i]);
+    for (let i = 0; i < scopes.length; i++) {
+      if (typeof scopes[i] === 'string') taken.add(scopes[i]);
+    }
     const kept = [];
-    for (let i = 0; i < node.scopes.length; i++) if (!taken.has(node.scopes[i])) kept.push(node.scopes[i]);
+    for (let i = 0; i < node.scopes.length; i++) {
+      if (!taken.has(node.scopes[i])) kept.push(node.scopes[i]);
+    }
     node.scopes = kept;
     await this.#saveNode(node);
     const revoked = [...taken];
     const message = `${node.url} took back the scopes ${revoked.join(', ')}`;
-    this.#fail(peer, new SyncomError('REVOKED', message, { scopes: revoked, node: peer.remote?.id ?? null }));
+    this.#fail(peer, new SyncomError('ALX_ERR_REVOKED', message, { scopes: revoked, node: peer.remote?.id ?? null }));
     if (this.#hooks.onRevoke !== null) {
       await runHook(this.#hooks, 'onRevoke', { url: node.url, node: peer.remote?.id ?? null, scopes: revoked });
     } else await this.#forgetScopes(taken);
@@ -943,7 +979,7 @@ class SyncManager extends Emitter {
     const ids = await storage.list();
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
-      let scope;
+      let scope = undefined;
       try {
         const data = await storage.get(id);
         if (data === null) continue;
@@ -1022,7 +1058,7 @@ class SyncManager extends Emitter {
       () => {
         peer.recovering = false;
         peer.behind = false;
-        this.#settle();
+        return void this.#settle();
       },
       (error) => {
         peer.recovering = false;
@@ -1071,7 +1107,7 @@ class SyncManager extends Emitter {
     if (!peer.undeliverable) {
       peer.undeliverable = true;
       const message = `${peer.node.url} lacks ops of this node that its log no longer holds`;
-      this.#fail(peer, new SyncomError('UNDELIVERABLE', message, { missing }));
+      this.#fail(peer, new SyncomError('ALX_ERR_UNDELIVERABLE', message, { missing }));
     }
     return missing;
   }
@@ -1168,23 +1204,24 @@ class SyncManager extends Emitter {
     }
   }
 
-  // The bytes this node holds of the attachments the peer waits for, uploaded (`syncom/blobPut`): a probe first,
-  // so bytes the host holds never cross, then the bytes — as a stream of the link's where the host reads one
-  // (#streamUp), as base64 in the call where no stream goes. Bytes this node lacks (a relay
-  // that never read them) wait — asked after no push again — until they land here (#blobLanded hands their
-  // digest). A refusal is final and a transport's failure tried again at the next push; both are reported
-  // (`BLOB_UPLOAD_FAILED`), never thrown — the push stands. An entry goes from the node's queue, and from the disk,
-  // once its bytes went up or were refused for good — never asked again, a restart later neither. "Not yet" (425: a
-  // hub that forwarded the register, its writer still to land it) is neither: the entry stays, nothing is reported,
-  // and the host's next lull asks again (`peer.deferred`, #receive) — the host's word, FORWARD_TTL long at most,
-  // then its answer is the bytes taken or a refusal. Runs on the push chain.
+  // The bytes this node holds of the attachments the peer waits for, uploaded (`syncom/blobPut`): a probe first, so
+  // bytes the host holds never cross, then the bytes — as a stream of the link's where the host reads one (#streamUp),
+  // as base64 in the call where no stream goes. Bytes this node lacks (a relay that never read them) wait — asked after
+  // no push again — until they land here (#blobLanded hands their digest). A refusal is final and a transport's failure
+  // tried again at the next push; both are reported (`ALX_ERR_BLOB_UPLOAD_FAILED`), never thrown — the push stands. An
+  // entry goes from the node's queue, and from the disk, once its bytes went up or were refused for good — never asked
+  // again, a restart later neither. "Not yet" (425: a hub that forwarded the register, its writer still to land it) is
+  // neither: the entry stays, nothing is reported, and the host's next lull asks again (`peer.deferred`, #receive) —
+  // the host's word, FORWARD_TTL long at most, then its answer is the bytes taken or a refusal. Runs on the push chain.
   async #upload(peer, landed = null) {
     const { uploads } = peer;
     const store = this.#storage[DB]?.blobs;
     peer.deferred = false;
     if (uploads.size === 0 || store === undefined) return;
     const { url } = peer.node;
-    for (const [digest, entry] of uploads) {
+    for (const pair of uploads) {
+      const digest = pair[0];
+      const entry = pair[1];
       if (peer.closed || !peer.connected || peer.link === null) return;
       // The digest that landed whatever the flag says: a pass that asked the store before the bytes came set it since.
       if (entry.waiting && digest !== landed) continue;
@@ -1215,7 +1252,7 @@ class SyncManager extends Emitter {
         this.#otel.recordBlob('uploaded', final ? 'refused' : 'failed', 0);
         const message = `${peer.node.url} did not take the bytes of ${id}/${name}`;
         const fields = { digest, id, attachment: name, cause: error, retry: !final };
-        this.#fail(peer, new SyncomError('BLOB_UPLOAD_FAILED', message, fields));
+        this.#fail(peer, new SyncomError('ALX_ERR_BLOB_UPLOAD_FAILED', message, fields));
       }
     }
   }
@@ -1272,8 +1309,8 @@ class SyncManager extends Emitter {
   }
 
   // Ops the host refused — its `authorizeWrite` (`reason: 'rule'`), or a record outside this node's scopes there
-  // (`'scope'`): each reported (WRITE_REFUSED), and one of this node's own the rule refused reverted — the fields
-  // the op touched brought to what the host holds of them (new ops stamped above the refused one, `actor:
+  // (`'scope'`): each reported (ALX_ERR_WRITE_REFUSED), and one of this node's own the rule refused reverted — the
+  // fields the op touched brought to what the host holds of them (new ops stamped above the refused one, `actor:
   // 'revert'`, through the kinds' patches, so every node comes to the host's state and what the host accepted since
   // stands), or the record forgotten here where the host holds nothing (no op: there is nothing to bring the others
   // to). A revert the host refuses too is reported, never reverted again — the answer names the op's actor, so a log
@@ -1292,16 +1329,10 @@ class SyncManager extends Emitter {
       // write, a delete or a merge; the whole record where the log no longer holds the op.
       const touched = held === undefined ? null : touchedBy(held.op);
       const revert = own && reason === 'rule' && actor !== 'revert' && held?.op.type !== 'purge';
-      const what = revert
-        ? current === null || current === undefined
-          ? '; forgotten here'
-          : '; reverted to what it holds'
-        : reason === 'scope'
-          ? ': the record is outside this node’s scopes there'
-          : '';
+      const what = refusalNote(revert, current, reason);
       const message = `${peer.node.url} refused ${origin}:${seq} on ${id}${what}`;
       const fields = { origin, seq, id, current: reason === 'scope' ? null : (current ?? null), own, touched, reason };
-      this.#fail(peer, new SyncomError('WRITE_REFUSED', message, fields));
+      this.#fail(peer, new SyncomError('ALX_ERR_WRITE_REFUSED', message, fields));
       if (!revert) continue;
       try {
         const options = { actor: 'revert', kinds: isPlainObject(kinds) ? kinds : {} };
@@ -1310,6 +1341,11 @@ class SyncManager extends Emitter {
         storage.logger.warn({ event: 'sync.revert.failed', url: peer.node.url, id, err: error });
       }
     }
+  }
+
+  // A fresh handshake for a feed the host forgot (428), the feed subscribed again after it.
+  #rehello(peer) {
+    this.#handshake(peer, { resubscribe: true }).catch((error) => this.#fail(peer, error));
   }
 
   #subscribe(peer) {
@@ -1341,15 +1377,14 @@ class SyncManager extends Emitter {
           if (error?.code === 428 && peer.connected) {
             if (++peer.rehellos > MAX_REHELLOS) {
               const message = `The host answered 428 to ${MAX_REHELLOS} fresh hellos in a row; not greeting again`;
-              this.#fail(peer, new SyncomError('HANDSHAKE_LOOP', message, { cause: error }));
-              this.#terminal(peer);
-              return;
+              this.#fail(peer, new SyncomError('ALX_ERR_HANDSHAKE_LOOP', message, { cause: error }));
+              return void this.#terminal(peer);
             }
-            this.#handshake(peer, { resubscribe: true }).catch((e) => this.#fail(peer, e));
-            return;
+            return void this.#rehello(peer);
           }
           this.#fail(peer, error);
-          // A refusal by code (NOT_SERVED, UNPROVEN, SCOPES): the feed is not opened again until the next hello.
+          // A refusal by code (NOT_SERVED, ALX_ERR_UNPROVEN, SCOPES): the feed is not opened again until the next
+          // hello.
           if (error?.code === 403) this.#terminal(peer);
         },
         onEnd: ended,
@@ -1374,7 +1409,7 @@ class SyncManager extends Emitter {
     peer.feed++;
     const stuck = peer.failures >= MAX_PAGE_RETRIES;
     const message = `Page after ${peer.node.cursor ?? 'the start'} failed (${error?.message ?? error})`;
-    const reported = new SyncomError(stuck ? 'STUCK' : 'PAGE_FAILED', message, {
+    const reported = new SyncomError(stuck ? 'ALX_ERR_STUCK' : 'ALX_ERR_PAGE_FAILED', message, {
       cause: error,
       cursor: peer.node.cursor ?? null,
       attempt: peer.failures,
@@ -1382,8 +1417,7 @@ class SyncManager extends Emitter {
     this.#fail(peer, reported);
     if (stuck) {
       peer.stuck = true;
-      this.#terminal(peer);
-      return;
+      return void this.#terminal(peer);
     }
     if (peer.connected) this.#subscribe(peer);
   }
@@ -1397,7 +1431,8 @@ class SyncManager extends Emitter {
         await this.#bootstrap(peer);
       } catch (error) {
         this.#fail(peer, error);
-        // Refused by code (a read-only hub's snapshot, UNPROVEN, SCOPES): nothing more comes until the next hello.
+        // Refused by code (a read-only hub's snapshot, ALX_ERR_UNPROVEN, SCOPES): nothing more comes until the next
+        // hello.
         if (error?.code === 403) this.#terminal(peer);
       }
       return;
@@ -1412,8 +1447,7 @@ class SyncManager extends Emitter {
       // A lull of the host's feed: what it said "not yet" to — an upload whose register its writer had still to
       // land — is asked again, on the push chain.
       if (peer.deferred) this.#serializePush(peer, () => this.#upload(peer)).catch(() => {});
-      this.#settle();
-      return;
+      return void this.#settle();
     }
     // A page of nothing but this node's own echoes: the position moved, the
     // cursor follows in memory, and that is all.
@@ -1473,13 +1507,14 @@ class SyncManager extends Emitter {
       const held = new Set(peer.remote.kinds);
       const kinds = this.#storage.kinds;
       const missing = [];
-      for (let i = 0; i < kinds.length; i++) if (!held.has(kinds[i])) missing.push(kinds[i]);
+      for (let i = 0; i < kinds.length; i++) {
+        if (!held.has(kinds[i])) missing.push(kinds[i]);
+      }
       if (missing.length > 0) {
         const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
         this.#otel.recordBootstrap('refused');
-        this.#fail(peer, new SyncomError('KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
-        this.#terminal(peer);
-        return;
+        this.#fail(peer, new SyncomError('ALX_ERR_KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
+        return void this.#terminal(peer);
       }
       const otel = this.#otel;
       if (!otel.enabled) return void (await this.#join(peer));
@@ -1516,7 +1551,8 @@ class SyncManager extends Emitter {
     let total = 0;
     // The host pages; this node checks it moves on: a cursor that does not
     // pass the last one (record ids, in order) would page for ever.
-    const bad = (reason, message) => new SyncomError('BAD_PAGE', `${node.url}: ${message}`, { url: node.url, reason });
+    const bad = (reason, message) =>
+      new SyncomError('ALX_ERR_BAD_PAGE', `${node.url}: ${message}`, { url: node.url, reason });
     do {
       const page = await link.call('syncom/snapshot', { cursor, scopes: node.scopes });
       pages++;
@@ -1553,14 +1589,14 @@ class SyncManager extends Emitter {
   /**
    * The bytes of an attachment's blob asked of the peers this node dials, by digest (`syncom/blob`): the first
    * connected peer that holds them answers — a stream where the transport carries one, base64 otherwise — the
-   * bytes are checked against the digest and kept in this node's blobs store. None has them: `BLOB_NOT_FOUND`
+   * bytes are checked against the digest and kept in this node's blobs store. None has them: `ALX_ERR_BLOB_NOT_FOUND`
    * (`digest`, `asked`). Past `MAX_BLOB_BYTES` a peer's answer is refused.
    */
   async fetchBlob(digest, { id, name } = {}) {
-    if (!isDigest(digest)) throw new TypeError('fetchBlob() takes a digest: SHA-256 as hex');
+    if (!isDigest(digest)) throw new ArgumentError('fetchBlob() takes a digest: SHA-256 as hex');
     const named = typeof id === 'string' && typeof name === 'string';
     if ((id !== undefined || name !== undefined) && !named) {
-      throw new TypeError('fetchBlob(digest, { id, name }): the record id and the attachment name are strings');
+      throw new ArgumentError('fetchBlob(digest, { id, name }): the record id and the attachment name are strings');
     }
     // Named, a host serves the digest to a peer whose scopes hold the record naming it (allow.blob 'named', the
     // default); by digest alone only a host with allow.blob 'any' answers.
@@ -1570,7 +1606,7 @@ class SyncManager extends Emitter {
     for (const peer of this.#peers.values()) {
       if (!peer.connected || peer.link === null) continue;
       asked++;
-      let bytes;
+      let bytes = null;
       try {
         const answer = await peer.link.call('syncom/blob', args);
         bytes = await this.#readBlob(peer.link, answer);
@@ -1604,32 +1640,32 @@ class SyncManager extends Emitter {
       fields.id = id;
       fields.attachment = name;
     }
-    throw new SyncomError('BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, fields);
+    throw new SyncomError('ALX_ERR_BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, fields);
   }
 
   // A blob as a host answers it: the bytes of a stream — `size` of them, in pieces — or base64 in the answer itself;
   // bounded by MAX_BLOB_BYTES.
   async #readBlob(link, answer) {
     if (answer === null || typeof answer !== 'object') {
-      throw new SyncomError('BAD_PAGE', 'A blob answer that is no object');
+      throw new SyncomError('ALX_ERR_BAD_PAGE', 'A blob answer that is no object');
     }
     if (typeof answer.base64 === 'string') {
       if (answer.base64.length > (MAX_BLOB_BYTES / 3) * 4 + 4) {
-        throw new SyncomError('BAD_PAGE', 'A blob past MAX_BLOB_BYTES');
+        throw new SyncomError('ALX_ERR_BAD_PAGE', 'A blob past MAX_BLOB_BYTES');
       }
       return fromBase64(answer.base64);
     }
     if (typeof link.stream !== 'function') {
-      throw new SyncomError('STREAMS_UNSUPPORTED', 'The host streamed a blob but the link cannot read streams');
+      throw new SyncomError('ALX_ERR_STREAMS_UNSUPPORTED', 'The host streamed a blob but the link cannot read streams');
     }
     const { size } = answer;
     if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BLOB_BYTES) {
-      throw new SyncomError('BAD_PAGE', 'A streamed blob of no size, or past MAX_BLOB_BYTES');
+      throw new SyncomError('ALX_ERR_BAD_PAGE', 'A streamed blob of no size, or past MAX_BLOB_BYTES');
     }
     // The size announced, and not a byte further: the pieces as the host wrote them.
     const bytes = await collect(link.stream(answer.id), size);
     if (bytes === null || bytes.length !== size) {
-      throw new SyncomError('BAD_PAGE', 'A streamed blob that is not the size it announced');
+      throw new SyncomError('ALX_ERR_BAD_PAGE', 'A streamed blob that is not the size it announced');
     }
     return bytes;
   }
@@ -1639,7 +1675,10 @@ class SyncManager extends Emitter {
   // mergeSnapshot as one page — a page is bounded by the host's `pageSize`.
   async #readSnapshot(link, page, bad) {
     if (typeof link.stream !== 'function') {
-      throw new SyncomError('STREAMS_UNSUPPORTED', 'The host streamed a snapshot but the link cannot read streams');
+      throw new SyncomError(
+        'ALX_ERR_STREAMS_UNSUPPORTED',
+        'The host streamed a snapshot but the link cannot read streams',
+      );
     }
     const decoder = new TextDecoder();
     const records = [];
@@ -1670,7 +1709,11 @@ class SyncManager extends Emitter {
     // To the shared log first: what the other hubs, and every feed read from it, learn of this op — offered with
     // its log position, which the relay's watermark is kept by.
     if (this.#shared !== null) this.#shared.offer(op, via, detail?.seq ?? null);
-    if (this.#wakers.size > 0) for (const wake of [...this.#wakers]) wake();
+    if (this.#wakers.size > 0) {
+      // A copy: a waker called leaves the set.
+      const wakers = [...this.#wakers];
+      for (const wake of wakers) wake();
+    }
     if (this.#peers.size === 0) return;
     const key = opKey(op);
     const scope = op.scope ?? GLOBAL_SCOPE;
@@ -1727,12 +1770,14 @@ class SyncManager extends Emitter {
    */
   presence(instance) {
     if (!instance || typeof instance.apply !== 'function' || typeof instance.on !== 'function') {
-      throw new TypeError('presence() takes a presence instance');
+      throw new ArgumentError('presence() takes a presence instance');
     }
     const onUpdate = (update) => this.#announcePresence(update);
     instance.on('update', onUpdate);
     this.#presences.add(instance);
-    for (const peer of this.#peers.values()) if (peer.remote) this.#sendPresence(peer, instance);
+    for (const peer of this.#peers.values()) {
+      if (peer.remote) this.#sendPresence(peer, instance);
+    }
     return () => {
       instance.off('update', onUpdate);
       this.#presences.delete(instance);
@@ -1797,11 +1842,15 @@ class SyncManager extends Emitter {
     // pushes forwarded to the inbox.
     if (this.#storage.readOnly && this.#shared === null) {
       const { path } = this.#storage;
-      throw new SyncomError('READ_ONLY', `Storage at ${path} is read-only: it does not host without a shared log`, {
-        path,
-        lease: this.#storage.stats().lock !== null,
-        reason: 'hosting',
-      });
+      throw new SyncomError(
+        'ALX_ERR_READ_ONLY',
+        `Storage at ${path} is read-only: it does not host without a shared log`,
+        {
+          path,
+          lease: this.#storage.stats().lock !== null,
+          reason: 'hosting',
+        },
+      );
     }
     return createUnit(this, options, {
       storage: this.#storage,
@@ -1833,13 +1882,13 @@ class SyncManager extends Emitter {
    */
   revoke(node, scopes) {
     if (typeof node !== 'string' || node.length === 0) {
-      throw new TypeError('revoke(node, scopes): node must be a string');
+      throw new ArgumentError('revoke(node, scopes): node must be a string');
     }
     if (!Array.isArray(scopes) || scopes.length === 0) {
-      throw new TypeError('revoke(node, scopes): scopes must be a non-empty array');
+      throw new ArgumentError('revoke(node, scopes): scopes must be a non-empty array');
     }
     for (let i = 0; i < scopes.length; i++) {
-      if (typeof scopes[i] !== 'string') throw new TypeError('revoke(node, scopes): scopes must be strings');
+      if (typeof scopes[i] !== 'string') throw new ArgumentError('revoke(node, scopes): scopes must be strings');
     }
     this.#adoptRevocation(node, scopes);
     // Over a shared log every hub takes the scopes back: the revocation goes to the topic, folded by each.

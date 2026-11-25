@@ -94,11 +94,11 @@ advisor.stop();
 // #endregion advisor
 assert.deepEqual(advisor.suggest(), [{ entity: 'Task', index: ['owner', 'title'], queries: 2 }]);
 
-const render = (rows) => rows.length;
+const render = (visible) => visible.length;
 let rendered = 0;
 // #region watch
 const open = db.Task.select({ done: false }).order('title').limit(20);
-const stop = open.watch((rows) => render(rows)); // now, and again after every write that changes the rows
+const stop = open.watch((visible) => render(visible)); // now, and again after every write that changes the rows
 // #endregion watch
 const again = db.Task.select({ done: false })
   .order('title')
@@ -125,7 +125,7 @@ const hub = await createDatabase({
 console.log(hub.stats().chain); // null
 // #endregion hub
 assert.equal(hub.stats().chain, null);
-await assert.rejects(() => hub.validate(), { code: 'NO_CHAIN' });
+await assert.rejects(() => hub.validate(), { code: 'ALX_ERR_NO_CHAIN' });
 await hub.close();
 
 // #region lazy

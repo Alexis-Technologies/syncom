@@ -18,12 +18,14 @@
 // `millis(position)` → the stamp in ms (NaN where it does not read: such a cursor is the plain one), `since(ms)` →
 // the position after which everything stamped later than `ms` comes, `read(position, limit)` → the rows after it
 // in the cursor's order (null: from the start), `positionOf(row)` → its position or null, `documentOf(row)` → the
-// document, or null for a row to leave out. No requires.
+// document, or null for a row to leave out. Requires argument-errors.js only.
+
+const { ArgumentError } = require('../argument-errors.js');
 
 /** `lookback` as an adapter takes it: a non-negative number of milliseconds (0: none). */
 const checkLookback = (adapter, value) => {
   if (!Number.isFinite(value) || value < 0) {
-    throw new TypeError(`${adapter}(): lookback must be a non-negative number of milliseconds`);
+    throw new ArgumentError(`${adapter}(): lookback must be a non-negative number of milliseconds`);
   }
   return value;
 };

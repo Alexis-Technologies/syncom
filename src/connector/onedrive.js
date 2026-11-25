@@ -8,9 +8,10 @@
 // writes it in place (a 412 the conflict) or, where no file is known, makes
 // it with `@microsoft.graph.conflictBehavior=fail` (a 409 the conflict: a
 // file another device made first) — a simple upload, so a collection file
-// stays under Graph's 4 MB. Requires jsonfile.js only.
+// stays under Graph's 4 MB. Requires jsonfile.js and errors.js only.
 
 const { jsonFile, requester } = require('./jsonfile.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 /**
  * `{ pull, push }` for `replicate()`. `token` is the Graph access token
@@ -28,7 +29,7 @@ const onedrive = ({
   poll = 0,
 } = {}) => {
   const request = requester(fetch, { headers, token, label: 'OneDrive' });
-  if (typeof path !== 'string' || path.length === 0) throw new TypeError('onedrive(): path is required');
+  if (typeof path !== 'string' || path.length === 0) throw new ArgumentError('onedrive(): path is required');
   const base = `${endpoint.replace(/\/+$/, '')}/${drive.replace(/^\/+|\/+$/g, '')}`;
   const segments = path.split('/');
   for (let i = 0; i < segments.length; i++) segments[i] = encodeURIComponent(segments[i]);

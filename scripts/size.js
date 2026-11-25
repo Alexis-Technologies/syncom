@@ -61,7 +61,7 @@ const ENTRIES = [
   // histograms, refusal counts, five observable gauges, identity scrubbing)
   // the raise to 32 KB; introspection (stats, hosted feeds, lastError, the
   // log event, via as a descriptor) the raise to 32.5 KB; the lock knobs and
-  // its exclusive create, the OPFS handle and key caches, the CORRUPT codes
+  // its exclusive create, the OPFS handle and key caches, the ALX_ERR_CORRUPT codes
   // and the query guards the raise to 33.5 KB. Splitting the 1 900-line
   // Storage into the facade and its write paths (src/commit.js, apply.js,
   // bootstrap.js over a shared `core`, entries.js, record.js, options.js,
@@ -84,13 +84,13 @@ const ENTRIES = [
   // seeding the candidates in the index's order — the raise to 41 KB (40.7
   // measured); the index itself is the @alexify/syncom/search subpath. The
   // fixes the RxDB comparison found — scope bounds on a push, a dialer that
-  // keeps its own ops until its nodes hold them, REWOUND, a record file that
+  // keeps its own ops until its nodes hold them, ALX_ERR_REWOUND, a record file that
   // fails after the append held and replayed — the raise to 42 KB (41.9
   // measured). The sequence engine (src/sequence.js: Fugue runs with
   // extension, run-length tombstones, pending runs and cuts, the walk, the
   // reset rule and the join) wired into ops.js as the list and text kinds —
   // the raise to 47 KB (47.0 measured); its API — splice() and push(), the
-  // index resolved inside the queue, OUT_OF_RANGE, migrate() over lists and
+  // index resolved inside the queue, ALX_ERR_OUT_OF_RANGE, migrate() over lists and
   // texts — the raise to 48 KB (47.7 measured). The movable list — setAt()
   // and move(), a value and a position register per element, position runs
   // — the raise to 49 KB (48.9 measured). updateText() with the Myers diff
@@ -159,7 +159,7 @@ const ENTRIES = [
   // 59.7 with the database opened through its engine: the stores behind EntryStore, the catalog, the lock, the
   // identity, the tags and the chain; `createDatabase({ engine })` (engines plan, E1.3). 60, raised by name.
   // 60.6 with a follower (`readOnly`: src/readonly.js, the change stream heard) and an engine's lease (`db.lock`,
-  // LEASE_LOST; engines plan, E5). 61, raised by name.
+  // ALX_ERR_LEASE_LOST; engines plan, E5). 61, raised by name.
   // 61.0 with a follower refused over an engine that is not shared and from hosting, and a lost lease fenced
   // locally — the stores and the log's medium swapped for the read-only ones, every landing after it held
   // (review №5, E2: R-4, G-2, S-2). 62, raised by name.
@@ -169,8 +169,8 @@ const ENTRIES = [
   // review №5 P-3/P-4/O-4). 64, raised by name.
   // 64.1 with collections defined after the open (`collections`, `addCollections()`, `removeCollection()`,
   // `Catalog.define`) and the catalog's action stream (collections plan, C1.1). 64.5, raised by name.
-  // 65.2 with records named by their data (composite ids, the id field as the id, EXISTS), the bulk writes,
-  // `upsert()`/`insertIfAbsent()` and IN_TRANSACTION (collections plan, C1.2–C1.3). 65.5, raised by name.
+  // 65.2 with records named by their data (composite ids, the id field as the id, ALX_ERR_EXISTS), the bulk writes,
+  // `upsert()`/`insertIfAbsent()` and ALX_ERR_IN_TRANSACTION (collections plan, C1.2–C1.3). 65.5, raised by name.
   // 66.9 with the update operators (src/operators.js, `operate`) and `ifMatch` (collections plan, C1.5). 67, raised by name.
   // 67.0 with `delete(id, { data })` and a revival's resets; declared references, `populate()` (collections plan,
   // C1.7–C1.8). 67.5, raised by name.
@@ -183,7 +183,7 @@ const ENTRIES = [
   // 2026-11-02). 70.5, raised by name. 70.5 with the folded tombstones in the `tombstones` kv namespace (EntryStore.foldMany,
   // the fallback read, the rebuild over both stores; review №6, E1.2–E1.3). 71, raised by name.
   // 71.0 with a row's id laid last, writes by query matched again inside the queue, drop() under the lock, dropDatabase()
-  // refusing a stray directory, composite ids refused on the separator and immutable (ID_IMMUTABLE), EXISTS by
+  // refusing a stray directory, composite ids refused on the separator and immutable (ALX_ERR_ID_IMMUTABLE), ALX_ERR_EXISTS by
   // `expect: ABSENT` (review №6, E2). 71.5, raised by name.
   // 72.7 with the catalog's sorted indexes on SortedIndex (src/sorted.js, chunked sorted arrays: 1.2 of it), a put that
   // re-keys only the indexes a changed field belongs to, load/define/adopt built once (review №6, E4.2; the design
@@ -218,7 +218,9 @@ const ENTRIES = [
   // 78.8 with a field that changes kind made again as what it is — a register by its put, the unsets first — the
   // commit event's `was` and a refusal's `kinds` for the revert (patch.js, commit.js, apply.js; 2026-11-16). 78.8,
   // raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 78.8 },
+  // 79.75 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (79.707 KB measured). 79.75, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 79.75 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -227,6 +229,8 @@ const ENTRIES = [
   // Smart contracts: off the main entry on purpose (a `new Function` over
   // chain data), so a node that never imports the subpath never pays for it
   // — in bytes or in attack surface.
+  // 1.35 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (1.318 KB measured). 1.35, raised by name.
   {
     label: 'contracts — browser (@alexify/syncom/contracts)',
     entry: 'src/contracts/contracts.js',
@@ -234,7 +238,7 @@ const ENTRIES = [
     // 1.1 with isQuotaError beside the errors it shares with the core (sync-parity plan, S5). 1.2, raised by name.
     // 1.2 (at the line) with a SyncomError's fields guarded against its own name, code and `__proto__` (review №7, E11.3;
     // 2026-11-07). 1.25, raised by name.
-    budget: 1.25,
+    budget: 1.35,
   },
   // The IndexedDB backend: browser-only by nature, its own row so the main
   // entry pays nothing for it.
@@ -249,18 +253,20 @@ const ENTRIES = [
   // An engine over a message port (serveEngine/remoteEngine/connectEngine) and a copy between engines (copyEngine):
   // platform-neutral, measured as a browser entry (engines plan, E6–E7). 9.1 with the served side checking every
   // call against the contract (a table of stores, methods and their arguments), the port's death and a timeout heard
-  // (ENGINE_UNREACHABLE, stats()), and a copy that lands the identity last and takes a failure away (review №5 E1).
+  // (ALX_ERR_ENGINE_UNREACHABLE, stats()), and a copy that lands the identity last and takes a failure away (review №5 E1).
   // 9.5, raised by name. 9.7 with a lease's life crossing the port (gen, expiresAt, its events; review №5 O-2). 10, raised by name.
+  // 11.35 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (11.310 KB measured). 11.35, raised by name.
   {
     label: 'engines — browser (@alexify/syncom/engines)',
     entry: 'src/engines/engines.js',
     platform: 'browser',
     // 10.1 with the blobs store proxied and copied (sync-parity plan, S4). 10.5, raised by name.
     // 10.6 with the blobs' door (src/blobs.js) at the served store and a copy refused into a target without blobs
-    // (BLOBS_UNSUPPORTED; review №7, E7.1/E7.3; 2026-11-07). 11, raised by name.
+    // (ALX_ERR_BLOBS_UNSUPPORTED; review №7, E7.1/E7.3; 2026-11-07). 11, raised by name.
     // 11.0 (at the line) with the served store taking the seal's bytes past the cap (MAX_STORED_BYTES; review №7, E12;
     // 2026-11-07). 11.25, raised by name.
-    budget: 11.25,
+    budget: 11.35,
   },
   // The trigram text index behind `$text`: platform-neutral, off the main
   // entry so a node that never searches pays nothing for it.
@@ -283,6 +289,8 @@ const ENTRIES = [
   { label: 'undo — browser (@alexify/syncom/undo)', entry: 'src/undo/undo.js', platform: 'browser', budget: 9.2 },
   // A fork opened through the parent's constructor, merged as ops: the
   // selection a push makes, the shape helpers, the protocol constants.
+  // 5.1 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (5.064 KB measured). 5.1, raised by name.
   {
     label: 'branch — browser (@alexify/syncom/branch)',
     entry: 'src/branch/branch.js',
@@ -290,7 +298,7 @@ const ENTRIES = [
     // 3.6 measured once ValidationError moved into the errors module it shares.
     // 4.0 with the canonical JSON in shape.js.
     // 4.6 with the log's stream index (a push and a merge pick by stream; 2026-10-27). 5, raised by name.
-    budget: 5,
+    budget: 5.1,
   },
   // Presence: the emitter, the bounds, the signed entries; the identity comes from the storage.
   // 4.5 (over by bytes) with the writer's new record methods it bundles (review №6, E7; 2026-11-02). 4.75, raised by name.
@@ -384,10 +392,10 @@ const ENTRIES = [
   // a list's reading derived from the one before, bodies capped at SEG_MAX, one hydration per plain block;
   // 2026-10-27). 107, raised by name.
   // 108.0 with a hash chain per stream (src/header.js: the fingerprint, `prev`, the fork refused as
-  // EQUIVOCATION; the log's fingerprints and heads). 108.5, raised by name.
+  // ALX_ERR_EQUIVOCATION; the log's fingerprints and heads). 108.5, raised by name.
   // 108.6 with presence refusals reported, unreadable log files kept and failing the open, a scrub that rewrites
   // what it takes and an op on a purged record stripped before the append (2026-10-27). 109, raised by name.
-  // 109.1 with a bootstrap's pages checked (BAD_PAGE), a default opsPerPush and kind refusals reported once a
+  // 109.1 with a bootstrap's pages checked (ALX_ERR_BAD_PAGE), a default opsPerPush and kind refusals reported once a
   // page. 110, raised by name: room for the review's remaining fixes, measured again at the end of it.
   // 110.4 with sets shared between versions, a hub's vector read key by key, the log's groups and the deferred
   // window measured (stats, three gauges, three instruments). 111.5, raised by name.
@@ -470,7 +478,7 @@ const ENTRIES = [
   // 169.6 with the host's rules and the dialer's (authorizeWrite, beforeSend, prove, revoke, query/count, forget;
   // sync-parity plan, S1; 2026-11-06). 170, raised by name.
   // 170.9 with the blobs stores, fetchBlob and the host's blob procedure (sync-parity plan, S4). 172, raised by name.
-  // 173.2 with the sealed records in queries, QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
+  // 173.2 with the sealed records in queries, ALX_ERR_QUOTA and the storage estimate (sync-parity plan, S5). 174, raised by name.
   // 173.9 with the sealed seam and the merged sealed page, the relay's watermark by log position (review №7, E1–E2.1;
   // 2026-11-07). 174.5, raised by name.
   // 174.5 with the snapshot's relayed vector, the holes, the ring the feeds read from (review №7, E2.2–E2.4;
@@ -508,7 +516,9 @@ const ENTRIES = [
   // renamed text with its marks and embeds (2026-11-16). 184.5, raised by name.
   // 184.6 with a field that changes kind made again as what it is, on a restore and on a host's revert
   // (2026-11-16). 184.6, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 184.6 },
+  // 186.5 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (186.443 KB measured). 186.5, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 186.5 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -519,7 +529,7 @@ const ENTRIES = [
   // 25.2 with the change reports (changeOf: a splice's spans, marks, moves; S.spanOf).
   // 26.7 with the deltas (a Quill compose, toDelta, applyDelta) and the cursor positions.
   // 27.6 with the editor binding's needs: a cut read as one splice per stretch (spansOf), an insert's marks
-  // in its change and exact in applyDelta, applyDelta's `expect` (STALE). 28, raised by name.
+  // in its change and exact in applyDelta, applyDelta's `expect` (ALX_ERR_STALE). 28, raised by name.
   // 28.1 with a mark's change less what newer marks of its key hold (S.newerRanges) and a marker set in
   // the turn that inserted it composed into the insert. 28.5, raised by name.
   // 28.7 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26).
@@ -547,7 +557,9 @@ const ENTRIES = [
   // 43.5 (over by bytes) with a join that is the same on every node whatever a forged picture differs in under one
   // key (the lesser text wins; SEQ-13). 44, raised by name.
   // 44.1 with isQuotaError in the errors it shares with the core (sync-parity plan, S5). 44.5, raised by name.
-  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44.5 },
+  // 44.75 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (44.723 KB measured). 44.75, raised by name.
+  { label: 'text — browser (@alexify/syncom/text)', entry: 'src/text/text.js', platform: 'browser', budget: 44.75 },
   // The tree kind alone, with the fractional indexes a place is made of and
   // the argument checks it shares with the core (5.1 measured).
   // 5.5 with the field-name check unset shares with it (src/args.js).
@@ -566,6 +578,8 @@ const ENTRIES = [
   // 4.5 with src/ in procedural loops (no array callbacks — a loop is longer than a callback; 2026-10-26) (a hex table in the browser half).
   // 5.1 with the keys no one holds refused (the points of small order, a y past the prime). 5.7 with the op's
   // header hashed in JavaScript (src/crypto/sha256.js, through src/header.js). 6, raised by name.
+  // 7.1 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (7.078 KB measured). 7.1, raised by name.
   {
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
@@ -573,7 +587,7 @@ const ENTRIES = [
     // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
     // 6.6 with the engines' shared errors beside the contract (src/engine.js unreadableRecord, eexist; review №5 M-4). 6.75, raised by name.
     // 6.8 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 6.75. 7, raised by name.
-    budget: 7,
+    budget: 7.1,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
@@ -581,7 +595,9 @@ const ENTRIES = [
   // 3.6 with the contract's keys (src/engine.js isKvKey, KV_NAMESPACES; review №5 E1). 3.75, raised by name.
   // 3.8 with the `tombstones` namespace among the contract's keys and a tombstone's row typed and stamped (review №6, E1.1;
   // 2026-11-02). 4, raised by name.
-  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 4 },
+  // 4.15 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (4.111 KB measured). 4.15, raised by name.
+  { label: 'chain — browser (@alexify/syncom/chain)', entry: 'src/chain/chain.js', platform: 'browser', budget: 4.15 },
   // Sealed records (the RSA half) and the at-rest wrapper (AES-GCM, PBKDF2).
   // 4.1 with the key pair read through a store (engines plan, E1.3). 4.5, raised by name.
   // 5.7 with atRest over an engine (src/encryption/at-rest-engine.js: every store's value sealed, the log's entries and
@@ -594,7 +610,7 @@ const ENTRIES = [
     platform: 'browser',
     // 6.6 with the blobs sealed at rest (sync-parity plan, S4). 7, raised by name.
     // 9.2 with rotateAtRest: the copy (engines/copy.js, the lock, the keys) rides along for the rotation by copy (sync-parity plan, S5). 9.5, raised by name.
-    // 9.6 with the blobs' door at the at-rest store, estimate() passed through and the copy's BLOBS_UNSUPPORTED it
+    // 9.6 with the blobs' door at the at-rest store, estimate() passed through and the copy's ALX_ERR_BLOBS_UNSUPPORTED it
     // bundles (review №7, E7.1/E7.3; 2026-11-07). 10.5, raised by name — E7.4's at-rest blobs as bytes land under it.
     budget: 10.5,
   },
@@ -613,11 +629,13 @@ const ENTRIES = [
     // 4.0 (at the line) with a SyncomError's fields guarded (review №7, E11.3; 2026-11-07). 4.25, raised by name.
     budget: 4.25,
   },
+  // 1.7 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (1.655 KB measured). 1.7, raised by name.
   {
     label: 'layered — browser (@alexify/syncom/layered)',
     entry: 'src/layered/layered.js',
     platform: 'browser',
-    budget: 1.5,
+    budget: 1.7,
   },
   // The sync of ops: the manager and the hosting unit, measured ALONE with
   // the op model (packOps), the vectors, the hooks, the scopes and the
@@ -626,7 +644,7 @@ const ENTRIES = [
   // 20.4 with presence: the unit's inbound event, the room's memory, the manager's carrying.
   // 21.1 with a contained telemetry writer and a log that answers every durable group (2026-10-26).
   // 22.5 with the review's sync fixes: proof for own streams, the hash chain's heads, presence refusals reported,
-  // a bootstrap's pages checked (BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
+  // a bootstrap's pages checked (ALX_ERR_BAD_PAGE, maxPageBytes; 2026-10-27). 23, raised by name.
   // 23.0 with sets shared between versions (the core's ops.js it bundles). 23.5, raised by name.
   // 25.4 with the shared log (src/sync/shared.js), one-way links, the awaits, a host's rules — authorizeWrite,
   // prove, revoke, query/count — and the dialer's beforeSend and revert (sync-parity plan, S0–S1; 2026-11-06).
@@ -660,9 +678,13 @@ const ENTRIES = [
   // lull (2026-11-16). 34.1, raised by name.
   // 34.1 (over by bytes) with the `version` op's wire code and the fields a refused one touched (wire.js, manager.js
   // touchedBy; 2026-11-16). 34.2, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 34.2 },
+  // 34.65 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (34.591 KB measured). 34.65, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 34.65 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
+  // 8.75 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (8.697 KB measured). 8.75, raised by name.
   {
     label: 'schema — browser (@alexify/syncom/schema)',
     entry: 'src/schema/schema.js',
@@ -678,7 +700,7 @@ const ENTRIES = [
     // 8.6 with a migration that writes what the lens changed (migrateRecord: the record compared name by name, a
     // rename told by its value) — src/compose.js rides along, which an app bundle shares with the core
     // (2026-11-16). 8.6, raised by name.
-    budget: 8.6,
+    budget: 8.75,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
@@ -717,6 +739,8 @@ const ENTRIES = [
   // Versions: the fold of the log, the tags, the view at a tag — measured
   // ALONE with the write path, the snapshot pages and the patches it shares
   // with the core.
+  // 42.2 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (42.175 KB measured). 42.2, raised by name.
   {
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
@@ -745,15 +769,17 @@ const ENTRIES = [
     // (2026-11-16). 41.7, raised by name.
     // 41.8 (over by bytes) with a kind change in a diff and the refusal's kinds it bundles (2026-11-16). 41.8,
     // raised by name.
-    budget: 41.8,
+    budget: 42.2,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
-  // 2.5 with the changes of a key one at a time (`set(key, fn)`), a contained observer and CORRUPT (review №6, E3b). 2.75,
+  // 2.5 with the changes of a key one at a time (`set(key, fn)`), a contained observer and ALX_ERR_CORRUPT (review №6, E3b). 2.75,
   // raised by name.
   // 2.8 with a write after close() or a lost lease refused through the seam's guard (review №6, E6; 2026-11-02). 3,
   // raised by name.
-  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 3 },
+  // 3.15 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (3.120 KB measured). 3.15, raised by name.
+  { label: 'local — browser (@alexify/syncom/local)', entry: 'src/local/local.js', platform: 'browser', budget: 3.15 },
   // Persistent app state by name and path, over a record or a local document — measured with the paths and the
   // shapes it shares with the core (collections plan, C4.2). 2.9 measured; 3.
   // 3.1 (over by bytes) with isQuotaError's walk of the cause in errors.js, which it bundles (review №7, E7.3; 2026-11-07).
@@ -766,7 +792,9 @@ const ENTRIES = [
   // 6.5 measured; 7.
   // 7.0 (over by bytes) with the copy's mark and the moved source's fence in engines/copy.js, which it bundles (review №7,
   // E7.4; 2026-11-07). 7.25, raised by name.
-  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7.25 },
+  // 7.4 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (7.371 KB measured). 7.4, raised by name.
+  { label: 'dump — browser (@alexify/syncom/dump)', entry: 'src/dump/dump.js', platform: 'browser', budget: 7.4 },
   // Connectors: a collection kept in step with a backend through pull/push handlers, the checkpoint in the `connector`
   // kv namespace (sync-parity plan, S2). The plan said 5; measured alone it brings shape.js (the id check, the canonical
   // JSON it compares a document by) and the emitter — 7.0; 7.5, raised by name.
@@ -786,11 +814,13 @@ const ENTRIES = [
   // refused as it was told — `#reread`, `#told` (feature/leftovers, 2026-11-16). 10.5, raised by name.
   // 10.58 with a page read and judged in one turn and a stream page's overtaken documents left for a pull —
   // `#pullPage`, `#judge`, `#touch` (feature/leftovers, 2026-11-16). 10.6, raised by name.
+  // 10.8 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (10.774 KB measured). 10.8, raised by name.
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 10.6,
+    budget: 10.8,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
@@ -800,11 +830,17 @@ const ENTRIES = [
   // Firestore with lookback.js (the pull that starts before its checkpoint, shared by the four adapters whose cursor
   // is a timestamp): 2.05 measured (feature/leftovers, 2026-11-16). 2.1, raised by name; supabase 1.8, mongodb 1.5
   // and appwrite 1.85 with it, within theirs.
-  { label: 'connector/firestore — browser', entry: 'src/connector/firestore.js', platform: 'browser', budget: 2.1 },
-  { label: 'connector/appwrite — browser', entry: 'src/connector/appwrite.js', platform: 'browser', budget: 2 },
+  // 2.25 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (2.200 KB measured). 2.25, raised by name.
+  { label: 'connector/firestore — browser', entry: 'src/connector/firestore.js', platform: 'browser', budget: 2.25 },
+  // 2.05 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (2.021 KB measured). 2.05, raised by name.
+  { label: 'connector/appwrite — browser', entry: 'src/connector/appwrite.js', platform: 'browser', budget: 2.05 },
   // Google Drive speaks four routes (the search by name, the v2 metadata for the ETag, the create, the media upload)
   // where OneDrive speaks two: 2.1 KB measured, raised to 2.5 (sync-parity plan, S2c).
-  { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.5 },
+  // 2.65 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (2.607 KB measured). 2.65, raised by name.
+  { label: 'connector/gdrive — browser', entry: 'src/connector/gdrive.js', platform: 'browser', budget: 2.65 },
   // OneDrive's first upload asks Graph to fail where the file is there (conflictBehavior=fail), and a 409 is tried
   // like a 412: 2.0 measured, at the line (review №7, E5.3; 2026-11-07). 2.25, raised by name.
   { label: 'connector/onedrive — browser', entry: 'src/connector/onedrive.js', platform: 'browser', budget: 2.25 },
@@ -824,18 +860,20 @@ const ENTRIES = [
   },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
-  // 6.2 with the re-armable election (onLead/yield/request), a promotion that yields and asks again (PROMOTE_FAILED),
+  // 6.2 with the re-armable election (onLead/yield/request), a promotion that yields and asks again (ALX_ERR_PROMOTE_FAILED),
   // an honest START and close, one dial shared by the writes waiting on it (review №7, E6.1; 2026-11-07). 6.5, raised by name.
-  // 6.6 with the forwarded call's id and `retry`, the leader's answers kept per follower and CALL_UNKNOWN (review №7,
+  // 6.6 with the forwarded call's id and `retry`, the leader's answers kept per follower and ALX_ERR_CALL_UNKNOWN (review №7,
   // E6.2; 2026-11-07). 7, raised by name.
   // 8.0 with the follower's surface — a collection's writers, the attachments and the local documents forwarded
   // (SharedCollection, SharedAttachments, SharedLocal; the collection/local/fetchBlob procedures; review №7, E6.3;
   // 2026-11-07). 8.5, raised by name.
+  // 8.8 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (8.760 KB measured). 8.8, raised by name.
   {
     label: 'shared — browser (@alexify/syncom/shared)',
     entry: 'src/shared/shared.js',
     platform: 'browser',
-    budget: 8.5,
+    budget: 8.8,
   },
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
@@ -844,15 +882,21 @@ const ENTRIES = [
   // (2026-11-15). 7.6, raised by name.
   // 7.62 with the streams wrpc 2.1's: the writable's writeAll, a reader's terminate that stops its writer
   // (2026-11-16). 7.7, raised by name.
-  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7.7 },
+  // 7.85 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (7.792 KB measured). 7.85, raised by name.
+  { label: 'testing — browser', entry: 'src/testing/testing.js', platform: 'browser', budget: 7.85 },
   // Agent tools: the definitions per collection and the argument check — the plan said 2 KB (sync-parity plan, S6).
   // 2.7 with `$regex` refused at the door, the `tools` allowlist, `annotations` on every tool and `changes` paged by
   // `limit` through `log.read` (review №7, E5.4; 2026-11-07). 2.75, raised by name — the plan's cap.
   // 2.8 with every call counted through the seam's writer (review №7, E9.2; 2026-11-07). 3, raised by name.
-  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 3 },
+  // 3.05 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (3.010 KB measured). 3.05, raised by name.
+  { label: 'mcp — browser', entry: 'src/mcp/mcp.js', platform: 'browser', budget: 3.05 },
   // Pipelines: a handler over a collection's turns, checkpointed in the `pipeline` kv namespace (collections plan, C4.7).
   // 3.0 with a replay and a rebuild paged, live turns joined while one is handled (review №6, E5.4; 2026-11-02). 3.25,
   // raised by name.
+  // 3.9 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (3.879 KB measured). 3.9, raised by name.
   {
     label: 'pipeline — browser (@alexify/syncom/pipeline)',
     entry: 'src/pipeline/pipeline.js',
@@ -862,17 +906,19 @@ const ENTRIES = [
     // 3.5, raised by name.
     // 3.71 with `leader`: the pipeline on the leading instance of openShared(), bound again at every change of instance
     // (docs found-bugs, infra; 2026-11-15). 3.8, raised by name.
-    budget: 3.8,
+    budget: 3.9,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
   // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.
   // 3.29 with `leader`: the sweeps and the timer on the leading instance of openShared() (docs found-bugs, infra;
   // 2026-11-15). 3.4, raised by name.
+  // 3.5 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
+  // place of array destructuring, the helpers the lint split out (3.474 KB measured). 3.5, raised by name.
   {
     label: 'cleanup — browser (@alexify/syncom/cleanup)',
     entry: 'src/cleanup/cleanup.js',
     platform: 'browser',
-    budget: 3.4,
+    budget: 3.5,
   },
 ];
 
@@ -893,7 +939,7 @@ const selfContained = {
   },
 };
 
-async function bundle(entry, platform, minify) {
+const bundle = async (entry, platform, minify) => {
   const result = await esbuild.build({
     // A string entry is a file; an object is esbuild's stdin — a bundle of
     // several entries at once, the composite below.
@@ -907,7 +953,7 @@ async function bundle(entry, platform, minify) {
     logLevel: 'silent',
   });
   return Buffer.from(result.outputFiles[0].contents);
-}
+};
 
 // The core and every block `/all` registers, bundled together as an app
 // that imports each from its subpath: what `/all` is, built the other way.
@@ -939,11 +985,11 @@ const composite = () => ({
   sourcefile: 'composite.js',
 });
 
-function kb(bytes) {
+const kb = (bytes) => {
   return `${(bytes / 1024).toFixed(1)} KB`;
-}
+};
 
-async function main() {
+const main = async () => {
   const rows = [];
   const over = [];
   for (const { label, entry, platform, budget } of ENTRIES) {
@@ -991,14 +1037,15 @@ async function main() {
   // Reported after the table: seeing every number is what makes a budget
   // failure actionable.
   if (over.length > 0) throw new Error(`bundle size budget exceeded\n  ${over.join('\n  ')}`);
-}
+};
 
 main().catch((error) => {
   // esbuild rejects with an object whose useful part is `errors[].text`; the
   // object itself prints as a wall of getters, which is how a clear "you
   // imported a package into the browser bundle" turns into noise.
   const reported = Array.isArray(error?.errors) ? error.errors : null;
-  if (reported) for (const { text } of reported) console.error(text);
-  else console.error(error);
+  if (reported) {
+    for (const { text } of reported) console.error(text);
+  } else console.error(error);
   process.exitCode = 1;
 });

@@ -58,8 +58,8 @@ assert.deepEqual(await db.Task.get('ship-it'), { title: 'Ship it on Friday', don
 await db.Task.update(task.id, { done: true });
 await db.Task.update(task.id, { $set: { owner: 'ada' }, $inc: { votes: 1 } });
 await db.Task.unset(task.id, 'owner');
-const after = await db.Task.modify(task.id, (record) => {
-  record.title = record.title.toUpperCase();
+const after = await db.Task.modify(task.id, (draft) => {
+  draft.title = draft.title.toUpperCase();
 });
 console.log(after); // { title: 'WRITE THE DOCS', done: true, $type: 'Task', votes: 1 }
 // #endregion update
@@ -78,13 +78,13 @@ const { success, error } = await db.Task.bulkInsert([
   { id: 'plan', title: 'A second plan', done: false }, // the id is taken by the first row
 ]);
 console.log(success); // [ 'plan', 'announce' ]
-console.log(error.map((row) => [row.index, row.id, row.error.code])); // [ [ 2, 'plan', 'EXISTS' ] ]
+console.log(error.map((failure) => [failure.index, failure.id, failure.error.code])); // [ [ 2, 'plan', 'ALX_ERR_EXISTS' ] ]
 await db.Task.bulkRemove(['announce']);
 // #endregion bulk
 assert.deepEqual(success, ['plan', 'announce']);
 assert.deepEqual(
-  error.map((row) => [row.index, row.id, row.error.code]),
-  [[2, 'plan', 'EXISTS']],
+  error.map((failure) => [failure.index, failure.id, failure.error.code]),
+  [[2, 'plan', 'ALX_ERR_EXISTS']],
 );
 assert.equal(await db.Task.get('announce'), null);
 
@@ -100,10 +100,10 @@ assert.equal(live.title, 'Plan the release');
 // #region foreign
 const ada = await db.Member.insert({ name: 'Ada' });
 console.log(await db.Task.get(ada.id)); // null: the record is a Member
-await db.Task.update(ada.id, { done: true }).catch((error) => console.log(error.code)); // 'NOT_FOUND'
+await db.Task.update(ada.id, { done: true }).catch((refusal) => console.log(refusal.code)); // 'ALX_ERR_NOT_FOUND'
 // #endregion foreign
 assert.equal(await db.Task.get(ada.id), null);
-await assert.rejects(() => db.Task.update(ada.id, { done: true }), { code: 'NOT_FOUND' });
+await assert.rejects(() => db.Task.update(ada.id, { done: true }), { code: 'ALX_ERR_NOT_FOUND' });
 
 // #region events
 db.Task.on('change', ({ id, action }) => console.log(action, id));

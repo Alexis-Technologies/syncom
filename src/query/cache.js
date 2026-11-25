@@ -30,7 +30,9 @@ const canonical = (value) => {
   }
   if (value === null || typeof value !== 'object' || value instanceof RegExp) return value;
   const out = {};
-  for (const key of Object.keys(value).sort()) out[key] = canonical(value[key]);
+  const keys = Object.keys(value);
+  keys.sort();
+  for (let i = 0; i < keys.length; i++) out[keys[i]] = canonical(value[keys[i]]);
   return out;
 };
 
@@ -110,7 +112,9 @@ class QueryCache {
 
   #trim() {
     if (!this.#over()) return;
-    for (const [key, entry] of this.#entries) {
+    for (const pair of this.#entries) {
+      const key = pair[0];
+      const entry = pair[1];
       if (entry.live !== null) continue;
       this.#entries.delete(key);
       this.#idle--;

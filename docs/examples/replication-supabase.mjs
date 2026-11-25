@@ -36,7 +36,9 @@ const createClient = () => {
         if (hit.length === 0) return { data: [], error: null };
       }
       if (state.op !== 'select') {
-        for (const channel of channels) if (channel.table === table) channel.handler({ eventType: state.op });
+        for (const channel of channels) {
+          if (channel.table === table) channel.handler({ eventType: state.op });
+        }
         const id = state.values.id ?? matching()[0]?.id;
         return { data: [structuredClone(rows.get(id))], error: null };
       }

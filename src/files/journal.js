@@ -36,7 +36,7 @@
 // crc32.js, header.js and errors.js only.
 
 const { crc32 } = require('../crc32.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { payloadOf, headerText, restOf, opOf } = require('../header.js');
 
 const OPEN = 'open';
@@ -44,7 +44,7 @@ const CORRUPT = 'corrupt';
 const JOURNAL = '.jsonl';
 const INDEX = 'index.json';
 
-const pad = (n) => String(n).padStart(10, '0');
+const pad = (n) => `${n}`.padStart(10, '0');
 const segmentName = (from) => `seg-${pad(from)}.json`;
 
 const parseJson = (text) => {
@@ -120,7 +120,10 @@ const readOrNull = async (fsi, dir, name) => {
     return await fsi.read(dir, name);
   } catch (error) {
     if (isAbsent(error)) return null;
-    throw new SyncomError('CORRUPT', `The log file ${dir}/${name} cannot be read`, { cause: error, file: name });
+    throw new SyncomError('ALX_ERR_CORRUPT', `The log file ${dir}/${name} cannot be read`, {
+      cause: error,
+      file: name,
+    });
   }
 };
 
@@ -224,6 +227,43 @@ const anyWithin = (seqs, from, to) => {
 const ATOMIC = Object.freeze({ atomic: true });
 
 const byFirst = (a, b) => a.first - b.first;
+// File names newest first: a journal's name begins with its first seq.
+const byNameDescending = (a, b) => {
+  if (a < b) return 1;
+  if (a > b) return -1;
+  return 0;
+};
+
+// The entries at `seqs` as they are now — a scrub took their payloads — by
+// seq: what a store is handed for certain. The log answers a whole range
+// where it holds one; a proxy (src/engines/remote.js) sends the scrubbed
+// entries alone, so a file is never rebuilt from less than it held.
+const replacementsOf = (seqs, entriesBetween) => {
+  const bySeq = new Map();
+  for (let i = 0; i < seqs.length; i++) {
+    const held = entriesBetween(seqs[i], seqs[i]);
+    if (held.length === 1) bySeq.set(seqs[i], held[0]);
+  }
+  return bySeq;
+};
+
+// What a load gathers: the entries merged in, deduplicated by seq (a crash
+// mid-roll leaves the same batch both sealed and open; a group whose
+// append failed may have left its line, shadowed by the group that took
+// its seqs), the floor as the index or the first entry says, the seq
+// sealed up to.
+const gathering = (indexed, floor) => {
+  const state = { indexed, floor, sealed: 0, entries: [], seen: new Set(), adopt: null };
+  state.adopt = (read) => {
+    for (let i = 0; i < read.length; i++) {
+      const entry = read[i];
+      if (!entry || !Number.isInteger(entry.seq) || state.seen.has(entry.seq)) continue;
+      state.seen.add(entry.seq);
+      state.entries.push(entry);
+    }
+  };
+  return state;
+};
 
 /**
  * The log's medium over an fsi, rooted at `path` (`<db>/log`). One per
@@ -256,18 +296,6 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
   // many journals it has begun — never a name a failed group's line is in.
   const journalName = (first) => `${pad(first)}-${session}${(++journals).toString(36).padStart(4, '0')}${JOURNAL}`;
 
-  // The entries at `seqs` as they are now — a scrub took their payloads — by
-  // seq: what a store is handed for certain. The log answers a whole range
-  // where it holds one; a proxy (src/engines/remote.js) sends the scrubbed
-  // entries alone, so a file is never rebuilt from less than it held.
-  const replacementsOf = (seqs, entriesBetween) => {
-    const bySeq = new Map();
-    for (let i = 0; i < seqs.length; i++) {
-      const held = entriesBetween(seqs[i], seqs[i]);
-      if (held.length === 1) bySeq.set(seqs[i], held[0]);
-    }
-    return bySeq;
-  };
   const NOTHING = new Map();
 
   // A group's line written again — what a scrub or a rewritten journal
@@ -309,7 +337,9 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
   // whose line cannot be made whole keeps the journal as it is, said out loud.
   const rewriteJournal = async (file, sealed, entriesBetween, replacements = NOTHING) => {
     const held = [];
-    for (let i = 0; i < groups.length; i++) if (groups[i].file === file) held.push(groups[i]);
+    for (let i = 0; i < groups.length; i++) {
+      if (groups[i].file === file) held.push(groups[i]);
+    }
     if (held.length > 0) {
       let content = '';
       for (let i = 0; i < held.length; i++) {
@@ -348,24 +378,6 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
   };
 
   // ---- the open: segments, then the open files, newest first -----------
-
-  // What a load gathers: the entries merged in, deduplicated by seq (a crash
-  // mid-roll leaves the same batch both sealed and open; a group whose
-  // append failed may have left its line, shadowed by the group that took
-  // its seqs), the floor as the index or the first entry says, the seq
-  // sealed up to.
-  const gathering = (indexed, floor) => {
-    const state = { indexed, floor, sealed: 0, entries: [], seen: new Set(), adopt: null };
-    state.adopt = (read) => {
-      for (let i = 0; i < read.length; i++) {
-        const entry = read[i];
-        if (!entry || !Number.isInteger(entry.seq) || state.seen.has(entry.seq)) continue;
-        state.seen.add(entry.seq);
-        state.entries.push(entry);
-      }
-    };
-    return state;
-  };
 
   // The sealed segments are what the directory lists (`seg-<from>.json`),
   // each read whole: the index names none of them. A segment's start not
@@ -486,7 +498,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
     };
 
     const open = await fsi.list(openPath);
-    open.sort((a, b) => (a < b ? 1 : a > b ? -1 : 0));
+    open.sort(byNameDescending);
     const stale = new Set();
     for (let i = 0; i < open.length; i++) {
       const name = open[i];
@@ -599,8 +611,8 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
      * later group's line shadows it.
      */
     async append(entries, headers, { first, last, sealedTo: sealed, onFail, entriesBetween }) {
-      let file;
-      let line;
+      let file = '';
+      let line = '';
       try {
         line = fileOf(entries, headers);
         if (journaled) {
@@ -614,7 +626,7 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
         // Its seqs go to the next group, which begins a new journal that a reopen reads first.
         journal = null;
         onFail(error);
-        if (journaled && file !== undefined) {
+        if (journaled && file !== '') {
           try {
             await rewriteJournal(file, sealed, entriesBetween);
           } catch (thrown) {
@@ -654,11 +666,13 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
       }
       groups = kept;
       journal = null;
-      for (const file of done) if (!keptFiles.has(file)) await fsi.remove(openPath, file);
+      for (const file of done) {
+        if (!keptFiles.has(file)) await fsi.remove(openPath, file);
+      }
     },
     /** The oldest segment — the first of `segments` — removed, compacted away. */
     async drop(segment) {
-      if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
+      if (segments[0] !== segment) throw new ArgumentError('drop(segment): the oldest segment goes first');
       segments.shift();
       await fsi.remove(path, segment.name);
     },
@@ -698,7 +712,9 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
         if (held === undefined) byFile.set(group.file, (held = []));
         held.push(group);
       }
-      for (const [file, held] of byFile) {
+      for (const pair of byFile) {
+        const file = pair[0];
+        const held = pair[1];
         let touched = false;
         for (let i = 0; !touched && i < held.length; i++) touched = anyWithin(seqs, held[i].first, held[i].last);
         if (!touched) continue;
@@ -727,7 +743,9 @@ const createJournalStore = (fsi, path, { logger = null } = {}) => {
           const text = await readOrNull(fsi, corruptPath, name);
           if (typeof text !== 'string') continue;
           let named = null;
-          for (let k = 0; named === null && k < needles.length; k++) if (text.includes(needles[k])) named = ids[k];
+          for (let k = 0; named === null && k < needles.length; k++) {
+            if (text.includes(needles[k])) named = ids[k];
+          }
           if (named === null) continue;
           await fsi.remove(corruptPath, name);
           logger?.info?.({ event: 'log.corrupt.scrubbed', file: name, id: named });

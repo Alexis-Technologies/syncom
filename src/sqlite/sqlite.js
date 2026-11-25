@@ -25,7 +25,7 @@
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 
 const MEMORY = ':memory:';
 const TABLES = ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'blobs'];
@@ -83,9 +83,9 @@ const ROLLBACK = 'ROLLBACK';
 const noop = () => {};
 const unreadable = (id, cause = null) => unreadableRecord(SyncomError, id, cause);
 
-// A record's text read back: the object it parses to, or INTEGRITY.
+// A record's text read back: the object it parses to, or ALX_ERR_INTEGRITY.
 const parsed = (id, text) => {
-  let value;
+  let value = null;
   try {
     value = JSON.parse(text);
   } catch (error) {
@@ -104,6 +104,20 @@ const pragmas = (file, full) => {
   return lines;
 };
 
+// The statements a new connection runs first: the engine's pragmas, or — a connection given — `durable` alone.
+const setupOf = (file, given, full) => {
+  if (!given) return pragmas(file, full);
+  return full ? ['PRAGMA synchronous = FULL'] : [];
+};
+
+// A column of the rows, sorted.
+const sortedColumn = (rows, column) => {
+  const out = [];
+  for (let i = 0; i < rows.length; i++) out.push(rows[i][column]);
+  out.sort();
+  return out;
+};
+
 /**
  * `sqliteEngine({ file, database, driver, durable })` — the engine over SQLite:
  * `file` (`':memory:'` by default) is opened lazily through `node:sqlite`, or
@@ -113,8 +127,12 @@ const pragmas = (file, full) => {
  * `destroy()` closes and deletes the file.
  */
 const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable = false } = {}) => {
-  if (typeof file !== 'string' || file.length === 0) throw new TypeError('sqliteEngine: file is a path or ":memory:"');
-  if (driver !== null && typeof driver?.open !== 'function') throw new TypeError('sqliteEngine: driver has no open()');
+  if (typeof file !== 'string' || file.length === 0) {
+    throw new ArgumentError('sqliteEngine: file is a path or ":memory:"');
+  }
+  if (driver !== null && typeof driver?.open !== 'function') {
+    throw new ArgumentError('sqliteEngine: driver has no open()');
+  }
   const capabilities = capabilitiesOf({ atomicBatch: true, exclusiveCreate: true, indexes: true, blobs: true });
   let connection = null;
   let opening = null;
@@ -135,10 +153,10 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       try {
         const conn = await openConnection();
         if (typeof conn?.exec !== 'function' || typeof conn.prepare !== 'function') {
-          throw new TypeError('sqliteEngine: the database has no exec() and prepare()');
+          throw new ArgumentError('sqliteEngine: the database has no exec() and prepare()');
         }
         // A connection the caller gave keeps its settings: only `durable` reaches it.
-        const setup = database !== null ? (full ? ['PRAGMA synchronous = FULL'] : []) : pragmas(file, full);
+        const setup = setupOf(file, database !== null, full);
         for (let i = 0; i < setup.length; i++) await conn.exec(setup[i]);
         for (let i = 0; i < SCHEMA.length; i++) await conn.exec(SCHEMA[i]);
         statements = new Map();
@@ -190,10 +208,10 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       };
       if (!atomic) return fn(tx);
       await conn.exec(BEGIN);
-      let value;
       try {
-        value = await fn(tx);
+        const value = await fn(tx);
         await conn.exec(COMMIT);
+        return value;
       } catch (error) {
         try {
           await conn.exec(ROLLBACK);
@@ -202,16 +220,9 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         }
         throw error;
       }
-      return value;
     });
   const transaction = (fn) => over(fn, true);
   const read = (fn) => over(fn, false);
-
-  const names = (rows, column) => {
-    const out = [];
-    for (let i = 0; i < rows.length; i++) out.push(rows[i][column]);
-    return out.sort();
-  };
 
   const openDb = (p, logger) => {
     const kv = {
@@ -220,14 +231,14 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         return none(row) ? null : row.value;
       },
       has: async (ns, key) => !none(await get(SQL.kvGet, [p, ns, key])),
-      list: async (ns) => names(await all(SQL.kvList, [p, ns]), 'key'),
-      put: (ns, key, value) => run(SQL.kvPut, [p, ns, key, String(value)]),
+      list: async (ns) => sortedColumn(await all(SQL.kvList, [p, ns]), 'key'),
+      put: (ns, key, value) => run(SQL.kvPut, [p, ns, key, `${value}`]),
       remove: (ns, key) => run(SQL.kvRemove, [p, ns, key]),
       // The exclusive create the lock prefers: the key read and made in one transaction.
       create: (ns, key, value) =>
         transaction(async (tx) => {
           if (!none(await tx.get(SQL.kvGet, [p, ns, key]))) throw eexist(`${ns}/${key}`);
-          await tx.run(SQL.kvInsert, [p, ns, key, String(value)]);
+          await tx.run(SQL.kvInsert, [p, ns, key, `${value}`]);
         }),
     };
 
@@ -271,7 +282,9 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         const rows = await all(SQL.pieceAll, [p, id]);
         const wanted = new Set(names);
         const found = new Map();
-        for (let i = 0; i < rows.length; i++) if (wanted.has(rows[i].name)) found.set(rows[i].name, rows[i].text);
+        for (let i = 0; i < rows.length; i++) {
+          if (wanted.has(rows[i].name)) found.set(rows[i].name, rows[i].text);
+        }
         return found;
       },
       remove: (id, name) => run(SQL.pieceRemove, [p, id, name]),
@@ -283,7 +296,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         return none(row) ? null : row.text;
       },
       has: async (tag, id) => !none(await get(SQL.copyGet, [p, tag, id])),
-      ids: async (tag) => names(await all(SQL.copyIds, [p, tag]), 'id'),
+      ids: async (tag) => sortedColumn(await all(SQL.copyIds, [p, tag]), 'id'),
       put: (tag, id, text) => run(SQL.copyPut, [p, tag, id, text]),
       remove: (tag, id) => run(SQL.copyRemove, [p, tag, id]),
       drop: (tag) => run(SQL.copyDrop, [p, tag]),
@@ -296,13 +309,9 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         return none(row) ? null : new Uint8Array(row.bytes);
       },
       has: async (digest) => !none(await get(SQL.blobHas, [p, checkDigest(digest, 'blobs.has')])),
-      list: async () => names(await all(SQL.blobList, [p]), 'digest'),
+      list: async () => sortedColumn(await all(SQL.blobList, [p]), 'digest'),
       put: async (digest, bytes) =>
-        run(SQL.blobPut, [
-          p,
-          checkDigest(digest, 'blobs.put'),
-          checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES),
-        ]),
+        run(SQL.blobPut, [p, checkDigest(digest, 'blobs.put'), checkBlobBytes(bytes, 'blobs.put', MAX_STORED_BYTES)]),
       remove: async (digest) => run(SQL.blobRemove, [p, checkDigest(digest, 'blobs.remove')]),
     };
 
@@ -342,7 +351,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
             const byFirst = new Map();
             for (let i = 0; i < rows.length; i++) {
               const { seq, first } = rows[i];
-              let entry;
+              let entry = null;
               try {
                 entry = JSON.parse(rows[i].entry);
               } catch (error) {
@@ -358,7 +367,9 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
               if (seq > group.last) group.last = seq;
               group.seqs.push(seq);
             }
-            const floor = index !== null ? index.floor : entries.length > 0 ? entries[0].seq : 1;
+            let floor = 1;
+            if (index !== null) floor = index.floor;
+            else if (entries.length > 0) floor = entries[0].seq;
             const sealed = sealedTo() ?? floor - 1;
             groups = [];
             const open = [];
@@ -366,7 +377,9 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
               if (group.last <= sealed) continue;
               groups.push({ first: group.first, last: group.last });
               const unsealed = [];
-              for (let i = 0; i < group.seqs.length; i++) if (group.seqs[i] > sealed) unsealed.push(group.seqs[i]);
+              for (let i = 0; i < group.seqs.length; i++) {
+                if (group.seqs[i] > sealed) unsealed.push(group.seqs[i]);
+              }
               open.push({ first: group.first, last: group.last, unsealed });
             }
             return { index, hasIndex: index !== null, entries, groups: open, floor, lost: false };
@@ -409,11 +422,13 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
         },
         async sealed(to) {
           const kept = [];
-          for (let i = 0; i < groups.length; i++) if (groups[i].last > to) kept.push(groups[i]);
+          for (let i = 0; i < groups.length; i++) {
+            if (groups[i].last > to) kept.push(groups[i]);
+          }
           groups = kept;
         },
         async drop(segment) {
-          if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
+          if (segments[0] !== segment) throw new ArgumentError('drop(segment): the oldest segment goes first');
           const rest = segments.slice(1);
           await transaction(async (tx) => {
             await tx.run(SQL.logDrop, [p, segment.from, segment.to]);
@@ -451,9 +466,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
       await transaction(async (tx) => {
         const puts = batch.kv?.put;
         if (puts !== undefined) {
-          for (let i = 0; i < puts.length; i++) {
-            await tx.run(SQL.kvPut, [p, puts[i][0], puts[i][1], String(puts[i][2])]);
-          }
+          for (let i = 0; i < puts.length; i++) await tx.run(SQL.kvPut, [p, puts[i][0], puts[i][1], `${puts[i][2]}`]);
         }
         const rows = batch.records;
         if (rows !== undefined) {
@@ -498,7 +511,7 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
           const rows = await tx.all(SQL.catalogAll, [p]);
           const out = [];
           for (let i = 0; i < rows.length; i++) {
-            let row;
+            let row = null;
             try {
               row = JSON.parse(rows[i].row);
             } catch (error) {
@@ -510,16 +523,18 @@ const sqliteEngine = ({ file = MEMORY, database = null, driver = null, durable =
           }
           return { indexes: head.indexes, stamp: head.stamp, rows: out };
         }),
-      save: (indexes, stamp, { all, changed, whole }) =>
+      save: (indexes, stamp, { all: allRows, changed, whole }) =>
         transaction(async (tx) => {
           if (whole) {
             await tx.run(SQL.catalogDrop, [p]);
-            const rows = all();
+            const rows = allRows();
             for (let i = 0; i < rows.length; i++) {
               await tx.run(SQL.catalogPut, [p, rows[i][0], JSON.stringify(rows[i][1])]);
             }
           } else {
-            for (const [id, row] of changed) {
+            for (const entry of changed) {
+              const id = entry[0];
+              const row = entry[1];
               if (row === null) await tx.run(SQL.catalogRemove, [p, id]);
               else await tx.run(SQL.catalogPut, [p, id, JSON.stringify(row)]);
             }

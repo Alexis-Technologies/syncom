@@ -69,7 +69,7 @@ export declare class Presence {
   nodes(): string[];
   /**
    * Sets this node's state — a JSON object of at most 64 keys, 8 deep, 16
-   * KiB as JSON (`PRESENCE_SIZE` otherwise); `null` leaves — signed when
+   * KiB as JSON (`ALX_ERR_PRESENCE_SIZE` otherwise); `null` leaves — signed when
    * the node can sign, announced as an `update`, renewed on its own.
    * Resolves to the update sent.
    */

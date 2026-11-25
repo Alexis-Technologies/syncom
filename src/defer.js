@@ -70,7 +70,9 @@ class DeferredWindow {
     if (slot === undefined) this.#slots.set(id, (slot = { entry, positions: [] }));
     else slot.entry = entry;
     if (typeof positions === 'number') slot.positions.push(positions);
-    else for (let i = 0; i < positions.length; i++) slot.positions.push(positions[i]);
+    else {
+      for (let i = 0; i < positions.length; i++) slot.positions.push(positions[i]);
+    }
     this.#positions += typeof positions === 'number' ? 1 : positions.length;
     if (this.#flushing) return;
     if (this.#slots.size >= DEFER_RECORDS || this.#positions >= DEFER_POSITIONS) {
@@ -98,7 +100,9 @@ class DeferredWindow {
   settle(id, toSeq) {
     const slot = this.#slots.get(id);
     if (slot === undefined) return;
-    for (let i = 0; i < slot.positions.length; i++) if (!(slot.positions[i] <= toSeq)) return;
+    for (let i = 0; i < slot.positions.length; i++) {
+      if (!(slot.positions[i] <= toSeq)) return;
+    }
     this.#slots.delete(id);
     // Its positions wait no more: the count the overflow flush reads goes down with them.
     this.#positions -= slot.positions.length;
@@ -143,7 +147,9 @@ class DeferredWindow {
     const positions = [];
     let from = Infinity;
     let to = -Infinity;
-    for (const [id, slot] of pending) {
+    for (const pair of pending) {
+      const id = pair[0];
+      const slot = pair[1];
       touched.set(id, slot.entry);
       for (const position of slot.positions) {
         positions.push(position);

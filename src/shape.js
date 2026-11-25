@@ -1,6 +1,6 @@
 'use strict';
 
-const { typed } = require('./errors.js');
+const { DataError } = require('./argument-errors.js');
 // The shapes checked where something enters a storage — a caller's object, a
 // record id, an origin or a scope, a peer's op — and the JSON copy taken at
 // that boundary. No requires beyond ./errors.js: this file ships to the browser as it is.
@@ -8,7 +8,8 @@ const { typed } = require('./errors.js');
 const isPlainObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 // A key's value when the object holds it as its own, else undefined: never
 // what the prototype answers for `constructor` or `toString`.
-const own = (object, key) => (object != null && Object.hasOwn(object, key) ? object[key] : undefined);
+const own = (object, key) =>
+  object !== undefined && object !== null && Object.hasOwn(object, key) ? object[key] : undefined;
 
 // Data crosses the boundary as JSON — what the disk, the log and the peers
 // hold. A copy on the way in (a caller mutating its object after `set()`)
@@ -27,8 +28,8 @@ const RECORD_ID = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}$/;
 const isRecordId = (id) => typeof id === 'string' && id.length <= 128 && RECORD_ID.test(id);
 const invalidId = (id) => {
   const shown = typeof id === 'string' ? JSON.stringify(id) : typeof id;
-  return typed(
-    'INVALID_ID',
+  return new DataError(
+    'ALX_ERR_INVALID_ID',
     `Invalid record id ${shown}: letters, digits, . _ - @, not starting with a dot, 128 at most`,
   );
 };
@@ -36,7 +37,9 @@ const invalidId = (id) => {
 // An origin or a scope ends up a vector key (`origin@scope`) and a room
 // name: a non-empty string without `@` or control characters.
 const hasControl = (value) => {
-  for (let i = 0; i < value.length; i++) if (value.charCodeAt(i) < 32) return true;
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) < 32) return true;
+  }
   return false;
 };
 const isStreamName = (value) =>
@@ -198,7 +201,8 @@ const canonical = (value) => {
     }
     return `${out}]`;
   }
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value);
+  keys.sort();
   let out = '{';
   let first = true;
   for (let i = 0; i < keys.length; i++) {

@@ -83,7 +83,7 @@ export interface SharedOptions<S extends Schema = Schema> extends StorageOptions
   election?: ElectionOptions;
   /** ms to wait for the grant before opening as a follower; 50 by default. */
   grace?: number;
-  /** ms a follower's write waits for a leader to answer before `LEADER_LOST`; 10 000 by default. */
+  /** ms a follower's write waits for a leader to answer before `ALX_ERR_LEADER_LOST`; 10 000 by default. */
   failover?: number;
 }
 
@@ -94,7 +94,7 @@ export interface SharedEvents {
   follower: (event: { path: string; generation: number }) => void;
   /** Every live thing was made again over a new instance. */
   rebind: (event: { path: string; generation: number }) => void;
-  /** The current instance's `error` events, and `PROMOTE_FAILED` when the elected instance could not open. */
+  /** The current instance's `error` events, and `ALX_ERR_PROMOTE_FAILED` when the elected instance could not open. */
   error: (error: Error & { code: string }) => void;
 }
 
@@ -152,7 +152,7 @@ export interface SharedBulkResult<T = unknown> {
 /**
  * A collection of the shared database: the readers the current instance's collection's, the writers the leader's —
  * `insert`, `upsert` and `insertIfAbsent` answer the id on either role, a bulk its verdicts; `modify()` and
- * `remove()` are `NOT_LEADER` on a follower.
+ * `remove()` are `ALX_ERR_NOT_LEADER` on a follower.
  */
 export interface SharedCollection<R = RecordData, I = R> {
   readonly name: string;
@@ -191,7 +191,7 @@ export interface SharedAttachments {
   has(id: string, name: string): Promise<boolean>;
   list(id: string): Promise<Array<AttachmentEntry & { name: string }>>;
   remove(id: string, name: string): Promise<void>;
-  /** The leader's sweep over the shared store; `READ_ONLY` on a follower. */
+  /** The leader's sweep over the shared store; `ALX_ERR_READ_ONLY` on a follower. */
   sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
 }
 
@@ -217,7 +217,7 @@ export interface Shared {
   readonly mode: 'locks' | 'heartbeat' | 'follower' | 'alone';
   /** The election's token: what names this instance's calls to the leader. */
   readonly token: string;
-  /** The leader's replication; `NOT_LEADER` on a follower. */
+  /** The leader's replication; `ALX_ERR_NOT_LEADER` on a follower. */
   readonly sync: FullDatabase['sync'];
   waitForLeadership(options?: { signal?: AbortSignal | null }): Promise<void>;
   onLeader(listener: SharedEvents['leader']): () => void;
@@ -226,7 +226,7 @@ export interface Shared {
   document<R = RecordData>(id: string): SharedDocument<R>;
   /** The collection named: readers the current instance's, writers the leader's (an id answered, a bulk's verdicts). */
   collection<R = RecordData, I = R>(name: string): SharedCollection<R, I>;
-  /** The attachments (`PLUGIN_MISSING` without the plugin): `put` from either role, `get` fetching through the leader. */
+  /** The attachments (`ALX_ERR_PLUGIN_MISSING` without the plugin): `put` from either role, `get` fetching through the leader. */
   readonly attachments: SharedAttachments;
   /** The local documents: reads this instance's, `set`/`delete` the leader's. */
   readonly local: SharedLocal;
@@ -264,9 +264,9 @@ export interface Shared {
   compact: Database['compact'];
   /** The leader's transaction; on a follower a recorded one, carried whole (no `insert`, no read of its own writes). */
   transact<T>(fn: (tx: SharedTransaction) => T | Promise<T>, options?: Record<string, unknown>): Promise<T>;
-  /** The procedures a leader mounts for its followers (`access` `'session'` by default); `NOT_LEADER` on a follower. */
+  /** The procedures a leader mounts for its followers (`access` `'session'` by default); `ALX_ERR_NOT_LEADER` on a follower. */
   serve(options?: { access?: string }): Record<string, ServedProcedure>;
-  /** The role, the generation, the election's mode and the counts: the calls forwarded to the leader, tried again, lost (`LEADER_LOST`), answered from what the leader kept (a retry it saw), the dials, the changes of role. */
+  /** The role, the generation, the election's mode and the counts: the calls forwarded to the leader, tried again, lost (`ALX_ERR_LEADER_LOST`), answered from what the leader kept (a retry it saw), the dials, the changes of role. */
   stats(): SharedStats;
   close(): Promise<void>;
   on<E extends keyof SharedEvents>(event: E, listener: SharedEvents[E]): this;
@@ -279,14 +279,14 @@ export interface SharedStats {
   leader: boolean;
   generation: number;
   mode: 'locks' | 'heartbeat' | 'follower' | 'alone';
-  /** Calls carried to a leader and answered (a value or its refusal); tried again; lost to a change of leader (`LEADER_LOST`); on a leader, retries answered from what it kept. */
+  /** Calls carried to a leader and answered (a value or its refusal); tried again; lost to a change of leader (`ALX_ERR_LEADER_LOST`); on a leader, retries answered from what it kept. */
   forwarded: number;
   retried: number;
   lost: number;
   answered: number;
   /** Channels dialed to a leader. */
   dials: number;
-  /** Promoted at a failover (never the first lead), demoted (the election lost), yielded (`PROMOTE_FAILED`). */
+  /** Promoted at a failover (never the first lead), demoted (the election lost), yielded (`ALX_ERR_PROMOTE_FAILED`). */
   promotions: number;
   demotions: number;
   yields: number;

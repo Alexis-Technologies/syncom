@@ -96,7 +96,7 @@ const openBatch = (
 
 // One op's verdict, contained: a check that throws — synchronously or not —
 // is a signature that does not check, FORGED for that op alone. A throw out
-// of the page would fail it whole (PAGE_FAILED, then STUCK): one hostile op
+// of the page would fail it whole (ALX_ERR_PAGE_FAILED, then ALX_ERR_STUCK): one hostile op
 // would stop the stream it rides on.
 const verdictOf = async (core, op, signatures) => {
   try {
@@ -177,14 +177,14 @@ const reportSignatures = (batch) => {
     const count = batch.forged;
     core.logger.warn({ event: 'sync.op.forged', origin: op.origin, seq: op.seq, count });
     const message = `Op ${op.origin}:${op.seq} does not verify against its origin (${count} in this page)`;
-    core.emit('error', new SyncomError('BAD_SIGNATURE', message, { op, count }));
+    core.emit('error', new SyncomError('ALX_ERR_BAD_SIGNATURE', message, { op, count }));
   }
   if (batch.unsigned > 0) {
     const op = batch.firstUnsigned;
     const count = batch.unsigned;
     core.logger.warn({ event: 'sync.op.unsigned', origin: op.origin, seq: op.seq, count });
     const message = `Op ${op.origin}:${op.seq} carries no signature; sync.signatures is 'require' (${count} in this page)`;
-    core.emit('error', new SyncomError('UNSIGNED', message, { op, count }));
+    core.emit('error', new SyncomError('ALX_ERR_UNSIGNED', message, { op, count }));
   }
 };
 
@@ -193,7 +193,9 @@ const reportSignatures = (batch) => {
 // relays — so the metric counts each, and the warn and the `error` event
 // come once per page, with the count and the kinds.
 const onlyKinds = (rejected) => {
-  for (let i = 0; i < rejected.length; i++) if (rejected[i].reason !== 'kind') return false;
+  for (let i = 0; i < rejected.length; i++) {
+    if (rejected[i].reason !== 'kind') return false;
+  }
   return true;
 };
 const refuseKind = (batch, op, rejected) => {
@@ -209,7 +211,7 @@ const reportKinds = (batch) => {
   const kinds = [...names];
   core.logger.warn({ event: 'sync.op.rejected', id: op.id, rejected, count, kinds });
   const message = `Refused ${count} op${count > 1 ? 's' : ''} of a kind this node runs no plugin for (${kinds.join(', ')})`;
-  core.emit('error', new SyncomError('OP_REFUSED', message, { op, rejected, count, kinds }));
+  core.emit('error', new SyncomError('ALX_ERR_OP_REFUSED', message, { op, rejected, count, kinds }));
 };
 
 // The fingerprint this node holds for the op at `seq` of the stream `key`:
@@ -300,7 +302,7 @@ const reportEquivocations = (batch) => {
     reason === 'chain'
       ? `Op ${op.origin}:${op.seq} does not follow the op this node holds at seq ${op.seq - 1} (${count} in this page)`
       : `Op ${op.origin}:${op.seq} is not the op this node holds at that seq (${count} in this page)`;
-  core.emit('error', new SyncomError('EQUIVOCATION', message, { op, ...fields }));
+  core.emit('error', new SyncomError('ALX_ERR_EQUIVOCATION', message, { op, ...fields }));
 };
 
 // The newest stamp a merge's meta holds — a peer's whole meta, every stamp
@@ -321,7 +323,7 @@ const skewed = (batch, op, ts) => {
   core.otel.recordMalformed();
   batch.malformed++;
   const message = `Op ${op.origin}:${op.seq} carries a stamp ${ahead} ms ahead of this node (maxSkew ${core.maxSkew})`;
-  core.emit('error', new SyncomError('SKEW', message, { op }));
+  core.emit('error', new SyncomError('ALX_ERR_SKEW', message, { op }));
   return false;
 };
 
@@ -384,7 +386,7 @@ const currentOf = async (batch, op) => {
     return batch.touched.get(op.id) ?? (await core.current(op.id));
   } catch (error) {
     const message = `Record ${op.id} is unreadable here; op ${op.origin}:${op.seq} skipped`;
-    const reported = new SyncomError('OP_UNREADABLE', message, { cause: error, op });
+    const reported = new SyncomError('ALX_ERR_OP_UNREADABLE', message, { cause: error, op });
     report(batch, { event: 'sync.op.unreadable', id: op.id, err: error }, 'unreadable', reported);
     skip(batch, op);
     return undefined;
@@ -518,8 +520,7 @@ const applyOne = async (batch, op) => {
   if (ahead && core.ahead === 'hold') {
     skip(batch, op);
     (batch.held ??= new Map()).set(op, op.v);
-    core.emit('schema', { kind: 'ahead', op, held: true });
-    return;
+    return void core.emit('schema', { kind: 'ahead', op, held: true });
   }
   // An op scrubbed before it came — withheld by its sender's `beforeSend`, refused by a host (its rule, a record
   // outside the pusher's scopes), landed on a purged record — is a header alone: logged and relayed as one
@@ -538,7 +539,12 @@ const applyOne = async (batch, op) => {
   // it after the append rewrote log files on any peer's say, and the
   // payload went on to every peer this node relays to. A merge is the purge
   // stamp's way across, and a purge has no payload.
-  if (current?.meta?.purged != null && op.type !== 'purge' && op.type !== 'merge') {
+  if (
+    current?.meta?.purged !== undefined &&
+    current.meta.purged !== null &&
+    op.type !== 'purge' &&
+    op.type !== 'merge'
+  ) {
     scrubOp(op);
     (batch.stripped ??= new Set()).add(op);
     return void skip(batch, op);
@@ -549,8 +555,7 @@ const applyOne = async (batch, op) => {
     // applies what this node did not — and no rule is asked of it (a sealed
     // entry has no meta an op could be tried over).
     core.logger.warn({ event: 'sync.op.encrypted', id: op.id });
-    skip(batch, op);
-    return;
+    return void skip(batch, op);
   }
   // The host's rule on what a peer may write, asked before anything else may apply the op: refused, the op is
   // logged as a scrub leaves it — skipped and scrubbed, a no-op for every node behind this one, no gap in its
@@ -571,7 +576,7 @@ const applyOne = async (batch, op) => {
   if (rejected.length > 0) {
     if (onlyKinds(rejected)) refuseKind(batch, op, rejected);
     else {
-      const error = new SyncomError('OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
+      const error = new SyncomError('ALX_ERR_OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
       report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
     }
   }
@@ -579,7 +584,7 @@ const applyOne = async (batch, op) => {
   // logged, relayed, replay-safe — and reported.
   const invalid = changed && !ahead ? await core.invalid(op, entry) : null;
   if (invalid) {
-    const error = new SyncomError('OP_INVALID', `Invalid op on ${op.id}`, { op, ...invalid });
+    const error = new SyncomError('ALX_ERR_OP_INVALID', `Invalid op on ${op.id}`, { op, ...invalid });
     report(batch, { event: 'sync.op.invalid', id: op.id, ...invalid }, 'validation', error);
     return void skip(batch, op);
   }
@@ -643,7 +648,9 @@ const announce = async (batch, result) => {
   try {
     await core.hook('afterApply', { via, peer, ops: accepted, ...result });
   } finally {
-    for (const [id, entry] of touched) {
+    for (const pair of touched) {
+      const id = pair[0];
+      const entry = pair[1];
       core.refresh(id, isAlive(entry) ? entry.data : null, batch.deltas.get(id), null, entry);
     }
     core.emit('apply', { via, peer, ops: accepted, ...result });

@@ -18,7 +18,7 @@
 
 const { applyOp } = require('../ops.js');
 const { parseEventId, vectorHas } = require('../vector.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, DataError } = require('../errors.js');
 
 // The ops that start a record over: what is stamped below them is gone from
 // the record, whatever the log holds before them. A scrubbed write has no
@@ -33,7 +33,7 @@ const gone = (id, reason) => {
     epoch: 'the event id belongs to another incarnation of this log',
     merge: 'a snapshot joined after the stamp carries ops stamped before it',
   };
-  return new SyncomError('HISTORY_GONE', `History of record ${id} is gone: ${why[reason]}`, { id, reason });
+  return new SyncomError('ALX_ERR_HISTORY_GONE', `History of record ${id} is gone: ${why[reason]}`, { id, reason });
 };
 
 const isVector = (value) => {
@@ -47,21 +47,24 @@ const isVector = (value) => {
 };
 
 // `at`, checked: an event id (a string), a stamp (a number or a Date),
-// `{ vector }` or `{ tag }`. The shape is data, so a wrong one is INVALID_VERSION.
+// `{ vector }` or `{ tag }`. The shape is data, so a wrong one is ALX_ERR_INVALID_VERSION.
 const parseVersion = (at) => {
   if (typeof at === 'string') {
     const parsed = parseEventId(at);
-    if (parsed === null) throw typed('INVALID_VERSION', `at: not an event id: ${at}`);
+    if (parsed === null) throw new DataError('ALX_ERR_INVALID_VERSION', `at: not an event id: ${at}`);
     return { kind: 'event', epoch: parsed.epoch, seq: parsed.seq };
   }
   const stamp = at instanceof Date ? at.getTime() : at;
   if (typeof stamp === 'number') {
-    if (!Number.isFinite(stamp) || stamp < 0) throw typed('INVALID_VERSION', `at: not a stamp: ${at}`);
+    if (!Number.isFinite(stamp) || stamp < 0) throw new DataError('ALX_ERR_INVALID_VERSION', `at: not a stamp: ${at}`);
     return { kind: 'stamp', ts: stamp };
   }
   if (at !== null && typeof at === 'object' && isVector(at.vector)) return { kind: 'vector', vector: at.vector };
   if (at !== null && typeof at === 'object' && typeof at.tag === 'string') return { kind: 'tag', name: at.tag };
-  throw typed('INVALID_VERSION', 'at: an event id, a stamp (a number or a Date), { vector } or { tag }');
+  throw new DataError(
+    'ALX_ERR_INVALID_VERSION',
+    'at: an event id, a stamp (a number or a Date), { vector } or { tag }',
+  );
 };
 
 // Whether an applied entry falls inside the version.

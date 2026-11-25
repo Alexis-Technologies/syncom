@@ -160,8 +160,11 @@ const list = async (dir) => {
     throw error;
   });
   const names = [];
-  for (const entry of entries) if (entry.isFile() && !entry.name.endsWith(TMP)) names.push(entry.name);
-  return names.sort();
+  for (const entry of entries) {
+    if (entry.isFile() && !entry.name.endsWith(TMP)) names.push(entry.name);
+  }
+  names.sort();
+  return names;
 };
 
 // fsync: what `createDatabase({ durable: true })` calls after every write. The OPFS

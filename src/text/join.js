@@ -68,13 +68,15 @@ const prune = (given, base) => {
   }
   for (const map of ['cuts', 'ext', 'marks']) {
     const keys = keysOf(plain[map]);
-    for (let i = 0; i < keys.length; i++) if (!below(keys[i], base)) (out[map] ??= {})[keys[i]] = plain[map][keys[i]];
+    for (let i = 0; i < keys.length; i++) {
+      if (!below(keys[i], base)) (out[map] ??= {})[keys[i]] = plain[map][keys[i]];
+    }
   }
   for (const map of ['pos', 'vals']) {
     const keys = keysOf(plain[map]);
     for (let i = 0; i < keys.length; i++) {
-      const [ts, origin] = plain[map][keys[i]];
-      if (compareClock([ts, origin], base) >= 0) (out[map] ??= {})[keys[i]] = plain[map][keys[i]];
+      const register = plain[map][keys[i]];
+      if (compareClock([register[0], register[1]], base) >= 0) (out[map] ??= {})[keys[i]] = register;
     }
   }
   const empty = runs === 0 && !out.cuts && !out.ext && !out.marks && !out.pos && !out.vals;
@@ -88,7 +90,11 @@ const prune = (given, base) => {
 // what each has seen; where a forged one does — a run's anchor, a mark's range, a register at one
 // stamp, an extension at one offset — the lesser text wins, so the join is the same on every node and
 // a snapshot cannot part two nodes for good.
-const lesser = (x, y) => (x === undefined ? y : y === undefined ? x : x <= y ? x : y);
+const lesser = (x, y) => {
+  if (x === undefined) return y;
+  if (y === undefined) return x;
+  return x <= y ? x : y;
+};
 const lesserJson = (x, y) => JSON.stringify(x) < JSON.stringify(y);
 // A picture as canonical plain JSON: a block of this engine serialized, plain JSON (a snapshot's)
 // normalized — never hydrated into a rope only to be serialized again.
@@ -134,12 +140,14 @@ const join = (givenA, givenB) => {
       }
       const ranges = side.cuts[key];
       for (let i = 0; i < ranges.length; i++) {
-        const [o, n] = ranges[i];
-        const range = `${o},${n}`;
+        const cut = ranges[i];
+        const offset = cut[0];
+        const length = cut[1];
+        const range = `${offset},${length}`;
         if (held.has(range)) continue;
         held.add(range);
-        if (held.size === 1) (out.cuts ??= {})[key] = [[o, n]];
-        else out.cuts[key].push([o, n]);
+        if (held.size === 1) (out.cuts ??= {})[key] = [[offset, length]];
+        else out.cuts[key].push([offset, length]);
       }
     }
     const extKeys = keysOf(side.ext);

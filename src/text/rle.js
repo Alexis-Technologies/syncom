@@ -20,6 +20,7 @@ const isText = (kind) => kind === 't';
 const present = (kind, seg) => (isText(kind) ? typeof seg === 'string' : Array.isArray(seg));
 const isGap = (seg) => Number.isInteger(seg) && seg > 0;
 const segLength = (seg) => (typeof seg === 'number' ? seg : seg.length);
+const ownSeg = (kind, seg) => (typeof seg === 'number' || isText(kind) ? seg : [...seg]);
 
 // Builds a canonical RLE: adjacent gaps add up, adjacent present items join.
 const builder = (kind) => {
@@ -28,7 +29,7 @@ const builder = (kind) => {
     push(seg) {
       if (segLength(seg) === 0) return;
       const last = out.length - 1;
-      if (last < 0) out.push(typeof seg === 'number' ? seg : isText(kind) ? seg : [...seg]);
+      if (last < 0) out.push(ownSeg(kind, seg));
       else if (typeof seg === 'number') typeof out[last] === 'number' ? (out[last] += seg) : out.push(seg);
       else if (typeof out[last] === 'number') out.push(isText(kind) ? seg : [...seg]);
       else if (isText(kind)) out[last] += seg;
@@ -52,8 +53,11 @@ const GAP = Symbol('gap');
 const rleExpand = (rle) => {
   const out = [];
   for (const seg of rle) {
-    if (typeof seg === 'number') for (let i = 0; i < seg; i++) out.push(GAP);
-    else for (let i = 0; i < seg.length; i++) out.push(seg[i]);
+    if (typeof seg === 'number') {
+      for (let i = 0; i < seg; i++) out.push(GAP);
+    } else {
+      for (let i = 0; i < seg.length; i++) out.push(seg[i]);
+    }
   }
   return out;
 };
@@ -92,7 +96,9 @@ const sameSeg = (a, b) =>
     : Array.isArray(b) && JSON.stringify(a) === JSON.stringify(b);
 const sameRle = (a, b) => {
   if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) if (!sameSeg(a[i], b[i])) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (!sameSeg(a[i], b[i])) return false;
+  }
   return true;
 };
 

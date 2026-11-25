@@ -20,9 +20,10 @@
 // file is known — the store must make it conditionally), `probe()` → the
 // ETag or null. `requester` is the fetch the two
 // drives share: the common headers on every request, an error with the status
-// for every answer that is not ok. Requires same.js only.
+// for every answer that is not ok. Requires same.js and errors.js only.
 
 const { same } = require('./same.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const RETRIES = 3;
 
@@ -30,7 +31,7 @@ const empty = () => ({ seq: 0, docs: {} });
 
 // The file's text read into its shape — or refused: a file this is not is never overwritten.
 const parse = (text) => {
-  let file;
+  let file = null;
   try {
     file = JSON.parse(text);
   } catch (error) {
@@ -57,9 +58,9 @@ const jsonFile = (store, { poll = 0 } = {}) => {
     typeof store.load !== 'function' ||
     typeof store.save !== 'function'
   ) {
-    throw new TypeError('jsonFile(): store must have load() and save()');
+    throw new ArgumentError('jsonFile(): store must have load() and save()');
   }
-  if (!Number.isFinite(poll) || poll < 0) throw new TypeError('jsonFile(): poll must be a non-negative number');
+  if (!Number.isFinite(poll) || poll < 0) throw new ArgumentError('jsonFile(): poll must be a non-negative number');
   const probes = typeof store.probe === 'function';
   let etag = null;
   let file = empty();
@@ -94,7 +95,10 @@ const jsonFile = (store, { poll = 0 } = {}) => {
         const documents = [];
         let last = since;
         for (let i = 0; i < rows.length && i < batchSize; i++) {
-          const [n, id, doc] = rows[i];
+          const row = rows[i];
+          const n = row[0];
+          const id = row[1];
+          const doc = row[2];
           documents.push(doc.deleted === true ? { id, deleted: true } : { id, data: doc.data });
           last = n;
         }
@@ -163,12 +167,12 @@ const jsonFile = (store, { poll = 0 } = {}) => {
  * `status` — `<label> <what> answered <status>` — otherwise.
  */
 const requester = (fetch, { headers = {}, token = null, label }) => {
-  if (typeof fetch !== 'function') throw new TypeError(`${label}: fetch must be a function`);
-  if (token !== null && typeof token !== 'string') throw new TypeError(`${label}: token must be a string`);
+  if (typeof fetch !== 'function') throw new ArgumentError(`${label}: fetch must be a function`);
+  if (token !== null && typeof token !== 'string') throw new ArgumentError(`${label}: token must be a string`);
   const common = { accept: 'application/json', ...headers };
   if (token !== null) common.authorization = `Bearer ${token}`;
   return async (url, init = {}, what) => {
-    const response = await fetch(url, { ...init, headers: { ...common, ...(init.headers ?? {}) } });
+    const response = await fetch(url, { ...init, headers: { ...common, ...init.headers } });
     if (response.ok) return response;
     let text = '';
     if (response.status !== 404 && response.status !== 412) {

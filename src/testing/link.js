@@ -222,7 +222,7 @@ class MemoryLink extends Emitter {
     const { maxMessage } = this.#options;
     if (maxMessage !== undefined && this.#tooBig(JSON.stringify(args ?? null).length)) throw closedError();
     if (this.#options.latency) await sleep(this.#options.latency);
-    let answer;
+    let answer = undefined;
     try {
       answer = clone(await procedure.handler(this.context, clone(args)));
     } catch (error) {

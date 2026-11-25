@@ -61,6 +61,7 @@ const refused = await createDatabase({
   path: 'clash',
   schema: { entities: { Task: { methods: { save() {} } } } }, // `save` is a Document's own
 }).catch((error) => error);
-console.log(refused.name); // TypeError
+console.log(refused.name); // ArgumentError
 // #endregion clash
-assert.equal(refused.name, 'TypeError');
+assert.equal(refused.name, 'ArgumentError');
+assert.ok(refused instanceof TypeError);

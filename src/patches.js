@@ -15,9 +15,9 @@ const { ancestorsOf, under } = require('./paths.js');
 const { diffViews, realize } = require('./patch.js');
 const { traced } = require('./telemetry/writer.js');
 const { asJson, isRecordId, invalidId } = require('./shape.js');
-const { SyncomError } = require('./errors.js');
+const { SyncomError, ArgumentError } = require('./errors.js');
 
-const sealed = (id, rest = '') => new SyncomError('ENCRYPTED', `Record ${id} is encrypted here${rest}`);
+const sealed = (id, rest = '') => new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is encrypted here${rest}`);
 
 // What an entry reads as, the way `get()` hands a record out: an encrypted
 // one as its data, a live one through the lens, a tombstone or none as null.
@@ -49,7 +49,11 @@ const runOps = async (core, id, ops, { actor, source, message }) => {
     core,
     async (tx) => {
       let made = 0;
-      for (const [type, payload] of ops) if ((await tx.commit(type, id, payload, { actor })) !== null) made++;
+      for (const entry of ops) {
+        const type = entry[0];
+        const payload = entry[1];
+        if ((await tx.commit(type, id, payload, { actor })) !== null) made++;
+      }
       return made;
     },
     { actor, source, message },
@@ -73,7 +77,7 @@ const runOps = async (core, id, ops, { actor, source, message }) => {
 
 const applyPatches = async (core, id, patches, { actor, source = null, message } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
-  if (!Array.isArray(patches)) throw new TypeError('applyPatches() takes an array of patches');
+  if (!Array.isArray(patches)) throw new ArgumentError('applyPatches() takes an array of patches');
   const ops = [];
   for (let i = 0; i < patches.length; i++) ops.push(realize(patches[i], core.plugins));
   const apply = () => runOps(core, id, ops, { actor, source, message });
@@ -99,7 +103,7 @@ const applyPatches = async (core, id, patches, { actor, source = null, message }
  * id. A peer's op stamped
  * before the rewrite and arriving after it is dropped by the reset, as
  * with any whole-record write. Resolves to how many ops it took; `0` for
- * a record that is not there, `ENCRYPTED` for an encrypted one.
+ * a record that is not there, `ALX_ERR_ENCRYPTED` for an encrypted one.
  */
 const compact = async (core, id, { actor, source = null, message } = {}) => {
   if (!isRecordId(id)) throw invalidId(id);
@@ -111,7 +115,9 @@ const compact = async (core, id, { actor, source = null, message } = {}) => {
   // The reading in the op model's terms: flat, every path a field; a field
   // under a member that is not shown is unreachable and goes with the rewrite.
   const view = decompose(await core.view(id, entry), entry, plugins);
-  for (const field of Object.keys(kinds)) if (!Object.hasOwn(view, field)) delete kinds[field];
+  for (const field of Object.keys(kinds)) {
+    if (!Object.hasOwn(view, field)) delete kinds[field];
+  }
   const patches = diffViews(null, {}, view, kinds, { plugins, context: { to: { entry } } });
   // What a plugin lays after the field is made again (a text's marks).
   for (const field of Object.keys(kinds)) {

@@ -29,7 +29,7 @@ const { isSyncLink } = require('./sync/link.js');
 const { OpLog } = require('./log.js');
 const { outbound } = require('./sync/outbound.js');
 const { compareVectors } = require('./vector.js');
-const { SyncomError, ValidationError } = require('./errors.js');
+const { SyncomError, ArgumentError, ArgumentRangeError, DataError, ValidationError } = require('./errors.js');
 const { createPlugins } = require('./plugin.js');
 
 module.exports = {
@@ -55,5 +55,8 @@ module.exports = {
   outbound,
   compareVectors,
   SyncomError,
+  ArgumentError,
+  ArgumentRangeError,
+  DataError,
   createPlugins,
 };

@@ -31,6 +31,7 @@ const {
   failureReporter,
   EMBED,
 } = require('../editor/editor.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 /** A ChangeSet as a delta over the document before it. */
 const deltaOfChanges = (changes) => {
@@ -101,7 +102,7 @@ const checkModules = (cm) => {
     typeof cm.state?.Annotation?.define !== 'function' ||
     typeof cm.state?.Transaction !== 'function'
   ) {
-    throw new TypeError(
+    throw new ArgumentError(
       'createCodeMirror() takes { state, view? }: the @codemirror/state and @codemirror/view modules',
     );
   }
@@ -131,10 +132,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   const toField = (index) => fit.toField(index);
   const settle = (expected) => {
     const shown = view.state.doc.toString();
-    if (shown === expected) {
-      fit.hold(null);
-      return;
-    }
+    if (shown === expected) return void fit.hold(null);
     const breaks = lineBreaks(expected);
     if (applyToText(expected, breaks.fit) === shown) fit.hold(expected, breaks.fit, breaks.back);
     // Another `lineSeparator`: the smallest difference.
@@ -172,8 +170,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
     },
     updateContents: (delta) => {
       if (fit.unfit.length === 0) {
-        land(changesOfDelta(delta), applyToText(view.state.doc.toString(), delta));
-        return;
+        return void land(changesOfDelta(delta), applyToText(view.state.doc.toString(), delta));
       }
       // The field moved under a document that reads it otherwise: the
       // document becomes the field's text as CodeMirror reads it. The peer's
@@ -193,11 +190,11 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
 
   const attach = (target) => {
     if (!target || typeof target.dispatch !== 'function' || !target.state) {
-      throw new TypeError('attach() takes an EditorView (state and dispatch)');
+      throw new ArgumentError('attach() takes an EditorView (state and dispatch)');
     }
-    if (text !== null) throw new TypeError('attach(): this binding is attached already');
+    if (text !== null) throw new ArgumentError('attach(): this binding is attached already');
     if (target.state.field(reporter, false) === undefined) {
-      throw new TypeError('attach(): the view’s state has not the extension');
+      throw new ArgumentError('attach(): the view’s state has not the extension');
     }
     view = target;
     text = createTextBinding(storage, id, path, adapter, { ...options, source });
@@ -209,7 +206,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   // published to it — `cm.view` (@codemirror/view) is needed for them.
   const cursors = (presence, { field = 'cursor', className = 'syncom-selection', render = null, onError } = {}) => {
     if (typeof cm.view?.Decoration?.mark !== 'function' || typeof cm.view?.WidgetType !== 'function') {
-      throw new TypeError('cursors() needs cm.view: the @codemirror/view module');
+      throw new ArgumentError('cursors() needs cm.view: the @codemirror/view module');
     }
     const { Decoration, EditorView, WidgetType } = cm.view;
     const set = StateEffect.define();
@@ -265,14 +262,14 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
         const next = JSON.stringify(tokens);
         if (stopped || tokens === null || next === published) return;
         published = next;
-        await presence.set({ ...(presence.local ?? {}), [field]: tokens });
+        await presence.set({ ...presence.local, [field]: tokens });
       } finally {
         publishing = false;
       }
     };
-    const report = failed('editor.cursors', onError);
-    const changed = () => void refresh().catch(report);
-    const share = () => void publish().catch(report);
+    const reportCursors = failed('editor.cursors', onError);
+    const changed = () => void refresh().catch(reportCursors);
+    const share = () => void publish().catch(reportCursors);
     started.push(() => {
       presence.on('change', changed);
       changed();
@@ -282,7 +279,9 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
     const decorations = StateField.define({
       create: () => Decoration.none,
       update: (value, tr) => {
-        for (const effect of tr.effects) if (effect.is(set)) return effect.value;
+        for (const effect of tr.effects) {
+          if (effect.is(set)) return effect.value;
+        }
         // This editor's selection moved, or the text did: publish once the queue is through.
         if (tr.selection !== undefined || tr.docChanged) queueMicrotask(share);
         // oxlint-disable-next-line no-restricted-properties -- RangeSet.map (CodeMirror), not an Array
@@ -316,7 +315,7 @@ const createCodeMirror = (storage, id, path, cm, options = {}) => {
   };
 
   const attached = (name) => {
-    if (view === null) throw new TypeError(`${name}(): attach() first`);
+    if (view === null) throw new ArgumentError(`${name}(): attach() first`);
   };
 
   return Object.freeze({

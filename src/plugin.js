@@ -42,7 +42,7 @@
 //       values(entry, field)                → what the field holds beside its reading (a text's embed
 //                                             markers by index), for the commit event; optional
 //       methods                             → { name: (core, id, …args) }, the storage's methods
-//       hints                               → { kind: 'a text; use …' }, for FIELD_KIND
+//       hints                               → { kind: 'a text; use …' }, for ALX_ERR_FIELD_KIND
 //     A block is immutable once it is in an entry and carries `ts`, the
 //     newest stamp it holds — what latestClock and isAlive read without
 //     knowing the kind.
@@ -52,13 +52,13 @@
 //     `requires` names the modules it needs registered first.
 //
 // A method of a module this storage was not opened with is a stub on the
-// facade that throws PLUGIN_MISSING naming the subpath (`missing`); a
+// facade that throws ALX_ERR_PLUGIN_MISSING naming the subpath (`missing`); a
 // peer's op of a kind the node lacks is refused as `reason: 'kind'`, logged
 // and relayed — a dirk, never a gap. No requires beyond the protocol's op
 // types and the error helpers: the registry ships to every entry.
 
 const { OP_TYPES, isPlainObject } = require('./shape.js');
-const { typed } = require('./errors.js');
+const { ArgumentError, DataError } = require('./argument-errors.js');
 
 // Pending work — runs waiting for their anchor, cuts and extensions waiting
 // for their run, registers and switched-off marks for elements and marks not
@@ -72,7 +72,7 @@ const PENDING_MAX = 4096;
 const CORE_RANK = Object.freeze({ register: 0, counter: 1, set: 2 });
 
 // Where an op type, a storage method or a patch action lives: the subpath a
-// PLUGIN_MISSING names.
+// ALX_ERR_PLUGIN_MISSING names.
 const HOME = Object.freeze({
   splice: 'text',
   assign: 'text',
@@ -124,7 +124,7 @@ const missing = (what, home = HOME[what.endsWith('()') ? what.slice(0, -2) : wha
     home === null
       ? 'a plugin'
       : `the ${home} plugin: createDatabase({ plugins: [${home}] }) from '@alexify/syncom/${home}'`;
-  return typed('PLUGIN_MISSING', `${what} needs ${where}`);
+  return new DataError('ALX_ERR_PLUGIN_MISSING', `${what} needs ${where}`);
 };
 
 /** A plugin module: a frozen object with a name, and either kinds (a kind module) or an open() (an API module). */
@@ -135,7 +135,7 @@ const isPlugin = (value) =>
   (isPlainObject(value.kinds) || typeof value.open === 'function' || typeof value.setup === 'function');
 
 const refuse = (where, message) => {
-  throw new TypeError(`${where}: ${message}`);
+  throw new ArgumentError(`${where}: ${message}`);
 };
 
 /**

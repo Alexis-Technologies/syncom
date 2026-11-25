@@ -120,9 +120,9 @@ export interface EngineDb {
   readonly capabilities: EngineCapabilities;
   /**
    * The engine's own lease on the database, where `capabilities.lock` is `'native'`: held while renewed on the
-   * server's clock, `LOCKED` while another instance holds it; `onLost` hears once when it goes to another
+   * server's clock, `ALX_ERR_LOCKED` while another instance holds it; `onLost` hears once when it goes to another
    * instance. A write set, a log group, a seal, the index or a kv put of a lease another instance took since
-   * rejects with `LEASE_LOST`.
+   * rejects with `ALX_ERR_LEASE_LOST`.
    */
   lock?(options: LockOptions & { onLost?: (error: Error) => void }): Promise<EngineLease>;
   /**
@@ -142,7 +142,7 @@ export interface EngineDb {
    * What another instance wrote over the same database, where `capabilities.changeStream` — `{ records: ids }`
    * per message (IndexedDB: `{ log: [first, last] }` for a log group too), never this instance's own; what a
    * follower (`readOnly`) hears. `{ error }` once when the stream ends — an error, a close — and the subscription
-   * with it: the follower subscribes again and reads every record again (`FOLLOW_LOST`).
+   * with it: the follower subscribes again and reads every record again (`ALX_ERR_FOLLOW_LOST`).
    */
   readonly changes?: {
     subscribe(
@@ -163,7 +163,7 @@ export interface EngineDb {
     create?(ns: string, key: string, value: string): Promise<void>;
   };
   readonly records: {
-    /** The stored record, or null; one that does not parse rejects with `INTEGRITY` (`reason: 'unreadable'`). */
+    /** The stored record, or null; one that does not parse rejects with `ALX_ERR_INTEGRITY` (`reason: 'unreadable'`). */
     get(id: string): Promise<StoredRecord | null>;
     /** The record's text as the medium holds it, or null. */
     raw(id: string): Promise<string | null>;
@@ -623,103 +623,147 @@ export interface Refusal {
  * wrong at run time, documented under each operation in the API reference.
  */
 export type SyncomErrorCode =
-  | 'CLOSED'
-  | 'IN_HOOK'
-  | 'IN_TRANSACTION'
-  | 'PIPELINE_FAILED'
-  | 'REPLICATION_FAILED'
-  | 'NOT_FOUND'
-  | 'EXISTS'
-  | 'FIELD_KIND'
-  | 'OUT_OF_RANGE'
-  | 'CYCLE'
-  | 'SURROGATE'
-  | 'STALE'
-  | 'HISTORY_GONE'
-  | 'TAG_EXISTS'
-  | 'TAG_NOT_FOUND'
-  | 'BRANCH_EXISTS'
-  | 'ENCRYPTED'
-  | 'INTEGRITY'
-  | 'CORRUPT'
-  | 'DOWNGRADE'
-  | 'LOCKED'
-  | 'READ_ONLY'
-  | 'LEASE_LOST'
-  | 'NOT_LEADER'
-  | 'LEADER_LOST'
-  | 'CALL_UNKNOWN'
-  | 'PROMOTE_FAILED'
-  | 'BLOB_NOT_FOUND'
-  | 'BLOB_UPLOAD_FAILED'
-  | 'BLOB_MISMATCH'
-  | 'ATTACHMENT_INVALID'
-  | 'FOLLOW_LOST'
-  | 'SHARED_LOG_FAILED'
-  | 'REVOKED'
-  | 'UNPROVEN'
-  | 'WRITE_REFUSED'
-  | 'TARGET_NOT_EMPTY'
-  | 'BLOBS_UNSUPPORTED'
-  | 'MOVED'
-  | 'SCHEMA_MISMATCH'
-  | 'ENGINE_UNREACHABLE'
-  | 'KEYS_INCOMPLETE'
-  | 'DECRYPT_FAILED'
-  | 'IDENTITY_MISMATCH'
-  | 'KINDS_MISMATCH'
-  | 'BAD_SIGNATURE'
-  | 'UNSIGNED'
-  | 'EQUIVOCATION'
-  | 'BAD_ENVELOPE'
-  | 'BLOCK_NOT_FOUND'
-  | 'NOT_CONTRACT'
-  | 'NODE_EXISTS'
-  | 'NODE_NOT_FOUND'
-  | 'BAD_HELLO'
-  | 'BAD_PAGE'
-  | 'HANDSHAKE_LOOP'
-  | 'PAGE_FAILED'
-  | 'STUCK'
-  | 'STREAMS_UNSUPPORTED'
-  | 'UNRECOVERABLE'
-  | 'UNPERSISTED'
-  | 'QUOTA'
-  | 'REWOUND'
-  | 'UNDELIVERABLE'
-  | 'UNLOGGED'
-  | 'SKEW'
-  | 'OP_UNREADABLE'
-  | 'OP_REFUSED'
-  | 'OP_INVALID'
-  | 'HOOK_FAILED'
-  | 'VALIDATION_FAILED';
+  | 'ALX_ERR_CLOSED'
+  | 'ALX_ERR_IN_HOOK'
+  | 'ALX_ERR_IN_TRANSACTION'
+  | 'ALX_ERR_PIPELINE_FAILED'
+  | 'ALX_ERR_REPLICATION_FAILED'
+  | 'ALX_ERR_NOT_FOUND'
+  | 'ALX_ERR_EXISTS'
+  | 'ALX_ERR_FIELD_KIND'
+  | 'ALX_ERR_OUT_OF_RANGE'
+  | 'ALX_ERR_CYCLE'
+  | 'ALX_ERR_SURROGATE'
+  | 'ALX_ERR_STALE'
+  | 'ALX_ERR_HISTORY_GONE'
+  | 'ALX_ERR_TAG_EXISTS'
+  | 'ALX_ERR_TAG_NOT_FOUND'
+  | 'ALX_ERR_BRANCH_EXISTS'
+  | 'ALX_ERR_ENCRYPTED'
+  | 'ALX_ERR_INTEGRITY'
+  | 'ALX_ERR_CORRUPT'
+  | 'ALX_ERR_DOWNGRADE'
+  | 'ALX_ERR_LOCKED'
+  | 'ALX_ERR_READ_ONLY'
+  | 'ALX_ERR_LEASE_LOST'
+  | 'ALX_ERR_NOT_LEADER'
+  | 'ALX_ERR_LEADER_LOST'
+  | 'ALX_ERR_CALL_UNKNOWN'
+  | 'ALX_ERR_PROMOTE_FAILED'
+  | 'ALX_ERR_BLOB_NOT_FOUND'
+  | 'ALX_ERR_BLOB_UPLOAD_FAILED'
+  | 'ALX_ERR_BLOB_MISMATCH'
+  | 'ALX_ERR_ATTACHMENT_INVALID'
+  | 'ALX_ERR_FOLLOW_LOST'
+  | 'ALX_ERR_SHARED_LOG_FAILED'
+  | 'ALX_ERR_REVOKED'
+  | 'ALX_ERR_UNPROVEN'
+  | 'ALX_ERR_WRITE_REFUSED'
+  | 'ALX_ERR_TARGET_NOT_EMPTY'
+  | 'ALX_ERR_BLOBS_UNSUPPORTED'
+  | 'ALX_ERR_MOVED'
+  | 'ALX_ERR_SCHEMA_MISMATCH'
+  | 'ALX_ERR_ENGINE_UNREACHABLE'
+  | 'ALX_ERR_KEYS_INCOMPLETE'
+  | 'ALX_ERR_DECRYPT_FAILED'
+  | 'ALX_ERR_IDENTITY_MISMATCH'
+  | 'ALX_ERR_KINDS_MISMATCH'
+  | 'ALX_ERR_BAD_SIGNATURE'
+  | 'ALX_ERR_UNSIGNED'
+  | 'ALX_ERR_EQUIVOCATION'
+  | 'ALX_ERR_BAD_ENVELOPE'
+  | 'ALX_ERR_BLOCK_NOT_FOUND'
+  | 'ALX_ERR_NOT_CONTRACT'
+  | 'ALX_ERR_NODE_EXISTS'
+  | 'ALX_ERR_NODE_NOT_FOUND'
+  | 'ALX_ERR_BAD_HELLO'
+  | 'ALX_ERR_BAD_PAGE'
+  | 'ALX_ERR_HANDSHAKE_LOOP'
+  | 'ALX_ERR_PAGE_FAILED'
+  | 'ALX_ERR_STUCK'
+  | 'ALX_ERR_STREAMS_UNSUPPORTED'
+  | 'ALX_ERR_UNRECOVERABLE'
+  | 'ALX_ERR_UNPERSISTED'
+  | 'ALX_ERR_QUOTA'
+  | 'ALX_ERR_REWOUND'
+  | 'ALX_ERR_UNDELIVERABLE'
+  | 'ALX_ERR_UNLOGGED'
+  | 'ALX_ERR_SKEW'
+  | 'ALX_ERR_OP_UNREADABLE'
+  | 'ALX_ERR_OP_REFUSED'
+  | 'ALX_ERR_OP_INVALID'
+  | 'ALX_ERR_HOOK_FAILED'
+  | 'ALX_ERR_VALIDATION_FAILED';
 
 /**
- * The codes a `TypeError` carries where the value it refuses is data or
- * configuration rather than the calling code's mistake (`typed()`): an id,
- * a `$type`, a version, the chain or a plugin missing, a presence state past
- * its bounds. Never on a `SyncomError`.
+ * The codes a `DataError` carries: a value it refuses that is data or
+ * configuration rather than the calling code's mistake — an id, a `$type`, a
+ * version, the chain or a plugin missing, a blob or a presence state past its
+ * bounds. Never on a `SyncomError`.
  */
-export type TypedErrorCode =
-  | 'INVALID_ID'
-  | 'TYPE_IMMUTABLE'
-  | 'ID_IMMUTABLE'
-  | 'INVALID_VERSION'
-  | 'NO_CHAIN'
-  | 'PLUGIN_MISSING'
-  | 'BLOB_TOO_LARGE'
-  | 'PRESENCE_SIZE';
+export type DataErrorCode =
+  | 'ALX_ERR_INVALID_ID'
+  | 'ALX_ERR_TYPE_IMMUTABLE'
+  | 'ALX_ERR_ID_IMMUTABLE'
+  | 'ALX_ERR_INVALID_VERSION'
+  | 'ALX_ERR_NO_CHAIN'
+  | 'ALX_ERR_PLUGIN_MISSING'
+  | 'ALX_ERR_BLOB_TOO_LARGE'
+  | 'ALX_ERR_PRESENCE_SIZE';
+
+/** Every code an error of syncom carries: a `SyncomError`'s, a `DataError`'s and an `ArgumentError`'s. */
+export type ErrorCode = SyncomErrorCode | DataErrorCode | 'ALX_ERR_INVALID_ARGUMENT';
+
+/**
+ * A wrong argument, option, definition or hook result: a bug in the calling
+ * code, never a state of the data. A `TypeError`, so `instanceof TypeError`
+ * holds; its code is always `ALX_ERR_INVALID_ARGUMENT`.
+ */
+export class ArgumentError extends TypeError {
+  constructor(message: string, options?: { cause?: unknown });
+  readonly name: 'ArgumentError';
+  readonly code: 'ALX_ERR_INVALID_ARGUMENT';
+}
+
+/**
+ * An argument past the range it may take where a `RangeError` is what the
+ * API has always thrown (`@alexify/syncom/order`'s keys and bounds). A
+ * `RangeError`; its code is `ALX_ERR_INVALID_ARGUMENT`.
+ */
+export class ArgumentRangeError extends RangeError {
+  constructor(message: string, options?: { cause?: unknown });
+  readonly name: 'ArgumentRangeError';
+  readonly code: 'ALX_ERR_INVALID_ARGUMENT';
+}
+
+/** What a `DataError` documents beside its code: the collection and field of an id it refused, the length and cap of a blob. */
+export interface DataErrorDetails {
+  entity?: string;
+  field?: string | null;
+  length?: number;
+  max?: number;
+}
+
+/**
+ * A value syncom refuses that came from data or configuration rather than
+ * from the code that called (a `DataErrorCode`). A `TypeError`; one shape for
+ * every code, `details` null where the code documents nothing.
+ */
+export class DataError extends TypeError {
+  constructor(code: DataErrorCode, message: string, details?: DataErrorDetails | null, options?: { cause?: unknown });
+  readonly name: 'DataError';
+  readonly code: DataErrorCode;
+  readonly details: DataErrorDetails | null;
+}
 
 /**
  * What syncom rejects with when an operation cannot be done — as opposed to
- * a `TypeError`, which is a wrong argument, option or hook result and carries
- * no code (except a `TypedErrorCode`: `INVALID_ID`, `TYPE_IMMUTABLE`, `ID_IMMUTABLE`,
- * `INVALID_VERSION`, `NO_CHAIN`, `PLUGIN_MISSING`, `BLOB_TOO_LARGE`, `PRESENCE_SIZE`, whose
- * value is data or configuration). `code` is one constant; the fields the code
- * documents (`op`, `cursor`, `rejected`…) ride on the error, `cause` is the
- * underlying one. A host's wire refusal is not one of these: it is a plain
- * `Error` with the numeric `code` the transport carries and a `reason`.
+ * an `ArgumentError` (a wrong argument, option or hook result) or a
+ * `DataError` (a value of data or configuration it refuses). `code` is one
+ * constant; the fields the code documents (`op`, `cursor`, `rejected`…) ride
+ * on the error, `cause` is the underlying one. A host's wire refusal is not
+ * one of these: it is a plain `Error` with the numeric `code` the transport
+ * carries and a `reason`, the protocol's constant.
  */
 export class SyncomError extends Error {
   constructor(code: SyncomErrorCode, message: string, fields?: { cause?: unknown; [field: string]: unknown });
@@ -737,7 +781,7 @@ export class SyncomError extends Error {
 export class HookError extends SyncomError {
   constructor(hook: string, cause: unknown);
   readonly name: 'HookError';
-  readonly code: 'HOOK_FAILED';
+  readonly code: 'ALX_ERR_HOOK_FAILED';
   readonly hook: string;
   readonly cause: unknown;
 }
@@ -847,7 +891,7 @@ export interface OpLog {
   fingerprintOf(key: string, seq: number): string | undefined;
   /** `[seq, fingerprint]` of the newest op of the stream `key` this log held — compacted or not, kept in the index — or undefined. */
   headOf(key: string): [number, string] | undefined;
-  /** Heads of streams whose ops this log does not hold (a REWOUND proof's), `{ key: [seq, fingerprint] }`; an older one than held is left. */
+  /** Heads of streams whose ops this log does not hold (a ALX_ERR_REWOUND proof's), `{ key: [seq, fingerprint] }`; an older one than held is left. */
   adoptHeads(heads: Record<string, readonly [number, string]>): void;
   /** How many ops the log keeps at least (`retention.ops`); `Infinity` when no count bounds it. */
   readonly retainedOps: number;
@@ -1042,7 +1086,7 @@ export interface ValidationIssue {
 export class ValidationError extends SyncomError {
   constructor(entity: string | null, issues: ValidationIssue[]);
   readonly name: 'ValidationError';
-  readonly code: 'VALIDATION_FAILED';
+  readonly code: 'ALX_ERR_VALIDATION_FAILED';
   readonly entity: string | null;
   readonly issues: ValidationIssue[];
   cause?: unknown;
@@ -1272,7 +1316,7 @@ export interface SyncHooks {
    */
   beforeSend?: (context: { op: SyncOp; peer: PeerRef }) => void | boolean | Promise<void | boolean>;
   /**
-   * A host took scopes back from this node (`REVOKED`): the registry entry is narrower already, the feed is opened
+   * A host took scopes back from this node (`ALX_ERR_REVOKED`): the registry entry is narrower already, the feed is opened
    * again under the new grant after this. Without the hook every record of those scopes is forgotten here
    * (`forget(id)`: no op — the host would refuse one).
    */
@@ -1302,7 +1346,7 @@ export interface SyncOptions {
    * How much pending work a list or text field takes from ops that ran
    * ahead of what they depend on — runs waiting for their anchor, cuts and
    * extensions for their run, registers and switched-off marks for elements
-   * not here — before an op is refused (`OP_REFUSED`, reason `'bound'`) and
+   * not here — before an op is refused (`ALX_ERR_OP_REFUSED`, reason `'bound'`) and
    * a snapshot block is dropped. 4096 by default; a refusal is final on this
    * node, so a mesh with several hosts raises it rather than lowers it.
    * `Infinity` disables the bound.
@@ -1319,7 +1363,7 @@ export interface SyncOptions {
   signatures?: 'verify' | 'require' | false;
   /**
    * A host that says at hello it holds more of this node's own streams than
-   * its log does (`REWOUND`: a directory restored from an older copy, a
+   * its log does (`ALX_ERR_REWOUND`: a directory restored from an older copy, a
    * second instance — or a host that lies). `'report'` (the default): a
    * stream moves past the host's only on proof — the host hands the op it
    * holds at that seq, and it is this node's own, signed by its key (the
@@ -1336,7 +1380,7 @@ export interface SyncOptions {
   /**
    * The bytes one streamed snapshot page may carry (default 256 MiB,
    * `Infinity` for no bound); past it — or a page without its records, or a
-   * cursor that does not move on — the bootstrap stops with `BAD_PAGE`.
+   * cursor that does not move on — the bootstrap stops with `ALX_ERR_BAD_PAGE`.
    */
   maxPageBytes?: number;
   /** Lifecycle hooks — see SyncHooks. */
@@ -1558,7 +1602,7 @@ export interface TagCollection<R = RecordData> {
 /**
  * The storage as it was at a tag. The tag's catalog is read at the view's
  * first read (an open reads the newest tag's alone); a reader of a tag whose
- * catalog is gone is told `TAG_NOT_FOUND` then.
+ * catalog is gone is told `ALX_ERR_TAG_NOT_FOUND` then.
  */
 /** Who wrote a field or an element: the node, and the stamp of its write. */
 export interface Editor {
@@ -1569,7 +1613,7 @@ export interface Editor {
 /**
  * The storage at a version that is no tag — an event id, a stamp, a vector
  * — read out of the log: what `branch(parent, { from: { at } })` pages.
- * Exact only while the log retains what the version needs (`HISTORY_GONE`
+ * Exact only while the log retains what the version needs (`ALX_ERR_HISTORY_GONE`
  * otherwise; never under `retention: 'all'`).
  */
 export interface VersionView {
@@ -1636,7 +1680,7 @@ export interface LockOptions {
   staleAfter?: number;
   /** How often `'wait'` looks again, in ms (default 100); how often a failed renewal of an engine's lease is tried again. */
   poll?: number;
-  /** How long `'wait'` waits before `LOCKED`, in ms (default forever). */
+  /** How long `'wait'` waits before `ALX_ERR_LOCKED`, in ms (default forever). */
   timeout?: number;
 }
 
@@ -1787,17 +1831,17 @@ export interface StorageOptions<S extends Schema = Schema> {
   defer?: number;
   /**
    * One instance per directory: `'fail'` (default) rejects `open()` with
-   * `code: 'LOCKED'` while another holds it, `'wait'` waits for it, `false`
+   * `code: 'ALX_ERR_LOCKED'` while another holds it, `'wait'` waits for it, `false`
    * leaves the coordination to the caller. Web Locks in the browser, a
    * `lock.json` with the pid otherwise (stale when its process is gone).
    */
   lock?: 'fail' | 'wait' | false | LockOptions;
   /**
    * A follower: reads what another instance writes through the same engine and writes nothing — no lock, no
-   * replay, no catalog save; every write rejects with `READ_ONLY`. Only an engine several instances may open at
+   * replay, no catalog save; every write rejects with `ALX_ERR_READ_ONLY`. Only an engine several instances may open at
    * once takes one (`capabilities.shared`: memory, IndexedDB, MongoDB) — the files engine and SQLite refuse it
    * with a `TypeError`. Its log and vector are as of its open: it neither dials (`sync.connect` is a `TypeError`)
-   * nor hosts (`sync.unit()` is `READ_ONLY`, `reason: 'hosting'`) until the shared log lands. Where the engine has
+   * nor hosts (`sync.unit()` is `ALX_ERR_READ_ONLY`, `reason: 'hosting'`) until the shared log lands. Where the engine has
    * a change stream (IndexedDB, MongoDB) a record the writer lands is read again, its live `Document` refreshed
    * and its watchers woken.
    */
@@ -1811,7 +1855,7 @@ export interface StorageOptions<S extends Schema = Schema> {
   /**
    * `false` keeps no hash-linked chain of what this node applied (a hub that
    * only replicates has nothing to audit): two file writes less per record,
-   * reads lazy, and `validate()` rejects with `code: 'NO_CHAIN'`.
+   * reads lazy, and `validate()` rejects with `code: 'ALX_ERR_NO_CHAIN'`.
    */
   chain?: boolean;
   /**
@@ -1830,7 +1874,7 @@ export interface StorageOptions<S extends Schema = Schema> {
   /**
    * Mints record ids. An id is a file name on every platform: letters,
    * digits, `.`, `_`, `-`, `@`, not starting with a dot, 128 characters at
-   * most — anything else is refused with `code: 'INVALID_ID'`.
+   * most — anything else is refused with `code: 'ALX_ERR_INVALID_ID'`.
    */
   getId?: () => string | Promise<string>;
   logger?: Logger | false;
@@ -1844,7 +1888,7 @@ export interface StorageOptions<S extends Schema = Schema> {
   /**
    * The plugins this storage runs with — `text` from `@alexify/syncom/text`,
    * `tree` from `/tree`… Registered per storage, never process-wide; a method
-   * of a plugin not given here throws `PLUGIN_MISSING` naming the subpath.
+   * of a plugin not given here throws `ALX_ERR_PLUGIN_MISSING` naming the subpath.
    */
   plugins?: readonly Plugin<any>[];
 }
@@ -1924,7 +1968,7 @@ export interface TransactOptions extends WriteOptions {
 export interface Transaction extends TextMethods, TreeMethods {
   get<R = RecordData>(id: string): Promise<R | null>;
   has(id: string): Promise<boolean>;
-  /** A new record under the id its data names (`EXISTS` for a live one there), else a minted one. */
+  /** A new record under the id its data names (`ALX_ERR_EXISTS` for a live one there), else a minted one. */
   insert(data: object, options?: WriteOptions): Promise<string>;
   set(id: string, data: object, options?: WriteOptions): Promise<void>;
   /** The fields set, or the operators run — over what the transaction left; with `ifMatch`, whether it wrote. */
@@ -2125,7 +2169,7 @@ export interface ApplyRemoteResult {
    */
   outOfScope: number;
   /**
-   * Refused as equivocation (`EQUIVOCATION`): another op than the one this
+   * Refused as equivocation (`ALX_ERR_EQUIVOCATION`): another op than the one this
    * node holds at its seq of its stream, or one whose `prev` is not the
    * fingerprint of the op this node holds at the seq before it; neither
    * logged nor relayed.
@@ -2149,16 +2193,16 @@ export interface StorageEvents {
   log: (event: { kind: 'roll'; sealed: number; dropped: number; floor: number; segments: number }) => void;
   /**
    * The engine's lease on the database (MongoDB): renewed; a renewal failed and is being retried (`late`, once
-   * per run of failures); gone to another instance or given up (`lost` — with the `error` event `LEASE_LOST`).
+   * per run of failures); gone to another instance or given up (`lost` — with the `error` event `ALX_ERR_LEASE_LOST`).
    */
   lease: (event: { state: 'renewed' | 'late' | 'lost'; path: string }) => void;
   /**
-   * A peer's op refused by the field-kind rule (`OP_REFUSED`,
+   * A peer's op refused by the field-kind rule (`ALX_ERR_OP_REFUSED`,
    * `rejected`), skipped because the record would not pass its entity's
-   * validator (`OP_INVALID`, `entity`, `issues`), refused for a stamp
-   * beyond `sync.maxSkew` (`SKEW`), or refused for its signature — once per
-   * page, `op` the first refused and `count` how many (`BAD_SIGNATURE`,
-   * `UNSIGNED`). `EQUIVOCATION`: a writer made two ops at one seq of one
+   * validator (`ALX_ERR_OP_INVALID`, `entity`, `issues`), refused for a stamp
+   * beyond `sync.maxSkew` (`ALX_ERR_SKEW`), or refused for its signature — once per
+   * page, `op` the first refused and `count` how many (`ALX_ERR_BAD_SIGNATURE`,
+   * `ALX_ERR_UNSIGNED`). `ALX_ERR_EQUIVOCATION`: a writer made two ops at one seq of one
    * stream — once per page, with the fingerprint held here and the one
    * received (`reason: 'seq'`), or the one held at the seq before and the
    * `prev` the op names (`'chain'`).
@@ -2166,7 +2210,7 @@ export interface StorageEvents {
   error: (
     error:
       | (SyncomError & {
-          code: 'OP_REFUSED' | 'OP_INVALID' | 'OP_UNREADABLE' | 'SKEW' | 'BAD_SIGNATURE' | 'UNSIGNED';
+          code: 'ALX_ERR_OP_REFUSED' | 'ALX_ERR_OP_INVALID' | 'ALX_ERR_OP_UNREADABLE' | 'ALX_ERR_SKEW' | 'ALX_ERR_BAD_SIGNATURE' | 'ALX_ERR_UNSIGNED';
           op: SyncOp;
           count?: number;
           rejected?: Refusal[];
@@ -2174,7 +2218,7 @@ export interface StorageEvents {
           issues?: ValidationIssue[];
         })
       | (SyncomError & {
-          code: 'EQUIVOCATION';
+          code: 'ALX_ERR_EQUIVOCATION';
           op: SyncOp;
           reason: 'seq' | 'chain';
           origin: string;
@@ -2185,11 +2229,11 @@ export interface StorageEvents {
           count: number;
         })
       /** Records logged but not written — held in memory until they land (see Health). */
-      | (SyncomError & { code: 'UNPERSISTED'; ids: string[]; quota?: true })
+      | (SyncomError & { code: 'ALX_ERR_UNPERSISTED'; ids: string[]; quota?: true })
       /** The engine's lease went to another instance: read-only from here on. */
-      | (SyncomError & { code: 'LEASE_LOST'; path: string; cause?: unknown })
+      | (SyncomError & { code: 'ALX_ERR_LEASE_LOST'; path: string; cause?: unknown })
       /** A follower's change stream ended: subscribed again, every record read again. */
-      | (SyncomError & { code: 'FOLLOW_LOST'; path: string; cause?: unknown }),
+      | (SyncomError & { code: 'ALX_ERR_FOLLOW_LOST'; path: string; cause?: unknown }),
   ) => void;
   /** A peer's batch is durable. */
   apply: (batch: ApplyBatchContext) => void;
@@ -2309,7 +2353,7 @@ export interface TextHandle {
   spans(): TextSpan[];
   /** Edits wait for the log: made and not flushed, or in a flush not settled yet. */
   readonly pending: boolean;
-  /** Settles once every edit made so far is logged and landed; rejects with `UNLOGGED` when it could not be. */
+  /** Settles once every edit made so far is logged and landed; rejects with `ALX_ERR_UNLOGGED` when it could not be. */
   readonly flushed: Promise<void>;
   /** Inserts `text` at `index`, styled with `attributes` (a name to a value; null takes a style off). */
   insert(index: number, text: string, attributes?: Record<string, unknown>): void;
@@ -2335,7 +2379,7 @@ export interface TextHandle {
   flush(): Promise<void>;
   /** Logs what waits, then stops following the field. */
   close(): Promise<void>;
-  /** `error`: a flush that could not be logged (`UNLOGGED`). */
+  /** `error`: a flush that could not be logged (`ALX_ERR_UNLOGGED`). */
   on(event: 'error', listener: (error: SyncomError) => void): void;
   off(event: 'error', listener: (error: SyncomError) => void): void;
 }
@@ -2353,7 +2397,7 @@ export interface TextMethods {
    * and inserts `content` — an array for a list, a string for a text — in
    * their place. The first write decides the kind; elements merge by
    * position (Fugue), each writer's run whole. Creates the field, and the
-   * record, when absent; rejects with `OUT_OF_RANGE` past the length.
+   * record, when absent; rejects with `ALX_ERR_OUT_OF_RANGE` past the length.
    */
   splice(
     id: string,
@@ -2421,9 +2465,9 @@ export interface TextMethods {
     block: { type: string; parents?: readonly string[]; attrs?: { [name: string]: unknown } },
     options?: WriteOptions,
   ): Promise<void>;
-  /** Removes the block marker at `index`, joining its content to the block before; rejects with `NOT_FOUND` when the slot is no marker. */
+  /** Removes the block marker at `index`, joining its content to the block before; rejects with `ALX_ERR_NOT_FOUND` when the slot is no marker. */
   joinBlock(id: string, key: string, index: number, options?: WriteOptions): Promise<void>;
-  /** Replaces the marker at `index` (last writer wins); rejects with `NOT_FOUND` when the slot is no marker. */
+  /** Replaces the marker at `index` (last writer wins); rejects with `ALX_ERR_NOT_FOUND` when the slot is no marker. */
   updateBlock(
     id: string,
     key: string,
@@ -2468,7 +2512,7 @@ export interface TextMethods {
     key: string,
     delta: readonly DeltaOp[],
     options?: TransactOptions & {
-      /** The field's text the delta was made over: a field that reads otherwise inside the queue rejects with `STALE` before any op. */
+      /** The field's text the delta was made over: a field that reads otherwise inside the queue rejects with `ALX_ERR_STALE` before any op. */
       expect?: string;
       /** The revision handed back with that text (`applyDelta`, `revision()`): while the field is at it, the text is not compared. */
       revision?: number;
@@ -2494,8 +2538,8 @@ export interface TreeMethods {
    * after sibling `after`, before sibling `before`, or last. Creates the
    * node, the field and the record when absent. Two nodes moving
    * concurrently so that each would hang under the other: the newer move
-   * loses, on every node. Rejects with `CYCLE` for a parent under the node
-   * and `NOT_FOUND` for a sibling not under `parent`; no op when the node
+   * loses, on every node. Rejects with `ALX_ERR_CYCLE` for a parent under the node
+   * and `ALX_ERR_NOT_FOUND` for a sibling not under `parent`; no op when the node
    * is already there.
    */
   treeMove(
@@ -2555,16 +2599,16 @@ export interface Database {
   validate(id: string, data: unknown, blockHash: string): Promise<boolean>;
   /**
    * Writes a new record: under the id its data names — its entity's composite id, or the id field's
-   * value (a live record there is `EXISTS`, decided inside the queue) — else under a minted one.
+   * value (a live record there is `ALX_ERR_EXISTS`, decided inside the queue) — else under a minted one.
    */
   insert(data: object, options?: StorageDataOptions): Promise<string>;
   has(id: string): Promise<boolean>;
   /**
    * The record as it reads (the lens applied, the read hooks run), as a
    * copy: editing it changes nothing. With `at`, the record at that version
-   * — folded from the log, or a tag's copy: rejects with `HISTORY_GONE`
-   * when the log cannot give it exactly, `INVALID_VERSION` for a malformed
-   * `at` or a seq this log has not reached, `TAG_NOT_FOUND`, `ENCRYPTED`
+   * — folded from the log, or a tag's copy: rejects with `ALX_ERR_HISTORY_GONE`
+   * when the log cannot give it exactly, `ALX_ERR_INVALID_VERSION` for a malformed
+   * `at` or a seq this log has not reached, `ALX_ERR_TAG_NOT_FOUND`, `ALX_ERR_ENCRYPTED`
    * for an encrypted record's history. `R` types the result —
    * `get<Post>(id)`; a collection's `get` knows its record type.
    */
@@ -2578,14 +2622,14 @@ export interface Database {
    * Names the storage as it is now. A tag is kept on this node — the
    * catalog of the moment plus a copy of each record's file taken before
    * its first change after the tag — and read through `at(name)` or
-   * `get(id, { at: { tag: name } })`. Rejects with `TAG_EXISTS`.
+   * `get(id, { at: { tag: name } })`. Rejects with `ALX_ERR_TAG_EXISTS`.
    */
   tag(name: string): Promise<Tag>;
-  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `TAG_NOT_FOUND`. */
+  /** Drops a tag; what the next older tag needs of its copies moves there. Rejects with `ALX_ERR_TAG_NOT_FOUND`. */
   untag(name: string): Promise<void>;
   /** The tags, oldest first. */
   tags(): Tag[];
-  /** The storage as it was at tag `name`; throws `TAG_NOT_FOUND`. */
+  /** The storage as it was at tag `name`; throws `ALX_ERR_TAG_NOT_FOUND`. */
   at(name: string): TagView;
   /** The storage at any version the log can still give exactly — an event id, a stamp, `{ vector }` or `{ tag }` (then a `TagView`); the `versions` plugin's. */
   atVersion(at: Version): VersionView | TagView;
@@ -2689,7 +2733,7 @@ export interface Database {
    * Rebuilds the record from what the log holds of it — a file that fails
    * its integrity check, or is torn: the retained entries replayed from the
    * first whole-record op (`write`, `merge`, `delete`, `purge`), written with
-   * a chain block of its own. Rejects with `UNRECOVERABLE` when the log holds
+   * a chain block of its own. Rejects with `ALX_ERR_UNRECOVERABLE` when the log holds
    * no such op (compacted away, never written here, encrypted). `ops` is how
    * many entries went in.
    */
@@ -2698,16 +2742,16 @@ export interface Database {
   list(): Promise<string[]>;
   /** The collections by name, frozen — the same objects as `db.<Name>`; made again by `addCollections()` and `removeCollection()`. */
   readonly collections: { readonly [name: string]: SyncomCollection };
-  /** The local documents of this database — the `local` plugin's (`PLUGIN_MISSING` without it). */
+  /** The local documents of this database — the `local` plugin's (`ALX_ERR_PLUGIN_MISSING` without it). */
   readonly local: LocalStore;
-  /** The attachments of this database — the `attachments` plugin's (`PLUGIN_MISSING` without it). */
+  /** The attachments of this database — the `attachments` plugin's (`ALX_ERR_PLUGIN_MISSING` without it). */
   readonly attachments: AttachmentStore;
   /**
    * Defines collections after the open — each as an entity of `createDatabase({ schema })`
    * would be, in force from here over the records of its type; nothing is persisted
    * (add them after every open; the schema's hash in hello does not move). A name
    * defined already or taken by the database, or a malformed definition, is a
-   * TypeError and nothing is taken. The `schema` plugin's (`PLUGIN_MISSING` without it).
+   * TypeError and nothing is taken. The `schema` plugin's (`ALX_ERR_PLUGIN_MISSING` without it).
    */
   addCollections(
     definitions: { readonly [name: string]: EntityDefinition } | ReadonlyMap<string, EntityDefinition>,
@@ -3154,14 +3198,14 @@ export interface Attachment extends AttachmentEntry {
 
 /** `db.attachments` — the `attachments` plugin's. */
 export interface AttachmentStore {
-  /** The bytes kept under the record as `name` (the engine's blobs store, by digest) and named on it. Rejects `NOT_FOUND` for a record that is not there. */
+  /** The bytes kept under the record as `name` (the engine's blobs store, by digest) and named on it. Rejects `ALX_ERR_NOT_FOUND` for a record that is not there. */
   put(
     id: string,
     name: string,
     bytes: Uint8Array | ArrayBuffer | string,
     options?: { type?: string },
   ): Promise<AttachmentEntry>;
-  /** The attachment named, or null; bytes this node lacks are asked of the peers it dials unless `fetch: false` — none has them, `BLOB_NOT_FOUND`. */
+  /** The attachment named, or null; bytes this node lacks are asked of the peers it dials unless `fetch: false` — none has them, `ALX_ERR_BLOB_NOT_FOUND`. */
   get(id: string, name: string, options?: { fetch?: boolean }): Promise<Attachment | null>;
   /** Whether this node holds the bytes of the attachment named. */
   has(id: string, name: string): Promise<boolean>;
@@ -3177,7 +3221,7 @@ export interface AttachmentStore {
   field(name: string): string;
   /**
    * Mark-and-sweep over the blobs store: every digest a live record, a tag's copy (`tags`, on by default) or a put in
-   * flight names is kept, every other blob removed (`dryRun` counts alone). `READ_ONLY` on a follower.
+   * flight names is kept, every other blob removed (`dryRun` counts alone). `ALX_ERR_READ_ONLY` on a follower.
    */
   sweep(options?: { dryRun?: boolean; tags?: boolean }): Promise<AttachmentSweep>;
   /** The counts: puts, gets (the bytes read whole), the gets that fetched from a peer, the mismatches, the misses, the sweeps, the puts in flight. */
@@ -3242,7 +3286,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
   clear(event?: keyof CollectionEvents): void;
   /**
    * Writes a new record: under the id its data names (the entity's composite id, or its id
-   * field — a live record there is `EXISTS`, decided inside the queue), else under a minted one.
+   * field — a live record there is `ALX_ERR_EXISTS`, decided inside the queue), else under a minted one.
    */
   insert(data: I, options?: StorageDataOptions): Promise<SyncomDocument<R>>;
   /** Writes the record its data names whole, new or not (`set()` by the named id; a TypeError without one). */
@@ -3253,9 +3297,9 @@ export interface SyncomCollection<R = RecordData, I = R> {
   bulkInsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
   /** Every row as `upsert()` would write it, as ONE transaction with a verdict per row. */
   bulkUpsert(rows: readonly I[], options?: TransactOptions): Promise<BulkResult<I>>;
-  /** Every id deleted, as ONE transaction with a verdict per row: an absent or foreign one is `NOT_FOUND`. */
+  /** Every id deleted, as ONE transaction with a verdict per row: an absent or foreign one is `ALX_ERR_NOT_FOUND`. */
   bulkRemove(ids: readonly string[], options?: TransactOptions): Promise<BulkResult<string>>;
-  /** Changes the record by a function inside the queue — the database's `modify()`; `NOT_FOUND` for a record of another collection. */
+  /** Changes the record by a function inside the queue — the database's `modify()`; `ALX_ERR_NOT_FOUND` for a record of another collection. */
   modify(id: string, fn: ModifyFn<R>, options?: TransactOptions): Promise<R | null>;
   /**
    * Deletes every record of the collection — tombstones that replicate, or with `purge` purges
@@ -3290,7 +3334,7 @@ export interface SyncomCollection<R = RecordData, I = R> {
   ): Promise<boolean>;
   update(id: string, delta: (Partial<I> & PathFields) | UpdateOperators, options?: WriteOptions): Promise<void>;
   unset(id: string, fields: string | readonly string[], options?: WriteOptions): Promise<void>;
-  /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
+  /** The live Document of `id` — of this collection, or `ALX_ERR_NOT_FOUND`. */
   document(id: string): Promise<SyncomDocument<R>>;
 }
 /** `Collection<R, I>`: a collection, by its RxDB-style name. */
@@ -3341,6 +3385,6 @@ export function createDatabase<S extends Schema = Schema, const P extends readon
 /**
  * Drops a closed database: every store of it removed from the engine — the one given, or the files
  * engine over `fsi` (the platform's by default). Held while it is taken: another instance's open
- * database is `LOCKED`, never emptied under it; a path that holds nothing is nothing to do.
+ * database is `ALX_ERR_LOCKED`, never emptied under it; a path that holds nothing is nothing to do.
  */
 export function dropDatabase(path: string, options?: { engine?: Engine; fsi?: Fsi }): Promise<void>;

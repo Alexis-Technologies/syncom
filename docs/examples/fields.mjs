@@ -31,10 +31,10 @@ assert.deepEqual((await db.Task.get(task.id)).tags, ['docs', 'writing']);
 try {
   await db.Task.update(task.id, { votes: 10 });
 } catch (error) {
-  console.log(error.code, error.kind); // 'FIELD_KIND' 'counter'
+  console.log(error.code, error.kind); // 'ALX_ERR_FIELD_KIND' 'counter'
 }
 // #endregion one-kind
-await assert.rejects(() => db.Task.update(task.id, { votes: 10 }), { code: 'FIELD_KIND', kind: 'counter' });
+await assert.rejects(() => db.Task.update(task.id, { votes: 10 }), { code: 'ALX_ERR_FIELD_KIND', kind: 'counter' });
 
 // #region paths
 await db.Task.update(task.id, { 'assignee/name': 'ada' }); // a field of its own under `assignee`

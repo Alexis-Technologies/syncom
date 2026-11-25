@@ -28,7 +28,7 @@
 // emptied when a tag of that name is taken again (fsi lists files, not
 // directories, so an open cannot find it).
 
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { isRecordId } = require('../shape.js');
 
 const FILE = 'tags.json';
@@ -59,7 +59,8 @@ const info = ({ name, eventId, seq, ts, vector, createdAt }) => ({
   createdAt,
 });
 
-const notFound = (name, rest = '') => new SyncomError('TAG_NOT_FOUND', `Tag ${name} not found${rest}`, { tag: name });
+const notFound = (name, rest = '') =>
+  new SyncomError('ALX_ERR_TAG_NOT_FOUND', `Tag ${name} not found${rest}`, { tag: name });
 
 class Tags {
   #db;
@@ -152,7 +153,7 @@ class Tags {
         await this.#copies(newest);
         break;
       } catch (error) {
-        if (error.code !== 'TAG_NOT_FOUND') throw error;
+        if (error.code !== 'ALX_ERR_TAG_NOT_FOUND') throw error;
       }
     }
     await this.#adoptPending();
@@ -161,7 +162,7 @@ class Tags {
 
   // A tag's catalog, read once, at its first use; a tag whose catalog
   // cannot be read is dropped — the line out of tags.json, a warning — and
-  // the reader is told TAG_NOT_FOUND. Concurrent first readers share the one load.
+  // the reader is told ALX_ERR_TAG_NOT_FOUND. Concurrent first readers share the one load.
   #catalog(tag) {
     if (tag.catalog !== null) return Promise.resolve(tag.catalog);
     return (tag.loading ??= this.#loadCatalog(tag));
@@ -181,7 +182,7 @@ class Tags {
         try {
           await this.#moveDown(tag, older);
         } catch (error) {
-          if (error.code !== 'TAG_NOT_FOUND') throw error;
+          if (error.code !== 'ALX_ERR_TAG_NOT_FOUND') throw error;
         }
       }
       await this.#save();
@@ -196,7 +197,10 @@ class Tags {
   // change between them — `older` has no copy of its own then and existed to
   // have one — so it moves there. Reads `older` when it was not yet.
   async #moveDown(tag, older) {
-    const [copied, catalog, held] = await Promise.all([this.#copies(tag), this.#catalog(older), this.#copies(older)]);
+    const read = await Promise.all([this.#copies(tag), this.#catalog(older), this.#copies(older)]);
+    const copied = read[0];
+    const catalog = read[1];
+    const held = read[2];
     for (const id of copied) {
       const row = catalog.row(id);
       if (row === null || row.gone || held.has(id)) continue;
@@ -224,7 +228,7 @@ class Tags {
     this.#byName.delete(tag.name);
   }
 
-  /** Reads the tag's catalog if it is not read yet — ahead of `hasAt`, `rowAt`, `catalogOf`. Rejects with `TAG_NOT_FOUND`. */
+  /** Reads the tag's catalog if it is not read yet — ahead of `hasAt`, `rowAt`, `catalogOf`. Rejects with `ALX_ERR_TAG_NOT_FOUND`. */
   async ensure(name) {
     await this.#catalog(this.#tag(name));
   }
@@ -285,9 +289,9 @@ class Tags {
   async take(name, { eventId, seq, ts, vector, rows }) {
     if (this.#corrupt) {
       const message = `${FILE} is unreadable; repair or remove it (a copy is in ${CORRUPT_FILE}) before taking a tag`;
-      throw new SyncomError('CORRUPT', message, { file: FILE });
+      throw new SyncomError('ALX_ERR_CORRUPT', message, { file: FILE });
     }
-    if (this.#byName.has(name)) throw new SyncomError('TAG_EXISTS', `Tag ${name} exists`, { tag: name });
+    if (this.#byName.has(name)) throw new SyncomError('ALX_ERR_TAG_EXISTS', `Tag ${name} exists`, { tag: name });
     // Whatever a crash left under this name goes first: a stale copy would
     // read as this tag's.
     await this.#erase(name);
@@ -349,7 +353,9 @@ class Tags {
     if (tag === undefined) return null;
     // The newest tag is read at open, at take() and at the drop that made
     // it the newest: these resolve at once.
-    const [catalog, copied] = await Promise.all([this.#catalog(tag), this.#copies(tag)]);
+    const read = await Promise.all([this.#catalog(tag), this.#copies(tag)]);
+    const catalog = read[0];
+    const copied = read[1];
     if (copied.has(id)) return null;
     const row = catalog.row(id);
     if (row === null || row.gone) return null;
@@ -398,14 +404,18 @@ class Tags {
       await this.#db.copies.remove(PENDING, ids[i]);
       this.#pending.delete(ids[i]);
     }
-    for (const tag of [...this.#tags]) {
-      let copied;
-      let catalog;
+    // A copy: a tag whose catalog cannot be read is dropped from the list as the loop goes.
+    const tags = this.#tags.slice();
+    for (const tag of tags) {
+      let copied = null;
+      let catalog = null;
       try {
-        [copied, catalog] = await Promise.all([this.#copies(tag), this.#catalog(tag)]);
+        const read = await Promise.all([this.#copies(tag), this.#catalog(tag)]);
+        copied = read[0];
+        catalog = read[1];
       } catch (error) {
         // A tag dropped for its catalog has nothing to forget; its copies went with it.
-        if (error.code !== 'TAG_NOT_FOUND') throw error;
+        if (error.code !== 'ALX_ERR_TAG_NOT_FOUND') throw error;
         continue;
       }
       let forgot = false;
@@ -427,7 +437,7 @@ class Tags {
   /** The tag's catalog — what a view at the tag reads through. After `ensure(name)`. */
   catalogOf(name) {
     const tag = this.#tag(name);
-    if (tag.catalog === null) throw new TypeError(`Tag ${name}: ensure() first — its catalog is not read yet`);
+    if (tag.catalog === null) throw new ArgumentError(`Tag ${name}: ensure() first — its catalog is not read yet`);
     return tag.catalog;
   }
 }

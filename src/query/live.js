@@ -18,9 +18,10 @@
 // change costs one copy, not one per row, and a subscriber may tell a row
 // that moved by its identity. `count` mode keeps the matching ids alone and
 // emits the number when it moves. One listener of the catalog, however many
-// subscribers. Requires shape.js only: it ships to the browser.
+// subscribers. Requires shape.js and errors.js only: it ships to the browser.
 
 const { deepEqual } = require('../shape.js');
+const { ArgumentError } = require('../argument-errors.js');
 
 const noop = () => {};
 
@@ -83,7 +84,7 @@ class Live {
 
   /** Calls `listener` with the rows (or the count) now and when they change; answers the function that takes it off. */
   subscribe(listener, onError = null) {
-    if (this.#stopped) throw new TypeError('watch(): this live query was stopped');
+    if (this.#stopped) throw new ArgumentError('watch(): this live query was stopped');
     const entry = { listener, onError };
     this.#subscribers.set(entry, true);
     if (this.#unsubscribe === null) {

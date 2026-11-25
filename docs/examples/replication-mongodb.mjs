@@ -15,7 +15,10 @@ const waitUntil = async (check) => {
 const createCollection = () => {
   const docs = new Map();
   const streams = new Set();
-  const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const compare = (a, b) => {
+    if (a < b) return -1;
+    return a > b ? 1 : 0;
+  };
   const test = (doc, filter) =>
     Object.entries(filter).every(([key, cond]) => {
       if (key === '$or') return cond.some((inner) => test(doc, inner));
@@ -27,21 +30,27 @@ const createCollection = () => {
       return value === cond;
     });
   const changed = () => {
-    for (const listeners of streams) for (const listener of listeners.change ?? []) listener({});
+    for (const listeners of streams) {
+      for (const listener of listeners.change ?? []) listener({});
+    }
   };
   return {
     find(filter, { sort = {}, limit = 0 } = {}) {
       const keys = Object.keys(sort);
       let rows = [...docs.values()].filter((doc) => test(doc, filter));
       rows.sort((a, b) => {
-        for (const key of keys) if (compare(a[key], b[key]) !== 0) return compare(a[key], b[key]) * sort[key];
+        for (const key of keys) {
+          if (compare(a[key], b[key]) !== 0) return compare(a[key], b[key]) * sort[key];
+        }
         return 0;
       });
       if (limit > 0) rows = rows.slice(0, limit);
       return { toArray: async () => structuredClone(rows) };
     },
     async findOne(filter) {
-      for (const doc of docs.values()) if (test(doc, filter)) return structuredClone(doc);
+      for (const doc of docs.values()) {
+        if (test(doc, filter)) return structuredClone(doc);
+      }
       return null;
     },
     async replaceOne(filter, replacement, { upsert = false } = {}) {

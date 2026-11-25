@@ -6,20 +6,20 @@
 // node opens on the new engine as itself and no peer bootstraps from it. Over
 // CLOSED databases: both are held for the copy (the lock the database would
 // take; a lease lost on the way fails it), and a target that holds anything
-// is refused (TARGET_NOT_EMPTY). The identity — node.json, the keys — lands
+// is refused (ALX_ERR_TARGET_NOT_EMPTY). The identity — node.json, the keys — lands
 // LAST, so a copy cut short is no node of that name, and a copy that fails
 // takes what it wrote away again — and marks its target first (`copy.json`,
 // removed last), so one cut short by a crash is taken away by the next copy;
-// a source moved elsewhere by rotateAtRest (`moved.json`) is refused (MOVED).
+// a source moved elsewhere by rotateAtRest (`moved.json`) is refused (ALX_ERR_MOVED).
 // The log's sealed entries go as one segment, `batch` entries a group; the
 // open groups as they were. Requires
 // engine.js, errors.js, lock.js and crypto/keys.js (the keys' file mode) only. A
 // target without a blobs store while the source holds blobs is refused
-// (BLOBS_UNSUPPORTED) before anything is written.
+// (ALX_ERR_BLOBS_UNSUPPORTED) before anything is written.
 
 const { checkEngine, checkEngineDb, kvNamespace, KV_NAMESPACES } = require('../engine.js');
 const { KEY_FILE_MODE } = require('../crypto/keys.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { acquireLock, LOCK_FILE } = require('./../lock.js');
 
 const NODE_FILE = 'node.json';
@@ -32,7 +32,7 @@ const TAGS_FILE = 'tags.json';
 const PENDING = '.pending';
 
 const empty = (path) =>
-  new SyncomError('TARGET_NOT_EMPTY', `copyEngine(): the target holds a database at ${path}`, { path });
+  new SyncomError('ALX_ERR_TARGET_NOT_EMPTY', `copyEngine(): the target holds a database at ${path}`, { path });
 // A source that rotateAtRest moved elsewhere: copied again it would be the node in two places.
 const movedAway = (path, text) => {
   let to = null;
@@ -42,7 +42,7 @@ const movedAway = (path, text) => {
     // A fence that does not read is a fence still.
   }
   return new SyncomError(
-    'MOVED',
+    'ALX_ERR_MOVED',
     `copyEngine(): the database at ${path} was moved (rotateAtRest): copy it from where it went`,
     {
       path,
@@ -52,12 +52,12 @@ const movedAway = (path, text) => {
 };
 const noBlobs = (engine, blobs) =>
   new SyncomError(
-    'BLOBS_UNSUPPORTED',
+    'ALX_ERR_BLOBS_UNSUPPORTED',
     `copyEngine(): the ${engine} engine has no blobs store, and the source holds ${blobs} blob(s)`,
     { engine, blobs },
   );
 const lost = (path, cause) =>
-  new SyncomError('LEASE_LOST', `copyEngine(): the lease on ${path} was lost during the copy`, { path, cause });
+  new SyncomError('ALX_ERR_LEASE_LOST', `copyEngine(): the lease on ${path} was lost during the copy`, { path, cause });
 
 // The database held the way createDatabase() holds it: the engine's lease, or the lock key.
 const hold = async (db, path, onLost) => {
@@ -69,7 +69,7 @@ const hold = async (db, path, onLost) => {
 const tagNames = async (db) => {
   const text = await db.kv.get('', TAGS_FILE);
   if (text === null) return [];
-  let parsed;
+  let parsed = null;
   try {
     parsed = JSON.parse(text);
   } catch {
@@ -77,7 +77,9 @@ const tagNames = async (db) => {
   }
   const names = [];
   const tags = parsed !== null && typeof parsed === 'object' && Array.isArray(parsed.tags) ? parsed.tags : [];
-  for (let i = 0; i < tags.length; i++) if (typeof tags[i]?.name === 'string') names.push(tags[i].name);
+  for (let i = 0; i < tags.length; i++) {
+    if (typeof tags[i]?.name === 'string') names.push(tags[i].name);
+  }
   return names;
 };
 
@@ -89,9 +91,48 @@ const piecesOf = (stored) => {
   for (const field of Object.keys(blocks)) {
     const parts = blocks[field]?.parts;
     if (!Array.isArray(parts)) continue;
-    for (let i = 0; i < parts.length; i++) if (typeof parts[i] === 'string') names.push(parts[i]);
+    for (let i = 0; i < parts.length; i++) {
+      if (typeof parts[i] === 'string') names.push(parts[i]);
+    }
   }
   return names;
+};
+
+// A record of a page as a row of the target's write set: the object the page read, or its text where the page did
+// not read whole; null where it is gone.
+const rowOf = async (source, id, found) => {
+  if (found !== null) {
+    const stored = found.get(id) ?? null;
+    return stored === null ? null : { id, stored };
+  }
+  const text = await source.records.raw(id);
+  return text === null ? null : { id, text };
+};
+
+// What a row's record holds, for the pieces it names: its object, or its text parsed (null where it does not parse).
+const storedOf = (row) => {
+  if (row.stored !== undefined) return row.stored;
+  try {
+    return JSON.parse(row.text);
+  } catch {
+    return null;
+  }
+};
+
+// The pieces named that the source holds, as a write set's puts: `[name, text]`.
+const piecesMade = async (source, id, names) => {
+  const pieces = await source.pieces.getMany(id, names);
+  const made = [];
+  for (let k = 0; k < names.length; k++) {
+    const piece = pieces.get(names[k]);
+    if (piece !== undefined) made.push([names[k], piece]);
+  }
+  return made;
+};
+
+// A group the target fails to append fails the copy: the error thrown on, out of the append.
+const rethrow = (error) => {
+  throw error;
 };
 
 // The kv texts of `ns`, as puts: the lock key is the holder's, the identity is kept for last.
@@ -117,12 +158,12 @@ const kvPuts = async (source, ns, { identity }) => {
 const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {}) => {
   checkEngine(from, 'copyEngine(from)');
   checkEngine(to, 'copyEngine(to)');
-  if (typeof path !== 'string' || path.length === 0) throw new TypeError('copyEngine(): path');
-  if (typeof targetPath !== 'string' || targetPath.length === 0) throw new TypeError('copyEngine(): targetPath');
+  if (typeof path !== 'string' || path.length === 0) throw new ArgumentError('copyEngine(): path');
+  if (typeof targetPath !== 'string' || targetPath.length === 0) throw new ArgumentError('copyEngine(): targetPath');
   if (from === to && targetPath === path) {
-    throw new TypeError('copyEngine(): the target is the source — another engine, or targetPath');
+    throw new ArgumentError('copyEngine(): the target is the source — another engine, or targetPath');
   }
-  if (!Number.isInteger(batch) || batch < 1) throw new TypeError('copyEngine(): batch must be a positive integer');
+  if (!Number.isInteger(batch) || batch < 1) throw new ArgumentError('copyEngine(): batch must be a positive integer');
   const source = checkEngineDb(await from.open(path, {}), 'copyEngine(from)');
   let target = checkEngineDb(await to.open(targetPath, {}), 'copyEngine(to)');
   const held = [];
@@ -160,8 +201,8 @@ const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {
     // A target that cannot keep the attachments' bytes the source holds: refused before anything is written —
     // a copy that silently lost every blob would leave the registers naming bytes nowhere.
     if (source.blobs !== undefined && target.blobs === undefined) {
-      const held = (await source.blobs.list()).length;
-      if (held > 0) throw noBlobs(to.name, held);
+      const blobCount = (await source.blobs.list()).length;
+      if (blobCount > 0) throw noBlobs(to.name, blobCount);
     }
     written = true;
     // The mark of a copy in flight, first of all.
@@ -169,7 +210,9 @@ const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {
     // The kv texts, namespace by namespace — the identity (node.json, the keys) last of all.
     const tags = await tagNames(source);
     const namespaces = [];
-    for (let i = 0; i < KV_NAMESPACES.length; i++) if (KV_NAMESPACES[i] !== KEYS) namespaces.push(KV_NAMESPACES[i]);
+    for (let i = 0; i < KV_NAMESPACES.length; i++) {
+      if (KV_NAMESPACES[i] !== KEYS) namespaces.push(KV_NAMESPACES[i]);
+    }
     for (let i = 0; i < tags.length; i++) namespaces.push(`tags/${tags[i]}/index`);
     for (let i = 0; i < namespaces.length; i++) {
       const puts = await kvPuts(source, namespaces[i], { identity: false });
@@ -192,40 +235,21 @@ const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {
     for (;;) {
       const ids = await source.records.ids({ after, limit: batch });
       if (ids.length === 0) break;
-      // The page's records in one read; a record the medium holds that is no record (INTEGRITY) goes as its text, as
-      // it is — a copy carries what it finds — read one by one then.
+      // The page's records in one read; a record the medium holds that is no record (ALX_ERR_INTEGRITY) goes as its
+      // text, as it is — a copy carries what it finds — read one by one then.
       let found = null;
       try {
         found = await source.records.getMany(ids);
       } catch (error) {
-        if (error?.code !== 'INTEGRITY') throw error;
+        if (error?.code !== 'ALX_ERR_INTEGRITY') throw error;
       }
       const rows = [];
       for (let i = 0; i < ids.length; i++) {
-        let row;
-        let stored = null;
-        if (found !== null) {
-          stored = found.get(ids[i]) ?? null;
-          if (stored === null) continue;
-          row = { id: ids[i], stored };
-        } else {
-          const text = await source.records.raw(ids[i]);
-          if (text === null) continue;
-          try {
-            stored = JSON.parse(text);
-          } catch {
-            stored = null;
-          }
-          row = { id: ids[i], text };
-        }
-        const names = piecesOf(stored);
+        const row = await rowOf(source, ids[i], found);
+        if (row === null) continue;
+        const names = piecesOf(storedOf(row));
         if (names.length > 0) {
-          const pieces = await source.pieces.getMany(ids[i], names);
-          const made = [];
-          for (let k = 0; k < names.length; k++) {
-            const piece = pieces.get(names[k]);
-            if (piece !== undefined) made.push([names[k], piece]);
-          }
+          const made = await piecesMade(source, ids[i], names);
           row.pieces = { put: made };
           counts.pieces += made.length;
         }
@@ -257,23 +281,21 @@ const copyEngine = async (from, to, { path, targetPath = path, batch = 500 } = {
     for (let i = 0; i < groups.length; i++) open.set(groups[i].first, { ...groups[i], entries: [] });
     for (let i = 0; i < entries.length; i++) {
       const entry = entries[i];
-      if (entry.seq <= sealedTo) sealed.push(entry);
-      else {
-        for (const group of open.values()) {
-          if (entry.seq >= group.first && entry.seq <= group.last) group.entries.push(entry);
-        }
+      if (entry.seq <= sealedTo) {
+        sealed.push(entry);
+        continue;
+      }
+      for (const group of open.values()) {
+        if (entry.seq >= group.first && entry.seq <= group.last) group.entries.push(entry);
       }
     }
-    const fail = (error) => {
-      throw error;
-    };
     const append = async (page, sealedBelow) => {
       check();
       const options = {
         first: page[0].seq,
         last: page[page.length - 1].seq,
         sealedTo: sealedBelow,
-        onFail: fail,
+        onFail: rethrow,
         entriesBetween: () => [],
       };
       await target.log.append(page, null, options);

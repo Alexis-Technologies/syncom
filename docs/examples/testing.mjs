@@ -2,7 +2,7 @@
 // tests/package/docs-examples.test.js runs it from an empty temporary directory; node:test reports and sets the exit code.
 import assert from 'node:assert/strict';
 // #region memory
-import { test } from 'node:test';
+import { it } from 'node:test';
 import { createDatabase } from '@alexify/syncom/all';
 import { memoryEngine } from '@alexify/syncom/testing';
 
@@ -11,7 +11,7 @@ const engine = memoryEngine(); // one engine for the whole test file, a database
 const openBoard = (path) =>
   createDatabase({ engine, path, logger: false, schema: { entities: { Task: { index: ['done'] } } } });
 
-test('a task can be closed', async () => {
+it('should close a task', async () => {
   const board = await openBoard('close-a-task');
   const task = await board.Task.insert({ title: 'Write the docs', done: false });
   await board.Task.update(task.id, { done: true });
@@ -23,7 +23,7 @@ test('a task can be closed', async () => {
 // #region with-database
 import { withDatabase } from '@alexify/syncom/testing';
 
-test('no open tasks on an empty board', async () => {
+it('should find no open tasks on an empty board', async () => {
   const open = await withDatabase(
     () => openBoard('empty-board'),
     (board) => board.Task.select({ done: false }).count(),
@@ -36,10 +36,10 @@ test('no open tasks on an empty board', async () => {
 import { createMesh, settle } from '@alexify/syncom/testing';
 
 // What createMesh() calls for every node: spread its options (the links) into your own createDatabase()
-const boardOn = (engine) => (name, options) =>
-  createDatabase({ ...options, engine, path: name, logger: false, schema: { entities: { Task: {} } } });
+const boardOn = (memory) => (name, options) =>
+  createDatabase({ ...options, engine: memory, path: name, logger: false, schema: { entities: { Task: {} } } });
 
-test('a task written on the phone reaches the laptop through the server', async () => {
+it('should carry a task written on the phone to the laptop through the server', async () => {
   // ['phone', 'server'] means the phone dials the server
   const mesh = await createMesh(
     ['server', 'laptop', 'phone'],
@@ -59,7 +59,7 @@ test('a task written on the phone reaches the laptop through the server', async 
 // #region hazards
 import { prng } from '@alexify/syncom/testing';
 
-test('the board converges over a slow link that repeats pages', async () => {
+it('should converge over a slow link that repeats pages', async () => {
   const random = prng(42); // the same numbers on every run: a failure can be replayed
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
     createStorage: boardOn(memoryEngine()),
@@ -79,7 +79,7 @@ test('the board converges over a slow link that repeats pages', async () => {
 // #region drop
 import { waitUntil } from '@alexify/syncom/testing';
 
-test('a page lost on the way takes the link down until it reconnects', async () => {
+it('should take the link down when a page is lost, until it reconnects', async () => {
   let lose = false;
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
     createStorage: boardOn(memoryEngine()),
@@ -104,11 +104,11 @@ test('a page lost on the way takes the link down until it reconnects', async () 
 // #region streams
 import { attachments } from '@alexify/syncom/attachments';
 
-test('a large attachment crosses a link whose messages are small', async () => {
-  const engine = memoryEngine();
+it('should carry a large attachment across a link whose messages are small', async () => {
+  const memory = memoryEngine();
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
     createStorage: (name, options) =>
-      createDatabase({ ...options, engine, path: name, logger: false, plugins: [attachments()] }),
+      createDatabase({ ...options, engine: memory, path: name, logger: false, plugins: [attachments()] }),
     // A binary transport that takes no message past 256 KiB, as a WebSocket with a low limit would
     link: { streams: true, maxMessage: 256 * 1024 },
   });
@@ -126,7 +126,7 @@ test('a large attachment crosses a link whose messages are small', async () => {
 // #endregion streams
 
 // #region offline
-test('writes made offline sync after the reconnect', async () => {
+it('should sync the writes made offline after the reconnect', async () => {
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
     createStorage: boardOn(memoryEngine()),
   });
@@ -144,7 +144,7 @@ test('writes made offline sync after the reconnect', async () => {
 });
 // #endregion offline
 
-test('the link records what crossed it', async () => {
+it('should record what crossed the link', async () => {
   const mesh = await createMesh(['server', 'laptop'], [['laptop', 'server']], {
     createStorage: boardOn(memoryEngine()),
   });

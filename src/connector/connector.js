@@ -43,14 +43,14 @@
 // since `pushed` — a record known by digest alone as a probe — or every
 // record of the collection once where the log cannot resume; a parked row
 // stays parked across it.
-// A handler that fails is told (`error`, REPLICATION_FAILED with the direction
+// A handler that fails is told (`error`, ALX_ERR_REPLICATION_FAILED with the direction
 // and `retryIn`) and tried again after a backoff; nothing is skipped. Requires
 // symbols.js, engine.js, shape.js, errors.js, hooks.js, emitter.js, same.js only.
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
 const { isPlainObject, isRecordId } = require('../shape.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 const { Emitter } = require('../emitter.js');
 const { canonical, same } = require('./same.js');
@@ -85,7 +85,9 @@ const isDatabase = (value) =>
 const plain = (data) => {
   if (data === null) return null;
   const out = {};
-  for (const key of Object.keys(data)) if (key !== '$type') out[key] = data[key];
+  for (const key of Object.keys(data)) {
+    if (key !== '$type') out[key] = data[key];
+  }
   return out;
 };
 
@@ -108,12 +110,16 @@ const isJson = (value, depth = 0) => {
   if (type === 'number') return Number.isFinite(value);
   if (type !== 'object' || depth >= MAX_DEPTH) return false;
   if (Array.isArray(value)) {
-    for (let i = 0; i < value.length; i++) if (!isJson(value[i], depth + 1)) return false;
+    for (let i = 0; i < value.length; i++) {
+      if (!isJson(value[i], depth + 1)) return false;
+    }
     return true;
   }
   const proto = Object.getPrototypeOf(value);
   if (proto !== Object.prototype && proto !== null) return false;
-  for (const key of Object.keys(value)) if (!isJson(value[key], depth + 1)) return false;
+  for (const key of Object.keys(value)) {
+    if (!isJson(value[key], depth + 1)) return false;
+  }
   return true;
 };
 
@@ -122,25 +128,29 @@ const isJson = (value, depth = 0) => {
 const textOf = (doc) => (doc.deleted ? null : canonical(doc.data));
 
 const failed = (direction, message, cause, name, retryIn = null) =>
-  new SyncomError('REPLICATION_FAILED', message, { direction, connector: name, cause, retryIn });
+  new SyncomError('ALX_ERR_REPLICATION_FAILED', message, { direction, connector: name, cause, retryIn });
 
 // The canonical text parsed back — the backend's state as a push hands it over as `assumed`.
 const parsed = (text) => (text === null ? null : JSON.parse(text));
 
 // Why a row is parked, as it is kept and listed: the reason's text (`backend` for one that has none), bounded.
 const reasonOf = (reason) => {
-  const text = typeof reason === 'string' ? reason : typeof reason === 'number' ? String(reason) : 'backend';
+  let text = 'backend';
+  if (typeof reason === 'string') text = reason;
+  else if (typeof reason === 'number') text = `${reason}`;
   return text.length > REASON_MAX ? text.slice(0, REASON_MAX) : text;
 };
 
 const checkHandlers = (name, side, value, methods) => {
   if (value === undefined) return null;
-  if (!isPlainObject(value)) throw new TypeError(`replicate(): ${side} must be an object`);
+  if (!isPlainObject(value)) throw new ArgumentError(`replicate(): ${side} must be an object`);
   for (let i = 0; i < methods.length; i++) {
-    const [method, required] = methods[i];
+    const spec = methods[i];
+    const method = spec[0];
+    const required = spec[1];
     const fn = value[method];
     if (fn === undefined && !required) continue;
-    if (typeof fn !== 'function') throw new TypeError(`replicate(): ${side}.${method} must be a function`);
+    if (typeof fn !== 'function') throw new ArgumentError(`replicate(): ${side}.${method} must be a function`);
   }
   return value;
 };
@@ -262,40 +272,42 @@ class Replication extends Emitter {
       resolve = null,
     } = options;
     if (typeof name !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,100}$/.test(name)) {
-      throw new TypeError('replicate() takes a name: letters, digits, _ . -');
+      throw new ArgumentError('replicate() takes a name: letters, digits, _ . -');
     }
     if (typeof collection !== 'string' || collection.length === 0) {
-      throw new TypeError('replicate() takes a collection');
+      throw new ArgumentError('replicate() takes a collection');
     }
     this.#pull = checkHandlers(name, 'pull', pull, [
       ['handler', true],
       ['stream', false],
     ]);
     this.#push = checkHandlers(name, 'push', push, [['handler', true]]);
-    if (this.#pull === null && this.#push === null) throw new TypeError('replicate() takes a pull, a push, or both');
-    if (typeof live !== 'boolean') throw new TypeError('replicate(): live must be a boolean');
+    if (this.#pull === null && this.#push === null) {
+      throw new ArgumentError('replicate() takes a pull, a push, or both');
+    }
+    if (typeof live !== 'boolean') throw new ArgumentError('replicate(): live must be a boolean');
     if (!Number.isFinite(retryTime) || retryTime <= 0) {
-      throw new TypeError('replicate(): retryTime must be a positive number');
+      throw new ArgumentError('replicate(): retryTime must be a positive number');
     }
     if (!Number.isFinite(maxRetryTime) || maxRetryTime < retryTime) {
-      throw new TypeError('replicate(): maxRetryTime must be a number of at least retryTime');
+      throw new ArgumentError('replicate(): maxRetryTime must be a number of at least retryTime');
     }
     if (!Number.isFinite(safetyTime) || safetyTime < 0) {
-      throw new TypeError('replicate(): safetyTime must be a non-negative number');
+      throw new ArgumentError('replicate(): safetyTime must be a non-negative number');
     }
     if (!Number.isInteger(batchSize) || batchSize <= 0) {
-      throw new TypeError('replicate(): batchSize must be a positive integer');
+      throw new ArgumentError('replicate(): batchSize must be a positive integer');
     }
     if (modifier !== undefined) {
-      if (!isPlainObject(modifier)) throw new TypeError('replicate(): modifier must be an object');
+      if (!isPlainObject(modifier)) throw new ArgumentError('replicate(): modifier must be an object');
       for (const side of ['pull', 'push']) {
         if (modifier[side] !== undefined && typeof modifier[side] !== 'function') {
-          throw new TypeError(`replicate(): modifier.${side} must be a function`);
+          throw new ArgumentError(`replicate(): modifier.${side} must be a function`);
         }
       }
     }
     if (resolve !== null && typeof resolve !== 'function') {
-      throw new TypeError('replicate(): resolve must be a function');
+      throw new ArgumentError('replicate(): resolve must be a function');
     }
     this.#db = db;
     this.#name = name;
@@ -344,7 +356,11 @@ class Replication extends Emitter {
   /** The rows set aside until a turn of theirs or `reSync()`, each with why: across a restart too. */
   get parked() {
     const rows = [];
-    for (const [id, reason] of this.#parked) if (!this.#pending.has(id)) rows.push({ id, reason });
+    for (const entry of this.#parked) {
+      const id = entry[0];
+      const reason = entry[1];
+      if (!this.#pending.has(id)) rows.push({ id, reason });
+    }
     return rows;
   }
 
@@ -357,7 +373,9 @@ class Replication extends Emitter {
   stats() {
     // A parked row `reSync()` is trying again counts as pending alone.
     let parked = 0;
-    for (const id of this.#parked.keys()) if (!this.#pending.has(id)) parked++;
+    for (const id of this.#parked.keys()) {
+      if (!this.#pending.has(id)) parked++;
+    }
     return {
       ...this.#stats,
       pending: this.#pending.size,
@@ -377,7 +395,7 @@ class Replication extends Emitter {
    */
   start() {
     if (this.#canceled) {
-      throw new SyncomError('REPLICATION_FAILED', `Connector ${this.#name} was canceled`, {
+      throw new SyncomError('ALX_ERR_REPLICATION_FAILED', `Connector ${this.#name} was canceled`, {
         direction: null,
         name: this.#name,
       });
@@ -439,7 +457,7 @@ class Replication extends Emitter {
    */
   async reSync() {
     if (!this.#active) {
-      throw new SyncomError('REPLICATION_FAILED', `Connector ${this.#name} is not active`, {
+      throw new SyncomError('ALX_ERR_REPLICATION_FAILED', `Connector ${this.#name} is not active`, {
         direction: null,
         name: this.#name,
       });
@@ -497,7 +515,9 @@ class Replication extends Emitter {
 
   #settle() {
     if (this.#waiters.size === 0) return;
-    for (const waiter of [...this.#waiters]) {
+    // A copy: a waiter met leaves the set as the loop goes.
+    const waiters = [...this.#waiters];
+    for (const waiter of waiters) {
       if (!waiter.check()) continue;
       this.#waiters.delete(waiter);
       waiter.resolve();
@@ -524,7 +544,9 @@ class Replication extends Emitter {
       pushed: typeof text.pushed === 'string' ? text.pushed : null,
     };
     const refused = Array.isArray(text.refused) ? text.refused : [];
-    for (let i = 0; i < refused.length; i++) if (isRecordId(refused[i])) this.#unlanded.add(refused[i]);
+    for (let i = 0; i < refused.length; i++) {
+      if (isRecordId(refused[i])) this.#unlanded.add(refused[i]);
+    }
     const parked = isPlainObject(text.parked) ? text.parked : {};
     for (const id of Object.keys(parked)) {
       if (!isRecordId(id) || typeof parked[id] !== 'string' || !this.#parkable(id)) continue;
@@ -592,9 +614,17 @@ class Replication extends Emitter {
 
   async #write() {
     const known = Object.create(null);
-    for (const [id, digest] of this.#digests) known[id] = digest;
+    for (const entry of this.#digests) {
+      const id = entry[0];
+      const digest = entry[1];
+      known[id] = digest;
+    }
     const parked = Object.create(null);
-    for (const [id, reason] of this.#parked) parked[id] = reason;
+    for (const entry of this.#parked) {
+      const id = entry[0];
+      const reason = entry[1];
+      parked[id] = reason;
+    }
     const { pull, pushed } = this.#checkpoint;
     const text = JSON.stringify({ pull, pushed, known, refused: [...this.#unlanded], parked });
     try {
@@ -685,7 +715,7 @@ class Replication extends Emitter {
     let stalls = 0;
     for (;;) {
       if (this.#canceled) return false;
-      let page;
+      let page = null;
       try {
         page = await this.#exclusive(() => this.#pullPage());
       } catch (error) {
@@ -717,7 +747,7 @@ class Replication extends Emitter {
       !Array.isArray(page.documents) ||
       (reread !== undefined && !(Number.isInteger(reread) && reread >= 0))
     ) {
-      throw new TypeError('pull.handler must answer { documents, checkpoint, reread? }');
+      throw new ArgumentError('pull.handler must answer { documents, checkpoint, reread? }');
     }
     const moved = !same(page.checkpoint ?? null, this.#checkpoint.pull);
     await this.#judge(page.documents, reread);
@@ -778,7 +808,7 @@ class Replication extends Emitter {
       // one, a value JSON has no text for. What the backend holds, in its own shape — before the modifier — is what
       // a push compares against.
       let reason = null;
-      let cause;
+      let cause = undefined;
       if (row !== null && row.type !== this.#collection) reason = 'collection';
       else if (row?.encrypted === true) reason = 'sealed';
       else {
@@ -874,11 +904,17 @@ class Replication extends Emitter {
     }
     for (let i = 0; i < learned.length; i += 2) this.#learn(learned[i], learned[i + 1]);
     // A row `reSync()` is trying again leaves with its push.
-    for (let i = 0; i < settled.length; i++) if (!this.#pending.has(settled[i])) this.#parked.delete(settled[i]);
+    for (let i = 0; i < settled.length; i++) {
+      if (!this.#pending.has(settled[i])) this.#parked.delete(settled[i]);
+    }
     for (let i = 0; i < refusals.length; i++) {
       // Not learned: a later edit assumes the state known, `reSync()` asks again. Another collection's record and a
       // sealed one are this node's own: nothing to ask the backend again.
-      const [id, reason, cause, text] = refusals[i];
+      const refusal = refusals[i];
+      const id = refusal[0];
+      const reason = refusal[1];
+      const cause = refusal[2];
+      const text = refusal[3];
       if (reason !== 'collection' && reason !== 'sealed') this.#unlanded.add(id);
       if (reread !== undefined) this.#told.set(id, text === undefined ? reason : this.#digestOf(text));
       this.#refuse('pull', id, reason, cause);
@@ -947,7 +983,7 @@ class Replication extends Emitter {
   // there is no record); null where it reads otherwise — an edit the backend has not taken (a `modifier.push` that
   // throws counts as one). Asked of an id whose landing was refused, where nothing else remembers the edit.
   #quiet(id, local) {
-    let out;
+    let out = null;
     try {
       out = this.#outgoing(id, local);
     } catch {
@@ -965,7 +1001,9 @@ class Replication extends Emitter {
     return this.#enqueue(async () => {
       try {
         const ids = [];
-        for (const id of this.#unlanded) if (!this.#pending.has(id) && !this.#parked.has(id)) ids.push(id);
+        for (const id of this.#unlanded) {
+          if (!this.#pending.has(id) && !this.#parked.has(id)) ids.push(id);
+        }
         for (let at = 0; at < ids.length && !this.#canceled; at += this.#batchSize) {
           const rows = [];
           for (let i = at; i < ids.length && i < at + this.#batchSize; i++) {
@@ -984,7 +1022,7 @@ class Replication extends Emitter {
             const list = Array.isArray(answers) ? answers : [];
             for (let i = 0; i < list.length; i++) {
               const answer = list[i];
-              if (isPlainObject(answer) && answer.error == null) docs.push(answer);
+              if (isPlainObject(answer) && (answer.error === undefined || answer.error === null)) docs.push(answer);
             }
             await this.#judge(docs);
           });
@@ -1060,8 +1098,7 @@ class Replication extends Emitter {
         this.#stream = typeof stop === 'function' ? stop : NOOP;
       } catch (error) {
         this.#following = false;
-        this.#failed('pull', error, () => this.#follow());
-        return;
+        return void this.#failed('pull', error, () => this.#follow());
       }
       // A stream may go quiet without a word: a pull from the checkpoint every `safetyTime` anyway.
       if (this.#safetyTime > 0) {
@@ -1105,15 +1142,13 @@ class Replication extends Emitter {
     if (signal === 'END') {
       this.#stopFollowing();
       this.#logger.info({ event: 'connector.stream.ended', name: this.#name });
-      this.#later('pull', () => {
+      return void this.#later('pull', () => {
         this.#follow();
         this.#pullAll().catch(NOOP);
       });
-      return;
     }
     if (!isPlainObject(signal) || !Array.isArray(signal.documents)) {
-      this.#logger.warn({ event: 'connector.stream.malformed', name: this.#name });
-      return;
+      return void this.#logger.warn({ event: 'connector.stream.malformed', name: this.#name });
     }
     // On the queue, behind the pages before it. The checkpoint stays where the last pull run left it: a page that
     // fails to land is pulled again from there (told, a run after the backoff), never passed over. What the backend
@@ -1291,15 +1326,14 @@ class Replication extends Emitter {
         ids.push(id);
         if (ids.length >= this.#batchSize) break;
       }
-      let rows;
+      let rows = null;
       try {
         rows = await this.#exclusive(() => this.#pushBatch(ids));
       } catch (error) {
         this.#inflight.clear();
         this.#redo.clear();
         this.#conflicted.clear();
-        this.#failed('push', error, () => this.#flush());
-        return;
+        return void this.#failed('push', error, () => this.#flush());
       }
       for (let i = 0; i < ids.length; i++) {
         const id = ids[i];
@@ -1370,7 +1404,7 @@ class Replication extends Emitter {
     for (let i = 0; i < ids.length; i++) {
       const id = ids[i];
       const local = await this.#db.get(id);
-      let out;
+      let out = null;
       try {
         out = this.#outgoing(id, local);
       } catch (error) {
@@ -1430,11 +1464,11 @@ class Replication extends Emitter {
         this.#park(row.id, { code: 'answer', message: 'the handler answered neither a document nor an error' });
         continue;
       }
-      let text;
+      let text = null;
       try {
         text = textOf(remote);
       } catch (error) {
-        this.#park(row.id, { code: 'value', message: error?.message ?? String(error) });
+        this.#park(row.id, { code: 'value', message: error?.message ?? String(error) }); // a thrown symbol too
         continue;
       }
       if (row.assumed === undefined) {
@@ -1488,7 +1522,9 @@ class Replication extends Emitter {
   async #resolveConflicts(conflicts) {
     const decided = [];
     for (let i = 0; i < conflicts.length; i++) {
-      const [row, remote] = conflicts[i];
+      const conflict = conflicts[i];
+      const row = conflict[0];
+      const remote = conflict[1];
       // The backend's state in the application's shape, as a pulled one: a modifier that throws, or what it answers
       // no JSON, and the row cannot be judged — parked, said, never flattened into the record.
       const why = this.#shaped(remote);
@@ -1534,7 +1570,9 @@ class Replication extends Emitter {
     // whole learned nothing — the rows go again with what they assumed, and the backend answers the conflict again.
     for (let i = 0; i < conflicts.length; i++) {
       if (conflicts[i] === null || refused.has(conflicts[i][0].id)) continue;
-      const [row, , text] = conflicts[i];
+      const conflict = conflicts[i];
+      const row = conflict[0];
+      const text = conflict[2];
       this.#conflicted.add(row.id);
       this.#learn(row.id, text);
     }
@@ -1548,10 +1586,10 @@ class Replication extends Emitter {
  * the `pull` and `push` handlers. Started unless `autoStart: false`.
  */
 const replicate = (db, options = {}) => {
-  if (!isDatabase(db)) throw new TypeError('replicate() takes a database');
-  if (!isPlainObject(options)) throw new TypeError('replicate() takes options');
+  if (!isDatabase(db)) throw new ArgumentError('replicate() takes a database');
+  if (!isPlainObject(options)) throw new ArgumentError('replicate() takes options');
   const { autoStart = true, ...rest } = options;
-  if (typeof autoStart !== 'boolean') throw new TypeError('replicate(): autoStart must be a boolean');
+  if (typeof autoStart !== 'boolean') throw new ArgumentError('replicate(): autoStart must be a boolean');
   const replication = new Replication(db, rest);
   if (autoStart) replication.start().catch(NOOP);
   return replication;

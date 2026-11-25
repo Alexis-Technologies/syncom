@@ -127,21 +127,21 @@ await board.applyDelta(id, 'draft', [{ retain: 3 }, { delete: 4 }, { insert: 'Hi
 try {
   await board.applyDelta(id, 'draft', [{ insert: '!' }], { expect: seen }); // made over an old text
 } catch (error) {
-  console.log(error.code); // STALE: nothing was written
+  console.log(error.code); // ALX_ERR_STALE: nothing was written
 }
 // #endregion delta
 assert.equal((await board.Task.get(id)).draft, '>> Hi Hello world');
-await assert.rejects(board.applyDelta(id, 'draft', [{ insert: '!' }], { expect: seen }), { code: 'STALE' });
+await assert.rejects(board.applyDelta(id, 'draft', [{ insert: '!' }], { expect: seen }), { code: 'ALX_ERR_STALE' });
 
 // #region surrogate
 await board.updateText(id, 'summary', 'Ship 🚀 it');
 try {
   await board.splice(id, 'summary', 6, 0, '!'); // between the two halves of the emoji
 } catch (error) {
-  console.log(error.code); // SURROGATE
+  console.log(error.code); // ALX_ERR_SURROGATE
 }
 // #endregion surrogate
-await assert.rejects(board.splice(id, 'summary', 6, 0, '!'), { code: 'SURROGATE' });
+await assert.rejects(board.splice(id, 'summary', 6, 0, '!'), { code: 'ALX_ERR_SURROGATE' });
 await board.close();
 
 // #region concurrent

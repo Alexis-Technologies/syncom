@@ -15,7 +15,7 @@
 const { outbound, unreachable } = require('../sync/outbound.js');
 const { asJson } = require('../shape.js');
 const { DEFAULT_PAGE_SIZE } = require('../sync/protocol.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { PLUGINS, DB } = require('../symbols.js');
 
 const FILE = 'branch.json';
@@ -51,9 +51,9 @@ const join = async (into, pages, from) => {
  */
 const merge = async (source, { into } = {}) => {
   if (!isStorage(source) || !isStorage(into)) {
-    throw new TypeError('merge() takes two storages: merge(source, { into })');
+    throw new ArgumentError('merge() takes two storages: merge(source, { into })');
   }
-  if (source === into) throw new TypeError('merge(): a storage does not merge into itself');
+  if (source === into) throw new ArgumentError('merge(): a storage does not merge into itself');
   const vector = into.vector;
   // Every stream, not the source's own alone: a merge is the receiver's one
   // way to a third node's ops the source holds, so a stream the source
@@ -83,14 +83,16 @@ const merge = async (source, { into } = {}) => {
  * schema, the hooks, the logger it should run with; `sync` is given
  * `retention: { ops: 0 }` and `autoStart: false`, so every op stays for
  * the merge back and no node is dialed before the caller says so). Writes
- * `branch.json` there; rejects with `BRANCH_EXISTS` when one is there
+ * `branch.json` there; rejects with `ALX_ERR_BRANCH_EXISTS` when one is there
  * already.
  */
 const branch = async (parent, { path, from = null, ...options } = {}) => {
-  if (!isStorage(parent) || typeof parent.constructor !== 'function') throw new TypeError('branch() takes a storage');
-  if (typeof path !== 'string' || path.length === 0) throw new TypeError('branch() takes a path for the branch');
+  if (!isStorage(parent) || typeof parent.constructor !== 'function') {
+    throw new ArgumentError('branch() takes a storage');
+  }
+  if (typeof path !== 'string' || path.length === 0) throw new ArgumentError('branch() takes a path for the branch');
   if (from !== null && (typeof from !== 'object' || (typeof from.tag !== 'string' && from.at === undefined))) {
-    throw new TypeError('branch(): from is { tag } or { at }');
+    throw new ArgumentError('branch(): from is { tag } or { at }');
   }
   // Where the branch stores its bytes: the engine given, the parent's, or the
   // files engine over a backend given — the parent's engine by default.
@@ -102,7 +104,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   const taken = probe === null ? await fsi.exists(path, FILE) : await probe.kv.has('', FILE);
   if (taken) {
     await probe?.close();
-    throw new SyncomError('BRANCH_EXISTS', `${path} holds a branch already`, { path });
+    throw new SyncomError('ALX_ERR_BRANCH_EXISTS', `${path} holds a branch already`, { path });
   }
   let present = [];
   try {
@@ -114,7 +116,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   await probe?.close();
   if (present.length > 0) {
     const message = `${path} holds files already; a branch opens in a new directory`;
-    throw new SyncomError('BRANCH_EXISTS', message, { path });
+    throw new SyncomError('ALX_ERR_BRANCH_EXISTS', message, { path });
   }
   const sync = { ...rest.sync, retention: { ...rest.sync?.retention, ops: 0 }, autoStart: false };
   const Database = parent.constructor;
@@ -122,7 +124,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   const where = engine === null ? { fsi } : { engine };
   const child = await new Database({ ...rest, ...where, path, sync, plugins });
   const origin = parent.nodeId;
-  let forkedAt;
+  let forkedAt = null;
   try {
     if (from !== null) {
       // At a tag, or at any version the parent's log can still give exactly.
@@ -158,17 +160,17 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
 
 /** `{ parent, forkedAt, createdAt }` of a storage opened on a branch's directory, or null for one that is no branch. */
 const branchInfo = async (storage) => {
-  if (!isStorage(storage) || typeof storage.path !== 'string') throw new TypeError('branchInfo() takes a storage');
+  if (!isStorage(storage) || typeof storage.path !== 'string') throw new ArgumentError('branchInfo() takes a storage');
   const text = await storage[DB].kv.get('', FILE);
   if (text === null) return null;
   let parsed = null;
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new SyncomError('CORRUPT', `${FILE} is unreadable`, { cause: error });
+    throw new SyncomError('ALX_ERR_CORRUPT', `${FILE} is unreadable`, { cause: error });
   }
   if (!parsed || parsed.format !== FORMAT || typeof parsed.parent !== 'string') {
-    throw new SyncomError('CORRUPT', `${FILE} is not a branch file`);
+    throw new SyncomError('ALX_ERR_CORRUPT', `${FILE} is not a branch file`);
   }
   const { parent, forkedAt, createdAt } = parsed;
   return { parent, forkedAt, createdAt };
@@ -192,9 +194,9 @@ const sweep = async (storage) => {
  * one call that deletes data, and it takes only what `branch()` made.
  */
 const drop = async (storage) => {
-  if (!isStorage(storage) || typeof storage.path !== 'string') throw new TypeError('drop() takes a storage');
+  if (!isStorage(storage) || typeof storage.path !== 'string') throw new ArgumentError('drop() takes a storage');
   if ((await branchInfo(storage)) === null) {
-    throw new TypeError(`drop() takes a branch: ${storage.path} holds no ${FILE}`);
+    throw new ArgumentError(`drop() takes a branch: ${storage.path} holds no ${FILE}`);
   }
   await sweep(storage);
 };

@@ -3,7 +3,7 @@
 // between versions, `restore()` — and the tags (`tag`, `untag`, `tags`,
 // `at`). The present and its patches (`applyPatches`, `compact`) are the
 // core's. The version types are the core's (index.d.ts) and are re-exported
-// here; without the plugin those methods throw `PLUGIN_MISSING`,
+// here; without the plugin those methods throw `ALX_ERR_PLUGIN_MISSING`,
 // `stats().tags` is null, and a directory that holds tags is refused.
 
 import type {

@@ -167,8 +167,8 @@ const contain = (given) => {
     withSpan(name, attributes, fn) {
       // 0: not run, 1: returned `value`, 2: threw `failure`.
       let state = 0;
-      let value;
-      let failure;
+      let value = undefined;
+      let failure = null;
       const once = (handle) => {
         if (state === 0) {
           try {

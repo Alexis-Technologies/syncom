@@ -28,16 +28,13 @@ const Query = {
   or: (queries) => JSON.stringify({ method: 'or', values: queries.map((q) => JSON.parse(q)) }),
   and: (queries) => JSON.stringify({ method: 'and', values: queries.map((q) => JSON.parse(q)) }),
 };
-const matches = (doc, q) =>
-  q.method === 'equal'
-    ? q.values.includes(doc[q.attribute])
-    : q.method === 'greaterThan'
-      ? doc[q.attribute] > q.values[0]
-      : q.method === 'or'
-        ? q.values.some((inner) => matches(doc, inner))
-        : q.method === 'and'
-          ? q.values.every((inner) => matches(doc, inner))
-          : true;
+const MATCHERS = {
+  equal: (doc, q) => q.values.includes(doc[q.attribute]),
+  greaterThan: (doc, q) => doc[q.attribute] > q.values[0],
+  or: (doc, q) => q.values.some((inner) => matches(doc, inner)),
+  and: (doc, q) => q.values.every((inner) => matches(doc, inner)),
+};
+const matches = (doc, q) => (Object.hasOwn(MATCHERS, q.method) ? MATCHERS[q.method](doc, q) : true);
 const server = { docs: new Map(), listeners: new Set(), last: 0 };
 const stamp = () => new Date((server.last = Math.max(Date.now(), server.last + 1))).toISOString();
 const told = (doc) => {
@@ -62,7 +59,9 @@ class Databases {
     const limit = parsed.find((q) => q.method === 'limit')?.values[0] ?? 25;
     const rows = [...server.docs.values()].filter((doc) => parsed.every((q) => matches(doc, q)));
     rows.sort((a, b) => {
-      for (const key of orders) if (a[key] !== b[key]) return a[key] < b[key] ? -1 : 1;
+      for (const key of orders) {
+        if (a[key] !== b[key]) return a[key] < b[key] ? -1 : 1;
+      }
       return 0;
     });
     return { total: rows.length, documents: structuredClone(rows.slice(0, limit)) };

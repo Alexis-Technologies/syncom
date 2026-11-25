@@ -15,6 +15,8 @@
 // keeps the order (the digits before them already decide it). A clash is
 // still only an equal sort key — the records keep their ids.
 
+const { ArgumentError, ArgumentRangeError } = require('../argument-errors.js');
+
 const ALPHABET = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 const BASE = ALPHABET.length;
 const TERMINATOR = 31;
@@ -25,15 +27,17 @@ const DIGITS = new Int8Array(128).fill(-1);
 for (let i = 0; i < BASE; i++) DIGITS[ALPHABET.charCodeAt(i)] = i;
 
 const digitsOf = (key) => {
-  if (typeof key !== 'string' || key.length === 0) throw new TypeError('a fractional index is a non-empty string');
+  if (typeof key !== 'string' || key.length === 0) throw new ArgumentError('a fractional index is a non-empty string');
   const digits = [];
   for (let i = 0; i < key.length; i++) {
     const code = key.charCodeAt(i);
     const digit = code < 128 ? DIGITS[code] : -1;
-    if (digit === -1) throw new TypeError(`not a fractional index: ${JSON.stringify(key)}`);
+    if (digit === -1) throw new ArgumentError(`not a fractional index: ${JSON.stringify(key)}`);
     digits.push(digit);
   }
-  if (digits[digits.length - 1] !== TERMINATOR) throw new TypeError(`not a fractional index: ${JSON.stringify(key)}`);
+  if (digits[digits.length - 1] !== TERMINATOR) {
+    throw new ArgumentError(`not a fractional index: ${JSON.stringify(key)}`);
+  }
   return digits;
 };
 const keyOf = (digits) => {
@@ -50,7 +54,10 @@ const isKey = (key) => {
   }
 };
 
-const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const compare = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
 
 const before = (digits) => {
   for (let i = 0; i < digits.length; i++) {
@@ -61,7 +68,7 @@ const before = (digits) => {
       return out;
     }
   }
-  throw new RangeError('invalid fractional index');
+  throw new ArgumentRangeError('invalid fractional index');
 };
 
 const after = (digits) => {
@@ -73,7 +80,7 @@ const after = (digits) => {
       return out;
     }
   }
-  throw new RangeError('invalid fractional index');
+  throw new ArgumentRangeError('invalid fractional index');
 };
 
 const middle = (left, right) => {
@@ -113,21 +120,23 @@ const finish = (digits, jitter) => {
  * Throws RangeError when the bounds are not in order.
  */
 const between = (lower, upper, { jitter = 0 } = {}) => {
-  if (!Number.isInteger(jitter) || jitter < 0) throw new TypeError('between() takes jitter: a non-negative integer');
-  const lo = lower == null ? null : digitsOf(lower);
-  const hi = upper == null ? null : digitsOf(upper);
+  if (!Number.isInteger(jitter) || jitter < 0) {
+    throw new ArgumentError('between() takes jitter: a non-negative integer');
+  }
+  const lo = lower === undefined || lower === null ? null : digitsOf(lower);
+  const hi = upper === undefined || upper === null ? null : digitsOf(upper);
   if (lo === null && hi === null) return finish([], jitter);
   if (lo === null) return finish(before(hi), jitter);
   if (hi === null) return finish(after(lo), jitter);
-  if (compare(lower, upper) >= 0) throw new RangeError('between(): the bounds are not in order');
+  if (compare(lower, upper) >= 0) throw new ArgumentRangeError('between(): the bounds are not in order');
   const digits = middle(lo, hi);
-  if (digits === null) throw new RangeError('between(): no key fits between the bounds');
+  if (digits === null) throw new ArgumentRangeError('between(): no key fits between the bounds');
   return finish(digits, jitter);
 };
 
 /** `n` increasing keys between the bounds, spread by bisection. */
 const spread = (lower, upper, n, options = {}) => {
-  if (!Number.isInteger(n) || n < 0) throw new TypeError('spread() takes a non-negative integer count');
+  if (!Number.isInteger(n) || n < 0) throw new ArgumentError('spread() takes a non-negative integer count');
   const out = [];
   const fill = (lo, hi, count) => {
     if (count === 0) return;

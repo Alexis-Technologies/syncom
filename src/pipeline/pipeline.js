@@ -14,7 +14,7 @@
 // source is handed over once (`rebuilt`) — a replay or a rebuild PAGE ids
 // per batch, one transaction each, the checkpoint written after the last
 // page. A handler that throws stops the pipeline BEFORE the turn: the
-// checkpoint stays, the database's `error` event carries PIPELINE_FAILED,
+// checkpoint stays, the database's `error` event carries ALX_ERR_PIPELINE_FAILED,
 // and `start()` hands the turn over again — a turn is never skipped. A turn
 // that comes while another is handled joins the one waiting (the ids each
 // once, the changes in order, the newer position), up to PAGE ids: the
@@ -29,7 +29,7 @@
 
 const { SOURCE, DB } = require('../symbols.js');
 const { kvNamespace } = require('../engine.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { notify } = require('../hooks.js');
 
 const NAMESPACE = 'pipeline';
@@ -64,18 +64,18 @@ const bind = (db) => {
  * answers, `db` its instance) it runs where this instance leads.
  */
 const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
-  if (!isDatabase(db)) throw new TypeError('createPipeline() takes a database');
+  if (!isDatabase(db)) throw new ArgumentError('createPipeline() takes a database');
   if (typeof name !== 'string' || !/^[A-Za-z0-9_-][A-Za-z0-9_.-]{0,100}$/.test(name)) {
-    throw new TypeError('createPipeline() takes a name: letters, digits, _ . -');
+    throw new ArgumentError('createPipeline() takes a name: letters, digits, _ . -');
   }
   if (typeof source !== 'string' || source.length === 0) {
-    throw new TypeError('createPipeline() takes a source collection');
+    throw new ArgumentError('createPipeline() takes a source collection');
   }
-  if (typeof handler !== 'function') throw new TypeError('createPipeline() takes a handler');
+  if (typeof handler !== 'function') throw new ArgumentError('createPipeline() takes a handler');
   if (leader !== null && !isLeader(leader)) {
-    throw new TypeError('createPipeline(): leader is what openShared() answers (live, isLeader)');
+    throw new ArgumentError('createPipeline(): leader is what openShared() answers (live, isLeader)');
   }
-  if (leader !== null && leader.db !== db) throw new TypeError('createPipeline(): db is leader.db, its instance');
+  if (leader !== null && leader.db !== db) throw new ArgumentError('createPipeline(): db is leader.db, its instance');
   // Without `leader` the database given, bound once; with it the leading instance, bound at every change of it.
   const own = leader === null ? bind(db) : null;
   const queue = [];
@@ -110,7 +110,9 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
     binding.listener = null;
     if (bound === binding) bound = null;
     let kept = 0;
-    for (let i = 0; i < queue.length; i++) if (queue[i].binding !== binding) queue[kept++] = queue[i];
+    for (let i = 0; i < queue.length; i++) {
+      if (queue[i].binding !== binding) queue[kept++] = queue[i];
+    }
     queue.length = kept;
   };
 
@@ -137,7 +139,7 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
       binding.db,
       binding.logger,
       'error',
-      new SyncomError('PIPELINE_FAILED', message, { pipeline: name, eventId, cause }),
+      new SyncomError('ALX_ERR_PIPELINE_FAILED', message, { pipeline: name, eventId, cause }),
     );
   };
 
@@ -179,10 +181,11 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
   };
 
   // The ids of a replay or a rebuild, PAGE per batch, the checkpoint after the last.
-  const paged = (binding, ids, rebuilt, eventId) => {
+  const paged = (binding, ids, isRebuild, eventId) => {
     for (let at = 0; at < ids.length; at += PAGE) {
       const page = ids.slice(at, at + PAGE);
-      push(binding, { ids: page, changes: null, replay: true, rebuilt, eventId }, at + PAGE >= ids.length);
+      const batch = { ids: page, changes: null, replay: true, rebuilt: isRebuild, eventId };
+      push(binding, batch, at + PAGE >= ids.length);
     }
   };
 
@@ -190,18 +193,18 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
   const ofSource = ({ seam }, changes) => {
     const ids = [];
     const seen = new Set();
-    const own = [];
+    const sourceChanges = [];
     for (let i = 0; i < changes.length; i++) {
       const { id } = changes[i];
       // The collection: the row's — a tombstone's row keeps it — or, of a purge (its row is gone), the change's.
       const type = seam.row(id)?.type ?? changes[i].type ?? null;
       if (type !== source) continue;
-      own.push(changes[i]);
+      sourceChanges.push(changes[i]);
       if (seen.has(id)) continue;
       seen.add(id);
       ids.push(id);
     }
-    return { ids, changes: own };
+    return { ids, changes: sourceChanges };
   };
 
   // The turns since the checkpoint, from the log: the ids of the source's records they touched. Where the log cannot

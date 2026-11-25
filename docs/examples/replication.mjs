@@ -88,7 +88,8 @@ assert.equal((await laptop.Task.get(task.id)).title, 'Docs: replication');
 
 // #region events
 laptop.sync.on('peer', ({ url, connected, reconnected }) => {
-  console.log(url, connected ? (reconnected ? 'back' : 'connected') : 'offline');
+  if (!connected) console.log(url, 'offline');
+  else console.log(url, reconnected ? 'back' : 'connected');
 });
 laptop.sync.on('sync', ({ url, pushed, applied }) => {
   if (pushed !== undefined) console.log('pushed', pushed, 'ops to', url);

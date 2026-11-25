@@ -13,7 +13,9 @@
 // at-rest wrapper, the served store, the attachments plugin and the dialer's
 // `fetchBlob`; a module of its own so that engine.js, which every block
 // bundles, carries none of it. `checkBlobBytes` takes the caller's `typed`
-// (src/errors.js) for BLOB_TOO_LARGE: a size is data. No requires.
+// (src/errors.js) for ALX_ERR_BLOB_TOO_LARGE: a size is data. Requires argument-errors.js only.
+
+const { ArgumentError, DataError } = require('./argument-errors.js');
 
 const MAX_BLOB_BYTES = 64 * 1024 * 1024;
 // What sealing a blob adds (src/encryption/encryption.js sealBytes: a 12-byte iv, a 16-byte tag).
@@ -26,21 +28,25 @@ const isDigest = (value) => typeof value === 'string' && value.length === 64 && 
 
 /** A digest, or a TypeError naming the store's method (`label`). */
 const checkDigest = (value, label) => {
-  if (!isDigest(value)) throw new TypeError(`${label}: ${JSON.stringify(value)} is not a digest (SHA-256 as hex)`);
+  if (!isDigest(value)) throw new ArgumentError(`${label}: ${JSON.stringify(value)} is not a digest (SHA-256 as hex)`);
   return value;
 };
 
 /**
  * A blob's bytes: a Uint8Array (a TypeError otherwise) within `max` — MAX_BLOB_BYTES at a door that takes plain bytes,
- * MAX_STORED_BYTES at an engine's store, which may hold them sealed (BLOB_TOO_LARGE past it).
+ * MAX_STORED_BYTES at an engine's store, which may hold them sealed (ALX_ERR_BLOB_TOO_LARGE past it).
  */
-const checkBlobBytes = (typed, bytes, label, max = MAX_BLOB_BYTES) => {
-  if (!(bytes instanceof Uint8Array)) throw new TypeError(`${label}: a blob is a Uint8Array`);
+const checkBlobBytes = (bytes, label, max = MAX_BLOB_BYTES) => {
+  if (!(bytes instanceof Uint8Array)) throw new ArgumentError(`${label}: a blob is a Uint8Array`);
   if (bytes.length > max) {
-    throw typed('BLOB_TOO_LARGE', `${label}: a blob of ${bytes.length} bytes is past the cap (${max})`, {
-      length: bytes.length,
-      max,
-    });
+    throw new DataError(
+      'ALX_ERR_BLOB_TOO_LARGE',
+      `${label}: a blob of ${bytes.length} bytes is past the cap (${max})`,
+      {
+        length: bytes.length,
+        max,
+      },
+    );
   }
   return bytes;
 };

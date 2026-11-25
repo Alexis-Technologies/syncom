@@ -77,19 +77,19 @@ assert.equal((await board.get(first)).owner, 'ada');
 try {
   await board.set('task 1', { title: 'A space is not allowed in an id' });
 } catch (error) {
-  console.log(error.code); // 'INVALID_ID'
+  console.log(error.code); // 'ALX_ERR_INVALID_ID'
 }
 // #endregion invalid-id
-await assert.rejects(() => board.set('task 1', { title: 'x' }), { name: 'TypeError', code: 'INVALID_ID' });
+await assert.rejects(() => board.set('task 1', { title: 'x' }), { name: 'DataError', code: 'ALX_ERR_INVALID_ID' });
 
 // #region lock
 try {
   await createDatabase({ path: 'board' });
 } catch (error) {
-  console.log(error.code); // 'LOCKED': board is open in this process already
+  console.log(error.code); // 'ALX_ERR_LOCKED': board is open in this process already
 }
 // #endregion lock
-await assert.rejects(() => createDatabase({ path: 'board', logger: false }), { code: 'LOCKED' });
+await assert.rejects(() => createDatabase({ path: 'board', logger: false }), { code: 'ALX_ERR_LOCKED' });
 
 // #region lock-wait
 const waiting = createDatabase({ path: 'board', lock: 'wait', logger: false });
@@ -103,10 +103,10 @@ await reopened.close();
 try {
   await reopened.insert({ title: 'Too late' });
 } catch (error) {
-  console.log(error.code); // 'CLOSED'
+  console.log(error.code); // 'ALX_ERR_CLOSED'
 }
 // #endregion closed
-await assert.rejects(() => reopened.insert({ title: 'x' }), { code: 'CLOSED' });
+await assert.rejects(() => reopened.insert({ title: 'x' }), { code: 'ALX_ERR_CLOSED' });
 
 // #region get-id
 let n = 0;

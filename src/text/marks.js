@@ -45,20 +45,29 @@ const EXPANDS = { before: [true, false], after: [false, true], both: [true, true
 // Removing a style grows where the style would not and the other way round (Loro): both ↔ none.
 const REVERSED = { before: 'before', after: 'after', both: 'none', none: 'both' };
 
+const startAnchor = (block, start, length, before) => {
+  if (before) return start === 0 ? HEAD : `>${elemAt(block, start - 1)}`;
+  return start === length ? END : `<${elemAt(block, start)}`;
+};
+const endAnchor = (block, end, length, after) => {
+  if (after) return end === length ? END : `<${elemAt(block, end)}`;
+  return end === 0 ? HEAD : `>${elemAt(block, end - 1)}`;
+};
+
 // The anchors of a mark over visible [start, end) under an expand rule.
 const markAnchors = (block, start, end, expand) => {
-  const [before, after] = EXPANDS[expand];
+  const sides = EXPANDS[expand];
   const length = lengthOf(block);
-  const at = (i) => elemAt(block, i);
-  const from = before ? (start === 0 ? HEAD : `>${at(start - 1)}`) : start === length ? END : `<${at(start)}`;
-  const to = after ? (end === length ? END : `<${at(end)}`) : end === 0 ? HEAD : `>${at(end - 1)}`;
+  const from = startAnchor(block, start, length, sides[0]);
+  const to = endAnchor(block, end, length, sides[1]);
   return [from, to];
 };
 
 // A `mark`: a new mark keyed by the op's stamp — first wins on a key — or `{ off }`, which flags an
 // existing mark (or a placeholder for one not here yet) as removed by id.
 const applyMark = (given, stamp, payload, base = null, pendingMax = PENDING_MAX) => {
-  const [ts, origin] = stamp;
+  const ts = stamp[0];
+  const origin = stamp[1];
   const seq = asBlock(given, base);
   if (seq.k !== 't' || !payload || typeof payload !== 'object') return malformed(seq);
   const st = STATE.get(seq);
@@ -183,7 +192,9 @@ class MarksIndex {
     if (this.opens !== null) return this;
     const { ends, next } = this;
     const closeAt = new Int32Array(next);
-    for (let i = 0; i < ends.length; i++) if (!ends[i].open) closeAt[ends[i].m.n] = i;
+    for (let i = 0; i < ends.length; i++) {
+      if (!ends[i].open) closeAt[ends[i].m.n] = i;
+    }
     const count = ends.length >> 1;
     let size = 1;
     while (size < count) size <<= 1;
@@ -304,7 +315,9 @@ const withoutMark = (index, id) => {
   const byKey = new Map(index.byKey);
   const list = [];
   const held = byKey.get(entry.key);
-  for (let i = 0; i < held.length; i++) if (held[i] !== entry) list.push(held[i]);
+  for (let i = 0; i < held.length; i++) {
+    if (held[i] !== entry) list.push(held[i]);
+  }
   if (list.length > 0) byKey.set(entry.key, list);
   else byKey.delete(entry.key);
   return new MarksIndex(index.base, ends, byKey, index.waits, index.next);
@@ -344,8 +357,10 @@ const marksOver = (st, index, ordinal) => {
   return out;
 };
 
-const byKeyThenStamp = (x, y) =>
-  x.key < y.key ? -1 : x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin]);
+const byKeyThenStamp = (x, y) => {
+  if (x.key < y.key) return -1;
+  return x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin]);
+};
 
 // The style of the marks in force at one point: per key the newest value, none when null; MANY marks
 // list as `{ id, value }`, the ones newer than the key's newest plain mark.
@@ -413,7 +428,8 @@ const newerRanges = (block, key, stamp, stacked, base = null) => {
     const end = visibleOfEnd(st, to);
     if (start < end) out.push([start, end]);
   }
-  return out.sort((x, y) => x[0] - y[0]);
+  out.sort((x, y) => x[0] - y[0]);
+  return out;
 };
 
 // The ordinal of every anchor the marks name, and the ordinal of every visible slot — read in one walk
@@ -425,7 +441,12 @@ const walkMarks = (block, base) => {
   const pairs = C.pairs(st.marks);
   for (let p = 0; p < pairs.length; p++) {
     const id = pairs[p].key;
-    const [from, to, key, value, flags] = pairs[p].value;
+    const held = pairs[p].value;
+    const from = held[0];
+    const to = held[1];
+    const key = held[2];
+    const value = held[3];
+    const flags = held[4];
     if ((flags & OFF) !== 0) continue;
     const { ts, origin } = parseRun(id);
     marks.push({ id, ts, origin, from, to, key, value, many: (flags & MANY) !== 0 });
@@ -447,7 +468,9 @@ const walkMarks = (block, base) => {
         if (wanted.has(name)) wanted.set(name, ord + k);
       }
     }
-    if (span.vis) for (let k = 0; k < span.len; k++) ords.push(ord + k);
+    if (span.vis) {
+      for (let k = 0; k < span.len; k++) ords.push(ord + k);
+    }
     ord += span.len;
   }
   const ordinalOf = (token) => {
@@ -460,6 +483,12 @@ const walkMarks = (block, base) => {
     return at + (side === 'L' ? 0 : 1);
   };
   return { marks, ords, ordinalOf, total: ord };
+};
+
+// The expand rule a mark's anchors stand for: growing before its start, after its end, both or neither.
+const expandOf = (before, after) => {
+  if (before) return after ? 'both' : 'before';
+  return after ? 'after' : 'none';
 };
 
 // The marks in force over the reading, as the calls that would make them again, in stamp order.
@@ -488,10 +517,11 @@ const marksIn = (block, seq = block, base = null) => {
     if (start >= end) continue;
     const before = m.from === HEAD || m.from[0] === '>';
     const after = m.to === END || m.to[0] === '<';
-    const expand = before ? (after ? 'both' : 'before') : after ? 'after' : 'none';
+    const expand = expandOf(before, after);
     out.push({ ts: m.ts, origin: m.origin, start, end, key: m.key, value: m.value, expand, many: m.many });
   }
-  return out.sort((x, y) => compareClock([x.ts, x.origin], [y.ts, y.origin]));
+  out.sort((x, y) => compareClock([x.ts, x.origin], [y.ts, y.origin]));
+  return out;
 };
 
 // The text as runs of equal style: `[{ text, marks }]`, a sweep over the walk.
@@ -523,7 +553,9 @@ const spans = (block, seq = block, base = null) => {
       const ordinal = ords[i];
       let moved = false;
       while (e < events.length && events[e][0] <= ordinal) {
-        const [, kind, mark] = events[e++];
+        const event = events[e++];
+        const kind = event[1];
+        const mark = event[2];
         if (kind === 1) active.add(mark);
         else active.delete(mark);
         moved = true;

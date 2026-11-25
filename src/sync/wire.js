@@ -57,6 +57,11 @@ const CODE_TYPES = {
   '~': 'tree',
 };
 
+const scrubbedSlot = (op) => {
+  if (op.scrubbed !== true) return null;
+  return op.withheld === true ? WITHHELD : SCRUBBED;
+};
+
 const packOps = (ops) => {
   const packed = [];
   for (let i = 0; i < ops.length; i++) {
@@ -81,7 +86,7 @@ const packOps = (ops) => {
       op.nonce === undefined ? null : op.nonce,
       op.msg === undefined ? null : op.msg,
       op.prev === undefined ? null : op.prev,
-      op.scrubbed === true ? (op.withheld === true ? WITHHELD : SCRUBBED) : null,
+      scrubbedSlot(op),
     ]);
   }
   return packed;
@@ -92,28 +97,26 @@ const unpackOps = (packed) => {
   const ops = [];
   for (const row of packed) {
     if (!Array.isArray(row) || row.length < 5) continue;
-    const [
-      origin,
-      seq,
-      ts,
-      code,
-      id,
-      scope,
-      data,
-      meta,
-      key,
-      value,
-      vector,
-      from,
-      v,
-      actor,
-      sig,
-      digest,
-      nonce,
-      msg,
-      prev,
-      scrubbed,
-    ] = row;
+    const origin = row[0];
+    const seq = row[1];
+    const ts = row[2];
+    const code = row[3];
+    const id = row[4];
+    const scope = row[5];
+    const data = row[6];
+    const meta = row[7];
+    const key = row[8];
+    const value = row[9];
+    const vector = row[10];
+    const from = row[11];
+    const v = row[12];
+    const actor = row[13];
+    const sig = row[14];
+    const digest = row[15];
+    const nonce = row[16];
+    const msg = row[17];
+    const prev = row[18];
+    const scrubbed = row[19];
     const op = { origin, seq, ts, type: own(CODE_TYPES, code) ?? code };
     if (scrubbed === SCRUBBED || scrubbed === WITHHELD) op.scrubbed = true;
     if (scrubbed === WITHHELD) op.withheld = true;

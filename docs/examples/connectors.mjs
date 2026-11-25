@@ -83,19 +83,19 @@ import { replicate } from '@alexify/syncom/connector';
 
 const board = await createDatabase({ path: 'board', schema: { entities: { Task: {} } } });
 
-// The two handlers the connector calls, over your backend's client (`api`).
-const handlersFor = (api) => ({
+// The two handlers the connector calls, over your backend's client.
+const handlersFor = (client) => ({
   pull: {
     // The backend's documents changed since `checkpoint`, at most `batchSize`, and the position after them.
     async handler(checkpoint, batchSize) {
-      const page = await api.changes({ since: checkpoint ?? 0, limit: batchSize });
+      const page = await client.changes({ since: checkpoint ?? 0, limit: batchSize });
       return { documents: page.rows, checkpoint: page.last };
     },
   },
   push: {
     // This node's records as they change; answers the rows the backend refused, as it holds them.
     async handler(rows) {
-      return api.bulk(rows);
+      return client.bulk(rows);
     },
   },
 });
@@ -230,7 +230,7 @@ api.failNext(1);
 api.write('t4', { title: 'Answer issues', done: false });
 await merging.reSync();
 assert.equal(seen.errors.length, 1);
-assert.equal(seen.errors[0].code, 'REPLICATION_FAILED');
+assert.equal(seen.errors[0].code, 'ALX_ERR_REPLICATION_FAILED');
 assert.equal(seen.errors[0].direction, 'pull');
 assert.ok(seen.errors[0].retryIn >= 3750 && seen.errors[0].retryIn <= 6250);
 assert.equal(merging.errors.length, 1);

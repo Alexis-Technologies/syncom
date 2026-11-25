@@ -95,7 +95,7 @@ const flaky = createPipeline(reopened, {
     if (failNext) throw new Error('search service down');
   },
 });
-reopened.on('error', (error) => console.log(error.code, error.cause.message)); // PIPELINE_FAILED search service down
+reopened.on('error', (error) => console.log(error.code, error.cause.message)); // ALX_ERR_PIPELINE_FAILED search service down
 await flaky.start(); // the rebuild hands every task over: the handler throws
 await flaky.awaitIdle();
 console.log(flaky.stopped, flaky.checkpoint); // true null: stopped, and the checkpoint did not move
@@ -106,7 +106,7 @@ await flaky.awaitIdle();
 console.log(flaky.stopped, flaky.errors.length); // false 1
 // #endregion failure
 assert.equal(flaky.stopped, false);
-assert.deepEqual(failures, ['PIPELINE_FAILED']);
+assert.deepEqual(failures, ['ALX_ERR_PIPELINE_FAILED']);
 assert.equal(flaky.errors.length, 1);
 assert.notEqual(flaky.checkpoint, null);
 flaky.stop();

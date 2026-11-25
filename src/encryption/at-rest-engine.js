@@ -24,13 +24,13 @@
 const { checkEngine, capabilitiesOf, unreadableRecord } = require('../engine.js');
 const { checkDigest, checkBlobBytes } = require('../blobs.js');
 const { toBase64, fromBase64 } = require('../crypto/pem.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 
 const unreadable = (id) => unreadableRecord(SyncomError, id);
 
-// A record's text, decrypted: the object it parses to, or INTEGRITY.
+// A record's text, decrypted: the object it parses to, or ALX_ERR_INTEGRITY.
 const parsed = (id, text) => {
-  let value;
+  let value = null;
   try {
     value = JSON.parse(text);
   } catch {
@@ -69,7 +69,7 @@ const decoder = new TextDecoder();
 const atRestEngine = (engine, cipher) => {
   const inner = checkEngine(engine, 'atRest()');
   if (inner.name === 'files') {
-    throw new TypeError('atRest(): wrap the backend, not the files engine — filesEngine(atRest(fsi, options))');
+    throw new ArgumentError('atRest(): wrap the backend, not the files engine — filesEngine(atRest(fsi, options))');
   }
   const { seal, open } = cipher;
   // A blob's cipher: bytes in, bytes out; a cipher of text alone seals the bytes as base64 text.
@@ -100,11 +100,11 @@ const atRestEngine = (engine, cipher) => {
       },
       has: (ns, key) => db.kv.has(ns, key),
       list: (ns) => db.kv.list(ns),
-      put: async (ns, key, value, options) => db.kv.put(ns, key, await seal(kvKey(ns, key), String(value)), options),
+      put: async (ns, key, value, options) => db.kv.put(ns, key, await seal(kvKey(ns, key), `${value}`), options),
       remove: (ns, key) => db.kv.remove(ns, key),
     };
     if (typeof db.kv.create === 'function') {
-      kv.create = async (ns, key, value) => db.kv.create(ns, key, await seal(kvKey(ns, key), String(value)));
+      kv.create = async (ns, key, value) => db.kv.create(ns, key, await seal(kvKey(ns, key), `${value}`));
     }
 
     const records = {
@@ -136,7 +136,11 @@ const atRestEngine = (engine, cipher) => {
       getMany: async (id, names) => {
         const sealed = await db.pieces.getMany(id, names);
         const found = new Map();
-        for (const [name, text] of sealed) found.set(name, await open(pieceKey(name), text));
+        for (const entry of sealed) {
+          const name = entry[0];
+          const text = entry[1];
+          found.set(name, await open(pieceKey(name), text));
+        }
         return found;
       },
       remove: (id, name) => db.pieces.remove(id, name),
@@ -172,7 +176,7 @@ const atRestEngine = (engine, cipher) => {
     const sealAll = (entries) => eachChunk(entries, sealEntry);
     // A row decrypted that is no JSON: the medium is corrupt at that seq — never a bare SyntaxError out of an open.
     const corrupt = (what, cause) =>
-      new SyncomError('CORRUPT', `The log's ${what} does not read once decrypted`, { cause, file: what });
+      new SyncomError('ALX_ERR_CORRUPT', `The log's ${what} does not read once decrypted`, { cause, file: what });
     const parsedJson = (what, text) => {
       try {
         return JSON.parse(text);
@@ -233,11 +237,28 @@ const atRestEngine = (engine, cipher) => {
         }
         const sealedBetween = (from, to) => {
           const out = [];
-          for (let seq = from; seq <= to; seq++) if (bySeq.has(seq)) out.push(bySeq.get(seq));
+          for (let seq = from; seq <= to; seq++) {
+            if (bySeq.has(seq)) out.push(bySeq.get(seq));
+          }
           return out;
         };
         await db.log.scrub(seqs, { id, sealedTo, entriesBetween: sealedBetween });
       },
+    };
+
+    // A record's pieces in a write set: the ones it makes sealed at their places, the ones it drops as they are.
+    const sealedPieces = async (held) => {
+      const next = {};
+      const made = held.put;
+      if (made !== undefined) {
+        const list = [];
+        for (let k = 0; k < made.length; k++) {
+          list.push([made[k][0], await seal(pieceKey(made[k][0]), made[k][1])]);
+        }
+        next.put = list;
+      }
+      if (held.remove !== undefined) next.remove = held.remove;
+      return next;
     };
 
     // One write set, every value sealed: a record as text, its pieces, the kv puts, the copies.
@@ -250,8 +271,12 @@ const atRestEngine = (engine, cipher) => {
         if (puts !== undefined) {
           const out = [];
           for (let i = 0; i < puts.length; i++) {
-            const [ns, key, value, options] = puts[i];
-            out.push([ns, key, await seal(kvKey(ns, key), String(value)), options]);
+            const put = puts[i];
+            const ns = put[0];
+            const key = put[1];
+            const value = put[2];
+            const options = put[3];
+            out.push([ns, key, await seal(kvKey(ns, key), `${value}`), options]);
           }
           sealed.kv.put = out;
         }
@@ -264,18 +289,7 @@ const atRestEngine = (engine, cipher) => {
           const row = rows[i];
           const text = row.stored !== undefined ? JSON.stringify(row.stored) : row.text;
           const next = { id: row.id, text: await seal(recordKey(row.id), text) };
-          if (row.pieces !== undefined) {
-            next.pieces = {};
-            const made = row.pieces.put;
-            if (made !== undefined) {
-              const list = [];
-              for (let k = 0; k < made.length; k++) {
-                list.push([made[k][0], await seal(pieceKey(made[k][0]), made[k][1])]);
-              }
-              next.pieces.put = list;
-            }
-            if (row.pieces.remove !== undefined) next.pieces.remove = row.pieces.remove;
-          }
+          if (row.pieces !== undefined) next.pieces = await sealedPieces(row.pieces);
           out.push(next);
         }
         sealed.records = out;
@@ -287,7 +301,10 @@ const atRestEngine = (engine, cipher) => {
         if (copied !== undefined) {
           const out = [];
           for (let i = 0; i < copied.length; i++) {
-            const [tag, id, text] = copied[i];
+            const copy = copied[i];
+            const tag = copy[0];
+            const id = copy[1];
+            const text = copy[2];
             out.push([tag, id, await seal(copyKey(tag, id), text)]);
           }
           sealed.copies.put = out;
@@ -302,7 +319,7 @@ const atRestEngine = (engine, cipher) => {
     if (typeof db.estimate === 'function') wrapped.estimate = () => db.estimate();
     if (db.blobs !== undefined) {
       // An attachment's bytes: sealed as bytes at the blob's place (iv ‖ ciphertext, the size its own); the digest
-      // stays a name. A blob that is not the key's — another key, never sealed — is DECRYPT_FAILED `key`.
+      // stays a name. A blob that is not the key's — another key, never sealed — is ALX_ERR_DECRYPT_FAILED `key`.
       wrapped.blobs = {
         get: async (digest) => {
           const stored = await db.blobs.get(checkDigest(digest, 'blobs.get'));
@@ -313,7 +330,7 @@ const atRestEngine = (engine, cipher) => {
         list: () => db.blobs.list(),
         put: async (digest, bytes) => {
           checkDigest(digest, 'blobs.put');
-          checkBlobBytes(typed, bytes, 'blobs.put');
+          checkBlobBytes(bytes, 'blobs.put');
           return db.blobs.put(digest, await sealBytes(blobKey(digest), bytes));
         },
         remove: async (digest) => db.blobs.remove(checkDigest(digest, 'blobs.remove')),

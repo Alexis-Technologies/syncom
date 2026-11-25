@@ -10,7 +10,7 @@
 // Without the plugin the node id is what `createDatabase({ getId })` mints (a UUID
 // by default), nothing is signed, and a peer's signatures are not checked:
 // the 'verify' semantics for unsigned ops, as before — `'require'` without
-// the plugin is PLUGIN_MISSING. The hook the core takes: `identity` — the
+// the plugin is ALX_ERR_PLUGIN_MISSING. The hook the core takes: `identity` — the
 // id, `sign(op)`, `verify(op, mode)` and `signMessage(text)` (presence).
 
 const { calculateHash, generateSigningKeys, loadSigningKeys, sign, verify, verifyAsync } = require('./ed25519.js');

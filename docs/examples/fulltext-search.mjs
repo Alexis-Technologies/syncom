@@ -98,14 +98,16 @@ const exactWords = () => {
       held.delete(id);
     },
     query(text) {
-      const hits = [];
+      const found = [];
       for (const [id, has] of held) {
         let score = 0;
-        for (const word of words(text)) if (has.has(word)) score++;
-        if (score > 0) hits.push({ id, score });
+        for (const word of words(text)) {
+          if (has.has(word)) score++;
+        }
+        if (score > 0) found.push({ id, score });
       }
       // Every match, best first, ties by id.
-      return hits.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
+      return found.sort((a, b) => b.score - a.score || (a.id < b.id ? -1 : 1));
     },
   };
 };

@@ -11,7 +11,7 @@
 
 const { capabilitiesOf, unreadableRecord, eexist } = require('../engine.js');
 const { checkDigest, checkBlobBytes, MAX_STORED_BYTES } = require('../blobs.js');
-const { SyncomError, typed } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 
 const CAPABILITIES = capabilitiesOf({
   atomicBatch: true,
@@ -23,7 +23,7 @@ const CAPABILITIES = capabilitiesOf({
 });
 
 // A record handed in as text that is no record: kept as the text, read as
-// INTEGRITY — what a torn file reads as under the files engine.
+// ALX_ERR_INTEGRITY — what a torn file reads as under the files engine.
 class Torn {
   constructor(text) {
     this.text = text;
@@ -32,19 +32,19 @@ class Torn {
 const unreadable = (id) => unreadableRecord(SyncomError, id);
 // A record given as text: the object it parses to, or the text kept aside.
 const parsed = (text) => {
-  let value;
   try {
-    value = JSON.parse(text);
+    const value = JSON.parse(text);
+    return value === null || typeof value !== 'object' || Array.isArray(value) ? new Torn(text) : value;
   } catch {
     return new Torn(text);
   }
-  return value === null || typeof value !== 'object' || Array.isArray(value) ? new Torn(text) : value;
 };
 
 const sorted = (keys) => {
   const names = [];
   for (const key of keys) names.push(key);
-  return names.sort();
+  names.sort();
+  return names;
 };
 
 // A deep copy through JSON: what the index is saved as (the log's vector is
@@ -72,7 +72,9 @@ const logStore = () => {
         for (let seq = Math.max(group.first, sealed + 1); seq <= group.last; seq++) unsealed.push(seq);
         open.push({ first: group.first, last: group.last, unsealed });
       }
-      const floor = index !== null ? index.floor : entries.length > 0 ? entries[0].seq : 1;
+      let floor = 1;
+      if (index !== null) floor = index.floor;
+      else if (entries.length > 0) floor = entries[0].seq;
       return {
         index: index === null ? null : frozenCopy(index),
         hasIndex: index !== null,
@@ -107,11 +109,13 @@ const logStore = () => {
     },
     async sealed(to) {
       const kept = [];
-      for (let i = 0; i < groups.length; i++) if (groups[i].last > to) kept.push(groups[i]);
+      for (let i = 0; i < groups.length; i++) {
+        if (groups[i].last > to) kept.push(groups[i]);
+      }
       groups = kept;
     },
     async drop(segment) {
-      if (segments[0] !== segment) throw new TypeError('drop(segment): the oldest segment goes first');
+      if (segments[0] !== segment) throw new ArgumentError('drop(segment): the oldest segment goes first');
       segments.shift();
       let cut = 0;
       while (cut < entries.length && entries[cut].seq <= segment.to) cut++;
@@ -167,7 +171,7 @@ const openDb = (path) => {
       return sorted(blobs.keys());
     },
     async put(digest, bytes) {
-      blobs.set(checkDigest(digest, 'blobs.put'), checkBlobBytes(typed, bytes, 'blobs.put', MAX_STORED_BYTES).slice());
+      blobs.set(checkDigest(digest, 'blobs.put'), checkBlobBytes(bytes, 'blobs.put', MAX_STORED_BYTES).slice());
     },
     async remove(digest) {
       blobs.delete(checkDigest(digest, 'blobs.remove'));
@@ -185,7 +189,7 @@ const openDb = (path) => {
       return keys === undefined ? [] : sorted(keys.keys());
     },
     async put(ns, key, value) {
-      space(ns).set(key, String(value));
+      space(ns).set(key, `${value}`);
     },
     async remove(ns, key) {
       spaces.get(ns)?.delete(key);
@@ -193,7 +197,7 @@ const openDb = (path) => {
     async create(ns, key, value) {
       const keys = space(ns);
       if (keys.has(key)) throw eexist(`${ns}/${key}`);
-      keys.set(key, String(value));
+      keys.set(key, `${value}`);
     },
   };
   const recordStore = {
@@ -245,7 +249,9 @@ const openDb = (path) => {
       const held = pieces.get(id);
       const found = new Map();
       if (held === undefined) return found;
-      for (let i = 0; i < names.length; i++) if (held.has(names[i])) found.set(names[i], held.get(names[i]));
+      for (let i = 0; i < names.length; i++) {
+        if (held.has(names[i])) found.set(names[i], held.get(names[i]));
+      }
       return found;
     },
     async remove(id, name) {
@@ -318,7 +324,9 @@ const openDb = (path) => {
     if (batch.records !== undefined || batch.remove !== undefined) sortedIds = null;
     const ids = [];
     const puts = batch.kv?.put;
-    if (puts !== undefined) for (let i = 0; i < puts.length; i++) space(puts[i][0]).set(puts[i][1], String(puts[i][2]));
+    if (puts !== undefined) {
+      for (let i = 0; i < puts.length; i++) space(puts[i][0]).set(puts[i][1], `${puts[i][2]}`);
+    }
     const rows = batch.records;
     if (rows !== undefined) {
       for (let i = 0; i < rows.length; i++) {
@@ -332,7 +340,9 @@ const openDb = (path) => {
         records.set(row.id, row.stored !== undefined ? row.stored : parsed(row.text));
         ids.push(row.id);
         const dropped = row.pieces?.remove;
-        if (dropped !== undefined) for (let k = 0; k < dropped.length; k++) pieces.get(row.id)?.delete(dropped[k]);
+        if (dropped !== undefined) {
+          for (let k = 0; k < dropped.length; k++) pieces.get(row.id)?.delete(dropped[k]);
+        }
       }
     }
     const removed = batch.remove;
@@ -343,7 +353,9 @@ const openDb = (path) => {
       }
     }
     const copied = batch.copies?.put;
-    if (copied !== undefined) for (let i = 0; i < copied.length; i++) tag(copied[i][0]).set(copied[i][1], copied[i][2]);
+    if (copied !== undefined) {
+      for (let i = 0; i < copied.length; i++) tag(copied[i][0]).set(copied[i][1], copied[i][2]);
+    }
     const removals = batch.kv?.remove;
     if (removals !== undefined) {
       for (let i = 0; i < removals.length; i++) spaces.get(removals[i][0])?.delete(removals[i][1]);
@@ -353,10 +365,16 @@ const openDb = (path) => {
   // What the database holds, as JSON would (the records are objects): an estimate, with nothing to say of a quota.
   const estimate = async () => {
     let usage = 0;
-    for (const keys of spaces.values()) for (const text of keys.values()) usage += text.length;
+    for (const keys of spaces.values()) {
+      for (const text of keys.values()) usage += text.length;
+    }
     for (const stored of records.values()) usage += JSON.stringify(stored).length;
-    for (const named of pieces.values()) for (const text of named.values()) usage += text.length;
-    for (const tagged of copies.values()) for (const text of tagged.values()) usage += text.length;
+    for (const named of pieces.values()) {
+      for (const text of named.values()) usage += text.length;
+    }
+    for (const tagged of copies.values()) {
+      for (const text of tagged.values()) usage += text.length;
+    }
     for (const bytes of blobs.values()) usage += bytes.length;
     return { usage, quota: null };
   };

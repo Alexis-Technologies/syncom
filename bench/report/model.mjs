@@ -57,10 +57,11 @@ export const formatValue = (value, unit) => {
 
 // ─── Scales ─────────────────────────────────────────────────────────────────
 
+const NICE_STEPS = [1, 2, 5];
 const niceStep = (raw) => {
   const magnitude = 10 ** Math.floor(Math.log10(raw));
   const residual = raw / magnitude;
-  const nice = residual <= 1 ? 1 : residual <= 2 ? 2 : residual <= 5 ? 5 : 10;
+  const nice = NICE_STEPS.find((step) => residual <= step) ?? 10;
   return nice * magnitude;
 };
 

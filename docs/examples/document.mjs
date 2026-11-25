@@ -37,9 +37,9 @@ assert.deepEqual(task.tags, ['docs']);
 const voted = await db.Task.insert({ title: 'Vote on me', done: false });
 await voted.inc('votes', 1);
 voted.votes = 10;
-await voted.save().catch((error) => console.log(error.code)); // 'FIELD_KIND': votes is a counter
+await voted.save().catch((error) => console.log(error.code)); // 'ALX_ERR_FIELD_KIND': votes is a counter
 // #endregion not-a-register
-await assert.rejects(() => voted.save(), { code: 'FIELD_KIND' });
+await assert.rejects(() => voted.save(), { code: 'ALX_ERR_FIELD_KIND' });
 assert.deepEqual(voted.delta(), { votes: 10 }); // a refused save keeps what was staged
 
 // #region events

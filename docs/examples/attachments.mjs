@@ -92,9 +92,9 @@ assert.equal(phone.attachments.stats().fetched, 1);
 await server.attachments.put(id, 'second.png', new Uint8Array(16), { type: 'image/png' });
 await settle(mesh.storages);
 const missing = await phone.attachments.get(id, 'second.png', { fetch: false }).catch((error) => error);
-console.log(missing.code); // BLOB_NOT_FOUND: not here, and nobody was asked
+console.log(missing.code); // ALX_ERR_BLOB_NOT_FOUND: not here, and nobody was asked
 // #endregion offline
-assert.equal(missing.code, 'BLOB_NOT_FOUND');
+assert.equal(missing.code, 'ALX_ERR_BLOB_NOT_FOUND');
 await mesh.close();
 
 // #region hub

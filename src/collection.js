@@ -16,14 +16,14 @@ const { Emitter } = require('./emitter.js');
 const { notify } = require('./hooks.js');
 const { isPlainObject, MAX_BATCH } = require('./shape.js');
 const { SOURCE, CURSOR } = require('./symbols.js');
-const { SyncomError, typed } = require('./errors.js');
+const { SyncomError, ArgumentError, DataError } = require('./errors.js');
 const { namedId, idReason } = require('./schema/entity.js');
 
 // A bulk write's rows: an array of at most MAX_BATCH (one transaction).
 const list = (method, rows) => {
-  if (!Array.isArray(rows)) throw new TypeError(`${method}() takes an array`);
+  if (!Array.isArray(rows)) throw new ArgumentError(`${method}() takes an array`);
   if (rows.length > MAX_BATCH) {
-    throw new TypeError(
+    throw new ArgumentError(
       `${method}() takes at most ${MAX_BATCH} rows in one transaction (${rows.length} given): page the batch`,
     );
   }
@@ -39,16 +39,16 @@ const LOOSE = Object.freeze({ id: null, idField: 'id' });
 // A row's own verdict — on its data, its id, its collection — as against a failure of the batch
 // (the disk, the log, the database closed), which fails the whole write.
 const ROW_CODES = new Set([
-  'VALIDATION_FAILED',
-  'NOT_FOUND',
-  'FIELD_KIND',
-  'EXISTS',
-  'OUT_OF_RANGE',
-  'CYCLE',
-  'ENCRYPTED',
-  'HOOK_FAILED',
-  'INVALID_ID',
-  'TYPE_IMMUTABLE',
+  'ALX_ERR_VALIDATION_FAILED',
+  'ALX_ERR_NOT_FOUND',
+  'ALX_ERR_FIELD_KIND',
+  'ALX_ERR_EXISTS',
+  'ALX_ERR_OUT_OF_RANGE',
+  'ALX_ERR_CYCLE',
+  'ALX_ERR_ENCRYPTED',
+  'ALX_ERR_HOOK_FAILED',
+  'ALX_ERR_INVALID_ID',
+  'ALX_ERR_TYPE_IMMUTABLE',
 ]);
 const ownVerdict = (error) => error instanceof TypeError || ROW_CODES.has(error?.code);
 
@@ -109,7 +109,9 @@ class Collection extends Emitter {
   #unlisten() {
     if (this.#unsubscribe === null) return;
     const names = this.eventNames();
-    for (let i = 0; i < names.length; i++) if (this.listenerCount(names[i]) > 0) return;
+    for (let i = 0; i < names.length; i++) {
+      if (this.listenerCount(names[i]) > 0) return;
+    }
     this.#unsubscribe();
     this.#unsubscribe = null;
   }
@@ -143,31 +145,35 @@ class Collection extends Emitter {
 
   #mine(id) {
     if (this.#foreign(id)) {
-      throw new SyncomError('NOT_FOUND', `Record ${id} is not a ${this.#name}`, { id, entity: this.#name });
+      throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} is not a ${this.#name}`, { id, entity: this.#name });
     }
   }
 
   // A record of this collection, as the database writes it.
   #typed(method, data) {
-    if (!isPlainObject(data)) throw new TypeError(`${method}() takes a plain object`);
+    if (!isPlainObject(data)) throw new ArgumentError(`${method}() takes a plain object`);
     return { ...data, $type: this.#name };
   }
 
   // The id a record's data names under this collection's definition — a
   // composite id (its fields stay in the data), or the id field's value (the
   // field leaves it) — with the data to write: `{ id, data }`, as `namedId`
-  // derives it for every writer; a TypeError (INVALID_ID) when it names none.
+  // derives it for every writer; a TypeError (ALX_ERR_INVALID_ID) when it names none.
   #named(method, data) {
     const def = this.#storage[SOURCE].definition(this.#name) ?? LOOSE;
     const named = namedId(def, data);
     if (named === null) {
-      throw typed('INVALID_ID', `${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`, {
-        entity: this.#name,
-        field: def.idField || null,
-      });
+      throw new DataError(
+        'ALX_ERR_INVALID_ID',
+        `${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`,
+        {
+          entity: this.#name,
+          field: def.idField || null,
+        },
+      );
     }
     if (named.id === null) {
-      throw typed('INVALID_ID', `${method}(): a ${this.#name} ${idReason(named)}`, {
+      throw new DataError('ALX_ERR_INVALID_ID', `${method}(): a ${this.#name} ${idReason(named)}`, {
         entity: this.#name,
         field: named.field,
       });
@@ -185,7 +191,7 @@ class Collection extends Emitter {
   /**
    * Writes a new record of this collection: under the id its data names
    * (the entity's composite id, or its id field — a live record there is
-   * `EXISTS`), else under a minted one. Resolves to the record's Document.
+   * `ALX_ERR_EXISTS`), else under a minted one. Resolves to the record's Document.
    */
   async insert(data, options = {}) {
     const id = await this.#storage.insert(this.#typed('insert', data), options);
@@ -207,7 +213,7 @@ class Collection extends Emitter {
    * Writes the record its data names unless a live one is there already,
    * decided inside the queue; resolves to the Document either way — the
    * one written, or the one that was there (of this collection, or
-   * `NOT_FOUND`).
+   * `ALX_ERR_NOT_FOUND`).
    */
   async insertIfAbsent(data, options = {}) {
     const { id, data: record } = this.#named('insertIfAbsent', this.#typed('insertIfAbsent', data));
@@ -250,7 +256,7 @@ class Collection extends Emitter {
     } catch (cause) {
       // An afterWrite hook failed AFTER the rows landed: the verdicts are the caller's (the writes are durable), the
       // hook's failure the database's `error` event and a warning — never a rejection that loses which rows went.
-      if (cause?.code !== 'HOOK_FAILED' || cause.hook !== 'afterWrite') throw cause;
+      if (cause?.code !== 'ALX_ERR_HOOK_FAILED' || cause.hook !== 'afterWrite') throw cause;
       const { logger } = this.#storage;
       logger.warn({ event: 'hook.failed', hook: 'afterWrite', method, err: cause });
       notify(this.#storage, logger, 'error', cause);
@@ -293,17 +299,17 @@ class Collection extends Emitter {
     );
   }
 
-  /** Deletes every id of this collection, as one transaction with a verdict per row: an absent or foreign one is `NOT_FOUND`. */
+  /** Deletes every id of this collection, as one transaction with a verdict per row: an absent or foreign one is `ALX_ERR_NOT_FOUND`. */
   bulkRemove(ids, options = {}) {
     return this.#bulk(
       'bulkRemove',
       ids,
       options,
       async (tx, id) => {
-        if (typeof id !== 'string') throw new TypeError('bulkRemove() takes ids');
+        if (typeof id !== 'string') throw new ArgumentError('bulkRemove() takes ids');
         this.#mine(id);
         if (!(await tx.has(id))) {
-          throw new SyncomError('NOT_FOUND', `Record ${id} not found`, { id, entity: this.#name });
+          throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id, entity: this.#name });
         }
         await tx.delete(id, options);
         return id;
@@ -321,10 +327,10 @@ class Collection extends Emitter {
    * TypeError, not the collection gone — the matches of a query go through `select(query).delete()`.
    */
   async remove(options = {}) {
-    if (!isPlainObject(options)) throw new TypeError('remove() takes an options object: { purge, actor }');
+    if (!isPlainObject(options)) throw new ArgumentError('remove() takes an options object: { purge, actor }');
     for (const key of Object.keys(options)) {
       if (key === 'purge' || key === 'actor') continue;
-      throw new TypeError(
+      throw new ArgumentError(
         `remove() takes { purge, actor } and nothing else (${key} given): the matches of a query go through select(query).delete()`,
       );
     }
@@ -372,7 +378,7 @@ class Collection extends Emitter {
    * sealed records are read, at the key holder, unless `{ sealed: false }` asks for the plain rows alone.
    */
   select(query, options = {}) {
-    if (!isPlainObject(options)) throw new TypeError('select() takes a query and { sealed }');
+    if (!isPlainObject(options)) throw new ArgumentError('select() takes a query and { sealed }');
     return this.#storage[CURSOR](this.#name, query, { sealed: options.sealed !== false });
   }
 
@@ -388,10 +394,12 @@ class Collection extends Emitter {
    * set of ids, `select({ id: { $in: ids } }).watch(...)`.
    */
   async findByIds(ids) {
-    if (!Array.isArray(ids)) throw new TypeError('findByIds() takes an array of ids');
+    if (!Array.isArray(ids)) throw new ArgumentError('findByIds() takes an array of ids');
     const found = await this.#storage[SOURCE].loadMany(ids);
     const out = new Map();
-    for (const [id, data] of found) {
+    for (const entry of found) {
+      const id = entry[0];
+      const data = entry[1];
       if (data === null || data.$type !== this.#name) continue;
       out.set(id, JSON.parse(JSON.stringify(data)));
     }
@@ -410,7 +418,7 @@ class Collection extends Emitter {
 
   /** Replaces the record wholesale, stamped as this collection's. */
   async set(id, data, options) {
-    if (!isPlainObject(data)) throw new TypeError('set() takes a plain object');
+    if (!isPlainObject(data)) throw new ArgumentError('set() takes a plain object');
     return this.#storage.set(id, { ...data, $type: this.#name }, options);
   }
 
@@ -421,7 +429,7 @@ class Collection extends Emitter {
 
   async update(id, delta, options = {}) {
     const names = isPlainObject(delta) && (Object.hasOwn(delta, '$type') || Object.hasOwn(delta.$set ?? {}, '$type'));
-    if (names) throw new TypeError('$type is immutable; update() may not name it');
+    if (names) throw new ArgumentError('$type is immutable; update() may not name it');
     this.#mine(id);
     return this.#storage.update(id, delta, options);
   }
@@ -437,7 +445,7 @@ class Collection extends Emitter {
     return this.#storage.modify(id, fn, options);
   }
 
-  /** The live Document of `id` — of this collection, or `NOT_FOUND`. */
+  /** The live Document of `id` — of this collection, or `ALX_ERR_NOT_FOUND`. */
   async document(id) {
     this.#mine(id);
     return this.#storage.document(id);

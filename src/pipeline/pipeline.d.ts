@@ -20,7 +20,7 @@ export interface PipelineOptions {
   source: string;
   /**
    * Runs inside one transaction per turn; its writes land whole, or not at all. A throw stops the pipeline
-   * before the turn (the database's `error` event carries `PIPELINE_FAILED`); `start()` hands the turn over again.
+   * before the turn (the database's `error` event carries `ALX_ERR_PIPELINE_FAILED`); `start()` hands the turn over again.
    */
   handler: (batch: PipelineBatch, tx: Transaction) => unknown;
   /**

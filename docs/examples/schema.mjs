@@ -48,7 +48,7 @@ try {
   await db.Task.insert({ title: '', done: 'no' });
 } catch (error) {
   if (!(error instanceof ValidationError)) throw error;
-  console.log(error.code, error.entity); // 'VALIDATION_FAILED' 'Task'
+  console.log(error.code, error.entity); // 'ALX_ERR_VALIDATION_FAILED' 'Task'
   for (const issue of error.issues) console.log(issue.path, issue.code);
   // [ 'title' ] 'length'   [ 'done' ] 'type'   [ 'key' ] 'required'
 }
@@ -167,11 +167,11 @@ assert.deepEqual(await people.Member.get('docs-ada'), { board: 'docs', handle: '
 
 // #region exists
 const taken = await people.Board.insert({ slug: 'docs', title: 'Again' }).catch((error) => error.code);
-console.log(taken); // 'EXISTS'
+console.log(taken); // 'ALX_ERR_EXISTS'
 const kept = await people.Board.insertIfAbsent({ slug: 'docs', title: 'Again' });
 console.log(kept.title); // 'Documentation': the record that was there
 // #endregion exists
-assert.equal(taken, 'EXISTS');
+assert.equal(taken, 'ALX_ERR_EXISTS');
 assert.equal(kept.title, 'Documentation');
 await people.close();
 

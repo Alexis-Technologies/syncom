@@ -11,7 +11,7 @@
 // resume from this node's log receive them too); `insert` writes the data
 // under the same ids as plain writes — new ops, new stamps — and takes a
 // foreign dump (`{ records: [{ id, data }] }`) the same way. A dump made under
-// another schema is refused (SCHEMA_MISMATCH) unless forced. `migrateStorage`
+// another schema is refused (ALX_ERR_SCHEMA_MISMATCH) unless forced. `migrateStorage`
 // moves a database between engines: `copy` is `copyEngine` — the same node on
 // the new engine — `merge` an export of one open database imported into
 // another, a new node that holds what the old one held. A record of a dump
@@ -21,7 +21,7 @@
 
 const { SOURCE } = require('../symbols.js');
 const { isPlainObject, isRecordId } = require('../shape.js');
-const { SyncomError } = require('../errors.js');
+const { SyncomError, ArgumentError } = require('../errors.js');
 const { copyEngine } = require('../engines/copy.js');
 
 const FORMAT = 1;
@@ -37,10 +37,10 @@ const isDatabase = (value) =>
 // The collections a dump keeps to: a Set of names, or null for every record.
 const collectionSet = (collections) => {
   if (collections === undefined || collections === null) return null;
-  if (!Array.isArray(collections)) throw new TypeError('collections must be an array of names');
+  if (!Array.isArray(collections)) throw new ArgumentError('collections must be an array of names');
   const set = new Set();
   for (let i = 0; i < collections.length; i++) {
-    if (typeof collections[i] !== 'string') throw new TypeError('collections must be an array of names');
+    if (typeof collections[i] !== 'string') throw new ArgumentError('collections must be an array of names');
     set.add(collections[i]);
   }
   return set;
@@ -53,9 +53,9 @@ const collectionSet = (collections) => {
  * the live records as they read. `collections` keeps
  * to those (by the catalog's row), `scopes` to the records in them.
  */
-async function* exportPages(db, { collections, scopes = null, meta = true, limit = PAGE } = {}) {
-  if (!isDatabase(db)) throw new TypeError('exportPages() takes a database');
-  if (!Number.isInteger(limit) || limit < 1) throw new TypeError('exportPages(): limit must be a positive integer');
+const exportPages = async function* (db, { collections, scopes = null, meta = true, limit = PAGE } = {}) {
+  if (!isDatabase(db)) throw new ArgumentError('exportPages() takes a database');
+  if (!Number.isInteger(limit) || limit < 1) throw new ArgumentError('exportPages(): limit must be a positive integer');
   const only = collectionSet(collections);
   const source = db[SOURCE];
   let cursor = null;
@@ -79,16 +79,18 @@ async function* exportPages(db, { collections, scopes = null, meta = true, limit
     if (page.cursor === null) return;
     cursor = page.cursor;
   }
-}
+};
 
 /**
  * The whole database as one JSON value: `{ format, node, schema, kinds,
  * eventId, vector, records }` — the records as `exportPages` hands them.
  */
 const exportJSON = async (db, options = {}) => {
-  if (!isDatabase(db)) throw new TypeError('exportJSON() takes a database');
+  if (!isDatabase(db)) throw new ArgumentError('exportJSON() takes a database');
   const records = [];
-  for await (const page of exportPages(db, options)) for (let i = 0; i < page.length; i++) records.push(page[i]);
+  for await (const page of exportPages(db, options)) {
+    for (let i = 0; i < page.length; i++) records.push(page[i]);
+  }
   const info = db.schemaInfo;
   return {
     format: FORMAT,
@@ -105,12 +107,12 @@ const exportJSON = async (db, options = {}) => {
 // The dump's records, checked: an array of `{ id, data }`, the id an id.
 const recordsOf = (dump) => {
   if (!isPlainObject(dump) || !Array.isArray(dump.records)) {
-    throw new TypeError('importJSON() takes a dump: { records }');
+    throw new ArgumentError('importJSON() takes a dump: { records }');
   }
   for (let i = 0; i < dump.records.length; i++) {
     const record = dump.records[i];
     if (!isPlainObject(record) || !isRecordId(record.id) || !isPlainObject(record.data)) {
-      throw new TypeError(`importJSON(): record ${i} is not { id, data }`);
+      throw new ArgumentError(`importJSON(): record ${i} is not { id, data }`);
     }
   }
   return dump.records;
@@ -124,21 +126,21 @@ const recordsOf = (dump) => {
  * meta, or `deleted: true` without one — is deleted; one revived above its
  * tombstone is alive) — new ops of this node — and takes a foreign dump
  * the same way. A dump of another format is a TypeError. A dump made under another schema hash is
- * SCHEMA_MISMATCH unless `force`. Resolves to `{ mode, records }`.
+ * ALX_ERR_SCHEMA_MISMATCH unless `force`. Resolves to `{ mode, records }`.
  */
 const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAGE } = {}) => {
-  if (!isDatabase(db)) throw new TypeError('importJSON() takes a database');
-  if (mode !== 'merge' && mode !== 'insert') throw new TypeError("importJSON(): mode is 'merge' or 'insert'");
-  if (!Number.isInteger(batch) || batch < 1) throw new TypeError('importJSON(): batch must be a positive integer');
+  if (!isDatabase(db)) throw new ArgumentError('importJSON() takes a database');
+  if (mode !== 'merge' && mode !== 'insert') throw new ArgumentError("importJSON(): mode is 'merge' or 'insert'");
+  if (!Number.isInteger(batch) || batch < 1) throw new ArgumentError('importJSON(): batch must be a positive integer');
   if (dump.format !== undefined && dump.format !== FORMAT) {
-    throw new TypeError(`importJSON(): a dump of format ${dump.format}; this build reads format ${FORMAT}`);
+    throw new ArgumentError(`importJSON(): a dump of format ${dump.format}; this build reads format ${FORMAT}`);
   }
   const records = recordsOf(dump);
   const given = isPlainObject(dump.schema) ? dump.schema : null;
   const mine = db.schemaInfo;
   if (!force && given !== null && mine !== null && given.hash !== mine.hash) {
     throw new SyncomError(
-      'SCHEMA_MISMATCH',
+      'ALX_ERR_SCHEMA_MISMATCH',
       'The dump was made under another schema; importJSON({ force: true }) takes it',
       {
         expected: mine.hash,
@@ -150,7 +152,7 @@ const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAG
   if (mode === 'merge') {
     for (let i = 0; i < records.length; i++) {
       if (!isPlainObject(records[i].meta)) {
-        throw new TypeError(`importJSON(): record ${records[i].id} has no meta to merge`);
+        throw new ArgumentError(`importJSON(): record ${records[i].id} has no meta to merge`);
       }
     }
     for (let i = 0; i < records.length; i += batch) await db.mergeSnapshot(records.slice(i, i + batch));
@@ -180,9 +182,9 @@ const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAG
  */
 const migrateStorage = async ({ from, to, path, mode = 'copy', batch = PAGE } = {}) => {
   if (mode === 'copy') return copyEngine(from, to, { path, batch });
-  if (mode !== 'merge') throw new TypeError("migrateStorage(): mode is 'copy' or 'merge'");
+  if (mode !== 'merge') throw new ArgumentError("migrateStorage(): mode is 'copy' or 'merge'");
   if (!isDatabase(from) || !isDatabase(to)) {
-    throw new TypeError('migrateStorage({ mode: "merge" }) takes two open databases');
+    throw new ArgumentError('migrateStorage({ mode: "merge" }) takes two open databases');
   }
   let records = 0;
   for await (const page of exportPages(from, { limit: batch })) {

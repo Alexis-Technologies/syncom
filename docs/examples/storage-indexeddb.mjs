@@ -30,7 +30,7 @@ while ((await otherTab.Task.count({})) < 2 && Date.now() < deadline) {
   await new Promise((resolve) => setTimeout(resolve, 10));
 }
 assert.equal(await otherTab.Task.count({}), 2);
-await assert.rejects(() => otherTab.Task.insert({ title: 'no', done: false }), { code: 'READ_ONLY' });
+await assert.rejects(() => otherTab.Task.insert({ title: 'no', done: false }), { code: 'ALX_ERR_READ_ONLY' });
 await otherTab.close();
 
 // #region close

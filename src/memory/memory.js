@@ -12,10 +12,11 @@ const { memoryEngine } = require('./engine.js');
 
 const notFound = (key) => Object.assign(new Error(`ENOENT: no such file, ${key}`), { code: 'ENOENT' });
 
+const keyOf = (dir, name) => `${dir}/${name}`;
+
 /** A backend in memory: a Map of `dir/name` to content. */
 const memory = () => {
   const files = new Map();
-  const keyOf = (dir, name) => `${dir}/${name}`;
   return {
     async read(dir, name) {
       const key = keyOf(dir, name);
@@ -23,12 +24,12 @@ const memory = () => {
       return files.get(key);
     },
     async write(dir, name, content) {
-      files.set(keyOf(dir, name), String(content));
+      files.set(keyOf(dir, name), `${content}`);
     },
     // At the end of the file, made when absent: what the log's journal appends with.
     async append(dir, name, content) {
       const key = keyOf(dir, name);
-      files.set(key, (files.get(key) ?? '') + String(content));
+      files.set(key, (files.get(key) ?? '') + `${content}`);
     },
     async exists(dir, name) {
       return files.has(keyOf(dir, name));
@@ -40,7 +41,7 @@ const memory = () => {
     async create(dir, name, content) {
       const key = keyOf(dir, name);
       if (files.has(key)) throw Object.assign(new Error(`EEXIST: file already exists, ${key}`), { code: 'EEXIST' });
-      files.set(key, String(content));
+      files.set(key, `${content}`);
     },
     // Files directly under `dir`, sorted; a directory is only ever implied.
     async list(dir) {
@@ -51,7 +52,8 @@ const memory = () => {
         const rest = key.slice(prefix.length);
         if (!rest.includes('/')) names.push(rest);
       }
-      return names.sort();
+      names.sort();
+      return names;
     },
     get size() {
       return files.size;
