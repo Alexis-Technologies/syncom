@@ -5,9 +5,17 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -20,7 +28,7 @@ jobs:
       - run: pnpm format:check
       # The package checks first and fast: exports, files, the browser map,
       # the invariants' tests, the error codes, the guides' paths.
-      - run: node --test --test-timeout=60000 --test-force-exit tests/package/*.test.js
+      - run: pnpm run test:package
       # Smoke: keeps the bundle-size script working and its numbers visible in
       # CI logs. It also enforces the browser budget and rejects any bare
       # import that reaches a browser bundle.
@@ -33,8 +41,10 @@ jobs:
     # rather than let a hang burn the six-hour default.
     timeout-minutes: 20
     strategy:
+      fail-fast: false
       matrix:
-        node-version: [24, 26]
+        # engines.node is ">=24": its floor exactly, then each newer line
+        node-version: ['24.0.0', 24, 26]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -71,7 +81,7 @@ jobs:
       - run: pnpm run docs:build
 
   # The package on the other runtimes: a smoke of a database in memory and two nodes over an in-process link
-  # (tests/smoke/smoke.js, plain node:assert) — what Deno's and Bun's Node compatibility has to carry for
+  # (tests/smoke/smoke.js, a plain script over node:assert/strict) — what Deno's and Bun's Node compatibility has to carry for
   # `require('@alexify/syncom')` to work there. Neither runs the suite: node:test is Node's. Deno reads the
   # checkout's `.js` files as CommonJS because package.json says `"type": "commonjs"`.
   smoke-deno:
@@ -103,3 +113,16 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - uses: oven-sh/setup-bun@v2
       - run: bun tests/smoke/smoke.js
+
+  # The one job branch protection requires: a needed job that failed, was cancelled or was skipped fails it, so a
+  # new leg of the matrix is never silently left out of the requirement.
+  ci-success:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [lint, test, docs, smoke-deno, smoke-bun]
+    if: always()
+    steps:
+      - name: Fail when a needed job failed, was cancelled or was skipped
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: exit 1
+      - run: echo "All CI jobs passed"

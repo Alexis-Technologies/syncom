@@ -42,142 +42,82 @@ database of an earlier build is deleted, not migrated: IndexedDB refuses to open
 catalog is of another format is dropped (`tags.dropped`). `tests/package/formats.test.js` holds every format and
 version constant of `src/` to 1 until the first release.
 
-### Changed
+**Upgrading a checkout from before alexiskills 1.1** (nothing published): every error code carries the `ALX_ERR_`
+prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is an `ArgumentError` (`name`
+`'ArgumentError'`, `code` `ALX_ERR_INVALID_ARGUMENT`) and a refused value a `DataError` whose fields are under
+`details` — both still `instanceof TypeError`. A host's refusal keeps its numeric code and its `reason`.
 
-- **The shared log relays by log position, and its failures are told (review №7, E2).** The relay's watermark
-  (`sync.shared().appended`) is the last position of the hub's log every op at or below which is in the topic —
-  moved by whole runs of positions appended or read from the topic, never by `lastEventId`, which ran ahead of ops
-  still landing and lost a batch that failed behind one that landed; every op is offered with its position (the
-  `change` event's third argument carries `seq`), every start recovers what the log holds above the watermark (a stop
-  with ops waiting loses none), a watermark the log compacted past is told once (`lost`) and moved to the floor, and
-  `stop()` waits `sharedLog.stopWait` (5 s) for an append in flight, then lets go. A writing hub's snapshot carries
-  the vector its reads reflect and its marker is appended behind every op offered (503 `SHARED_LOG` with
-  `detail: 'behind'` while the relay recovers); a read-only hub serves no snapshot (403 `READ_ONLY`: a fresh client
-  lands on a hub that writes). `mongoSharedLog` tells a hole (`{ id, value: null, headers: { hole: '1' } }`;
-  `SHARED_LOG_FAILED` `hole` on the hub, `sync.shared().holes`) instead of passing a late appender's number in
-  silence — a failed insert leaves a tombstone, an insert slower than `gapTimeout` takes a fresh number — reads the
-  head once per page, polls no more under a live change stream, trims the topics `retention.topics` names alone
-  (the writer trims the inbox past its cursor through `trimBefore(topic, id)`). Every `changes` feed of a hub is
-  served from its consumer's one read of the topic (a ring of the entries passed last). An entry the engine refuses
-  is tried again, backed off (`SHARED_LOG_FAILED` `apply`, `sync.shared().retrying`); only a rule's refusal — a hook
-  that throws — leaves the topic `stuck`.
-- **The host's rules close their gaps (review №7, E3).** A refused op's revert brings back the fields the op
-  touched — through the kinds' patches, a counter by an inc, a set by a remove, a text by a splice — so what the
-  host accepted since stands (`refused[]` carries the op's `actor`, `WRITE_REFUSED` says `touched`; a sealed record
-  at the host is skipped before the rule is asked). `createDatabase({ sync: { authorizeWrite } })` is every unit's
-  rule and the writer's over the shared log's inbox; a follower verifies a push before it forwards it, holds its
-  shadow to what the topic shows, and reads the writer's `dropped` entries. `unit({ query })` takes `true` or
-  `{ regex: false | 'safe' | true }` — a `$regex` from the wire is 400 `REGEX` unless the unit takes them (`'safe'`:
-  no nested quantifier, backreference or lookaround) — and a scoped `query`/`count` walks the cursor until its
-  window is full or `limits.rowsPerQuery` rows were read, the answer saying `capped` (`Infinity` is no cap). A
-  session goes with its socket (`sync.sessions()` lists them), a read's hello leaves nothing on the client, and
-  revocations are kept in `revoked.json` and appended to the shared log for every hub to fold. Under `prove` the
-  rooms and the presence wait for the proof (`PRESENCE_UNPROVEN`). `syncom/blob` names the record and the
-  attachment, served under `allow.blob: 'named'` (the default) only where a live record in the peer's scopes names
-  the digest — `'any'` keeps the digest as a capability — and `fetchBlob(digest, { id, name })` names it; an op
-  flagged `scrubbed` with a payload is scrubbed before it is logged; `beforeSend` rules a hosted `changes` page as it
-  rules a push.
-- **The awaits are told, `forget()` holds under defer (review №7, E8).** `awaitInSync`/`awaitInitialReplication`
-  resolve when a dial fails after they began or the host refuses the feed for good (`peers()[i].terminal`);
-  `forget(id)` settles the record's deferred slot and scrubs the log in the same turn of the queue, so a flush lays
-  nothing back.
-- **Several tabs: the election re-armed, a write applied once, the follower's writers (review №7, E6).** The
-  election's one-shot `lead` promise is gone: `onLead(listener)`, `yield()`, `request()` — a promotion that cannot
-  open yields the lock and asks again (`PROMOTE_FAILED`), `openShared` never resolves with `db: null`, `close()`
-  closes the database before it releases the election, a fresh path in heartbeat mode waits the election out. A
-  forwarded write is `{ id: '<token>:<n>', args, retry }`: the leader keeps its answers and answers a retry from
-  them, a retry a new leader never saw is `CALL_UNKNOWN` → `LEADER_LOST { maybeApplied: true }`. A follower's
-  collection, attachments and local writers are forwarded (`SharedCollection`, `shared.attachments`,
-  `shared.local`; `insert` answers the id on either role; `PROCEDURES`, `COLLECTION_WRITERS`); `serve()` is
-  `'session'` by default; `election: { follower: true }` never leads (the SharedWorker recipe: the worker leads);
-  followers run over `shared` engines — never SQLite; the log events are `tabs.*`.
-- **Blobs: a digest at every door, bytes as the register says, the stores' promises, `sweep()` (review №7, E7).**
-  `src/blobs.js` holds the one cap (`MAX_BLOB_BYTES`, `BLOB_TOO_LARGE`) and the one check (`isDigest`): every
-  engine's blobs store refuses a key that is no digest, a register is believed only as far as it is one
-  (`ATTACHMENT_INVALID`), the bytes read are what the register says or `BLOB_MISMATCH` (an inflating stops at the
-  register's length), a fetched blob is kept once (`sync.blob.keep.failed` where the store refuses). SQLite's
-  `remove(path)` sweeps the blobs, `copyEngine` refuses a target without blobs while the source holds some
-  (`BLOBS_UNSUPPORTED`), MongoDB blobs are chunked at 15 MiB, `quota()` asks the engine (`estimate()`),
-  `isQuotaError` sees `SQLITE_FULL` and looks through `cause`. At rest a blob is iv ‖ ciphertext bytes — the
-  cap is the plain bytes' and a store takes the seal's 28 bytes more (`MAX_STORED_BYTES`), so a blob at the cap is
-  stored sealed (the bench found a 64 MiB put refused there);
-  `rotateAtRest` takes a backend (`{ fsi, filesEngine }`), fences the source (`moved.json`, `MOVED`) and marks a
-  copy in flight (`copy.json`). `attachments.sweep({ dryRun, tags })` collects the bytes nothing names; `put` on a
-  sealed record is `ENCRYPTED`; `BLOB_NOT_FOUND`'s field is `attachment`.
-- **The sync blocks, the tabs and the blobs are observed (review №7, E9).** With the telemetry plugin the shared
-  log counts its ops (`syncom.shared.ops`: relayed, applied, forwarded, dropped), its entries (`syncom.shared.entries`:
-  passed, malformed, hole, failed, retried, stuck) and the lag of a topic entry to its apply (`syncom.shared.lag`); a
-  host's refusal says why (`syncom.hello.refused` carries `syncom.reason` beside the code), a revoke is counted by
-  where it came from (`syncom.revoke`, `syncom.via`) and is an info line (`sync.revoke`), a thin client's reads are
-  counted with their rows (`syncom.reads`, `syncom.reads.rows`), every blob put, read, served or fetched with its
-  bytes (`syncom.blobs`, `syncom.blob.bytes`), a sweep is a span (`syncom.attachments.sweep`), and the tabs count
-  their calls and their changes of role (`syncom.tabs.calls`, `syncom.tabs.failovers`; `tabs.promoted`,
-  `tabs.demoted` info lines); a connector counts its documents and rows by direction and result (`syncom.connector.rows`:
-  pulled, applied, pushed, probed, refused, parked, conflict, failed; `stats().probed`) and an agent's tools their calls
-  by verb (`syncom.mcp.calls`). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
-- **The hosting side in three files, one of every helper (review №7, E11).** `src/sync/hosting.js` keeps hello, push, snapshot, the
-  feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
-  `query`, `count` and `blob`. `proveMessage` is `src/sync/protocol.js`'s (the dialer and the host signed and verified
-  two copies of it); an error crosses a wire of this package — the tabs' channel, the remote engine — through one
-  `packError`/`unpackError` of `src/wire-error.js` (`{ name, message, code?, fields }`, a data error's own fields alone,
-  never one that would swap a prototype); a `SyncomError`'s fields never clobber its `name`, `code`, `message` or
-  `stack` — which is why `REPLICATION_FAILED` names its connector as `connector` and `PIPELINE_FAILED` its pipeline
-  as `pipeline` (both rode as `name` and renamed the error; a test had encoded it).
-- **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
-  stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
-  object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the
-  open builds them once. The planner fits every index and takes the one expected to read the fewest records
-  (`explain().estimate`; the indexed equalities it leaves `narrow` the scan before a record is read; a `$in` of a
-  few ordered values is scanned value by value), the rows are the index's only where the order's keys reach its end,
-  an unordered window over a range is the first rows by id, a page after its edge is sought in the index or by id
-  (`stream()` reads each row once, and runs once where no index sorts), a one-sided range holds its kind alone, and
-  `count()` over a sorted index entered by a prefix or a range reads no record. A plan and a cached result follow
-  `addCollections()`/`removeCollection()`; `addCollections()` indexes the records in pages inside the queue.
-- **Tombstones are folded whole (review №6, E1).** `cleanup` moves an old, acknowledged tombstone — its data and its
-  whole meta — into the `tombstones` kv namespace in ONE write set with its file's removal; the catalog is derived
-  from the records and that namespace, a rebuild reads both, a fold changes no row, and a tombstone's row keeps the
-  record's collection and its `deleted` stamp. A late op below the stamp stays moot on a folded
-  node as on any other; a pipeline and a dump see a plain delete's collection.
-- **Writes made safe (review №6, E2).** A write by query and `ifMatch` go by the record's id — a data field named
-  `id` names no other record; `drop()` is `READ_ONLY` on a follower or after a lost lease and sweeps under the lock;
-  `dropDatabase()` refuses a directory that holds no database; a composite id whose field holds the separator, or is
-  not a string, a number or a boolean, is `INVALID_ID` (`entity`, `field`), and the fields of a composite id are
-  immutable (`ID_IMMUTABLE`); `$type` is immutable through `unset`, `$unset`, `$rename` and `modify()`; a named
-  `insert()` with `encrypted: true` is `EXISTS` like any other (`expect: ABSENT`, inside the queue); `populate()` and a
-  `Reference` resolve a record of the declared collection alone; a `delete` change reports the data applied.
-- **Bounded, and refused out loud (review №6, E5–E6).** One transaction takes 10 000 rows of a bulk write or matches
-  of a write by query (`MAX_BATCH`, a `TypeError` before anything lands); two update operators naming one field are a
-  `TypeError`, as MongoDB refuses a conflicting update, and `$rename` takes a register; `collection.remove()` takes
-  `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`, not the collection gone) and pages
-  over the records as the call began; a bulk write whose `afterWrite` hook fails after the rows landed keeps its
-  verdicts (the failure is the `error` event); a purge's ids are scrubbed together (`log.scrub(ids)`: every file
-  holding them rewritten once); a transaction's unique keys and the records' in flight are checked through maps, not
-  a scan per op; the query cache is current per collection and holds 10 000 rows at most; a live run delivers a row
-  that stayed as the copy it was; `nearest()` takes `k` of at most 1000 and a vector of at most 4096 numbers; a query
-  nests 32 levels at most; a collection's events fire on a microtask after the landing and the catalog's subscription
-  goes with the last listener; a local write after `close()` is `CLOSED`; a cold read verifies its chain block parsed
-  and hashed once per batch (10 000 records read in 0.1 s, not 19); a pipeline's replay and rebuild are paged by 500
-  with the checkpoint after the last page, and live turns join while one is handled.
-- **Observable (review №6, E7).** `stats()` answers `collections`, `advisors`, `tombstones` and the query plugin's
-  `{ cache: { entries, rows }, live }`; the blocks record their work — `syncom.query.cache`, `syncom.query.live`,
-  `syncom.query.plans`, `syncom.bulk.rows`, `syncom.pipeline.turns`, `syncom.pipeline.lag`,
-  `syncom.cleanup.tombstones` and the `syncom.cleanup.sweep` span, `syncom.dump.pages`, `syncom.insert.named`; the
-  destructive operations are info lines (`database.drop`, `collection.remove`, `collection.removed`,
-  `pipeline.rebuild`); a composite id's `INVALID_ID` names its `entity` and `field`, a refused bulk row the id its
-  data named.
-- **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
-  `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
-  `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.
-- **The names are RxDB's: `createDatabase()`, `Database`, `Collection`, `Document`.** A storage is a
-  database — a directory, a node, a log — and a live record a document, so the classes say so:
-  `createDatabase(options)` opens one (`src/database.js`), `db.document(id)` and `collection.document(id)`
-  hand out a `Document` (`src/document.js`), `Collection` has a module of its own (`src/collection.js`),
-  and the types follow (`Database`, `DatabaseConstructor`, `DatabaseOptions`, `Document<R>`,
-  `SyncomDocument`, `Collection<R, I>`). The names before the rename — `open()`, `Storage`, `Record`,
-  `record()`, `SyncomRecord`, `StorageConstructor` — are gone: nothing is published, so a rename keeps no
-  alias; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
-  `/guide/database`. Importing the `Document` type shadows the DOM's inside that module —
-  `SyncomDocument` is the same type under a name that does not.
+### Changed (breaking)
+
+- **Every error code starts with `ALX_ERR_`, as every Alexis library's does (alexiskills 1.1).** The 71 codes of
+  `SyncomErrorCode` and the 8 of `DataErrorCode` keep their names after the prefix: `NOT_FOUND` is
+  `ALX_ERR_NOT_FOUND`, `INVALID_ID` is `ALX_ERR_INVALID_ID`. A host's wire refusal is not an error code and keeps its
+  numeric `code` and its `reason` (`403` `READ_ONLY`, `404` `BLOB_NOT_FOUND`), as wrpc carries them.
+- **A wrong argument is an `ArgumentError`, a refused value a `DataError`.** Every one of the 556 `TypeError`s of
+  `src/` is now one of syncom's own classes, exported from the root: an `ArgumentError` (`code`
+  `ALX_ERR_INVALID_ARGUMENT`) for a wrong argument, option, definition or hook result, an `ArgumentRangeError` (a
+  `RangeError`, the same code) where `@alexify/syncom/order` threw a `RangeError`, and a `DataError` — what `typed()`
+  made — for a value of data or configuration: one shape, its code and `details` (`{ entity, field }` of an id a
+  collection refused, `{ length, max }` of a blob past the cap), where the fields used to ride on the error. Both
+  TypeError kinds still pass `instanceof TypeError`; `name` is the class's. The `TypedErrorCode` type is
+  `DataErrorCode`, and `ErrorCode` is the union of every code.
+
+- **The log's files and an op's payload changed shape** (nothing is published, `PROTOCOL` stays
+  1): a log file is `{"e":[[seq, fp, header, payload, rest?, flags?]],"c":"<crc32>"}`, its CRC-32
+  checked before it is parsed, and a segment is the lines its groups were journaled as and a
+  trailer; an op names what is its own origin's without the origin — a run by its stamp, an
+  element as `ts:offset`.
+
+- A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects
+  anything else (`code: 'ALX_ERR_INVALID_ID'`), `get()`/`has()` answer absent, and a
+  peer's op or snapshot record with another id is dropped as `malformed`.
+- `applyRemote()` answers `{ applied, skipped, duplicates, gaps, malformed,
+  unsigned, forged }` (the `sync` and `apply` events carry the new counts too), and takes
+  `adoptFrom`: an `advance` is adopted only when its origin is that node.
+- `storage.on('error')` payloads carry `code` — `ALX_ERR_OP_REFUSED`, `ALX_ERR_OP_INVALID`,
+  `ALX_ERR_SKEW`.
+- `createDatabase({ sync: { maxSkew } })` (default 24 hours) bounds how far ahead of the
+  node's clock a peer's stamp may be.
+- A hosted unit refuses `push` ops outside the peer's hello scopes (answer
+  field `outOfScope`, `refused` event) and serves `snapshot`/`changes` for the
+  granted scopes only (403 when none of the asked ones is).
+- `loadKeys` rejects with `code: 'ALX_ERR_KEYS_INCOMPLETE'` when exactly one of
+  `public.pem`/`private.pem` exists; before, it generated a new pair.
+- `fsi.write(dir, name, content, options?)` takes an optional `{ mode }` hint;
+  `withSync` forwards it. Adapters without permissions ignore it.
+
+- **`createDatabase()` is exclusive by default.** A second instance over the same
+  directory used to open silently and mint the seqs of the first; it now
+  rejects with `code: 'ALX_ERR_LOCKED'` unless `lock: 'wait'` or `lock: false`.
+- **Smart contracts moved to `@alexify/syncom/contracts`.** `SmartContract`
+  and `DataReader` (and their types) are no longer on the package root:
+  `SmartContract.load` runs code from the chain, and a process that never
+  imports the subpath — a hub — never does.
+- An entity definition is `{ schema?, idField?, validate?, index?, unique?,
+  fields?, search? }` and any other key is a `TypeError` at `createDatabase()`; a legacy field
+  map (`Post: { title: 'string' }`) goes under `fields`. A `schema` with a
+  key other than `version` and `entities`, and a `getId` that is not a
+  function, are refused at `createDatabase()` too (the latter used to be ignored).
+- `SyncManager` is constructed as `new SyncManager(storage, options)`; nodes
+  no longer carry `type: 'uplink' | 'downlink'` — every registered node is
+  dialed, and any node can host. `src/sync.browser.js` is gone: one
+  `src/sync.js` over `fsi` serves both halves, and the browser registry is
+  persisted in OPFS.
+- The in-memory `Database.#updates` array and `addUpdate()` are gone; the
+  operation log replaces them. `set()` on an existing record is a whole-record
+  write; `update()` on a counter field, and `inc()` on a register field, throw.
+- `delete()` leaves a tombstone on disk; `list()`, `get()` and `has()` hide it.
+- The browser bundle budget was raised from 5 KB to 14 KB min+gzip for the
+  replication engine.
+- **Node.js ≥ 22 is required** (was `>=18`).
+- Browser modules follow the `*.browser.js` pattern:
+  `src/{crypto,fsi,sync}-browser.js` → `src/{crypto,fsi,sync}.browser.js`.
+- The default storage directory is `syncom` (was `gs`).
+- Type names `GsRecord` / `GsCollection` → `SyncomDocument` / `SyncomCollection`.
+- `exports` gained a `browser` condition resolving to `browser.js` /
+  `browser.d.ts`, and a `./package.json` entry.
+- The `bench:compare` and `size:compare` scripts were removed; they pointed at
+  files that were never written.
 
 ### Added
 
@@ -188,7 +128,7 @@ version constant of `src/` to 1 until the first release.
   changes — and `push(rows)` — the collection's records as the turns change them, with what the backend was
   assumed to hold, the rows it refuses answered as conflicts the backend wins unless `resolve` decides. The
   checkpoint `{ pull, pushed }` lives in the `connector` kv namespace; a restart pulls from it and pushes
-  what the log holds since it. A handler that fails is `REPLICATION_FAILED` (`direction`) on the connector's
+  what the log holds since it. A handler that fails is `ALX_ERR_REPLICATION_FAILED` (`direction`) on the connector's
   `error` event and tried again after `retryTime`. `awaitInitialReplication()`, `awaitInSync()`, `reSync()`,
   `cancel()`, `stats()`.
 - **Connector adapters: `/connector/couchdb`, `/connector/graphql`, `/connector/mongodb`, `/connector/supabase`.**
@@ -216,8 +156,8 @@ version constant of `src/` to 1 until the first release.
   stream and writing through the leader over a channel (`createSharedChannel` of the wrpc subpath over a
   SharedWorker's port; `shared.serve()` the leader's procedures). The election is Web Locks, or a heartbeat over a
   `BroadcastChannel`; the leader gone, the next instance opens the database as the leader with the same node id
-  and log, every live thing (`live`, `document`) made again, a write in flight tried again (`LEADER_LOST` past
-  `failover` ms). A follower's `transact` is recorded and carried whole. `NOT_LEADER` for what is the leader's
+  and log, every live thing (`live`, `document`) made again, a write in flight tried again (`ALX_ERR_LEADER_LOST` past
+  `failover` ms). A follower's `transact` is recorded and carried whole. `ALX_ERR_NOT_LEADER` for what is the leader's
   (`sync`, `serve`). The memory engine announces every write set to the instances listening (`changes`), as the
   IndexedDB engine does.
 - **Attachments: `@alexify/syncom/attachments`.** `createDatabase({ plugins: [attachments({ compression })] })` hands
@@ -225,7 +165,7 @@ version constant of `src/` to 1 until the first release.
   their SHA-256 and names them on the record as the register `_attachments/<name>` (`{ digest, type, length,
   encoding? }`), which replicates like any field; `get` reads them — bytes this node lacks are asked of the peers it
   dials (`syncom/blob`: a stream, or base64 on a text transport), checked against the digest and kept; none has
-  them, `BLOB_NOT_FOUND` — `has`, `list`, `remove`. Compression through `CompressionStream`. Every engine keeps blobs
+  them, `ALX_ERR_BLOB_NOT_FOUND` — `has`, `list`, `remove`. Compression through `CompressionStream`. Every engine keeps blobs
   (IndexedDB in a seventh object store; the files engine as base64 under `blobs/`), the at-rest
   wrapper seals them, `copyEngine()` carries them, a read-only database reads them. `unit({ allow: { blob } })`,
   `sync.fetchBlob(digest)`.
@@ -252,8 +192,8 @@ version constant of `src/` to 1 until the first release.
   opts in) and a connector never hand a sealed record out of the key holder (review №7, E1). The catalog keeps the
   sealed listing per put instead of rebuilding it after every write.
 - **Quota.** `db.quota()` (`{ usage, quota }`: the browser's Storage API estimate, a file system's free space) and
-  `db.persist()`; a log append refused for want of room is `QUOTA` (the platform's error as `cause`) and a record
-  file that could not be written for it `UNPERSISTED` with `quota: true`.
+  `db.persist()`; a log append refused for want of room is `ALX_ERR_QUOTA` (the platform's error as `cause`) and a record
+  file that could not be written for it `ALX_ERR_UNPERSISTED` with `quota: true`.
 - **Key rotation at rest: `rotateAtRest(engine, { path, from, to, into })`** of `@alexify/syncom/encryption` — the
   database sealed under one key copied whole into another path or engine sealed under the next, the same node;
   never in place. `copyEngine()` takes `targetPath` and answers `blobs`.
@@ -261,12 +201,12 @@ version constant of `src/` to 1 until the first release.
   `unit({ authorizeWrite })` rules what a peer writes, op by op, with the record as it is and as the op
   would leave it: a refused op is logged as a scrub leaves it (skipped, scrubbed, the twentieth slot of the
   wire says so), relayed as a no-op — no stream has a gap — and the pusher reverts its own op to what the
-  host holds (`WRITE_REFUSED`), or forgets the record where the host holds nothing. `sync.hooks.beforeSend`
+  host holds (`ALX_ERR_WRITE_REFUSED`), or forgets the record where the host holds nothing. `sync.hooks.beforeSend`
   sends an op the dialer withholds the same way: its header alone. `unit({ prove })` (on under
   `signatures: 'require'`) asks every peer to prove it holds the key that is its id — a `challenge` at
   hello, `syncom/prove` with its signature, 403 `UNPROVEN` until then — and the dialer proves by itself.
   `sync.revoke(node, scopes)` takes scopes back from a peer: its feeds end, `syncom/revoke` reaches it, its
-  next hello grants less; the peer narrows its registry entry, reports `REVOKED`, runs `sync.hooks.onRevoke`
+  next hello grants less; the peer narrows its registry entry, reports `ALX_ERR_REVOKED`, runs `sync.hooks.onRevoke`
   or forgets the records of those scopes — `db.forget(id)`: a record gone here with no op, its log entries
   scrubbed and flagged skipped. `unit({ query: true })` serves `query` and `count` to thin clients: a Mango
   query over an entity through the query plugin, the rows in the peer's scopes, capped by
@@ -291,8 +231,8 @@ version constant of `src/` to 1 until the first release.
   bootstraps from a hub's snapshot, positioned at a marker. A read-only hub — a follower over MongoDB, a
   writer whose lease was lost — hosts over it: its hello answers the vector as the log moved it, its
   feed comes from the log, and a push is forwarded to the inbox (`<topic>.inbox`) for a hub that writes
-  to land; `sync.unit()` without a shared log stays `READ_ONLY`. `sync.shared()` is the cursors, the
-  watermark and the counts. A failure is `SHARED_LOG_FAILED` with its `reason` (`append`, `lost`,
+  to land; `sync.unit()` without a shared log stays `ALX_ERR_READ_ONLY`. `sync.shared()` is the cursors, the
+  watermark and the counts. A failure is `ALX_ERR_SHARED_LOG_FAILED` with its `reason` (`append`, `lost`,
   `gone`, `stuck`, `marker`, `stopped`), and recovered from: an append that fails is appended again from
   the log once the broker answers, a trimmed cursor reads from the oldest entry, a stuck entry waits for
   `sync.stop()` and `start()`. The option was reserved and refused before.
@@ -308,7 +248,7 @@ version constant of `src/` to 1 until the first release.
   database's, a collection's, `tx.insert()`) writes under the id the data names — an entity's composite
   id (`id: { fields, separator }`, derived from the fields, which stay in the record) or the id field's
   value (which leaves the data) — and mints one only when the data names none; a live record under a
-  named id is `EXISTS`, decided inside the queue. `collection.upsert(data)` writes the named record whole,
+  named id is `ALX_ERR_EXISTS`, decided inside the queue. `collection.upsert(data)` writes the named record whole,
   `insertIfAbsent(data)` only when none is live (the Document either way). `bulkInsert(rows)`,
   `bulkUpsert(rows)`, `bulkRemove(ids)` are ONE transaction with a verdict per row — `{ success, error:
   [{ index, id, data, error }] }`: a row refused on its own account (its validator, a unique key, its
@@ -316,7 +256,7 @@ version constant of `src/` to 1 until the first release.
 - **Update operators and `ifMatch`.** `update(id, delta)` — the database's, a collection's, `tx`'s — takes
   `$set`, `$unset`, `$inc`, `$addToSet`, `$pull`, `$push`, `$pop`, `$min`, `$max` and `$rename` in place of
   fields (every key one of them, or none), each laid onto the write API by the kind of its field
-  (`src/operators.js`): `$inc` is `inc()` on a counter and `FIELD_KIND` on a register, `$addToSet`/`$pull`
+  (`src/operators.js`): `$inc` is `inc()` on a counter and `ALX_ERR_FIELD_KIND` on a register, `$addToSet`/`$pull`
   are `add()`/`remove()` on a set and a last-writer-wins rewrite of an array a register holds,
   `$push`/`$pop` a `push()`/`splice()` on a list and a rewrite of a register's array, `$min`/`$max` a set
   only where the comparison holds, `$rename` an `unset` and a `set` — decided inside the queue over the
@@ -335,7 +275,7 @@ version constant of `src/` to 1 until the first release.
   never dropped); `run({ drop: true })` takes the entry and the row too.
 - **Pipelines: `@alexify/syncom/pipeline`.** `createPipeline(db, { name, source, handler })` runs a handler
   over every change of a collection, in order, inside one transaction per turn — at least once: a handler
-  that throws stops the pipeline before the turn (`PIPELINE_FAILED`), and `start()` hands it over again — and keeps the turn's
+  that throws stops the pipeline before the turn (`ALX_ERR_PIPELINE_FAILED`), and `start()` hands it over again — and keeps the turn's
   log position as its checkpoint after the transaction landed — a reopen resumes from it (the turns since
   replayed from the log), or hands every record of the source over once where the log cannot resume. The
   `transaction` event carries `eventId`, the log position of the turn's last op.
@@ -344,7 +284,7 @@ version constant of `src/` to 1 until the first release.
   the log position (`meta: false`: the live data alone); `exportPages` the same a page at a time.
   `importJSON(db, dump, { mode })` joins it back as a `merge` (a bootstrap: one op per record, exact to
   the source) or as an `insert` (plain writes under the same ids, new ops — a foreign `{ records: [{ id,
-  data }] }` too); a dump made under another schema hash is `SCHEMA_MISMATCH` unless forced.
+  data }] }` too); a dump made under another schema hash is `ALX_ERR_SCHEMA_MISMATCH` unless forced.
   `migrateStorage({ from, to, path })` moves a database between engines as the same node (`copyEngine`),
   or by `merge` into a new one.
 - **Local documents: `@alexify/syncom/local`.** `createDatabase({ plugins: [local] })` hands the core
@@ -399,7 +339,7 @@ version constant of `src/` to 1 until the first release.
   500, each page one transaction; the definition stays (`removeCollection()` forgets it). A database
   dropped: closed, then every store of it removed from the engine (`engine.remove(path)`), so a node
   opened at the path again is a new node; `dropDatabase()` does it for a closed one, held by the lock —
-  another instance's open database is `LOCKED`, never emptied under it. `src/layout.js` names every
+  another instance's open database is `ALX_ERR_LOCKED`, never emptied under it. `src/layout.js` names every
   directory a database keeps under its path, and `tests/package/layout.test.js` holds every module
   that names a kv namespace to it.
 - **ORM: `methods` and `statics`.** An entity's `methods` go on every `Document` of the collection, bound
@@ -434,8 +374,8 @@ version constant of `src/` to 1 until the first release.
   nothing) is written as the ops that take the record there — a field changed a `set`, a field gone an
   `unset`, `null` a delete — as one transaction. Two calls on one record compose, each reading what the
   one before it left: no lost update, no conflict to retry. A field of another kind than a register
-  changed by the function is `FIELD_KIND`.
-- **`IN_TRANSACTION`.** A write made through the database from inside `transact()`'s or `modify()`'s
+  changed by the function is `ALX_ERR_FIELD_KIND`.
+- **`ALX_ERR_IN_TRANSACTION`.** A write made through the database from inside `transact()`'s or `modify()`'s
   function — which holds the mutation queue the write would wait for — is refused at once, where it used
   to deadlock (told by the function's async context in Node; the browser half has none and such a write
   still waits there). A write made meanwhile by anyone else queues, as it always did.
@@ -488,10 +428,10 @@ version constant of `src/` to 1 until the first release.
   (`$$NOW`, never the client's), renewed every third of `lock.staleAfter` (30 s by default), a lapsed one taken
   over with its generation `gen` one up. Every document a holder writes carries that generation and every put,
   removal and log group is fenced to its generation or older, so a writer whose lease another instance took
-  cannot write over anything the new holder wrote (`LEASE_LOST` from the engine; under `transactions: true` the
-  lease is checked inside the transaction first): it hears `error` `LEASE_LOST` once, is read-only from then on
-  (`READ_ONLY` on every write) and writes nothing more — not at its close, where what it had logged but not landed
-  is held as `UNPERSISTED`. A renewal that fails is tried again every `lock.poll` ms while two thirds of
+  cannot write over anything the new holder wrote (`ALX_ERR_LEASE_LOST` from the engine; under `transactions: true` the
+  lease is checked inside the transaction first): it hears `error` `ALX_ERR_LEASE_LOST` once, is read-only from then on
+  (`ALX_ERR_READ_ONLY` on every write) and writes nothing more — not at its close, where what it had logged but not landed
+  is held as `ALX_ERR_UNPERSISTED`. A renewal that fails is tried again every `lock.poll` ms while two thirds of
   `staleAfter` are left, then given up; the `lease` event tells of every renewal (`renewed`), the first failure
   of a run (`late`, the log event `storage.lease.late`) and the loss (`lost`), and `stats().lock` is
   `{ kind: 'kv' | 'native', mode, expiresAt, lost }`. A log group whose write failed after it landed (the
@@ -505,22 +445,22 @@ version constant of `src/` to 1 until the first release.
   where it is opened; only its bytes cross. `copyEngine(from, to, { path, batch })` copies a database between
   engines — records with their pieces, a tag's copies, every kv text, the op log with its index — so the node
   opens on the new engine as itself (identity, epoch, vector, heads) and no peer bootstraps; both databases
-  closed and held for the copy, the target empty (`TARGET_NOT_EMPTY`).
+  closed and held for the copy, the target empty (`ALX_ERR_TARGET_NOT_EMPTY`).
 - **An engine encrypted at rest: `atRest(engine, options)`** (`@alexify/syncom/encryption`, beside `atRest(fsi)`).
   The same key over an engine's stores: every record (as one text), piece, copy, kv text, log entry and the
   log's index a ciphertext bound to its place (`data/<id>.json`, `log/<seq>`…), the keys and the index's `floor`
   in the clear; `capabilities.indexes` off. A database over it reads nothing from the plain engine and the plain
-  engine nothing of it (`DECRYPT_FAILED` either way). The files engine is wrapped at its backend.
+  engine nothing of it (`ALX_ERR_DECRYPT_FAILED` either way). The files engine is wrapped at its backend.
 - **A follower: `createDatabase({ readOnly: true })`.** Reads what another instance writes through the same
   engine and writes nothing — no lock, no replay of the log's tail, no catalog save, not even the log's index;
-  every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `READ_ONLY`.
+  every write, `applyRemote()`, `mergeSnapshot()`, `transact()`, `tag()` and `repair()` reject with `ALX_ERR_READ_ONLY`.
   Only an engine several instances may open at once takes a follower (`capabilities.shared`: memory, IndexedDB,
   MongoDB); the files engine and SQLite refuse one with a `TypeError`. A follower's log and vector are as of its
-  open: it reads; it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` is `READ_ONLY`,
+  open: it reads; it neither dials (`sync.connect` is a `TypeError`) nor hosts (`sync.unit()` is `ALX_ERR_READ_ONLY`,
   `reason: 'hosting'`) until the shared log lands. Over an engine with a change stream (IndexedDB across tabs,
   MongoDB across processes) a record the writer lands is read again, a live `Document` of it refreshed and its
   watchers woken — subscribed before the load, so nothing landed while the follower opens is missed; a stream
-  that ends (an error, a close) is `error` `FOLLOW_LOST` once, the follower subscribes again and reads every
+  that ends (an error, a close) is `error` `ALX_ERR_FOLLOW_LOST` once, the follower subscribes again and reads every
   record again. The MongoDB stream is matched to the database's path on the server and carries no record text;
   the `log` collection is not watched. `stats().readOnly`, `storage.readOnly`.
 - **A synchronous editor's handle on a text: `storage.openText(id, key, { window, actor, source })`**
@@ -529,7 +469,7 @@ version constant of `src/` to 1 until the first release.
   `length`, `slice()` and `spans()` read it; `observe()` hears every other writer's change as a
   delta in the handle's indices. The edits are logged a window later (the storage's `defer`) as
   one transaction, keystrokes that continue each other as one op; a flush that cannot be logged
-  rejects `flushed` with the new `UNLOGGED` and drops what was not logged — its edits, the flushes
+  rejects `flushed` with the new `ALX_ERR_UNLOGGED` and drops what was not logged — its edits, the flushes
   taken behind it and what was typed since — and the storage logs `handle.unlogged`; a step that
   fails after the append (an `afterWrite` hook) leaves the edits logged. The storage's `flush()`,
   `tag()` and `close()` flush every open handle, one that cannot be logged stopping none of the
@@ -538,7 +478,7 @@ version constant of `src/` to 1 until the first release.
   run reservations go with its last handle. A hook sees a handle's edit resolved (`ctx.resolved`,
   `content`, `current`); `applyDelta` is checked whole before anything is made; keystrokes typed on
   are one change as they are one op; a handle on a deleted record reads empty (an edit writes it
-  again, as the storage's would) and one on a purged record refuses an edit as `NOT_FOUND`;
+  again, as the storage's would) and one on a purged record refuses an edit as `ALX_ERR_NOT_FOUND`;
   `repair(id)` resets the handles on the record. Several writers of one node over
   one text — handles and the storage — never grow one run from two readings.
 - **Keystrokes fold into one op.** Sent without waiting (made at once, outside the queue), typed
@@ -657,7 +597,7 @@ version constant of `src/` to 1 until the first release.
   each, a peer's reach the editor rebased over what it holds beyond the
   field — with a shadow of the field, one delta in flight at a time and
   `applyDelta`'s new `expect`: a delta the field moved under is refused as
-  `STALE` before any op and sent again rebased. `compose`, `transform`,
+  `ALX_ERR_STALE` before any op and sent again rebased. `compose`, `transform`,
   `transformIndex`, `applyToText` over Quill-form deltas; `spansToDelta`,
   `deltaToSpans`, `spansToBlocks`, `blocksToSpans`; `diffSpans`/`diffBlocks`,
   the delta between two readings, markers and marks included;
@@ -701,7 +641,7 @@ version constant of `src/` to 1 until the first release.
 - **A fork at any version; who wrote what.** `branch(parent, { from: { at } })`
   forks at an event id, a stamp or a vector, through the new
   `storage.atVersion(at)` — every record folded to the version, its vector,
-  pages to join; `HISTORY_GONE` when the log no longer gives it exactly.
+  pages to join; `ALX_ERR_HISTORY_GONE` when the log no longer gives it exactly.
   `lastEditorOf(id, field)` and `editorsOf(id)` read a record's writers from
   its metadata, and the text plugin's `editorOf(id, key, index)` who
   inserted an element — `{ origin, ts }`, a node and a stamp.
@@ -784,9 +724,9 @@ version constant of `src/` to 1 until the first release.
   paths into nested objects over the register at the prefix. A register
   written at a prefix resets what hangs under it below its stamp (a later
   child survives), an unset of the prefix takes the subtree, a counter, a
-  set or a block holds its prefix alone (`FIELD_KIND` with `prefix`; from a
+  set or a block holds its prefix alone (`ALX_ERR_FIELD_KIND` with `prefix`; from a
   peer, what hung under it goes), and a record holds at most 4 096 fields
-  (`FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`). `/` is reserved for
+  (`ALX_ERR_FIELD_KIND`, `kind: 'bound'`, `detail: 'paths'`). `/` is reserved for
   paths. A hook's `current`, a validator, a query and a `Document` see the
   paths composed; the ops, the log and a snapshot keep them apart.
 - **Children of elements and nodes.** A list's element and a tree's node
@@ -795,10 +735,10 @@ version constant of `src/` to 1 until the first release.
   other, merged on its own, read composed into the element (over its value)
   or as the node's `data`; `elementAt()` and `elements()` name a list's
   elements. A write under an element or a node that is not there is
-  `NOT_FOUND`; a field under a removed one is unreachable until `compact()`.
+  `ALX_ERR_NOT_FOUND`; a field under a removed one is unreachable until `compact()`.
 - **A surrogate pair is never split.** `splice()`, `mark()`, `unmark()` and
   `cursor()` refuse an index of a text between the two halves of a pair with
-  `SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points
+  `ALX_ERR_SURROGATE` (`id`, `field`, `index`), `updateText()` diffs by code points
   where a pair is about, and content with a lone half is a `TypeError`.
 - **`unset()`, and `compareVectors()`.** `unset(id, fields)` — on the storage,
   a collection and a `Document`, and as the `unset` patch — removes fields of
@@ -843,12 +783,12 @@ version constant of `src/` to 1 until the first release.
   core with every shipped plugin registered, the API as it was. The main
   entry is the core alone (54 KB min+gzip, from 66). A method, a patch action
   or a local op of a plugin the storage was not opened with is refused with
-  `PLUGIN_MISSING` naming the subpath; a peer's op of such a kind is refused as
+  `ALX_ERR_PLUGIN_MISSING` naming the subpath; a peer's op of such a kind is refused as
   `reason: 'kind'`, logged and relayed (a hub without the text plugin carries
   the text between two nodes that have it), a snapshot block of it is left
   out with a `sync.record.kind` warning; `hello` names the kinds both ways and
   a node does not bootstrap from a host that lacks one of its own
-  (`KINDS_MISMATCH`); `node.json` remembers the kinds a directory ran with and
+  (`ALX_ERR_KINDS_MISMATCH`); `node.json` remembers the kinds a directory ran with and
   a reopen without one is refused. `storage.plugins`, `storage.kinds`,
   `createPlugins()`. Every subpath is a folder under `src/` and the root holds
   four files; `meta.seqs`/`meta.trees` became one `meta.blocks` slot keyed by
@@ -868,14 +808,14 @@ version constant of `src/` to 1 until the first release.
   `createDatabase({ getId })`), nothing is signed or checked, and a directory keeps the
   key it was given as its id (one born without the plugin is rekeyed once,
   with `identity.rekeyed`, when it arrives); without `chain` no block is
-  written and `validate()` is `NO_CHAIN` naming the plugin. What the options
-  ask for and no plugin provides is `PLUGIN_MISSING` at `createDatabase()`:
+  written and `validate()` is `ALX_ERR_NO_CHAIN` naming the plugin. What the options
+  ask for and no plugin provides is `ALX_ERR_PLUGIN_MISSING` at `createDatabase()`:
   `sync.signatures: 'require'` without `signing`, `chain: true` without
   `chain`, `encrypted: true` without `encryption`. The chain and the schema
   hash use SHA-256 through Web Crypto on both platforms (`src/crypto/digest.js`), so
   the core has no crypto half. New: `atRest(fsi, { key | password, salt })`
   — a backend wrapper (every file AES-256-GCM under one key, PBKDF2 from a
-  password, `DECRYPT_FAILED` with a `reason` for a file that is not the
+  password, `ALX_ERR_DECRYPT_FAILED` with a `reason` for a file that is not the
   key's). The main entry is 51 KB; `/all` registers all five plugins.
 - **Backends as blocks.** `memory()` — the backend in memory, what
   `createMemoryFsi()` was — is `@alexify/syncom/memory`, off the root; the
@@ -888,7 +828,7 @@ version constant of `src/` to 1 until the first release.
   memory above it holds, and under `'back'` nothing stale is read from below.
 - **Sync as a block.** The sync manager — the dialing side and the hosting
   unit — is the `sync` plugin, `@alexify/syncom/sync` (`SyncManager` and
-  `isSyncLink` with it); without it `storage.sync` is `PLUGIN_MISSING`, and
+  `isSyncLink` with it); without it `storage.sync` is `ALX_ERR_PLUGIN_MISSING`, and
   the core still takes a peer's page through `applyRemote()` and selects
   what a peer lacks with `outbound()`, now exported from the root — the
   updates API a transport of the application's own carries. The options,
@@ -900,7 +840,7 @@ version constant of `src/` to 1 until the first release.
   them (collections, validation on the write path, the catalog's indexes,
   `schemaInfo`, `migrate()`, `check()`) and keeps `ValidationError`. Without
   the plugin `createDatabase({ schema })` and `createDatabase({ validator })` are
-  `PLUGIN_MISSING`, as are `migrate()` and `check()`, and records are
+  `ALX_ERR_PLUGIN_MISSING`, as are `migrate()` and `check()`, and records are
   untyped. The core is 42 KB.
 - **Telemetry as a block.** The OpenTelemetry adapter — `{ api }` or
   `{ tracer, meter }` into the writer the engine records through — is the
@@ -908,12 +848,12 @@ version constant of `src/` to 1 until the first release.
   to build a writer by hand; the core keeps the writer contract, the
   disabled writer and `traced`, takes a writer given to `createDatabase({ telemetry })`
   as it is, and refuses an api or a tracer without the plugin
-  (`PLUGIN_MISSING`). An `OpLog` opened on its own takes a writer. The core
+  (`ALX_ERR_PLUGIN_MISSING`). An `OpLog` opened on its own takes a writer. The core
   is 40 KB.
 - **Queries as a block.** The cursor — the Mango predicate, the planner,
   `fetch()`/`count()`/`one()`/`watch()` — is the `query` plugin,
   `@alexify/syncom/query`: `select()` and `count()` on a collection, and on
-  a view at a tag, are its; without it they throw `PLUGIN_MISSING`. The
+  a view at a tag, are its; without it they throw `ALX_ERR_PLUGIN_MISSING`. The
   catalog, its indexes and the text index behind `$text` (`createDatabase({ search })`)
   stay in the core, kept whether or not anything queries them. The core is
   39 KB.
@@ -923,7 +863,7 @@ version constant of `src/` to 1 until the first release.
   the `versions` plugin, `@alexify/syncom/versions`; `applyPatches()` and
   `compact()`, the present and its patches, stay in the core (the undo
   subpath stands on them). Without the plugin those methods throw
-  `PLUGIN_MISSING`, `stats().tags` is `null`, and a directory that holds tags
+  `ALX_ERR_PLUGIN_MISSING`, `stats().tags` is `null`, and a directory that holds tags
   is refused at `createDatabase()`, since its copies would not be kept. The core is
   35 KB — from 66 before the blocks; `pnpm size` checks that the core and
   every block bundled together weigh what `/all` weighs, so nothing is
@@ -938,8 +878,8 @@ version constant of `src/` to 1 until the first release.
   `splice` op carries the cut ranges and either the anchor of a new run or
   the writer's own run to extend — a keystroke at the end of one's run adds
   no key to the record. The index is resolved inside the mutation queue;
-  past the length is `OUT_OF_RANGE`. Mixing kinds is refused locally as for
-  sets (`FIELD_KIND` with `kind: 'list' | 'text'`); between peers the kinds'
+  past the length is `ALX_ERR_OUT_OF_RANGE`. Mixing kinds is refused locally as for
+  sets (`ALX_ERR_FIELD_KIND` with `kind: 'list' | 'text'`); between peers the kinds'
   precedence decides — register, counter, set, list, text, tree (see Fixed).
   Lists and texts cross a
   schema version through `migrate()`, are indexed and queried as the arrays
@@ -972,8 +912,8 @@ version constant of `src/` to 1 until the first release.
   a move that would put a node under itself skipped (Kleppmann et al. 2021,
   the rule Loro's movable tree follows), so two nodes moving concurrently so
   that each would hang under the other agree that the older move stands. A
-  parent under the node itself rejects with `CYCLE` (new code), a sibling not
-  under the parent with `NOT_FOUND`, both decided inside the mutation queue;
+  parent under the node itself rejects with `ALX_ERR_CYCLE` (new code), a sibling not
+  under the parent with `ALX_ERR_NOT_FOUND`, both decided inside the mutation queue;
   a move to where the node is makes no op. `migrate()` carries a tree across
   a schema version and counts `trees`. Browser budget 52 → 55 KB — the move
   log and the fold, and `@alexify/syncom/order` now in the core for the
@@ -988,8 +928,8 @@ version constant of `src/` to 1 until the first release.
   collection's `get` takes `at` too. Both are a fold of the retained log
   (`src/history.js`), exact while nothing was dropped and, after compaction,
   from a reset stamped above `droppedTs`; `history()` reports `exact` and
-  `complete`, `get()` rejects with `HISTORY_GONE` (`reason: 'compacted' |
-  'scrubbed' | 'merge' | 'epoch'`) or `INVALID_VERSION` (new codes). A
+  `complete`, `get()` rejects with `ALX_ERR_HISTORY_GONE` (`reason: 'compacted' |
+  'scrubbed' | 'merge' | 'epoch'`) or `ALX_ERR_INVALID_VERSION` (new codes). A
   purge leaves the ops listed with their content gone; an encrypted record
   has no past. The read hooks see `at`. New page: Versions and history.
   Browser budget 55 → 56.5 KB.
@@ -1001,13 +941,13 @@ version constant of `src/` to 1 until the first release.
   as they were (`get`, `has`), `get(id, { at: { tag } })` too; `untag()`
   moves to the next older tag the copies it needs; `tags()` lists them. A
   copy carries its chain block and is checked like the file; a copy that
-  cannot be written leaves the record held (`UNPERSISTED`) and the tag
+  cannot be written leaves the record held (`ALX_ERR_UNPERSISTED`) and the tag
   reading the file; a purge reaches every tag. A tag is the whole storage:
   `at(name).list()`, `at(name).collection('Post').select()`/`count()`/`get()`
   over the tag's own catalog (no `watch()`, no `$text`), and
   `at(name).snapshot()` pages the storage as it was for another storage's
-  `mergeSnapshot()`. Tags do not replicate. New codes `TAG_EXISTS` and
-  `TAG_NOT_FOUND`; `tags.json` and `tags/` on disk. Browser budget
+  `mergeSnapshot()`. Tags do not replicate. New codes `ALX_ERR_TAG_EXISTS` and
+  `ALX_ERR_TAG_NOT_FOUND`; `tags.json` and `tags/` on disk. Browser budget
   56.5 → 58 KB.
 - **Diff, restore, patches, the commit event.** `diff(id, from, to)` is the
   list of patches — plain JSON in the terms of the write API: `put`,
@@ -1048,7 +988,7 @@ version constant of `src/` to 1 until the first release.
   or, when one of those streams is out of the source's log, as a join of
   state (`joined: true`); `branchInfo()`, `drop()`. A branch is a storage
   like any other; a merge into a parent that dials peers reaches them. New
-  code `BRANCH_EXISTS`: a path that holds a branch, or any files, is never
+  code `ALX_ERR_BRANCH_EXISTS`: a path that holds a branch, or any files, is never
   taken over; `drop()` removes a branch alone (a storage without
   `branch.json` is a `TypeError`), and a fork that fails leaves nothing
   behind. A subpath that bundles no engine (3.2 KB, budget 3.5).
@@ -1139,14 +1079,14 @@ version constant of `src/` to 1 until the first release.
   (Web Crypto in the browser), so a replica is not held to one check after
   another. `'verify'` (the default) checks a signature when there is one, `'require'`
   refuses unsigned ops and keyless origins too (and a keyless `hello`, 403
-  `UNSIGNED`). Refusals are `forged`/`unsigned` in the apply result and the
-  `refused` event, `error` events `BAD_SIGNATURE`/`UNSIGNED` once per page,
+  `ALX_ERR_UNSIGNED`). Refusals are `forged`/`unsigned` in the apply result and the
+  `refused` event, `error` events `ALX_ERR_BAD_SIGNATURE`/`ALX_ERR_UNSIGNED` once per page,
   `syncom.ops.received{refused}` and `syncom.ops.rejected{forged|unsigned}`.
   New: `generateSigningKeys`, `loadSigningKeys`, `sign`, `verify` on both
   halves (async in the browser), `SigningKeyPair`, `storage.signatures`,
   `keys/sign-public.pem` and `sign-private.pem`, `node.json` rekeyed once
   from a UUID (`identity.rekeyed`) and refused when it names another key
-  (`IDENTITY_MISMATCH`), `packOps` slots 15–17 (`sig`, `digest`, `nonce`).
+  (`ALX_ERR_IDENTITY_MISMATCH`), `packOps` slots 15–17 (`sig`, `digest`, `nonce`).
   Browser budget 38 → 40 KB.
 
 - **Observed-remove sets.** A third field kind next to the register and the
@@ -1157,7 +1097,7 @@ version constant of `src/` to 1 until the first release.
   a remove names the adds its node had seen (`meta.sets[field][element][origin]
   = [added, removed]`); a reset drops and clamps slots so metas agree in any
   order. A set reads sorted by element text. The kind rule gains
-  `reason: 'set'` (`FIELD_KIND`, `OP_REFUSED`); a set op is validated as the
+  `reason: 'set'` (`ALX_ERR_FIELD_KIND`, `ALX_ERR_OP_REFUSED`); a set op is validated as the
   record it leaves; `migrate()` adds sets back and reports `sets`. The catalog
   posts an indexed array under each element, so `{ tags: 'bug' }` narrows to
   the arrays holding it — a covered count and a loaded fetch used to disagree
@@ -1183,10 +1123,10 @@ version constant of `src/` to 1 until the first release.
   Architecture.
 
 - **`storage.repair(id)`.** A record whose file fails its integrity check
-  (`INTEGRITY`) or is torn is rebuilt from this node's log: the retained
+  (`ALX_ERR_INTEGRITY`) or is torn is rebuilt from this node's log: the retained
   entries of the id replayed from the first whole-record op (`write`,
   `merge`, `delete`, `purge`), written back with a chain block of its own —
-  `{ ops, alive }`. `UNRECOVERABLE` when the log holds no such op (compacted
+  `{ ops, alive }`. `ALX_ERR_UNRECOVERABLE` when the log holds no such op (compacted
   away, never written here, encrypted). `OpLog.entriesOf(id)` is what it
   reads; `record.repaired` is logged at info.
 - **Queries: the first page costs its reads, not its sort.** An ordered
@@ -1213,18 +1153,18 @@ version constant of `src/` to 1 until the first release.
   appends); the cold-read row of `bench/storage.js` closes the instance it
   opens.
 - **`SyncomError`: every operational error carries a `code`.** What syncom
-  rejects with when an operation cannot be done — `CLOSED`, `IN_HOOK`,
-  `NOT_FOUND`, `FIELD_KIND`, `ENCRYPTED`, `INTEGRITY`, `CORRUPT`,
-  `DOWNGRADE`, `LOCKED`, `KEYS_INCOMPLETE`, `BAD_ENVELOPE`, `BLOCK_NOT_FOUND`,
-  `NOT_CONTRACT`, `NODE_EXISTS`, `NODE_NOT_FOUND`, `BAD_HELLO`,
-  `HANDSHAKE_LOOP`, `PAGE_FAILED`, `STUCK`, `STREAMS_UNSUPPORTED`, `SKEW`,
-  `OP_UNREADABLE`, `OP_REFUSED`, `OP_INVALID` — is a `SyncomError` (exported
+  rejects with when an operation cannot be done — `ALX_ERR_CLOSED`, `ALX_ERR_IN_HOOK`,
+  `ALX_ERR_NOT_FOUND`, `ALX_ERR_FIELD_KIND`, `ALX_ERR_ENCRYPTED`, `ALX_ERR_INTEGRITY`, `ALX_ERR_CORRUPT`,
+  `ALX_ERR_DOWNGRADE`, `ALX_ERR_LOCKED`, `ALX_ERR_KEYS_INCOMPLETE`, `ALX_ERR_BAD_ENVELOPE`, `ALX_ERR_BLOCK_NOT_FOUND`,
+  `ALX_ERR_NOT_CONTRACT`, `ALX_ERR_NODE_EXISTS`, `ALX_ERR_NODE_NOT_FOUND`, `ALX_ERR_BAD_HELLO`,
+  `ALX_ERR_HANDSHAKE_LOOP`, `ALX_ERR_PAGE_FAILED`, `ALX_ERR_STUCK`, `ALX_ERR_STREAMS_UNSUPPORTED`, `ALX_ERR_SKEW`,
+  `ALX_ERR_OP_UNREADABLE`, `ALX_ERR_OP_REFUSED`, `ALX_ERR_OP_INVALID` — is a `SyncomError` (exported
   from the package root, `SyncomErrorCode` the union) with the fields the
   code documents (`field`/`kind`, `id`, `url`, `hash`, `cursor`/`attempt`,
   `op`…) and `cause`; `HookError` and `ValidationError` are `SyncomError`s.
-  A wrong argument stays a `TypeError` without a code (`INVALID_ID`,
-  `TYPE_IMMUTABLE` and `NO_CHAIN` keep theirs). A host's wire refusal keeps
-  its numeric code and gains `reason` (`HELLO_FIRST`, `BAD_HELLO`,
+  A wrong argument stays a `TypeError` without a code (`ALX_ERR_INVALID_ID`,
+  `ALX_ERR_TYPE_IMMUTABLE` and `ALX_ERR_NO_CHAIN` keep theirs). A host's wire refusal keeps
+  its numeric code and gains `reason` (`HELLO_FIRST`, `ALX_ERR_BAD_HELLO`,
   `PROTOCOL`, `SELF`, `UNAUTHORIZED`, `SCOPES`, `OPS_PER_PUSH`,
   `BYTES_PER_PUSH`, `OPS_PER_SECOND`), logged in `sync.hello.refused`. No
   message changed; three registry argument errors (`addNode` without a url
@@ -1233,7 +1173,7 @@ version constant of `src/` to 1 until the first release.
 - **`createDatabase({ chain: false })`.** A node that only replicates — a hub — keeps
   no hash-linked chain: two file writes less per record (the chain grew by
   one block file per write and was never compacted), reads without the
-  block re-check, `validate()` rejecting with `code: 'NO_CHAIN'`.
+  block re-check, `validate()` rejecting with `code: 'ALX_ERR_NO_CHAIN'`.
 - **WebRTC, through wrpc 2.** No transport code in syncom: a `PeerLink`'s
   `remote` from `@alexify/wrpc/webrtc` is a `WrpcClient`, which
   `createWrpcLink()` takes as it is, and `storage.sync.unit()` mounts on a
@@ -1299,7 +1239,7 @@ version constant of `src/` to 1 until the first release.
 - **One instance per directory.** `createDatabase()` holds the directory — Web Locks
   in the browser, `<path>/lock.json` with the pid elsewhere (stale once the
   process is gone, or after 30 minutes without a pid) — and a second
-  `createDatabase()` of it rejects with `code: 'LOCKED'`; `lock: 'wait'` waits,
+  `createDatabase()` of it rejects with `code: 'ALX_ERR_LOCKED'`; `lock: 'wait'` waits,
   `lock: false` leaves the coordination to the caller. `close()` releases
   it; an `createDatabase()` that fails releases it too. Browser budget raised
   22 → 23 KB (with the injected backend).
@@ -1358,7 +1298,7 @@ version constant of `src/` to 1 until the first release.
   after the op is applied and before anything is logged; what the validator
   returns (defaults, aliases, stripped keys) is what is written and
   replicated, a `set` keeping only its own keys. A failed write rejects with
-  `ValidationError` (`code: 'VALIDATION_FAILED'`, `entity`, `issues`,
+  `ValidationError` (`code: 'ALX_ERR_VALIDATION_FAILED'`, `entity`, `issues`,
   `cause`). A peer's op the schema refuses is skipped like a `beforeApply`
   `false` and reported through the `error` event (`entity`, `issues`). The id
   is handed to the validator under `idField` — `id`, metaschema's
@@ -1378,7 +1318,7 @@ version constant of `src/` to 1 until the first release.
   `beforeConnect` (`false` leaves a node registered but not dialled) and
   `beforeBootstrap` (`false` refuses to join a peer's whole state). Hooks run
   inside the operation; a throw rejects it with `HookError` (`code:
-  'HOOK_FAILED'`, `hook`, `cause`). A write issued from a hook is refused
+  'ALX_ERR_HOOK_FAILED'`, `hook`, `cause`). A write issued from a hook is refused
   rather than left to deadlock the queue. `applyRemote` reports `skipped`
   and takes a `peer` descriptor. Browser budget raised 17 → 18 KB.
 - **Events are contained.** Every event now goes out through one path:
@@ -1449,119 +1389,442 @@ version constant of `src/` to 1 until the first release.
   running lint + format + size, the test matrix, and the docs build.
 - `CHANGELOG.md`, `SECURITY.md`, `CONTRIBUTING.md`, `CLAUDE.md`, `vercel.json`.
 
-### Security
+### Changed
 
-- **A peer’s `actor` and `from` are bounded.** Both are claims, carried as they are — and in the header
-  every node hashes, in the browser at once on the main thread, so a peer chose how much a node hashed
-  and how large a buffer it kept. An op whose `actor` or `from` is past 256 characters (`MAX_ACTOR`) is
-  `malformed`; a local actor past it is a `TypeError`. The browser halves’ scratch buffers (the CRC-32
-  table’s, SHA-256’s) are let go of past a megabyte, and a log file or a segment that fails its
-  checksum, or is no segment at all, is told by its shape alone — nothing of it is parsed.
-- **A host could keep a bootstrapping node paging for ever.** The dialing
-  side took the host's snapshot cursor as it came — one that did not move
-  on was asked again and again — and read a streamed page to its end,
-  however long. A page without records, a cursor that does not pass the
-  last one, or a streamed page past `sync.maxPageBytes` (new, 256 MiB by
-  default) now stop the bootstrap with `BAD_PAGE` (`url`, `reason`).
-- **An op on a purged record no longer costs a rewrite of the log, nor
-  carries the payload on.** A peer's op that landed on a record purged
-  before it was logged with its payload, relayed with it to every peer this
-  node relays to, then scrubbed — and the scrub rewrote every log file that
-  had ever held the id, so a peer sending op after op for a purged id made
-  this node rewrite all those segments each time. Such an op is now
-  stripped before the append (the header, digest and signature stay, so it
-  still verifies) and logged `scrubbed`; a scrub rewrites only the files
-  holding entries it takes.
-- **A fork of a stream is refused, never healed in silence.** Two ops of
-  one `origin` and `seq` that differ — a restored backup minting seqs again,
-  a cloned directory, an equivocating signer — were taken first-come and the
-  other dropped as a duplicate, so nodes diverged for good. Every op now
-  names the fingerprint of the op before it in its stream (`prev`, the
-  SHA-256 of its header, slot 19 of `packOps`, in the signed header; still
-  `PROTOCOL` 1, the wire of the first publication), and the log keeps each op's
-  fingerprint and every stream's head (`index.json` `heads`, kept past
-  compaction). A peer's op at a seq this node holds under another
-  fingerprint, or one whose `prev` is not the held predecessor's, is
-  refused as `EQUIVOCATION` (`reason: 'seq'` / `'chain'`): not logged, not
-  relayed, counted (`equivocations` in an apply or push result,
-  `syncom.ops.rejected{equivocation|chain}`), an `error` event with both
-  fingerprints, `refused` on a host. An unsigned op carries no digest, so
-  its fingerprint covers its header alone: two unsigned ops that differ in
-  payload only are one op to it. A digest and a fingerprint are 43
-  base64url characters. Cost: about 2.5 µs per local op on the unsigned
-  path (a keystroke in memory 14.5 → 17 µs; the editing trace 47.8k → 42.1k
-  ops/s), 3% on the signed one; on disk within noise. Budgets: `/all`
-  108.5 KB, `/versions` 33.5 KB.
-- **Lists, texts and trees are bounded against a peer.** A peer's op or
-  block could cost a node more than it says, or split the mesh: a `[3e8]`
-  gap in a snapshot run was expanded element by element; any origin could
-  extend another's run, so the order of arrival decided the text; the
-  snapshot path had no bound on pending work, so one hostile block spent it
-  for every honest op after it; a 4,000-deep tree chain threw in the render
-  on the apply path (`PAGE_FAILED`, then `STUCK`); a forged place among
-  siblings made every local `treeMove()` next to it throw. Now a run holds
-  at most 1,048,576 slots and a field 4,194,304, tombstones included; a run
-  is extended by its own origin alone; pending work per field — a run whose
-  anchor has not arrived, a cut or an extension of a run not here, a
-  register of an element not here, a mark switched off before it arrived —
-  is bounded by `createDatabase({ sync: { pendingMax } })` (4,096 by default,
-  `Infinity` to disable), all of it on the op path and in a snapshot block
-  alike (`OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`); a
-  place is a fractional index of at most 1,024 characters, a tree reads 512
-  levels, and `treeMove()` refuses a move past either (`OUT_OF_RANGE`, with
-  `depth` or `reason: 'fi'`); two moves under one stamp tie by node id. A
-  payload the engine does not admit is never silent: a `TypeError` on the
-  local path, `OP_REFUSED` with `reason: 'malformed'` from a peer — the op
-  logged and relayed as a no-op, counted in `syncom.ops.rejected`.
-- **Scopes bound what a peer writes, not only what it declares.** An
-  `update()` took the scope of its delta, so with a field-based `sync.scope`
-  (`data.$type`, as the docs show) it was minted global and reached every
-  peer; an op now takes the scope of the record as it leaves it, read after
-  validation. And a host took the scope an op declared on trust, so a peer
-  granted `Other` could overwrite a `Doc` record by sending an op with no
-  scope: a host's `push` now passes the grant to `applyRemote` as `bound`,
-  and an op whose record is outside it — before or after the op, as the host
-  scopes it — is refused (`outOfScope` in the answer and the apply result,
-  `refused` with `reason: 'scope'`). Found while comparing with RxDB.
+- **`src/` follows the conventions of alexiskills 1.1, with no change of behaviour.** Strict comparisons only
+  (`== null` became `x === undefined || x === null` at its 10 sites; esbuild folds the pair back); a call followed by
+  a bare `return` is `return void call()` (31); no array destructuring (164 sites read by index, 81 of them in
+  `for…of`); every `let` starts with a value of its kind (88); a template literal where `String()` met no symbol;
+  `function` declarations are expressions (5); no nested ternaries (48) and no block deeper than 4 (53), through
+  helpers at module level on the hot path; and the `suspicious` lint rules (shadowed names, sorts in a statement of
+  their own, functions moved out of their scope). The undo manager's two listeners are closures made at its start,
+  no longer arrow fields. `delete` stays only on dictionaries and on data whose missing key means something.
+- **`removeCollection(name)` leaves `db.<name>` undefined and unlisted** rather than deleting it from the instance;
+  `addCollections()` takes the name again.
+- **The bundles grew with it**: the main entry 78.7 → 79.7 KB min+gzip, `/all` 184.6 → 186.4 KB, a block 0.1 to
+  0.3 KB; the TypeError family lives in `src/argument-errors.js`, so a subpath that throws nothing else stays small
+  (`order`, `store`, the connectors' adapters). Each budget was raised by name in `scripts/size.js`.
 
-- **Record ids are checked at every entrance.** An id is
-  `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`: the local writers reject anything
-  else with `TypeError` `code: 'INVALID_ID'` (naming `getId` when it minted
-  the id), a peer's op with another id is `malformed`, a snapshot record is
-  skipped. Before, an id became `data/${id}.json` as given — `../x` wrote
-  outside the storage on `node:fs`, and an id with `/` left an op in the log
-  that no reopen could replay.
-- **A peer's op is `wellFormed` before anything reads it** — `origin`, `seq`,
-  `ts`, `type`, `scope`, `v` and the id — and a stamp more
-  than `sync.maxSkew` (default 24 hours, `Infinity` to disable) ahead of the
-  node's clock is refused with an `error` event `code: 'SKEW'` instead of
-  being observed into the clock. Before, one op stamped far in the future
-  (or with a string `ts`) silently froze every later local write to the
-  field, on every node that saw it, across restarts.
-- **`mergeEntry`/`normalizeMeta` walk own keys only.** A `merge` op (or a
-  snapshot record) whose metadata carried a `__proto__` or `constructor`
-  counter polluted `Object.prototype` / `Object` on the receiving node;
-  non-finite counter sums leaked into records. Peer metadata is now rebuilt
-  into the trusted shape — stamps as `[ts, origin]`, counts as
-  `[seq, sum, ts]` — and fields named `constructor`/`toString` are ordinary
-  fields rather than silently dropped.
-- **Scopes are a boundary on the host.** `push` refuses ops outside the
-  scopes `hello` granted (counted as `outOfScope`, announced as `refused`,
-  metric reason `scope`); `snapshot` and `changes` serve the intersection of
-  what is asked and what was granted (403 when nothing is). Before, the
-  scopes only selected what a peer was *sent*.
-- **An `advance` moves the vector only from the feed host's own ops.**
-  Pushed or relayed, it is logged and passed on but adopts nothing
-  (`applyRemote({ adoptFrom })`). Before, any peer could mark another
-  origin's future ops as already seen.
-- **`validate(id, data, block)` checks the block's own hash**, so a file
-  planted beside the chain with the right `records` map no longer passes.
-- **`loadKeys` refuses half a key pair** (`code: 'KEYS_INCOMPLETE'`) instead
-  of minting a new one that orphans every sealed record; `private.pem` is
-  written `0o600` where the backend has permissions (`fsi.write`'s optional
-  `{ mode }` hint).
-- A `Document` field named like a member of the class (`save`, `delete`, `data`,
-  `on`) no longer shadows the method (`record.shadowed` is logged once).
+- **The shared log relays by log position, and its failures are told (review №7, E2).** The relay's watermark
+  (`sync.shared().appended`) is the last position of the hub's log every op at or below which is in the topic —
+  moved by whole runs of positions appended or read from the topic, never by `lastEventId`, which ran ahead of ops
+  still landing and lost a batch that failed behind one that landed; every op is offered with its position (the
+  `change` event's third argument carries `seq`), every start recovers what the log holds above the watermark (a stop
+  with ops waiting loses none), a watermark the log compacted past is told once (`lost`) and moved to the floor, and
+  `stop()` waits `sharedLog.stopWait` (5 s) for an append in flight, then lets go. A writing hub's snapshot carries
+  the vector its reads reflect and its marker is appended behind every op offered (503 `SHARED_LOG` with
+  `detail: 'behind'` while the relay recovers); a read-only hub serves no snapshot (403 `READ_ONLY`: a fresh client
+  lands on a hub that writes). `mongoSharedLog` tells a hole (`{ id, value: null, headers: { hole: '1' } }`;
+  `ALX_ERR_SHARED_LOG_FAILED` `hole` on the hub, `sync.shared().holes`) instead of passing a late appender's number in
+  silence — a failed insert leaves a tombstone, an insert slower than `gapTimeout` takes a fresh number — reads the
+  head once per page, polls no more under a live change stream, trims the topics `retention.topics` names alone
+  (the writer trims the inbox past its cursor through `trimBefore(topic, id)`). Every `changes` feed of a hub is
+  served from its consumer's one read of the topic (a ring of the entries passed last). An entry the engine refuses
+  is tried again, backed off (`ALX_ERR_SHARED_LOG_FAILED` `apply`, `sync.shared().retrying`); only a rule's refusal — a hook
+  that throws — leaves the topic `stuck`.
+- **The host's rules close their gaps (review №7, E3).** A refused op's revert brings back the fields the op
+  touched — through the kinds' patches, a counter by an inc, a set by a remove, a text by a splice — so what the
+  host accepted since stands (`refused[]` carries the op's `actor`, `ALX_ERR_WRITE_REFUSED` says `touched`; a sealed record
+  at the host is skipped before the rule is asked). `createDatabase({ sync: { authorizeWrite } })` is every unit's
+  rule and the writer's over the shared log's inbox; a follower verifies a push before it forwards it, holds its
+  shadow to what the topic shows, and reads the writer's `dropped` entries. `unit({ query })` takes `true` or
+  `{ regex: false | 'safe' | true }` — a `$regex` from the wire is 400 `REGEX` unless the unit takes them (`'safe'`:
+  no nested quantifier, backreference or lookaround) — and a scoped `query`/`count` walks the cursor until its
+  window is full or `limits.rowsPerQuery` rows were read, the answer saying `capped` (`Infinity` is no cap). A
+  session goes with its socket (`sync.sessions()` lists them), a read's hello leaves nothing on the client, and
+  revocations are kept in `revoked.json` and appended to the shared log for every hub to fold. Under `prove` the
+  rooms and the presence wait for the proof (`PRESENCE_UNPROVEN`). `syncom/blob` names the record and the
+  attachment, served under `allow.blob: 'named'` (the default) only where a live record in the peer's scopes names
+  the digest — `'any'` keeps the digest as a capability — and `fetchBlob(digest, { id, name })` names it; an op
+  flagged `scrubbed` with a payload is scrubbed before it is logged; `beforeSend` rules a hosted `changes` page as it
+  rules a push.
+- **The awaits are told, `forget()` holds under defer (review №7, E8).** `awaitInSync`/`awaitInitialReplication`
+  resolve when a dial fails after they began or the host refuses the feed for good (`peers()[i].terminal`);
+  `forget(id)` settles the record's deferred slot and scrubs the log in the same turn of the queue, so a flush lays
+  nothing back.
+- **Several tabs: the election re-armed, a write applied once, the follower's writers (review №7, E6).** The
+  election's one-shot `lead` promise is gone: `onLead(listener)`, `yield()`, `request()` — a promotion that cannot
+  open yields the lock and asks again (`ALX_ERR_PROMOTE_FAILED`), `openShared` never resolves with `db: null`, `close()`
+  closes the database before it releases the election, a fresh path in heartbeat mode waits the election out. A
+  forwarded write is `{ id: '<token>:<n>', args, retry }`: the leader keeps its answers and answers a retry from
+  them, a retry a new leader never saw is `ALX_ERR_CALL_UNKNOWN` → `ALX_ERR_LEADER_LOST { maybeApplied: true }`. A follower's
+  collection, attachments and local writers are forwarded (`SharedCollection`, `shared.attachments`,
+  `shared.local`; `insert` answers the id on either role; `PROCEDURES`, `COLLECTION_WRITERS`); `serve()` is
+  `'session'` by default; `election: { follower: true }` never leads (the SharedWorker recipe: the worker leads);
+  followers run over `shared` engines — never SQLite; the log events are `tabs.*`.
+- **Blobs: a digest at every door, bytes as the register says, the stores' promises, `sweep()` (review №7, E7).**
+  `src/blobs.js` holds the one cap (`MAX_BLOB_BYTES`, `ALX_ERR_BLOB_TOO_LARGE`) and the one check (`isDigest`): every
+  engine's blobs store refuses a key that is no digest, a register is believed only as far as it is one
+  (`ALX_ERR_ATTACHMENT_INVALID`), the bytes read are what the register says or `ALX_ERR_BLOB_MISMATCH` (an inflating stops at the
+  register's length), a fetched blob is kept once (`sync.blob.keep.failed` where the store refuses). SQLite's
+  `remove(path)` sweeps the blobs, `copyEngine` refuses a target without blobs while the source holds some
+  (`ALX_ERR_BLOBS_UNSUPPORTED`), MongoDB blobs are chunked at 15 MiB, `quota()` asks the engine (`estimate()`),
+  `isQuotaError` sees `SQLITE_FULL` and looks through `cause`. At rest a blob is iv ‖ ciphertext bytes — the
+  cap is the plain bytes' and a store takes the seal's 28 bytes more (`MAX_STORED_BYTES`), so a blob at the cap is
+  stored sealed (the bench found a 64 MiB put refused there);
+  `rotateAtRest` takes a backend (`{ fsi, filesEngine }`), fences the source (`moved.json`, `ALX_ERR_MOVED`) and marks a
+  copy in flight (`copy.json`). `attachments.sweep({ dryRun, tags })` collects the bytes nothing names; `put` on a
+  sealed record is `ALX_ERR_ENCRYPTED`; `ALX_ERR_BLOB_NOT_FOUND`'s field is `attachment`.
+- **The sync blocks, the tabs and the blobs are observed (review №7, E9).** With the telemetry plugin the shared
+  log counts its ops (`syncom.shared.ops`: relayed, applied, forwarded, dropped), its entries (`syncom.shared.entries`:
+  passed, malformed, hole, failed, retried, stuck) and the lag of a topic entry to its apply (`syncom.shared.lag`); a
+  host's refusal says why (`syncom.hello.refused` carries `syncom.reason` beside the code), a revoke is counted by
+  where it came from (`syncom.revoke`, `syncom.via`) and is an info line (`sync.revoke`), a thin client's reads are
+  counted with their rows (`syncom.reads`, `syncom.reads.rows`), every blob put, read, served or fetched with its
+  bytes (`syncom.blobs`, `syncom.blob.bytes`), a sweep is a span (`syncom.attachments.sweep`), and the tabs count
+  their calls and their changes of role (`syncom.tabs.calls`, `syncom.tabs.failovers`; `tabs.promoted`,
+  `tabs.demoted` info lines); a connector counts its documents and rows by direction and result (`syncom.connector.rows`:
+  pulled, applied, pushed, probed, refused, parked, conflict, failed; `stats().probed`) and an agent's tools their calls
+  by verb (`syncom.mcp.calls`). `shared.stats()` and `db.attachments.stats()` answer the same counts from memory.
+- **The hosting side in three files, one of every helper (review №7, E11).** `src/sync/hosting.js` keeps hello, push, snapshot, the
+  feeds, the presence and the unit; `src/sync/rules.js` what they stand on; `src/sync/reads.js` the thin client's
+  `query`, `count` and `blob`. `proveMessage` is `src/sync/protocol.js`'s (the dialer and the host signed and verified
+  two copies of it); an error crosses a wire of this package — the tabs' channel, the remote engine — through one
+  `packError`/`unpackError` of `src/wire-error.js` (`{ name, message, code?, fields }`, a data error's own fields alone,
+  never one that would swap a prototype); a `SyncomError`'s fields never clobber its `name`, `code`, `message` or
+  `stack` — which is why `ALX_ERR_REPLICATION_FAILED` names its connector as `connector` and `ALX_ERR_PIPELINE_FAILED` its pipeline
+  as `pipeline` (both rode as `name` and renamed the error; a test had encoded it).
+- **Queries plan by cost over sorted indexes on chunked arrays (review №6, E4).** The catalog's sorted indexes
+  stand on `SortedIndex` (src/sorted.js — chunks of 512, the ids and the keys flat; 27 bytes an entry, against an
+  object each), a put re-keys only the indexes a changed field belongs to, a load or a collection defined after the
+  open builds them once. The planner fits every index and takes the one expected to read the fewest records
+  (`explain().estimate`; the indexed equalities it leaves `narrow` the scan before a record is read; a `$in` of a
+  few ordered values is scanned value by value), the rows are the index's only where the order's keys reach its end,
+  an unordered window over a range is the first rows by id, a page after its edge is sought in the index or by id
+  (`stream()` reads each row once, and runs once where no index sorts), a one-sided range holds its kind alone, and
+  `count()` over a sorted index entered by a prefix or a range reads no record. A plan and a cached result follow
+  `addCollections()`/`removeCollection()`; `addCollections()` indexes the records in pages inside the queue.
+- **Tombstones are folded whole (review №6, E1).** `cleanup` moves an old, acknowledged tombstone — its data and its
+  whole meta — into the `tombstones` kv namespace in ONE write set with its file's removal; the catalog is derived
+  from the records and that namespace, a rebuild reads both, a fold changes no row, and a tombstone's row keeps the
+  record's collection and its `deleted` stamp. A late op below the stamp stays moot on a folded
+  node as on any other; a pipeline and a dump see a plain delete's collection.
+- **Writes made safe (review №6, E2).** A write by query and `ifMatch` go by the record's id — a data field named
+  `id` names no other record; `drop()` is `ALX_ERR_READ_ONLY` on a follower or after a lost lease and sweeps under the lock;
+  `dropDatabase()` refuses a directory that holds no database; a composite id whose field holds the separator, or is
+  not a string, a number or a boolean, is `ALX_ERR_INVALID_ID` (`entity`, `field`), and the fields of a composite id are
+  immutable (`ALX_ERR_ID_IMMUTABLE`); `$type` is immutable through `unset`, `$unset`, `$rename` and `modify()`; a named
+  `insert()` with `encrypted: true` is `ALX_ERR_EXISTS` like any other (`expect: ABSENT`, inside the queue); `populate()` and a
+  `Reference` resolve a record of the declared collection alone; a `delete` change reports the data applied.
+- **Bounded, and refused out loud (review №6, E5–E6).** One transaction takes 10 000 rows of a bulk write or matches
+  of a write by query (`MAX_BATCH`, a `TypeError` before anything lands); two update operators naming one field are a
+  `TypeError`, as MongoDB refuses a conflicting update, and `$rename` takes a register; `collection.remove()` takes
+  `{ purge, actor }` and nothing else (`remove({ status: 'old' })` is a `TypeError`, not the collection gone) and pages
+  over the records as the call began; a bulk write whose `afterWrite` hook fails after the rows landed keeps its
+  verdicts (the failure is the `error` event); a purge's ids are scrubbed together (`log.scrub(ids)`: every file
+  holding them rewritten once); a transaction's unique keys and the records' in flight are checked through maps, not
+  a scan per op; the query cache is current per collection and holds 10 000 rows at most; a live run delivers a row
+  that stayed as the copy it was; `nearest()` takes `k` of at most 1000 and a vector of at most 4096 numbers; a query
+  nests 32 levels at most; a collection's events fire on a microtask after the landing and the catalog's subscription
+  goes with the last listener; a local write after `close()` is `ALX_ERR_CLOSED`; a cold read verifies its chain block parsed
+  and hashed once per batch (10 000 records read in 0.1 s, not 19); a pipeline's replay and rebuild are paged by 500
+  with the checkpoint after the last page, and live turns join while one is handled.
+- **Observable (review №6, E7).** `stats()` answers `collections`, `advisors`, `tombstones` and the query plugin's
+  `{ cache: { entries, rows }, live }`; the blocks record their work — `syncom.query.cache`, `syncom.query.live`,
+  `syncom.query.plans`, `syncom.bulk.rows`, `syncom.pipeline.turns`, `syncom.pipeline.lag`,
+  `syncom.cleanup.tombstones` and the `syncom.cleanup.sweep` span, `syncom.dump.pages`, `syncom.insert.named`; the
+  destructive operations are info lines (`database.drop`, `collection.remove`, `collection.removed`,
+  `pipeline.rebuild`); a composite id's `ALX_ERR_INVALID_ID` names its `entity` and `field`, a refused bulk row the id its
+  data named.
+- **Node 24 or later.** `node:sqlite` needs no flag there (22.13/23.4 unflagged it; the engines' tests run it), so
+  `engines.node` says `>=24` and CI runs on 24 and 26 (review №5, G-6). The guide page `/guide/storage` became
+  `/guide/database` on the rename: the links that still pointed at it (llms.txt, a versions API comment) follow.
+- **The names are RxDB's: `createDatabase()`, `Database`, `Collection`, `Document`.** A storage is a
+  database — a directory, a node, a log — and a live record a document, so the classes say so:
+  `createDatabase(options)` opens one (`src/database.js`), `db.document(id)` and `collection.document(id)`
+  hand out a `Document` (`src/document.js`), `Collection` has a module of its own (`src/collection.js`),
+  and the types follow (`Database`, `DatabaseConstructor`, `DatabaseOptions`, `Document<R>`,
+  `SyncomDocument`, `Collection<R, I>`). The names before the rename — `open()`, `Storage`, `Record`,
+  `record()`, `SyncomRecord`, `StorageConstructor` — are gone: nothing is published, so a rename keeps no
+  alias; `StorageOptions`, `StorageEvents` and `StorageStats` keep their names. The guide page is
+  `/guide/database`. Importing the `Document` type shadows the DOM's inside that module —
+  `SyncomDocument` is the same type under a name that does not.
+
+- **The sequence engine is new: a copy-on-write rope.** Lists and texts stand on a copy-on-write
+  B+-tree with two measures (`src/text/rope.js`), an id index from (run, offset) to a run
+  (`src/text/ids.js`) and hash tries for the registers and the marks (`src/text/cow.js`); a run's
+  name is parsed once per lineage, an op reads every bound before it writes and copies each node
+  it touches once. The blocks, their JSON, every reading and every refusal are the old engine's,
+  op for op. The B4 editing trace through `applyOp` runs at 273 000 edits a second with every
+  version kept; a list op is O(log n) — setAt in a 50 000-element list 2 000 → 154 000 a second —
+  its reading made when it is read. The text plugin is 3.4 KB larger.
+- **A write is made at once where nothing asynchronous is set up** — no write hook, signature,
+  validator, unique key, telemetry, actor function or lens, the record files deferred: appended
+  before the call returns, landed and announced as its group is written (74 promises a keystroke
+  became about 9). The browser makes it too: an op's header is hashed in JavaScript, at once.
+- **The editor binding stands on a text handle.** `createTextBinding` no longer sends one delta at
+  a time with `expect`, nor rebases a ALX_ERR_STALE one: the editor's edits are made at once over the
+  handle's reading, and every other writer's change reaches the editor as a delta in its
+  indices. The adapters are unchanged; a binding takes `window`.
+- **`applyDelta()` counts the ops logged**, a keystroke folded into the one before it none.
+
+- **A folder of `src/` is a zone, not only a subpath.** A module lives in the
+  folder of what it is about even where the core requires it: the telemetry
+  writer contract is `src/telemetry/writer.js`; the wire shape, the protocol
+  constants, the link check, the outbound selection and the shared-log
+  contract are in `src/sync/`; the validator's projection is
+  `src/schema/entity.js`; the Quill delta algebra is `src/text/quill.js`; the
+  key pairs, PEM and SHA-256 are `src/crypto/` (a zone with no subpath). The
+  root of `src/` holds the core alone. No export, entry point or bundle
+  changed.
+- **A large text is written in pieces, not whole at every flush.** A list
+  or text block of 1 024 runs or more keeps its runs in files of 512 beside
+  the record file (`<id>~<n>.json`), by the order the node first named them;
+  a flush writes the pieces whose runs read otherwise, the record file, and
+  removes what it no longer names. A local insert grows a run of the newest
+  piece alone, so a keystroke anywhere — at the start, in the middle — writes
+  that piece and no other, through a handle too. A text of 25 000 inserts: a keystroke
+  under `defer: 0` 33.2 ms and 3 MB written → 1.35 ms and 242 KB (8 000:
+  9.1 → 0.7 ms); under the default window, at 8 000, 231 → 146 µs and
+  9.7 → 0.9 KB. A read assembles the block
+  whole; `file()` (a tag's copy) hands it whole; a piece gone is
+  `ALX_ERR_INTEGRITY`. The kind plugin hook is `pieces(block)`.
+- **A push reads what the receiver lacks, not the whole log, and a roll
+  writes no index.** The log keeps its retained entries by stream; a push on
+  a handshake or a recovery, a branch merge and a host's ALX_ERR_REWOUND proof pick
+  from it by a binary search per stream (200 000 ops retained over 1 000
+  streams: 18.7 → 0.17 ms a handshake). `index.json` names no segment any
+  more — they are what the directory lists, a gap among them is
+  `log.segment.missing` — and is written where compaction dropped
+  something, not at every roll: with one op a group it was rewritten every
+  64 ops and grew with the history (272 KB under `retention: 'all'`).
+- **An editor's send no longer compares the whole text.** `applyDelta()`
+  resolves to `{ ops, revision }` (it was the op count) and takes
+  `revision` beside `expect`: while the field is still at that revision —
+  a token per engine block, `revision(id, key)` reads it — the text is not
+  compared (it was O(n), the rope flattened, on every send). A field that
+  moved past it is compared as before, so `ALX_ERR_STALE` and the rebase are what
+  they were. The editor binding sends the revision the last answer handed
+  back while its shadow has not moved since: typing alone into a 1 MB text
+  costs a send 193 µs instead of 376 µs (100 KB: 81 instead of 96).
+- **The sequence engine is five modules, not one file of 2 957 lines, and the
+  text plugin four.**
+  `src/text/sequence.js` keeps the design and the public names; the code is
+  `keys.js` (names, anchors, refusals), `state.js` (the block, hydration,
+  every reading), `splice.js` (what an op does, the registers), `marks.js`
+  (the marks and their index) and `join.js` (a snapshot's block normalized,
+  pruned, joined), layered without a cycle. The text plugin likewise:
+  `src/text/text.js` is the plugin object over `kind.js` (what the core
+  calls), `diffs.js` (the patches), `methods.js` (the storage methods) and
+  `deltas.js` (Quill deltas). Nothing a caller reads changed; the names that
+  cross a module are not minified, so `/text` is 1.9 KB larger (31.5 →
+  33.4 KB).
+- **`migrate()` and `check()` are the schema plugin's, and so is
+  `schema.json`.** The facade keeps a stub for each (ALX_ERR_PLUGIN_MISSING
+  without the plugin, as before); the code, and the reading and writing of
+  the version file, moved to `src/schema/api.js` — the core 0.7 KB lighter
+  (50.8 → 50.1 KB), `/schema` 4.9 → 5.9 KB. A plugin's `setup(ctx)` gets
+  `hash`, the core's SHA-256; the lent core gets `kindOf`.
+- **Nothing reads a shape from before the first publication.** The wire,
+  the signed header and the files are version 1 as that publication will
+  have them (`PROTOCOL` 1, the header's version `1`, `enc1:` bound to its
+  file name), and the readers of the shapes before it are gone: a log file
+  without a hash is unreadable (`checksum`), an `index.json` with a field
+  missing is no index (a new epoch, as for an unreadable one), an unbound
+  `enc1:` ciphertext is `ALX_ERR_DECRYPT_FAILED`, and a hello that names no kinds
+  holds none (a dialer that runs a kind does not bootstrap from it).
+
+- **A tree move costs one step, not the tree.** Every op of a tree field
+  folded every move again (a sort, the cycle walks), rendered both readings
+  whole and diffed them: a move cost 2 ms at 2 000 nodes and 52 ms at
+  32 000, and an 8 000-node outline built in one transaction took 44 s.
+  The fold is kept per block and handed to the block an op derives from
+  it: a move newest in the fold is one step, an older one undoes the newer
+  moves and does them again (Kleppmann et al.'s undo–do–redo), the reading
+  is path-copied and the change report comes from what the move changed —
+  the same reading and report, op for op, as the full fold (a seeded
+  differential test against it). A local move at 2 000 / 8 000 / 32 000
+  nodes: 78 / 96 / 133 µs; the 8 000-node outline 0.25 s. The block's JSON
+  is unchanged. Budgets: `/tree` 9 KB, `/all` 113.5 KB.
+- **A ProseMirror keystroke costs where it is, not the document.** Every
+  local edit read both documents whole and diffed them; typing, a cut or
+  inline content pasted inside one textblock is now sent from its steps,
+  the field index of a position summed from block sizes kept per node. A
+  keystroke in 100 / 1 000 / 5 000 paragraphs: 0.27 / 2.7 / 15 ms →
+  0.018 / 0.026 / 0.055 ms. Anything else is still diffed.
+- **One delta algebra.** The text plugin's `toDelta` and the editor
+  binding each had their own Quill-form `compose` — with different edge
+  rules — and both compared a style by its JSON, so `{ bold, italic }` and
+  `{ italic, bold }` stayed two ops. Both stand on `src/text/quill.js` now, which
+  compares a style whatever its key order; a property test holds the laws.
+- **A hub's vector is no longer copied per page.** Applying a peer's page
+  copied the whole version vector (a key per client and scope — thousands
+  on a hub), so did every log group (for a rollback it rarely needed), the
+  host's push answer and the dialer's merge of it. A page now reads seqs
+  key by key over what it moved, a group records only the keys it moves,
+  and the answers merge in place: one peer's one-op page on a hub holding
+  20 000 streams went from 9.6 ms to 153 µs.
+- **A snapshot record is normalized once, not three times.** Joining one
+  read its meta for the skew check, again for the clock and again for the
+  join, hydrating its blocks each time; a peer's merge op twice. A meta its
+  holder will not change (`settleMeta`) is now normalized once per object:
+  joining 400 records of 2 000-character texts took 840 ms, now 550.
+- **A write no longer reads its record for a scope nobody asked for.**
+  Every local write merged the record with its data and composed it —
+  twice — to ask a scope function, even with no `sync.scope` given; now the
+  record is read only where one is, and composed once.
+- **A large set no longer slows down every op of its record.** Every op
+  copied every set of its record whole, walked it for the newest stamp and
+  listed its keys for a kind check, and an add or a remove sorted and parsed
+  the whole set again. A set field is now shared between versions until an
+  op writes it, the newest stamp is carried from op to op along a record a
+  write path reads (a fold no one stamps after carries nothing, so a plain
+  register op costs what it did), a set's emptiness is remembered, and an add
+  or a remove moves the reading by the elements it names. On a record holding 20 000 elements: a register write 5.4 ms →
+  71 µs, an add 20 → 3.6 ms, a remove 19.4 → 3.1 ms (what is left is the one
+  copy of the set the op writes).
+- **A host refuses a push past 10 000 ops unless told otherwise.** With no
+  `limits`, a peer could push a page of any length; `opsPerPush` now
+  defaults to 10 000 (twenty pages of a dialer's default size), checked on
+  the length before anything is read — `limits: { opsPerPush: Infinity }`
+  lifts it. The bytes and the rate stay opt-in.
+- **A node without a kind's plugin reports its refusals once per page.**
+  A core-only hub relaying a text raised an `ALX_ERR_OP_REFUSED` and a warning per
+  keystroke; the metric still counts each op (`reason: 'kind'`), and the
+  warning and the error come once per page, with `count` and `kinds`. A
+  bootstrap refused for `ALX_ERR_KINDS_MISMATCH` counts in `syncom.bootstraps` as
+  `refused`.
+- **Lost data is logged at `error`.** `log.segment.unreadable`,
+  `log.open.unreadable`, `storage.unpersisted` and `tags.unreadable` were
+  warnings, like a peer's refused op; they are errors now, and
+  `log.open.torn` — a last line whose append was never acknowledged, so
+  nothing answered is lost — is `info`. `storage.unpersisted` names the
+  first 32 ids and says how many (`count`), not every id of a batch. The
+  telemetry page's level column is checked against the code.
+- **Marked texts, long lists, long typed runs and a cold record cost what
+  the op touches.** A keystroke into a text read every mark (5 000 marks:
+  3.4 ms → 31 µs): the marks' anchors are an index in walk order, kept
+  across every op that leaves the marks, and pos/vals/marks live in
+  persistent maps. `setAt`, `move` and `push` on a list read it whole
+  (50 000 elements: 9.2 / 9.5 / 5.0 ms → 100 / 189 / 128 µs): an element's
+  index comes from the rope, the reading is derived from the one before. A
+  body grows by `SEG_MAX` (2 048) slots at most, so a read inside a long
+  typed run no longer flattens it (200 000 characters: 7.3 → 1.4 MB held).
+  A block read from a file is hydrated once (first op on a 1.75 MB record:
+  322 → 153 ms). The block's JSON is unchanged. Budgets: `/all` 107 KB,
+  `/text` 31.5 KB.
+- **More than eight storages in a process no longer reopen their log files.**
+  The `node:fs` backend held eight append descriptors for the whole process;
+  a ninth log appending made them take turns opening and closing their files
+  (about fifteen times the cost of a held write). It holds one per directory
+  — a log appends to its newest journal alone — and 64 in all.
+- **An undo manager no longer costs the record on every keystroke.** The
+  `commit` event copied the record before and after every local write, and
+  scanned a text for its embed slots, though an undo step keeps only its
+  first `before` and its last `after`. The copies are taken at their first
+  read now and the manager keeps the events, copying when it takes a step
+  back: 1 027 → 76 µs per keystroke into a 400 KB text with an undo manager
+  listening.
+- **Marking writes applied no longer walks every open group.** The log kept
+  the groups waiting for their records in a map it walked from the oldest on
+  every mark, once per written position: a deferred flush of a busy window
+  cost positions × groups. They are a sorted array searched by halves now —
+  8 192 marks over interleaved records, 49 ms → 2.7 ms.
+- **A searchable text is no longer re-indexed on every keystroke.** The
+  catalog handed the text index the whole joined text of a record at every
+  write; it keeps the last word per record now and hands it over when a
+  `$text` query asks — 2.5 ms → 78 µs per keystroke in a 40 KB searchable
+  text. A write that leaves a record's catalog row as it was (a field the
+  catalog does not hold) posts nothing, saves nothing, and does not run a
+  watch the catalog covers.
+- **A live `Document` no longer copies the whole record on every write.** It
+  took a JSON copy of the record, walked it for references and redefined its
+  accessors on every change — a 200 KB text made each keystroke of another
+  field cost the text. It lays the fields the write changed over what it
+  holds now (a path, a lens or a read hook still take the whole reading):
+  275 → 58 µs per write of a record with a 200 KB text, under the default
+  window.
+- **A delete no longer re-hints the whole text.** The change report of a
+  splice read the stretches it cut from the block before it — after the
+  splice had made the new block the head of the rope's lineage, so the old
+  block was a fork, and the rope re-hinted every item of it, O(n), on every
+  delete: two thirds of an editing trace's time. The cut is read while the
+  old block is still the head now. The automerge-perf trace replays at
+  35 600 keystrokes/s in memory (12 700 before), 25 600 with `/all`
+  (11 000).
+- **`src/` is written in loops.** No array method that takes a callback
+  (`map`, `filter`, `find`, `some`, `every`, `flatMap`, `forEach`, `reduce`…)
+  and no `Array.from` is left in the published code; `pnpm lint` refuses them
+  in `src/**` (`no-restricted-properties`). Walks that ran twice run once (a
+  set's added and removed elements, a transaction's ops, positions and
+  signatures, a version's applied entries, purges and merges, a scrub's
+  segments), membership tests inside loops are `Set`s, and a few searches
+  became indexes: a list block's elements by key, a tree block's members, the
+  hydration of a run's children, the cuts and extensions a join collects, a
+  rope leaf's item index, the move list of a tree node (a binary search where
+  it was a sort). The bundles grow with it: `/all` 98.3 → 100.7 KB min+gzip,
+  `/text` 28.1 → 28.7, `/tree` 6.4 → 6.8; their budgets are raised by name.
+
+- **A tag is read at its first use.** An open read every tag's catalog and
+  copy listing, so its time grew with the tags times their records; it reads
+  `tags.json` and the newest tag alone now (the one the write path copies
+  into), and an older tag's catalog and copies once, at its first read.
+  `at(name)` stays synchronous; its `has()` and `list()` are promises, and a
+  cursor at a tag waits for the catalog. A tag whose catalog cannot be read
+  is dropped at that first use, as `untag()` drops it (`tags.dropped` with
+  `reason: 'catalog'`), and its reader is told `ALX_ERR_TAG_NOT_FOUND`.
+- **The field kinds' API and the versions API are modules.** `storage.js`
+  had grown back to 1,821 lines: `src/fields.js` (`inc` … `treeRemove`,
+  `spans`, `cursor`, `index`) and `src/versions.js` (`get(id, { at })`,
+  `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`,
+  `at`) run over the core Database lends its write paths, the facade one
+  delegate per method; the run-length content of a run is `src/rle.js`, out
+  of `src/sequence.js`; the write API's argument checks are `src/args.js`,
+  shared with `realize()` in `src/patch.js` and so with the undo subpath. No
+  public name, type or message changed.
+- **Browser budget 60.5 → 65 KB, under a ceiling.** The bounds above
+  (62 KB), the argument checks and the rehearsal of `applyPatches()`
+  (62.5 KB), the two API modules (64.5 KB — the core's property names where
+  private fields minified away) and `src/rle.js` (65 KB; 64.6 measured, 65.0
+  with the tags read at their first use). 64 KB was set as the v1 ceiling
+  with the second review and lifted the same day for the module split; a
+  raise still names its feature in `scripts/size.js`, and one of more than a
+  kilobyte is a design decision, taken in a plan. `PROTOCOL` 1 is the wire
+  as of the first publication: every op type and `packOps` slot added before
+  it bumps nothing.
+- **Comparison: Jazz at 2.0.** The Jazz column described 0.20 (Jazz Classic);
+  it now describes 2.0.0-alpha.59, the version jazz.tools documents — a
+  server-merged relational database with queries, lenses, row policies and
+  queryable history, and without CoValues, per-change signatures, list or
+  text CRDTs or a purge. The method gains the rule for a project whose npm
+  `latest` is legacy, and the prose counts follow.
+
+- **Browser budget 41 → 42 KB.** The fixes above — scopes checked on the
+  record, own ops kept until delivered, `ALX_ERR_REWOUND`/`ALX_ERR_UNDELIVERABLE`,
+  `ALX_ERR_UNPERSISTED`, scoped collections, canonical index keys — add about 1.2 KB
+  min+gzip; the browser entry is 41.9 KB.
+
+- **A write no longer costs more as the store grows.** The record catalog is a
+  whole file, and it was saved every `catalog.flushEvery` (64) puts whatever
+  its size, so every write paid for a sixty-fourth of every row: inserts into
+  20,000 records in memory ran at a third of the speed of inserts into 1,000,
+  and the save was half of the CPU. `flushEvery` is now the floor: a catalog
+  is saved every sixteenth of its size as it grows, never more than half the
+  log's `retention.ops` apart (so a node stopped without `close()` still
+  catches up from the log rather than rebuilding from a scan). Inserts in
+  memory hold their speed at 40,000 records; `OpLog.retainedOps` says what
+  the log keeps.
+
+- **The engine is modules, not one class.** `src/storage.js` (1 900 lines)
+  is now the facade — the open sequence, the mutation queue, the public API
+  — and lends a `core` to its three write paths: `src/commit.js` (a local
+  op: prepare, validate, persist, announce), `src/apply.js` (a peer's batch:
+  admit, apply, persist, announce) and `src/bootstrap.js` (snapshot pages,
+  merge pages, `adoptVector`). Record files, the cache and the catalog rows
+  live in `src/entries.js` (`EntryStore`); `Reference`/`Document`/`Collection`
+  in `src/record.js`; `createDatabase()`'s option checks in `src/options.js`; the
+  entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
+  the hosting side of replication in `src/sync/hosting.js` (`createUnit`), with
+  `src/sync/protocol.js` for what both halves share. No public name, error
+  message, event, hook signature or on-disk format changed. The browser budget was raised
+  33.5 → 35.5 KB: a class's private names minify to one letter, the property
+  names of a seam shared between modules do not (+2.3 KB min+gzip).
+
+### Removed
+
+- `emulation/` — a legacy prototype duplicating `Database` and `SyncManager`.
+- The root `example.js` — it required two modules that do not exist.
+  `examples/` covers the same ground.
 
 ### Fixed
 
@@ -1604,7 +1867,7 @@ version constant of `src/` to 1 until the first release.
   `@deprecated … removed in 1.0`, and the store subpath types take a `Document`. `bench/engines.js` measured Ed25519
   signing (every op signed under `/all`, the write made at once off) and the fake MongoDB driver (a scan per
   operation; G-3): the rows run with signatures off, and MongoDB is measured over the driver alone, under
-  `MONGODB_URL`. The engines' `INTEGRITY` and `EEXIST` errors are made in one place (src/engine.js `unreadableRecord`,
+  `MONGODB_URL`. The engines' `ALX_ERR_INTEGRITY` and `EEXIST` errors are made in one place (src/engine.js `unreadableRecord`,
   `eexist`; M-4), the SQLite tests silence `node:sqlite`'s warning through one helper, and src/CLAUDE.md names the
   journal's members where they are now (G-9); the keys-and-order guarantees are a row of their own, ENG-2 (G-4), and the convergence suite runs over a served files engine and over SQLite at rest too (G-8).
 - **The catalog was one document on SQLite and MongoDB; an at-rest ciphertext opened in any database of the engine.**
@@ -1630,7 +1893,7 @@ version constant of `src/` to 1 until the first release.
   is counted `corrupt` and left out instead of a bare `SyntaxError` out of the open (`log.row.unreadable`,
   `log.meta.unreadable`; R-14), the segments list moves once the medium has it (R-21). IndexedDB aborts a write set a
   request threw in (R-20). The files engine's `remove(path)` fails rather than answering done over a directory it could
-  not list (R-23). `atRest` raises `CORRUPT` for a decrypted row that is no JSON. `INTEGRITY` carries `reason` and the
+  not list (R-23). `atRest` raises `ALX_ERR_CORRUPT` for a decrypted row that is no JSON. `ALX_ERR_INTEGRITY` carries `reason` and the
   parse error as `cause` (G-5).
 - **A served files engine lost log entries to a purge and to a failed append; a copy skipped records; the served side
   answered any call.** Over `serveEngine(filesEngine(…))` a purge rewrote every segment and journal the purged
@@ -1647,8 +1910,8 @@ version constant of `src/` to 1 until the first release.
   files engine checks the same before a name becomes a file), `remove(path)` takes what the port opened or `allow` lists,
   an answer that does not clone crosses as an error, a file system's `path`/`syscall`/`errno` never cross. A port that
   closes or a worker that exits, and a call past `remoteEngine(port, { timeout })`, fail every call waiting and after as
-  `ENGINE_UNREACHABLE` (`reason`), the served side lets go of what the port held, and `engine.stats()` counts the calls
-  (R-8). `copyEngine` lands the identity last, takes a failed copy away (`to.remove(path)`), fails `LEASE_LOST` when the
+  `ALX_ERR_ENGINE_UNREACHABLE` (`reason`), the served side lets go of what the port held, and `engine.stats()` counts the calls
+  (R-8). `copyEngine` lands the identity last, takes a failed copy away (`to.remove(path)`), fails `ALX_ERR_LEASE_LOST` when the
   lease goes, pages the sealed log by `batch`, and keeps the private keys' mode (`KEY_FILE_MODE`; R-18, S-7, R-13).
 - **A tag read as the window laid its record could read the record as it is now.** A record changed
   since the tag and not yet on its file reads as the file — still the tag's state — but a deferred
@@ -1740,7 +2003,7 @@ version constant of `src/` to 1 until the first release.
   of an open group's file (EIO, EMFILE) was taken for a torn write and the
   file removed, and a group file that failed its checksum — whole once, so
   answered — was removed too. A file that is there and cannot be read now
-  fails `createDatabase()` with `CORRUPT` (its `cause`), and a group file that fails
+  fails `createDatabase()` with `ALX_ERR_CORRUPT` (its `cause`), and a group file that fails
   its checksum is moved to `log/corrupt/` and counted as lost. A torn one,
   never answered, is still dropped (`log.open.torn`).
 - **A transaction of many ops on one large record held a copy of the
@@ -1780,10 +2043,10 @@ version constant of `src/` to 1 until the first release.
   plugin of the application's reached its methods inside a transaction only,
   though the types promised them on `createDatabase()`'s storage. They are installed at
   open now (a name that would shadow a member of the storage is refused).
-- **`INVALID_VERSION` was typed as a `SyncomError` code it never is.** It is
+- **`ALX_ERR_INVALID_VERSION` was typed as a `SyncomError` code it never is.** It is
   a `TypeError`'s (`typed()`), so `error instanceof SyncomError && error.code
-  === 'INVALID_VERSION'` was never true. The codes of the typed `TypeError`s
-  are their own union now, `TypedErrorCode` (`PRESENCE_SIZE` among them,
+  === 'ALX_ERR_INVALID_VERSION'` was never true. The codes of the typed `TypeError`s
+  are their own union now, `TypedErrorCode` (`ALX_ERR_PRESENCE_SIZE` among them,
   which had no row in the reference either); a test reads every code `src/`
   raises and holds both unions and the reference table to it.
 - **A presence state could be pinned, and a room filled, for good.** An
@@ -1804,7 +2067,7 @@ version constant of `src/` to 1 until the first release.
   and `close()` throw it.
 - **`drop()` needed the versions plugin, and a failed `branch()` stayed
   open.** Sweeping a branch asked for its tags before closing it — a
-  `PLUGIN_MISSING` on the lean core, which left the branch open and locked
+  `ALX_ERR_PLUGIN_MISSING` on the lean core, which left the branch open and locked
   (a failed `branch()` sweeps the same way) — and removed `branch.json` first,
   so a sweep cut short left a directory neither `drop()` nor `branch()` would
   take. The branch closes first, its tags are read only where the plugin
@@ -1864,9 +2127,9 @@ version constant of `src/` to 1 until the first release.
 - **A peer could push this node's clock years ahead.** A `merge` op was checked
   for the skew of its own stamp, not of the stamps its `meta` carried; the
   first local write to that record then observed them, and every op the node
-  made afterwards — on any record — was refused as `SKEW` everywhere,
+  made afterwards — on any record — was refused as `ALX_ERR_SKEW` everywhere,
   through a restart. A merge op whose meta is stamped beyond `sync.maxSkew` is
-  `SKEW` now (malformed, never logged or relayed), a stamp must be a positive
+  `ALX_ERR_SKEW` now (malformed, never logged or relayed), a stamp must be a positive
   safe integer, and a stamp a record already holds beyond the horizon is
   never observed into the clock (`clock.skew.ignored`, once per record).
 - **The host a node dialed could renumber the node's own streams.** A host's
@@ -1874,12 +2137,12 @@ version constant of `src/` to 1 until the first release.
   hello's claim that the host held more of them moved them at once: a gap in
   the node's stream forever, or a seq past the safe integers and a node no
   peer would hear. Own keys never move by `advance` or a join now; a hello's
-  claim (`REWOUND`) is adopted under `/signing` only with proof — the host
+  claim (`ALX_ERR_REWOUND`) is adopted under `/signing` only with proof — the host
   hands this node's own signed op at that seq — and otherwise only with the new
-  `sync.rewind: 'adopt'` (`'report'` by default; `REWOUND` carries `adopted`).
+  `sync.rewind: 'adopt'` (`'report'` by default; `ALX_ERR_REWOUND` carries `adopted`).
 - **A deeply nested payload stopped every signing dialer.** Verifying a
   page's signatures recursed through each op and overflowed the stack on one
-  nested a few thousand levels deep — `PAGE_FAILED`, then `STUCK`. An op nested
+  nested a few thousand levels deep — `ALX_ERR_PAGE_FAILED`, then `ALX_ERR_STUCK`. An op nested
   past 80 levels is malformed before anything reads it, a verify that throws is
   that op `FORGED` alone, and a local write nested past 64 levels is a
   `TypeError`.
@@ -1998,7 +2261,7 @@ version constant of `src/` to 1 until the first release.
   `applyDelta` sets the marker of every slot of the range now. And an editor
   binding whose sends keep failing no longer retries in a loop that holds
   the event loop: it reloads after a growing pause and stops after five
-  failures in a row (`onError`), and a `STALE` that no event explains reloads
+  failures in a row (`onError`), and a `ALX_ERR_STALE` that no event explains reloads
   instead of waiting forever.
 - **A live Record read a path write as a field of its own.** After
   `update(id, { 'profile/city': 'Kyiv' })` a Record held both the old
@@ -2030,7 +2293,7 @@ version constant of `src/` to 1 until the first release.
   `index.d.ts` does — the CRDT branch's (`Patch`, `Version`, `Tag`,
   `TextSpan`, the payloads…) never reached the browser condition — and a
   consistency test keeps it so. The storage `error` event is a union with
-  `UNPERSISTED` (`ids`, no `op`); `sync` events carry `outOfScope`;
+  `ALX_ERR_UNPERSISTED` (`ids`, no `op`); `sync` events carry `outOfScope`;
   `applyOp` takes its `{ pendingMax }`; `OpLog.pins`, `SyncManager.pendingOps()`,
   `UndoManager.listenerCount()`, the hello's `version` and a write context's
   `removals`/`own` are declared; `Patch` takes `mark`; and the doc comments of
@@ -2038,7 +2301,7 @@ version constant of `src/` to 1 until the first release.
 - **A malformed register, counter or set payload is reported.** A peer's
   `write` or `set` without a plain object, `inc` of no finite number, or
   `add`/`remove` without an array applied as nothing and said nothing — the
-  sequence and tree ops already reported theirs. They are `OP_REFUSED` with
+  sequence and tree ops already reported theirs. They are `ALX_ERR_OP_REFUSED` with
   `reason: 'malformed'` now, counted, still logged and relayed as no-ops.
 - **A live `Document` reads as `get()` after a change too.** It loaded through
   the lens and the read hooks, but every change it followed — a write here,
@@ -2058,8 +2321,8 @@ version constant of `src/` to 1 until the first release.
   `null` side and a non-collection under an array instead of throwing, and
   no longer reads a string as a set of its characters. `$text` at a tag says
   that a tag keeps no text index, not that the entity has no search fields.
-  `update()` with an invalid id is `INVALID_ID` like every other writer, and
-  its `NOT_FOUND` (and `swap()`'s) carries the `id`. `applyPatches()` names
+  `update()` with an invalid id is `ALX_ERR_INVALID_ID` like every other writer, and
+  its `ALX_ERR_NOT_FOUND` (and `swap()`'s) carries the `id`. `applyPatches()` names
   an unknown action as such. `adopt` walks a peer's vector by its own keys.
 - **A failed undo never inverts part of a record twice.** When a hook or a
   validator refused a later op of one record's inverse, the earlier ops of
@@ -2072,8 +2335,8 @@ version constant of `src/` to 1 until the first release.
   so a node that reloaded the record counted again from 0 while one holding
   it in memory kept `Infinity` — a divergence a peer could cause on purpose.
   Each origin's sum now stays within ±`Number.MAX_SAFE_INTEGER`: an `inc`
-  past it is a bound refusal (`detail: 'counter'`; `FIELD_KIND` locally,
-  `OP_REFUSED` from a peer), the same on every node; a snapshot slot past it
+  past it is a bound refusal (`detail: 'counter'`; `ALX_ERR_FIELD_KIND` locally,
+  `ALX_ERR_OP_REFUSED` from a peer), the same on every node; a snapshot slot past it
   is not taken; and the sums add up in origin order, so a counter of
   fractions no longer reads differently by the order of arrival. A merged
   record this node did not hold is joined like any other rather than copied,
@@ -2081,7 +2344,7 @@ version constant of `src/` to 1 until the first release.
   stamp — does not come with it.
 - **`compact()` keeps what a record reads as.** It made a text again from its
   string and dropped its marks, dropped a counter at `0`, and refused a text
-  or a list longer than one run (`FIELD_KIND`, `detail: 'run'`). The marks
+  or a list longer than one run (`ALX_ERR_FIELD_KIND`, `detail: 'run'`). The marks
   in force are laid again now, in stamp order and with the expand rule their
   anchors had (`marksIn` in src/sequence.js; patches take a `mark` action), a
   counter at `0` is made again with an `inc` of 0, and a long field in runs
@@ -2100,7 +2363,7 @@ version constant of `src/` to 1 until the first release.
   `push(id, 'body', [1])` on a text field was let through the local kind
   check; the list it made outranks a text, so the text was dropped — on
   every node the op reached. A splice now names its kind by its content
-  and meets the field's before it is stamped (`FIELD_KIND`, the field left
+  and meets the field's before it is stamped (`ALX_ERR_FIELD_KIND`, the field left
   whole), as a string on a list already did inside the engine.
 - **A kind clash converges.** Two nodes making one field as different kinds
   at once — a write carrying it as a register, an `inc`, an `add` or a
@@ -2110,8 +2373,8 @@ version constant of `src/` to 1 until the first release.
   outranks a counter, a counter a set, a set a list, a list a text, a text a
   tree. Where the winner's op arrives, the loser's state is dropped; where
   the winner is held, the loser's op is refused for that field
-  (`OP_REFUSED`). Locally a write of another kind is refused before it is
-  stamped (`FIELD_KIND`), for `write`, `set`, `inc`, `add` and `remove` as
+  (`ALX_ERR_OP_REFUSED`). Locally a write of another kind is refused before it is
+  stamped (`ALX_ERR_FIELD_KIND`), for `write`, `set`, `inc`, `add` and `remove` as
   for the sequence and tree ops.
 - **The edges of branches, patches and tags.** `drop()` wiped any storage
   handed to it; `branch()` opened over an existing storage and merged the
@@ -2138,7 +2401,7 @@ version constant of `src/` to 1 until the first release.
   auxiliary, yet a torn `tags.json` failed the open like `node.json` does.
   The storage now opens without tags, keeps the file aside as
   `tags.corrupt.json` for a repair by hand, warns `tags.unreadable`,
-  reports `stats().tags.corrupt` and refuses `tag()` with `CORRUPT`; every
+  reports `stats().tags.corrupt` and refuses `tag()` with `ALX_ERR_CORRUPT`; every
   record changed meanwhile has its file kept once under `tags/.pending/`,
   and the next open with a readable file hands those copies to the newest
   tag, so the tags a repair brings back read as they did.
@@ -2159,24 +2422,24 @@ version constant of `src/` to 1 until the first release.
   without a word. A node that dials now keeps its own ops until every
   enabled registered node holds them (`listNodes()` shows `acked`,
   `OpLog.retain(keep)` is the hook), and a host that lacks ones the log no
-  longer holds is reported once per hello as `UNDELIVERABLE`.
+  longer holds is reported once per hello as `ALX_ERR_UNDELIVERABLE`.
 - **A restored directory no longer forks its node in silence.** A node
   restored from an older copy minted again seqs its peers already held, and
   they dropped its new writes as duplicates. At hello it now reports
-  `REWOUND`, moves its streams past what the host holds, and bootstraps from
+  `ALX_ERR_REWOUND`, moves its streams past what the host holds, and bootstraps from
   the host to get back what the lost ops wrote.
 - **Logged is committed.** A record file (or chain block) that failed after
   the log append rejected the write while its op stayed logged and
   replicated, and the writer read the record as missing until a reopen. The
   write now stands: the entry is held in memory, the batch is replayed onto
-  the files at the next open, and the storage reports `UNPERSISTED`. A
+  the files at the next open, and the storage reports `ALX_ERR_UNPERSISTED`. A
   peer's batch is held the same way.
-- **A torn record file is `INTEGRITY`**, not a bare `SyntaxError` from
+- **A torn record file is `ALX_ERR_INTEGRITY`**, not a bare `SyntaxError` from
   `get()`/`has()`; `repair(id)` rebuilds it.
 - **A collection answers for its own records.** `collection.get(id)`
   returned a record of another collection, and `update`, `delete` and
   `record` acted on one; `get` is `null` there now, the others reject with
-  `NOT_FOUND`. An entity named like a storage member (`get`, `close`, `log`…)
+  `ALX_ERR_NOT_FOUND`. An entity named like a storage member (`get`, `close`, `log`…)
   replaced it, or broke `createDatabase()` with a bare `TypeError`; it is refused at
   `createDatabase()`.
 - **`cursor.one()` leaves the cursor as it was** instead of a `limit(1)` the
@@ -2207,7 +2470,7 @@ version constant of `src/` to 1 until the first release.
   `change` listener). `$regex` is capped at 1000 characters and
   `projection(['__proto__'])` refused. A torn registry file is reported and
   skipped at open; a torn `node.json`, `schema.json` or `.blockchain.json`
-  rejects with `code: 'CORRUPT'` and the file's name. The OPFS backend keeps
+  rejects with `code: 'ALX_ERR_CORRUPT'` and the file's name. The OPFS backend keeps
   its directory handles, the browser crypto its imported keys; the log's
   `latestTs` rides in the index, its open builds the dedup set once.
   `examples/` is linted and closes its
@@ -2294,7 +2557,7 @@ version constant of `src/` to 1 until the first release.
   known vector; a push answers with the keys the page touched (merged, not
   replaced) and a snapshot carries the vector on its first page only.
 - **A host that kept answering 428 was greeted forever.** Five fresh hellos
-  in a row refused with 428 end in one `error` `code: 'HANDSHAKE_LOOP'`.
+  in a row refused with 428 end in one `error` `code: 'ALX_ERR_HANDSHAKE_LOOP'`.
 - A repeated hello no longer refills the peer's rate bucket; `bytesPerPush`
   counts UTF-8 bytes rather than UTF-16 units; a feed page carrying only the
   dialer's own echoes moves the cursor without an `applyRemote` or a
@@ -2313,14 +2576,14 @@ version constant of `src/` to 1 until the first release.
   the next page moved the cursor past it: its ops were lost to this node for
   good, reported only as `gaps`. Pages now run one after another per peer, a
   failed page closes the subscription and reopens it from the last saved
-  cursor (`error` `code: 'PAGE_FAILED'`, with `cursor` and `attempt`), and
-  the third failure in a row leaves the peer `stuck` (`code: 'STUCK'`,
+  cursor (`error` `code: 'ALX_ERR_PAGE_FAILED'`, with `cursor` and `attempt`), and
+  the third failure in a row leaves the peer `stuck` (`code: 'ALX_ERR_STUCK'`,
   `peers()[i].stuck`) rather than silently behind. `gaps > 0` on a page is
   logged (`sync.gaps`).
 - **A record this node cannot read no longer poisons a page.** An op on a
   record whose file is torn or fails its integrity check is skipped like a
   `beforeApply` `false` — logged, relayed, replay-safe — and reported
-  (`error` `code: 'OP_UNREADABLE'`, metric reason `unreadable`); before, the
+  (`error` `code: 'ALX_ERR_OP_UNREADABLE'`, metric reason `unreadable`); before, the
   whole push failed and a host's dialer offered the same page at every hello.
 - **`swap()` compared outside the mutation queue**, so two concurrent swaps
   on one expectation could both pass; the comparison now runs inside the
@@ -2370,349 +2633,145 @@ version constant of `src/` to 1 until the first release.
   `../lib/` directory that does not exist in this layout.
 - `examples/main.js` required a `globalstorage.js` that does not exist.
 
-### Changed
+### Security
 
-- **The sequence engine is new: a copy-on-write rope.** Lists and texts stand on a copy-on-write
-  B+-tree with two measures (`src/text/rope.js`), an id index from (run, offset) to a run
-  (`src/text/ids.js`) and hash tries for the registers and the marks (`src/text/cow.js`); a run's
-  name is parsed once per lineage, an op reads every bound before it writes and copies each node
-  it touches once. The blocks, their JSON, every reading and every refusal are the old engine's,
-  op for op. The B4 editing trace through `applyOp` runs at 273 000 edits a second with every
-  version kept; a list op is O(log n) — setAt in a 50 000-element list 2 000 → 154 000 a second —
-  its reading made when it is read. The text plugin is 3.4 KB larger.
-- **A write is made at once where nothing asynchronous is set up** — no write hook, signature,
-  validator, unique key, telemetry, actor function or lens, the record files deferred: appended
-  before the call returns, landed and announced as its group is written (74 promises a keystroke
-  became about 9). The browser makes it too: an op's header is hashed in JavaScript, at once.
-- **The editor binding stands on a text handle.** `createTextBinding` no longer sends one delta at
-  a time with `expect`, nor rebases a STALE one: the editor's edits are made at once over the
-  handle's reading, and every other writer's change reaches the editor as a delta in its
-  indices. The adapters are unchanged; a binding takes `window`.
-- **`applyDelta()` counts the ops logged**, a keystroke folded into the one before it none.
+- **A peer’s `actor` and `from` are bounded.** Both are claims, carried as they are — and in the header
+  every node hashes, in the browser at once on the main thread, so a peer chose how much a node hashed
+  and how large a buffer it kept. An op whose `actor` or `from` is past 256 characters (`MAX_ACTOR`) is
+  `malformed`; a local actor past it is a `TypeError`. The browser halves’ scratch buffers (the CRC-32
+  table’s, SHA-256’s) are let go of past a megabyte, and a log file or a segment that fails its
+  checksum, or is no segment at all, is told by its shape alone — nothing of it is parsed.
+- **A host could keep a bootstrapping node paging for ever.** The dialing
+  side took the host's snapshot cursor as it came — one that did not move
+  on was asked again and again — and read a streamed page to its end,
+  however long. A page without records, a cursor that does not pass the
+  last one, or a streamed page past `sync.maxPageBytes` (new, 256 MiB by
+  default) now stop the bootstrap with `ALX_ERR_BAD_PAGE` (`url`, `reason`).
+- **An op on a purged record no longer costs a rewrite of the log, nor
+  carries the payload on.** A peer's op that landed on a record purged
+  before it was logged with its payload, relayed with it to every peer this
+  node relays to, then scrubbed — and the scrub rewrote every log file that
+  had ever held the id, so a peer sending op after op for a purged id made
+  this node rewrite all those segments each time. Such an op is now
+  stripped before the append (the header, digest and signature stay, so it
+  still verifies) and logged `scrubbed`; a scrub rewrites only the files
+  holding entries it takes.
+- **A fork of a stream is refused, never healed in silence.** Two ops of
+  one `origin` and `seq` that differ — a restored backup minting seqs again,
+  a cloned directory, an equivocating signer — were taken first-come and the
+  other dropped as a duplicate, so nodes diverged for good. Every op now
+  names the fingerprint of the op before it in its stream (`prev`, the
+  SHA-256 of its header, slot 19 of `packOps`, in the signed header; still
+  `PROTOCOL` 1, the wire of the first publication), and the log keeps each op's
+  fingerprint and every stream's head (`index.json` `heads`, kept past
+  compaction). A peer's op at a seq this node holds under another
+  fingerprint, or one whose `prev` is not the held predecessor's, is
+  refused as `ALX_ERR_EQUIVOCATION` (`reason: 'seq'` / `'chain'`): not logged, not
+  relayed, counted (`equivocations` in an apply or push result,
+  `syncom.ops.rejected{equivocation|chain}`), an `error` event with both
+  fingerprints, `refused` on a host. An unsigned op carries no digest, so
+  its fingerprint covers its header alone: two unsigned ops that differ in
+  payload only are one op to it. A digest and a fingerprint are 43
+  base64url characters. Cost: about 2.5 µs per local op on the unsigned
+  path (a keystroke in memory 14.5 → 17 µs; the editing trace 47.8k → 42.1k
+  ops/s), 3% on the signed one; on disk within noise. Budgets: `/all`
+  108.5 KB, `/versions` 33.5 KB.
+- **Lists, texts and trees are bounded against a peer.** A peer's op or
+  block could cost a node more than it says, or split the mesh: a `[3e8]`
+  gap in a snapshot run was expanded element by element; any origin could
+  extend another's run, so the order of arrival decided the text; the
+  snapshot path had no bound on pending work, so one hostile block spent it
+  for every honest op after it; a 4,000-deep tree chain threw in the render
+  on the apply path (`ALX_ERR_PAGE_FAILED`, then `ALX_ERR_STUCK`); a forged place among
+  siblings made every local `treeMove()` next to it throw. Now a run holds
+  at most 1,048,576 slots and a field 4,194,304, tombstones included; a run
+  is extended by its own origin alone; pending work per field — a run whose
+  anchor has not arrived, a cut or an extension of a run not here, a
+  register of an element not here, a mark switched off before it arrived —
+  is bounded by `createDatabase({ sync: { pendingMax } })` (4,096 by default,
+  `Infinity` to disable), all of it on the op path and in a snapshot block
+  alike (`ALX_ERR_OP_REFUSED`, reason `bound`, with `detail`, `count` and `max`); a
+  place is a fractional index of at most 1,024 characters, a tree reads 512
+  levels, and `treeMove()` refuses a move past either (`ALX_ERR_OUT_OF_RANGE`, with
+  `depth` or `reason: 'fi'`); two moves under one stamp tie by node id. A
+  payload the engine does not admit is never silent: a `TypeError` on the
+  local path, `ALX_ERR_OP_REFUSED` with `reason: 'malformed'` from a peer — the op
+  logged and relayed as a no-op, counted in `syncom.ops.rejected`.
+- **Scopes bound what a peer writes, not only what it declares.** An
+  `update()` took the scope of its delta, so with a field-based `sync.scope`
+  (`data.$type`, as the docs show) it was minted global and reached every
+  peer; an op now takes the scope of the record as it leaves it, read after
+  validation. And a host took the scope an op declared on trust, so a peer
+  granted `Other` could overwrite a `Doc` record by sending an op with no
+  scope: a host's `push` now passes the grant to `applyRemote` as `bound`,
+  and an op whose record is outside it — before or after the op, as the host
+  scopes it — is refused (`outOfScope` in the answer and the apply result,
+  `refused` with `reason: 'scope'`). Found while comparing with RxDB.
 
-- **A folder of `src/` is a zone, not only a subpath.** A module lives in the
-  folder of what it is about even where the core requires it: the telemetry
-  writer contract is `src/telemetry/writer.js`; the wire shape, the protocol
-  constants, the link check, the outbound selection and the shared-log
-  contract are in `src/sync/`; the validator's projection is
-  `src/schema/entity.js`; the Quill delta algebra is `src/text/quill.js`; the
-  key pairs, PEM and SHA-256 are `src/crypto/` (a zone with no subpath). The
-  root of `src/` holds the core alone. No export, entry point or bundle
-  changed.
-- **A large text is written in pieces, not whole at every flush.** A list
-  or text block of 1 024 runs or more keeps its runs in files of 512 beside
-  the record file (`<id>~<n>.json`), by the order the node first named them;
-  a flush writes the pieces whose runs read otherwise, the record file, and
-  removes what it no longer names. A local insert grows a run of the newest
-  piece alone, so a keystroke anywhere — at the start, in the middle — writes
-  that piece and no other, through a handle too. A text of 25 000 inserts: a keystroke
-  under `defer: 0` 33.2 ms and 3 MB written → 1.35 ms and 242 KB (8 000:
-  9.1 → 0.7 ms); under the default window, at 8 000, 231 → 146 µs and
-  9.7 → 0.9 KB. A read assembles the block
-  whole; `file()` (a tag's copy) hands it whole; a piece gone is
-  `INTEGRITY`. The kind plugin hook is `pieces(block)`.
-- **A push reads what the receiver lacks, not the whole log, and a roll
-  writes no index.** The log keeps its retained entries by stream; a push on
-  a handshake or a recovery, a branch merge and a host's REWOUND proof pick
-  from it by a binary search per stream (200 000 ops retained over 1 000
-  streams: 18.7 → 0.17 ms a handshake). `index.json` names no segment any
-  more — they are what the directory lists, a gap among them is
-  `log.segment.missing` — and is written where compaction dropped
-  something, not at every roll: with one op a group it was rewritten every
-  64 ops and grew with the history (272 KB under `retention: 'all'`).
-- **An editor's send no longer compares the whole text.** `applyDelta()`
-  resolves to `{ ops, revision }` (it was the op count) and takes
-  `revision` beside `expect`: while the field is still at that revision —
-  a token per engine block, `revision(id, key)` reads it — the text is not
-  compared (it was O(n), the rope flattened, on every send). A field that
-  moved past it is compared as before, so `STALE` and the rebase are what
-  they were. The editor binding sends the revision the last answer handed
-  back while its shadow has not moved since: typing alone into a 1 MB text
-  costs a send 193 µs instead of 376 µs (100 KB: 81 instead of 96).
-- **The sequence engine is five modules, not one file of 2 957 lines, and the
-  text plugin four.**
-  `src/text/sequence.js` keeps the design and the public names; the code is
-  `keys.js` (names, anchors, refusals), `state.js` (the block, hydration,
-  every reading), `splice.js` (what an op does, the registers), `marks.js`
-  (the marks and their index) and `join.js` (a snapshot's block normalized,
-  pruned, joined), layered without a cycle. The text plugin likewise:
-  `src/text/text.js` is the plugin object over `kind.js` (what the core
-  calls), `diffs.js` (the patches), `methods.js` (the storage methods) and
-  `deltas.js` (Quill deltas). Nothing a caller reads changed; the names that
-  cross a module are not minified, so `/text` is 1.9 KB larger (31.5 →
-  33.4 KB).
-- **`migrate()` and `check()` are the schema plugin's, and so is
-  `schema.json`.** The facade keeps a stub for each (PLUGIN_MISSING
-  without the plugin, as before); the code, and the reading and writing of
-  the version file, moved to `src/schema/api.js` — the core 0.7 KB lighter
-  (50.8 → 50.1 KB), `/schema` 4.9 → 5.9 KB. A plugin's `setup(ctx)` gets
-  `hash`, the core's SHA-256; the lent core gets `kindOf`.
-- **Nothing reads a shape from before the first publication.** The wire,
-  the signed header and the files are version 1 as that publication will
-  have them (`PROTOCOL` 1, the header's version `1`, `enc1:` bound to its
-  file name), and the readers of the shapes before it are gone: a log file
-  without a hash is unreadable (`checksum`), an `index.json` with a field
-  missing is no index (a new epoch, as for an unreadable one), an unbound
-  `enc1:` ciphertext is `DECRYPT_FAILED`, and a hello that names no kinds
-  holds none (a dialer that runs a kind does not bootstrap from it).
+- **Record ids are checked at every entrance.** An id is
+  `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`: the local writers reject anything
+  else with `TypeError` `code: 'ALX_ERR_INVALID_ID'` (naming `getId` when it minted
+  the id), a peer's op with another id is `malformed`, a snapshot record is
+  skipped. Before, an id became `data/${id}.json` as given — `../x` wrote
+  outside the storage on `node:fs`, and an id with `/` left an op in the log
+  that no reopen could replay.
+- **A peer's op is `wellFormed` before anything reads it** — `origin`, `seq`,
+  `ts`, `type`, `scope`, `v` and the id — and a stamp more
+  than `sync.maxSkew` (default 24 hours, `Infinity` to disable) ahead of the
+  node's clock is refused with an `error` event `code: 'ALX_ERR_SKEW'` instead of
+  being observed into the clock. Before, one op stamped far in the future
+  (or with a string `ts`) silently froze every later local write to the
+  field, on every node that saw it, across restarts.
+- **`mergeEntry`/`normalizeMeta` walk own keys only.** A `merge` op (or a
+  snapshot record) whose metadata carried a `__proto__` or `constructor`
+  counter polluted `Object.prototype` / `Object` on the receiving node;
+  non-finite counter sums leaked into records. Peer metadata is now rebuilt
+  into the trusted shape — stamps as `[ts, origin]`, counts as
+  `[seq, sum, ts]` — and fields named `constructor`/`toString` are ordinary
+  fields rather than silently dropped.
+- **Scopes are a boundary on the host.** `push` refuses ops outside the
+  scopes `hello` granted (counted as `outOfScope`, announced as `refused`,
+  metric reason `scope`); `snapshot` and `changes` serve the intersection of
+  what is asked and what was granted (403 when nothing is). Before, the
+  scopes only selected what a peer was *sent*.
+- **An `advance` moves the vector only from the feed host's own ops.**
+  Pushed or relayed, it is logged and passed on but adopts nothing
+  (`applyRemote({ adoptFrom })`). Before, any peer could mark another
+  origin's future ops as already seen.
+- **`validate(id, data, block)` checks the block's own hash**, so a file
+  planted beside the chain with the right `records` map no longer passes.
+- **`loadKeys` refuses half a key pair** (`code: 'ALX_ERR_KEYS_INCOMPLETE'`) instead
+  of minting a new one that orphans every sealed record; `private.pem` is
+  written `0o600` where the backend has permissions (`fsi.write`'s optional
+  `{ mode }` hint).
+- A `Document` field named like a member of the class (`save`, `delete`, `data`,
+  `on`) no longer shadows the method (`record.shadowed` is logged once).
 
-- **A tree move costs one step, not the tree.** Every op of a tree field
-  folded every move again (a sort, the cycle walks), rendered both readings
-  whole and diffed them: a move cost 2 ms at 2 000 nodes and 52 ms at
-  32 000, and an 8 000-node outline built in one transaction took 44 s.
-  The fold is kept per block and handed to the block an op derives from
-  it: a move newest in the fold is one step, an older one undoes the newer
-  moves and does them again (Kleppmann et al.'s undo–do–redo), the reading
-  is path-copied and the change report comes from what the move changed —
-  the same reading and report, op for op, as the full fold (a seeded
-  differential test against it). A local move at 2 000 / 8 000 / 32 000
-  nodes: 78 / 96 / 133 µs; the 8 000-node outline 0.25 s. The block's JSON
-  is unchanged. Budgets: `/tree` 9 KB, `/all` 113.5 KB.
-- **A ProseMirror keystroke costs where it is, not the document.** Every
-  local edit read both documents whole and diffed them; typing, a cut or
-  inline content pasted inside one textblock is now sent from its steps,
-  the field index of a position summed from block sizes kept per node. A
-  keystroke in 100 / 1 000 / 5 000 paragraphs: 0.27 / 2.7 / 15 ms →
-  0.018 / 0.026 / 0.055 ms. Anything else is still diffed.
-- **One delta algebra.** The text plugin's `toDelta` and the editor
-  binding each had their own Quill-form `compose` — with different edge
-  rules — and both compared a style by its JSON, so `{ bold, italic }` and
-  `{ italic, bold }` stayed two ops. Both stand on `src/text/quill.js` now, which
-  compares a style whatever its key order; a property test holds the laws.
-- **A hub's vector is no longer copied per page.** Applying a peer's page
-  copied the whole version vector (a key per client and scope — thousands
-  on a hub), so did every log group (for a rollback it rarely needed), the
-  host's push answer and the dialer's merge of it. A page now reads seqs
-  key by key over what it moved, a group records only the keys it moves,
-  and the answers merge in place: one peer's one-op page on a hub holding
-  20 000 streams went from 9.6 ms to 153 µs.
-- **A snapshot record is normalized once, not three times.** Joining one
-  read its meta for the skew check, again for the clock and again for the
-  join, hydrating its blocks each time; a peer's merge op twice. A meta its
-  holder will not change (`settleMeta`) is now normalized once per object:
-  joining 400 records of 2 000-character texts took 840 ms, now 550.
-- **A write no longer reads its record for a scope nobody asked for.**
-  Every local write merged the record with its data and composed it —
-  twice — to ask a scope function, even with no `sync.scope` given; now the
-  record is read only where one is, and composed once.
-- **A large set no longer slows down every op of its record.** Every op
-  copied every set of its record whole, walked it for the newest stamp and
-  listed its keys for a kind check, and an add or a remove sorted and parsed
-  the whole set again. A set field is now shared between versions until an
-  op writes it, the newest stamp is carried from op to op along a record a
-  write path reads (a fold no one stamps after carries nothing, so a plain
-  register op costs what it did), a set's emptiness is remembered, and an add
-  or a remove moves the reading by the elements it names. On a record holding 20 000 elements: a register write 5.4 ms →
-  71 µs, an add 20 → 3.6 ms, a remove 19.4 → 3.1 ms (what is left is the one
-  copy of the set the op writes).
-- **A host refuses a push past 10 000 ops unless told otherwise.** With no
-  `limits`, a peer could push a page of any length; `opsPerPush` now
-  defaults to 10 000 (twenty pages of a dialer's default size), checked on
-  the length before anything is read — `limits: { opsPerPush: Infinity }`
-  lifts it. The bytes and the rate stay opt-in.
-- **A node without a kind's plugin reports its refusals once per page.**
-  A core-only hub relaying a text raised an `OP_REFUSED` and a warning per
-  keystroke; the metric still counts each op (`reason: 'kind'`), and the
-  warning and the error come once per page, with `count` and `kinds`. A
-  bootstrap refused for `KINDS_MISMATCH` counts in `syncom.bootstraps` as
-  `refused`.
-- **Lost data is logged at `error`.** `log.segment.unreadable`,
-  `log.open.unreadable`, `storage.unpersisted` and `tags.unreadable` were
-  warnings, like a peer's refused op; they are errors now, and
-  `log.open.torn` — a last line whose append was never acknowledged, so
-  nothing answered is lost — is `info`. `storage.unpersisted` names the
-  first 32 ids and says how many (`count`), not every id of a batch. The
-  telemetry page's level column is checked against the code.
-- **Marked texts, long lists, long typed runs and a cold record cost what
-  the op touches.** A keystroke into a text read every mark (5 000 marks:
-  3.4 ms → 31 µs): the marks' anchors are an index in walk order, kept
-  across every op that leaves the marks, and pos/vals/marks live in
-  persistent maps. `setAt`, `move` and `push` on a list read it whole
-  (50 000 elements: 9.2 / 9.5 / 5.0 ms → 100 / 189 / 128 µs): an element's
-  index comes from the rope, the reading is derived from the one before. A
-  body grows by `SEG_MAX` (2 048) slots at most, so a read inside a long
-  typed run no longer flattens it (200 000 characters: 7.3 → 1.4 MB held).
-  A block read from a file is hydrated once (first op on a 1.75 MB record:
-  322 → 153 ms). The block's JSON is unchanged. Budgets: `/all` 107 KB,
-  `/text` 31.5 KB.
-- **More than eight storages in a process no longer reopen their log files.**
-  The `node:fs` backend held eight append descriptors for the whole process;
-  a ninth log appending made them take turns opening and closing their files
-  (about fifteen times the cost of a held write). It holds one per directory
-  — a log appends to its newest journal alone — and 64 in all.
-- **An undo manager no longer costs the record on every keystroke.** The
-  `commit` event copied the record before and after every local write, and
-  scanned a text for its embed slots, though an undo step keeps only its
-  first `before` and its last `after`. The copies are taken at their first
-  read now and the manager keeps the events, copying when it takes a step
-  back: 1 027 → 76 µs per keystroke into a 400 KB text with an undo manager
-  listening.
-- **Marking writes applied no longer walks every open group.** The log kept
-  the groups waiting for their records in a map it walked from the oldest on
-  every mark, once per written position: a deferred flush of a busy window
-  cost positions × groups. They are a sorted array searched by halves now —
-  8 192 marks over interleaved records, 49 ms → 2.7 ms.
-- **A searchable text is no longer re-indexed on every keystroke.** The
-  catalog handed the text index the whole joined text of a record at every
-  write; it keeps the last word per record now and hands it over when a
-  `$text` query asks — 2.5 ms → 78 µs per keystroke in a 40 KB searchable
-  text. A write that leaves a record's catalog row as it was (a field the
-  catalog does not hold) posts nothing, saves nothing, and does not run a
-  watch the catalog covers.
-- **A live `Document` no longer copies the whole record on every write.** It
-  took a JSON copy of the record, walked it for references and redefined its
-  accessors on every change — a 200 KB text made each keystroke of another
-  field cost the text. It lays the fields the write changed over what it
-  holds now (a path, a lens or a read hook still take the whole reading):
-  275 → 58 µs per write of a record with a 200 KB text, under the default
-  window.
-- **A delete no longer re-hints the whole text.** The change report of a
-  splice read the stretches it cut from the block before it — after the
-  splice had made the new block the head of the rope's lineage, so the old
-  block was a fork, and the rope re-hinted every item of it, O(n), on every
-  delete: two thirds of an editing trace's time. The cut is read while the
-  old block is still the head now. The automerge-perf trace replays at
-  35 600 keystrokes/s in memory (12 700 before), 25 600 with `/all`
-  (11 000).
-- **`src/` is written in loops.** No array method that takes a callback
-  (`map`, `filter`, `find`, `some`, `every`, `flatMap`, `forEach`, `reduce`…)
-  and no `Array.from` is left in the published code; `pnpm lint` refuses them
-  in `src/**` (`no-restricted-properties`). Walks that ran twice run once (a
-  set's added and removed elements, a transaction's ops, positions and
-  signatures, a version's applied entries, purges and merges, a scrub's
-  segments), membership tests inside loops are `Set`s, and a few searches
-  became indexes: a list block's elements by key, a tree block's members, the
-  hydration of a run's children, the cuts and extensions a join collects, a
-  rope leaf's item index, the move list of a tree node (a binary search where
-  it was a sort). The bundles grow with it: `/all` 98.3 → 100.7 KB min+gzip,
-  `/text` 28.1 → 28.7, `/tree` 6.4 → 6.8; their budgets are raised by name.
+### Documentation
 
-- **A tag is read at its first use.** An open read every tag's catalog and
-  copy listing, so its time grew with the tags times their records; it reads
-  `tags.json` and the newest tag alone now (the one the write path copies
-  into), and an older tag's catalog and copies once, at its first read.
-  `at(name)` stays synchronous; its `has()` and `list()` are promises, and a
-  cursor at a tag waits for the catalog. A tag whose catalog cannot be read
-  is dropped at that first use, as `untag()` drops it (`tags.dropped` with
-  `reason: 'catalog'`), and its reader is told `TAG_NOT_FOUND`.
-- **The field kinds' API and the versions API are modules.** `storage.js`
-  had grown back to 1,821 lines: `src/fields.js` (`inc` … `treeRemove`,
-  `spans`, `cursor`, `index`) and `src/versions.js` (`get(id, { at })`,
-  `history`, `diff`, `applyPatches`, `restore`, `compact`, `tag`, `untag`,
-  `at`) run over the core Database lends its write paths, the facade one
-  delegate per method; the run-length content of a run is `src/rle.js`, out
-  of `src/sequence.js`; the write API's argument checks are `src/args.js`,
-  shared with `realize()` in `src/patch.js` and so with the undo subpath. No
-  public name, type or message changed.
-- **Browser budget 60.5 → 65 KB, under a ceiling.** The bounds above
-  (62 KB), the argument checks and the rehearsal of `applyPatches()`
-  (62.5 KB), the two API modules (64.5 KB — the core's property names where
-  private fields minified away) and `src/rle.js` (65 KB; 64.6 measured, 65.0
-  with the tags read at their first use). 64 KB was set as the v1 ceiling
-  with the second review and lifted the same day for the module split; a
-  raise still names its feature in `scripts/size.js`, and one of more than a
-  kilobyte is a design decision, taken in a plan. `PROTOCOL` 1 is the wire
-  as of the first publication: every op type and `packOps` slot added before
-  it bumps nothing.
-- **Comparison: Jazz at 2.0.** The Jazz column described 0.20 (Jazz Classic);
-  it now describes 2.0.0-alpha.59, the version jazz.tools documents — a
-  server-merged relational database with queries, lenses, row policies and
-  queryable history, and without CoValues, per-change signatures, list or
-  text CRDTs or a purge. The method gains the rule for a project whose npm
-  `latest` is legacy, and the prose counts follow.
+- **The error codes are `ALX_ERR_*` on every page** (the reference table, the guides, the examples), and the Errors
+  page and the reference say what an `ArgumentError` and a `DataError` are.
+- **CONTRIBUTING.md** says Node.js ≥ 24 (what `engines` says), how a test is written (`describe`, `it('should …')`,
+  `node:assert/strict`, setup in `before`), why `--test-force-exit` stays, and the release steps with `pnpm pack` and
+  `pnpm publish`.
 
-- **Browser budget 41 → 42 KB.** The fixes above — scopes checked on the
-  record, own ops kept until delivered, `REWOUND`/`UNDELIVERABLE`,
-  `UNPERSISTED`, scoped collections, canonical index keys — add about 1.2 KB
-  min+gzip; the browser entry is 41.9 KB.
+### Tooling
 
-- **A write no longer costs more as the store grows.** The record catalog is a
-  whole file, and it was saved every `catalog.flushEvery` (64) puts whatever
-  its size, so every write paid for a sixty-fourth of every row: inserts into
-  20,000 records in memory ran at a third of the speed of inserts into 1,000,
-  and the save was half of the CPU. `flushEvery` is now the floor: a catalog
-  is saved every sixteenth of its size as it grows, never more than half the
-  log's `retention.ops` apart (so a node stopped without `close()` still
-  catches up from the log rather than rebuilding from a scan). Inserts in
-  memory hold their speed at 40,000 records; `OpLog.retainedOps` says what
-  the log keeps.
+- **The skills are alexiskills 1.1** (`@alexify/metaskills`, a devDependency), linked into `.claude/skills` by the
+  `prepare` script in place of the six metarhia 1.0.5 skills the repository kept; what they said of syncom alone is
+  in CLAUDE.md ("Conventions", "Release process").
+- **The lint is alexiskills' reference**: `correctness` and `suspicious` as errors, `eqeqeq` with `null` included,
+  `func-style`, `max-depth` 4, `no-nested-ternary`, `no-console`, the unicorn rules and `max-lines-per-function` in
+  `src/`; an unused disable comment is an error. `no-underscore-dangle` and `unicorn/prefer-add-event-listener` are
+  off, with the reasons in CLAUDE.md.
+- **The tests are `describe` and `it('should …')` over `node:assert/strict`**: every `it` title starts with
+  `should`, every `INVARIANTS.md` citation moved with its title, a suite's setup is a `before` (an async describe
+  body runs at load, beside the others), and the shared suites are functions that register their `it`s.
+- **`prepublishOnly`** runs the gates of a release (`lint`, `format:check`, `test:types`, `size`, `test:package`,
+  `test:coverage`); `test:package` runs `tests/package/` alone.
+- **CI** reads with `permissions: contents: read`, cancels a superseded run, gives the lint job a timeout, tests on
+  Node `24.0.0` (the floor of `engines`) besides 24 and 26, and ends in `ci-success`, which fails on a needed job
+  that failed, was cancelled or was skipped.
+- **`@alexify/wrpc` ^2.2.0** for the integration tests, in place of the pin to 2.1.0.
 
-- **The engine is modules, not one class.** `src/storage.js` (1 900 lines)
-  is now the facade — the open sequence, the mutation queue, the public API
-  — and lends a `core` to its three write paths: `src/commit.js` (a local
-  op: prepare, validate, persist, announce), `src/apply.js` (a peer's batch:
-  admit, apply, persist, announce) and `src/bootstrap.js` (snapshot pages,
-  merge pages, `adoptVector`). Record files, the cache and the catalog rows
-  live in `src/entries.js` (`EntryStore`); `Reference`/`Document`/`Collection`
-  in `src/record.js`; `createDatabase()`'s option checks in `src/options.js`; the
-  entrance checks (ids, stream names, a peer's op shape) in `src/shape.js`;
-  the hosting side of replication in `src/sync/hosting.js` (`createUnit`), with
-  `src/sync/protocol.js` for what both halves share. No public name, error
-  message, event, hook signature or on-disk format changed. The browser budget was raised
-  33.5 → 35.5 KB: a class's private names minify to one letter, the property
-  names of a seam shared between modules do not (+2.3 KB min+gzip).
-
-### Changed (breaking)
-
-- **The log's files and an op's payload changed shape** (nothing is published, `PROTOCOL` stays
-  1): a log file is `{"e":[[seq, fp, header, payload, rest?, flags?]],"c":"<crc32>"}`, its CRC-32
-  checked before it is parsed, and a segment is the lines its groups were journaled as and a
-  trailer; an op names what is its own origin's without the origin — a run by its stamp, an
-  element as `ts:offset`.
-
-- A record id is `[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}`; every writer rejects
-  anything else (`code: 'INVALID_ID'`), `get()`/`has()` answer absent, and a
-  peer's op or snapshot record with another id is dropped as `malformed`.
-- `applyRemote()` answers `{ applied, skipped, duplicates, gaps, malformed,
-  unsigned, forged }` (the `sync` and `apply` events carry the new counts too), and takes
-  `adoptFrom`: an `advance` is adopted only when its origin is that node.
-- `storage.on('error')` payloads carry `code` — `OP_REFUSED`, `OP_INVALID`,
-  `SKEW`.
-- `createDatabase({ sync: { maxSkew } })` (default 24 hours) bounds how far ahead of the
-  node's clock a peer's stamp may be.
-- A hosted unit refuses `push` ops outside the peer's hello scopes (answer
-  field `outOfScope`, `refused` event) and serves `snapshot`/`changes` for the
-  granted scopes only (403 when none of the asked ones is).
-- `loadKeys` rejects with `code: 'KEYS_INCOMPLETE'` when exactly one of
-  `public.pem`/`private.pem` exists; before, it generated a new pair.
-- `fsi.write(dir, name, content, options?)` takes an optional `{ mode }` hint;
-  `withSync` forwards it. Adapters without permissions ignore it.
-
-- **`createDatabase()` is exclusive by default.** A second instance over the same
-  directory used to open silently and mint the seqs of the first; it now
-  rejects with `code: 'LOCKED'` unless `lock: 'wait'` or `lock: false`.
-- **Smart contracts moved to `@alexify/syncom/contracts`.** `SmartContract`
-  and `DataReader` (and their types) are no longer on the package root:
-  `SmartContract.load` runs code from the chain, and a process that never
-  imports the subpath — a hub — never does.
-- An entity definition is `{ schema?, idField?, validate?, index?, unique?,
-  fields?, search? }` and any other key is a `TypeError` at `createDatabase()`; a legacy field
-  map (`Post: { title: 'string' }`) goes under `fields`. A `schema` with a
-  key other than `version` and `entities`, and a `getId` that is not a
-  function, are refused at `createDatabase()` too (the latter used to be ignored).
-- `SyncManager` is constructed as `new SyncManager(storage, options)`; nodes
-  no longer carry `type: 'uplink' | 'downlink'` — every registered node is
-  dialed, and any node can host. `src/sync.browser.js` is gone: one
-  `src/sync.js` over `fsi` serves both halves, and the browser registry is
-  persisted in OPFS.
-- The in-memory `Database.#updates` array and `addUpdate()` are gone; the
-  operation log replaces them. `set()` on an existing record is a whole-record
-  write; `update()` on a counter field, and `inc()` on a register field, throw.
-- `delete()` leaves a tombstone on disk; `list()`, `get()` and `has()` hide it.
-- The browser bundle budget was raised from 5 KB to 14 KB min+gzip for the
-  replication engine.
-- **Node.js ≥ 22 is required** (was `>=18`).
-- Browser modules follow the `*.browser.js` pattern:
-  `src/{crypto,fsi,sync}-browser.js` → `src/{crypto,fsi,sync}.browser.js`.
-- The default storage directory is `syncom` (was `gs`).
-- Type names `GsRecord` / `GsCollection` → `SyncomDocument` / `SyncomCollection`.
-- `exports` gained a `browser` condition resolving to `browser.js` /
-  `browser.d.ts`, and a `./package.json` entry.
-- The `bench:compare` and `size:compare` scripts were removed; they pointed at
-  files that were never written.
-
-### Removed
-
-- `emulation/` — a legacy prototype duplicating `Database` and `SyncManager`.
-- The root `example.js` — it required two modules that do not exist.
-  `examples/` covers the same ground.
+[unreleased]: https://github.com/Alexis-Technologies/syncom/compare/ae001848898680b957e835d63f68e5746e95d057...HEAD
