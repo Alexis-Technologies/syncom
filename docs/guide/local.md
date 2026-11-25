@@ -57,8 +57,8 @@ It is kept across restarts, removed with the database by `dropDatabase()`, and c
 handling, because nothing else ever writes it. For a value that several devices should share, use a record, or
 [app state](./state) over one.
 
-A local write is refused where any write would be: after `close()` with `CLOSED`, and on a database that cannot
-write (a follower tab, or one whose lease was lost) with `READ_ONLY`. Reads keep working.
+A local write is refused where any write would be: after `close()` with `ALX_ERR_CLOSED`, and on a database that cannot
+write (a follower tab, or one whose lease was lost) with `ALX_ERR_READ_ONLY`. Reads keep working.
 
 <<< @/examples/local.mjs#closed
 

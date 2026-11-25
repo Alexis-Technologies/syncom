@@ -40,7 +40,7 @@ registers the server once:
 <<< @/examples/replication-server.mjs#dial
 
 The registry is saved with the database, so the check before `addNode()` keeps a restart from registering
-the server twice (that would reject with `NODE_EXISTS`). After a restart the client dials the server
+the server twice (that would reject with `ALX_ERR_NODE_EXISTS`). After a restart the client dials the server
 again by itself and resumes from where it stopped.
 
 ### Write on either side
@@ -78,7 +78,7 @@ with 403.
 `authorizeWrite({ op, peer, current, after })` is asked about every op a node pushes, with the record as
 the server holds it (`current`) and as the op would leave it (`after`). Return `false` and the server
 refuses the op without leaving a hole in the node's stream: it logs and relays the op with no payload, and
-names it in its answer. The client reports `WRITE_REFUSED` and brings the record back to what the server
+names it in its answer. The client reports `ALX_ERR_WRITE_REFUSED` and brings the record back to what the server
 holds:
 
 <<< @/examples/replication-server.mjs#write-rule

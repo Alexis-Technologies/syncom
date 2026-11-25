@@ -88,7 +88,7 @@ An element can carry fields that merge on their own, named by a [path](./fields)
 box and vote on the same step at the same time both get their way. A read folds such fields into the
 element's value, which must be an object to keep them. The name stays with the element across moves, so a
 path under it keeps pointing at the same step. A write under an element that is not there is refused with
-`NOT_FOUND`.
+`ALX_ERR_NOT_FOUND`.
 
 ## Keep a place in a list
 
@@ -102,9 +102,9 @@ shows them in full.
 
 <<< @/examples/lists.mjs#errors
 
-An index past the end rejects with `OUT_OF_RANGE`, checked against the list as it is when the write runs,
+An index past the end rejects with `ALX_ERR_OUT_OF_RANGE`, checked against the list as it is when the write runs,
 so a peer's op that lands in between cannot shift it. A field is one kind for good: `splice()` on a field
-that holds a plain value, or `update()` on a list, rejects with `FIELD_KIND` and names the kind the field
+that holds a plain value, or `update()` on a list, rejects with `ALX_ERR_FIELD_KIND` and names the kind the field
 holds in `kind`. When ops of two kinds meet on one field from different nodes, the kinds' precedence decides
 on every node alike, which [Fields that merge](./fields) explains.
 

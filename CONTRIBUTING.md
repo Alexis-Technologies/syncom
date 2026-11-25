@@ -10,16 +10,18 @@ pnpm install
 pnpm test
 ```
 
-Requires **Node.js ≥ 22** and **pnpm** (`packageManager` pins the version).
-There is no build step: `src/` ships as-is.
+Requires **Node.js ≥ 24** (`engines`) and **pnpm** (`packageManager` pins the version).
+There is no build step: `src/` ships as-is. `pnpm install` also links the alexiskills
+skills into `.claude/skills` (the `prepare` script; CLAUDE.md, Skills).
 
 ## Commands
 
 ```bash
 pnpm test              # node --test, recursive over tests/
+pnpm test:package      # tests/package/*.test.js alone: exports, invariants, error codes, the guides' paths
 pnpm test:coverage     # c8 over src/ — thresholds 95 lines / 95 statements / 90 branches / 95 functions
 pnpm test:types        # tsd against the .d.ts files
-pnpm lint              # oxlint
+pnpm lint              # oxlint (an unused disable comment is an error too)
 pnpm format            # oxfmt (format:check in CI)
 pnpm size              # bundle-size report; a browser budget exceeded fails the run
 pnpm bench             # every script in bench/ (--save → bench/results/engine.json)
@@ -31,7 +33,8 @@ pnpm docs:dev          # the VitePress site (docs:build / docs:preview too)
 ```
 
 Run a single file with `node --test tests/storage.test.js`, or filter by name
-with `node --test --test-name-pattern 'swap'`.
+with `node --test --test-name-pattern 'swap'`. `pnpm run prepublishOnly` runs
+every gate a release needs but the docs build.
 
 ## House rules
 
@@ -81,9 +84,26 @@ with `node --test --test-name-pattern 'swap'`.
 
 ## Tests
 
-`node:test` with `node:assert`. One top-level `test(name, async (t) => ...)`
-per subject, nested `await t.test(...)` per case, teardown registered with
-`t.after(...)` immediately after setup.
+`node:test` with `node:assert/strict`, as `describe` and `it` only: `describe`
+names the subject, and every `it` title starts with `should` and says what is
+observable (`it('should change nothing when the same op is applied twice')`).
+No flat `test()`, no `t.test()`.
+
+- **Setup goes in `before`, never in a describe body.** An `async` describe
+  body runs when the file loads, at the same time as every other describe body
+  of the file, before any `it`: a database opened there is opened next to every
+  other suite's. Open it in `before` (or `beforeEach`) into a `let x = null` of
+  the describe, close it in `after`; a teardown an `it` owns is `t.after(...)`
+  of its own context.
+- **What ran between two subtests stays between them**: the end of the earlier
+  `it` or the start of the later one — never the describe body.
+- **Errors are asserted precisely**: `assert.throws(fn, { code, name })`,
+  `await assert.rejects(promise, { code: 'ALX_ERR_…' })`.
+- **`--test-force-exit` stays, on purpose.** Every passing test closes what it
+  opens, but a test that fails half-way skips its own teardown and can leave a
+  `MessagePort`, a worker or a change stream open; without the flag that file's
+  process never exits (one sat for eight hours after its last test). It never
+  hides a leak of a passing test: a file that only exits under the flag is a bug.
 
 Behaviour shared between the Node and browser halves lives in `tests/suites/`
 and is run twice — see `tests/suites/emitter.js`, `tests/suites/fsi.js` and
@@ -112,16 +132,19 @@ files, the `scripts/size.js` rows or the docs keywords/version drift from
 
 ## CI
 
-Three jobs (`.github/workflows/ci.yml`):
+The jobs of `.github/workflows/ci.yml`:
 
-1. **lint** — `lint`, `format:check`, the package checks
-   (`tests/package/*.test.js`: exports, invariants, error codes, the guides'
-   paths), `size` (the last both smoke-tests the script and puts the numbers
-   in the log).
-2. **test** — matrix over Node 24 and 26: `test:coverage`, then
-   `test:types`. Every test run has a 120 s timeout per test.
+1. **lint** — `lint`, `format:check`, `test:package` (exports, invariants,
+   error codes, the guides' paths), `size` (the last both smoke-tests the
+   script and puts the numbers in the log).
+2. **test** — matrix over Node `24.0.0` (the floor of `engines`, written
+   exactly), 24 and 26: `test:coverage`, then `test:types`. Every test run has
+   a 120 s timeout per test.
 3. **docs** — `docs:build`, so a broken page or dead link fails the PR rather
    than the deploy.
+4. **smoke-deno**, **smoke-bun** — `tests/smoke/smoke.js` on the other runtimes.
+5. **ci-success** — the one job branch protection requires: it fails when a
+   job it needs failed, was cancelled or was skipped.
 
 Benchmarks are not run in CI: they measure a machine, not a change.
 
@@ -144,18 +167,22 @@ number.
 Releases are a person running these commands by hand, on purpose: no release
 workflow, no publish automation.
 
-1. Everything green: `pnpm lint && pnpm format:check && pnpm test:coverage &&
-   pnpm test:types && pnpm size && pnpm run docs:build`.
-2. Move `[Unreleased]` in `CHANGELOG.md` to the new version with today's date.
+1. Everything green: `pnpm run prepublishOnly` (`lint`, `format:check`,
+   `test:types`, `size`, `test:package`, `test:coverage`) and
+   `pnpm run docs:build`.
+2. Move `[Unreleased]` in `CHANGELOG.md` to the new version with today's date,
+   and add its link at the bottom.
 3. Bump `version` in `package.json`, and the matching nav label in
    `docs/.vitepress/config.mts` (the consistency test checks this).
 4. Refresh the bundle-size table in `README.md` from `pnpm size`.
-5. `npm publish --dry-run` — check the file list against `files`.
-6. `npm pack`, then smoke the tarball: `require()` it from a scratch CJS file,
-   and typecheck it with
+5. `pnpm publish --dry-run` — check the file list against `files`.
+6. `pnpm pack`, then smoke the tarball from a scratch consumer project (the one
+   place `npm` and `npx` are used): `npm install` the tarball there, `require()`
+   it from a CJS file, and typecheck it with
    `npx tsc --moduleResolution bundler --module esnext --noEmit`.
-7. Tag and push: `git tag v<version> && git push --tags`.
-8. `npm publish`.
+7. Commit `chore(release): X.Y.Z`, then tag and push:
+   `git tag vX.Y.Z && git push --tags`.
+8. `pnpm publish` (gated by `prepublishOnly`).
 9. Write the GitHub release notes from the changelog section.
 10. Verify the docs deploy:
     `curl -o /dev/null -sw '%{http_code}' https://syncomjs.vercel.app/`.

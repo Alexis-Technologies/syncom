@@ -73,7 +73,7 @@ writes under `RecordData`.
 ## Type the methods of your plugins
 
 The methods a plugin adds appear on the database's type only when the plugin is in `plugins`. A call to
-a method of a plugin you did not pass is a compile error, as it is a `PLUGIN_MISSING` error at run time.
+a method of a plugin you did not pass is a compile error, as it is a `ALX_ERR_PLUGIN_MISSING` error at run time.
 `@alexify/syncom/all` types every method of every plugin it registers.
 
 <<< @/examples/typescript-shapes.mts#plugins

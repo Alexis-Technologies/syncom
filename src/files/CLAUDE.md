@@ -29,7 +29,7 @@ src/files/journal.js      createJournalStore(fsi, path): the op log's medium —
   tags' copies (a record as it was, before its file changes: a crash between leaves a copy, never a changed record
   without one), then per record the pieces it makes, its file, the pieces it drops (src/entries.js says why), then the kv
   removals. A files write set is never atomic (`capabilities.atomicBatch` false): the log append stays the commit point and
-  a failed landing is `UNPERSISTED`, as it always was.
+  a failed landing is `ALX_ERR_UNPERSISTED`, as it always was.
 - **A name is a file: checked first, sorted after.** A namespace, a key, a tag, a piece's name reach the backend only as
   `isKvKey` admits them (src/engine.js: no separator, no `..`, no control character) — `kv.*`, `pieces.*`, `copies.*` and
   `write` refuse the rest with a `TypeError` (a rejection, never a throw) before a path is made of it. The backend lists

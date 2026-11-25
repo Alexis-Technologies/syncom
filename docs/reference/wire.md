@@ -53,8 +53,8 @@ is read at all — its signature included (`wellFormed` in `src/shape.js`); one
 that fails is `malformed` — counted, not logged, not relayed, a gap in its
 stream. A stamp more than `sync.maxSkew` (24 hours) ahead of the receiver's
 clock — the op's `ts`, or any stamp a `merge`'s `meta` holds — is refused the
-same way (`SKEW`). The payload fields are checked where they land: an op the
-engine does not admit changes nothing, is reported as `OP_REFUSED` with
+same way (`ALX_ERR_SKEW`). The payload fields are checked where they land: an op the
+engine does not admit changes nothing, is reported as `ALX_ERR_OP_REFUSED` with
 `reason: 'malformed'`, and is still logged and relayed.
 
 ### Types and payloads
@@ -235,16 +235,16 @@ it holds a peer's op to:
 | without the `signing` plugin (`'verify'`) | signs nothing — its id is no key | taken, unverified | taken |
 
 `'require'` without the plugin is refused at `createDatabase()`
-(`PLUGIN_MISSING`): the mode has nothing to check with. A refused op is
+(`ALX_ERR_PLUGIN_MISSING`): the mode has nothing to check with. A refused op is
 counted (`forged`, `unsigned` in the apply result and the
 `syncom.ops.rejected` metric) and reported once per page as an `error`
-event (`BAD_SIGNATURE` or `UNSIGNED`, with the first refused op and the
+event (`ALX_ERR_BAD_SIGNATURE` or `ALX_ERR_UNSIGNED`, with the first refused op and the
 `count`); it is neither logged nor relayed and the vector does not move, so
 it is a gap for its stream until it comes again, intact. A host announces
 the same through the `refused` event (`reason: 'forged' | 'unsigned'`), and
 a `'require'` host refuses a `hello` from a node id that is no key (403
-`UNSIGNED`). A signature is checked only after the op's shape, and a check
-that throws is that op's `BAD_SIGNATURE`, never the page's failure.
+`ALX_ERR_UNSIGNED`). A signature is checked only after the op's shape, and a check
+that throws is that op's `ALX_ERR_BAD_SIGNATURE`, never the page's failure.
 
 What a signature leaves open: `actor` is signed, so no relay changes it,
 but it is still the writer's claim about itself — a host that knows who a
@@ -290,12 +290,12 @@ the signature:
 
 | A peer's op | Verdict |
 | --- | --- |
-| at a seq this node holds, with another fingerprint | `EQUIVOCATION`, `reason: 'seq'` |
-| the next of its stream, naming another `prev` than the fingerprint held at the seq before it — or none, when it is signed | `EQUIVOCATION`, `reason: 'chain'` |
+| at a seq this node holds, with another fingerprint | `ALX_ERR_EQUIVOCATION`, `reason: 'seq'` |
+| the next of its stream, naming another `prev` than the fingerprint held at the seq before it — or none, when it is signed | `ALX_ERR_EQUIVOCATION`, `reason: 'chain'` |
 | the next of its stream, unsigned and naming none — a hand-made op, an older writer's | taken |
 | the next of its stream where this node holds no op before it — the stream starts there, or this node joined it by a [snapshot](#snapshot) | taken; the chain is held from it |
 
-An op refused as `EQUIVOCATION` is neither logged nor relayed and the vector
+An op refused as `ALX_ERR_EQUIVOCATION` is neither logged nor relayed and the vector
 does not move: like a forged op, it is a gap for its stream. It is counted
 (`equivocations` in the apply result, `syncom.ops.rejected` with `reason`
 `equivocation` or `chain`) and reported once per page — the storage's
@@ -338,7 +338,7 @@ as the evidence, never deleted; one that does not parse was torn by its
 own write, never acknowledged, and is dropped (`log.open.torn`). A file
 that reads as JSON without its checksum is not whole: unreadable, as one
 that fails it. A file that is there and cannot be read at all — an I/O
-error, not a missing file — fails `createDatabase()` with `CORRUPT`: an open that went
+error, not a missing file — fails `createDatabase()` with `ALX_ERR_CORRUPT`: an open that went
 on without it could hand its seqs out again.
 
 A segment is read whole or not at all: every line checks on its own, and
@@ -469,7 +469,7 @@ pieces it no longer names: a crash leaves the old record file whole with
 its pieces, or the new one with its. New pieces a crash left unnamed are
 written over as `n` reaches them again; old ones it left after the record
 file stay on disk, never read. A read assembles the block whole
-(a piece gone is `INTEGRITY`); a tag's copy of a record is whole, never
+(a piece gone is `ALX_ERR_INTEGRITY`); a tag's copy of a record is whole, never
 in pieces.
 
 A peer's `meta` is never trusted as it comes: a snapshot's is rebuilt into
@@ -508,7 +508,7 @@ attachments each dialed node still waits for the bytes of, oldest first — [`bl
 `connector/<name>` `{ pull, pushed, known: { "<id>": "<22 base64url characters of the SHA-256>" | null }, refused: ["<id>"] }`
 (a connector's checkpoint: the backend's position, this node's log position pushed through, the backend's state per
 record as a digest, the ids whose state the database refused to land — [connectors](../guide/connectors)), `moved.json` `{ to: { path, engine }, at }` (a
-source `rotateAtRest` copied away, fenced: `createDatabase` refuses it as `MOVED`) and `copy.json` `{ from, started }`
+source `rotateAtRest` copied away, fenced: `createDatabase` refuses it as `ALX_ERR_MOVED`) and `copy.json` `{ from, started }`
 (a copy in flight into this directory, removed last; one left behind by a crash is taken away by the next copy).
 
 ## The procedures
@@ -584,7 +584,7 @@ host's `vector` holds more of one of the caller's own streams (`node`,
 restored from an older copy. It is the newest op of each such stream the
 host's log still retains, packed in the [twenty slots](#packed-the-twenty-slots):
 the caller's own op at the seq the host claims, signed by the caller's key.
-The caller moves a stream past the host's (`REWOUND`) only when that op is
+The caller moves a stream past the host's (`ALX_ERR_REWOUND`) only when that op is
 well formed, its origin, stream and seq are the claim's and its signature
 verifies under the caller's own key — or under `sync.rewind: 'adopt'`
 without it. A host can claim, never prove, what it did not receive. A proven
@@ -607,7 +607,7 @@ op of it names as `prev`. The answer, from the run above:
 A refused hello reaches the dialer's `error` event with the code and is kept
 as `peers()[i].lastError`; the host is greeted again when the link
 reconnects, or after `enableNode(url, false)` and `true`. An answer without
-a node id is the dialer's `BAD_HELLO`. `schema` both ways is `{ version, hash }`
+a node id is the dialer's `ALX_ERR_BAD_HELLO`. `schema` both ways is `{ version, hash }`
 — the node's schema version and the hash of its snapshot — or `null`; the
 host's `authorize` sees the dialer's, the dialer keeps the host's as
 `listNodes()[i].remote.schema`, and the `peer` and `hello` events carry it.
@@ -617,7 +617,7 @@ peer, version, hash, local }` on the database, log a warning, and keep the
 link up. Another version is not drift; it is what `v` on the ops is for.
 `kinds` is what a bootstrap checks (see [`snapshot`](#snapshot)). A host
 that answers 428 to five fresh hellos in a row is reported once as
-`HANDSHAKE_LOOP` and not greeted again until the link reconnects.
+`ALX_ERR_HANDSHAKE_LOOP` and not greeted again until the link reconnects.
 
 ### `push`
 
@@ -635,7 +635,7 @@ tell a counter's sum from a number); `'scope'` for a record the host reads as
 outside the pusher's scopes, without `current` (handing the record over would
 be a read outside the grant). Each is logged there as a withheld scrub
 (skipped, scrubbed, slot 20 `2`) and relayed as a no-op, so the stream has no
-gap. The pusher reports each (`WRITE_REFUSED`, with the `reason`) and sets
+gap. The pusher reports each (`ALX_ERR_WRITE_REFUSED`, with the `reason`) and sets
 itself straight after a rule's refusal of its own op: the fields the op
 touched brought back to `current` through the kinds' own ops — each made the
 kind `kinds` says, a field of another kind here unset and made again — or the
@@ -719,7 +719,7 @@ transport's message limit bounds the attachment (10 MiB of body over wrpc's HTTP
 encoding).
 
 Past `limits.bytesPerBlob` it is 413 `BYTES_PER_BLOB`, past 64 MiB (`MAX_BLOB_BYTES`, the one cap) 413
-`BLOB_TOO_LARGE` — told by the `size` announced, or by the text's length, before a byte is read or decoded; 400
+`ALX_ERR_BLOB_TOO_LARGE` — told by the `size` announced, or by the text's length, before a byte is read or decoded; 400
 `BAD_DIGEST` for what is no digest; 400 `BAD_BLOB` for bytes that are no base64 text, for `stream` and `base64`
 together, a `size` that is no non-negative integer, a stream this connection did not announce (or cannot carry), and a
 stream that ended short of its `size` or ran past it; 403 `READ_ONLY` where the unit takes no pushes (`allow.push`
@@ -743,7 +743,7 @@ pushed op sets, by digest, 1 024 at most; none of an op the host refused; a page
 other) and uploads the bytes it holds after the page, on the push chain: a probe, then the bytes. Bytes it lacks — a
 relay that never read them — wait until they land here (an upload from a node behind it, a `fetchBlob`), then go up. A
 refusal (400, 403, 404, 413) is final; a failure on the way — a link that went down with chunks still to send
-fails the call (503) — is tried again at the next push, a reconnect's included. Both are the manager's `error` event, `BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
+fails the call (503) — is tried again at the next push, a reconnect's included. Both are the manager's `error` event, `ALX_ERR_BLOB_UPLOAD_FAILED` (`digest`, `id`, `attachment`, `cause`,
 `retry`); neither fails the push. "Not yet" (425) is neither: the entry stays, nothing is reported, and it is asked
 again at the host's next idle page — a hub's feed sends one after the caller's own ops passed it, which is when the
 writer has landed them — and at the next push or hello. The wait is the host's to end: past its 30 s the answer is
@@ -807,7 +807,7 @@ peer's, since a pattern runs on the host's event loop). An entity or a query
 the cursor refuses is 400 `BAD_QUERY`. A caller that said no hello is 428
 `HELLO_FIRST` — unless the call carries one: `hello` is the [hello](#hello)'s
 own arguments, taken as a hello is (`authorize`, the scopes, the revocations;
-`UNPROVEN` under `prove`) and kept nowhere — no room, no session, no presence
+`ALX_ERR_UNPROVEN` under `prove`) and kept nowhere — no room, no session, no presence
 — for a client over a stateless transport (plain HTTP, where one request is
 one client and nothing can come first).
 
@@ -838,7 +838,7 @@ the global records alone, whatever the grant — and no list for the whole grant
 The dialer side of a bootstrap, entered when the feed answers `{ bootstrap:
 true }`: `beforeBootstrap` may refuse it (nothing is received from that host
 until the next handshake asks again); a host whose `hello.kinds` lack one of
-the dialer's kinds is refused (`KINDS_MISMATCH`, the peer `terminal`), since
+the dialer's kinds is refused (`ALX_ERR_KINDS_MISMATCH`, the peer `terminal`), since
 its pages would lack those fields. The dialer pages from `cursor: null` and
 joins each page as one batch — one log append, one chain block, every
 record a `merge` op of its own in its `@~` stream — adopts the host's
@@ -851,8 +851,8 @@ a peer's meta is rebuilt into the trusted shape before it is joined, and a
 list, text or tree block past a [bound](#bounds) is not taken as state. A
 streamed page past `sync.maxPageBytes` (256 MiB, `reason: 'bytes'`), a page
 that is no object or has no `records` array (`'shape'`), or a cursor that does
-not move on (`'cursor'`) stops the bootstrap with `BAD_PAGE`; a streamed page on a link without `stream` is
-`STREAMS_UNSUPPORTED`. The joined state enters the dialer's own log as
+not move on (`'cursor'`) stops the bootstrap with `ALX_ERR_BAD_PAGE`; a streamed page on a link without `stream` is
+`ALX_ERR_STREAMS_UNSUPPORTED`. The joined state enters the dialer's own log as
 `merge` and `advance` ops, so a third node resuming from the dialer gets it
 too — bootstrap is transitive — and those ops never travel back to the node
 the snapshot came from. An `advance` moves a node's vector only when it is
@@ -898,7 +898,7 @@ next hello says `revoked`. The host keeps what it took back in `revoked.json`
 of its root kv namespace (`{"v":1,"nodes":{"<node>":["B"]}}`), so a restart
 grants it no more, and over a [shared log](#the-shared-log) appends it to the
 topic (`{ v: 1, node, revoke: { node, scopes } }`), so every hub takes it
-back. The dialer narrows its registry entry, reports `REVOKED`, runs
+back. The dialer narrows its registry entry, reports `ALX_ERR_REVOKED`, runs
 `onRevoke` — without the hook it forgets every record of those scopes
 (`forget(id)`: no op) — and opens its feed again, under an empty grant too
 (the global records alone) when the revoke took its last scope.
@@ -983,7 +983,7 @@ holding `{ url, token, scopes, direction, enabled, lastSync, cursor, remote:
 { id, epoch, schema }, acked }`. The cursor and the remote node's identity
 are kept there, which is why a restart resumes instead of bootstrapping, and
 why a node is registered once (`addNode()` of a url already there is
-`NODE_EXISTS`). `url` is whatever `connect(node)` understands; syncom never
+`ALX_ERR_NODE_EXISTS`). `url` is whatever `connect(node)` understands; syncom never
 parses it. `direction` is what the link carries: `'both'` (the default)
 pushes and subscribes; `'pull'` only subscribes — nothing of this node goes
 to the peer, `sync()` pushes nothing to it, and retention does not wait for
@@ -1014,11 +1014,11 @@ link — leaves the node in `peers()` with its `lastError`, and the next
 cursor; a page's event id becomes the cursor once the page has landed. A
 page that cannot be applied — a `beforeApply` that throws, a log append that
 fails — is a break in the stream, not a page to step over (an op on a record
-file this node cannot read is skipped, `OP_UNREADABLE`, and the page goes
+file this node cannot read is skipped, `ALX_ERR_OP_UNREADABLE`, and the page goes
 on): the pages behind it are dropped, the subscription is closed and
 reopened from the last cursor saved, and the page comes again (`error` with
-`code: 'PAGE_FAILED'`, `cursor`, `attempt`). The third failure in a row
-leaves the peer **stuck** (`STUCK`, `peers()[i].stuck`): nothing past that
+`code: 'ALX_ERR_PAGE_FAILED'`, `cursor`, `attempt`). The third failure in a row
+leaves the peer **stuck** (`ALX_ERR_STUCK`, `peers()[i].stuck`): nothing past that
 page is taken until `enableNode(url, false)` then `true`. The cursor never
 moves past a page that did not land. A peer the host refused for good — a
 403 on the feed or the bootstrap, a handshake loop, a stuck feed, a kinds
@@ -1031,7 +1031,7 @@ answers `bootstrap`.
 subscription from its last event id — a wrpc client does all three. After a
 reconnect the manager repeats `hello` and the push, the outbound half a
 transport cannot know about; a 428 on the restored subscription triggers a
-fresh hello, at most five in a row (`HANDSHAKE_LOOP`). Timeouts on a call are
+fresh hello, at most five in a row (`ALX_ERR_HANDSHAKE_LOOP`). Timeouts on a call are
 the link's: give `connect(node)` a wrpc client with a `timeout`.
 `await db.close()` stops sync and seals the log; a write that arrives once
 `close()` was called is refused at once.
@@ -1044,7 +1044,7 @@ raised by every push answer, saved with the registry — so a node that writes
 offline for longer than retention still delivers every write when it
 reconnects. Only registered nodes are waited for: ops written before the
 first `addNode()` are retained like any other, and a host that lacks ops the
-log no longer holds is reported once per hello with `code: 'UNDELIVERABLE'`
+log no longer holds is reported once per hello with `code: 'ALX_ERR_UNDELIVERABLE'`
 (`missing`, by stream): those streams' ops are not sent to that host, since
 every one would be a gap there; it is caught up only by bootstrapping from a
 node that dials it. A node that is never reached holds its ops back until it
@@ -1053,7 +1053,7 @@ to it, so that node is not waited for.
 
 **Rewound.** A directory restored from an older copy is noticed at the next
 hello: the host holds more of the node's own stream than its log does. The
-node reports `code: 'REWOUND'` — with `local` and `remote`, what each side
+node reports `code: 'ALX_ERR_REWOUND'` — with `local` and `remote`, what each side
 holds of each stream, and `adopted`, what moved. A host could say the same
 and lie: a stream moved on its word alone would be a gap at every other peer
 (or run past a safe integer, and every op of it malformed everywhere). So the
@@ -1103,7 +1103,7 @@ the bytes a follower kept in the engine's blobs store (a peer's [`blobPut`](#blo
 sends on to the hosts it dials. `by` lets a hub pass its own entries without parsing them. A log
 may yield a **hole** — `{ id, value: null, headers: { hole: '1' } }`, an id
 whose entry never came (`mongoSharedLog`: a crashed appender's number) —
-which a hub tells (`SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The
+which a hub tells (`ALX_ERR_SHARED_LOG_FAILED`, `reason: 'hole'`) and passes. The
 ids are the log's (`<epoch>.<n>` on wrpc's brokers and `mongoSharedLog`);
 a hub keeps its consumer's cursors and the relay's watermark — the last
 position of its own log every op at or below which is in the topic — in
@@ -1140,7 +1140,7 @@ What a hub does with the log (`src/sync/shared.js`):
   retains goes to the topic first. What it compacted reaches the others
   through a snapshot of it (dial it once); a log compacted past the
   watermark is told once (`reason: 'lost'`) and what it retains still goes.
-- **Failures** are `SHARED_LOG_FAILED` on the manager's `error` event, with a
+- **Failures** are `ALX_ERR_SHARED_LOG_FAILED` on the manager's `error` event, with a
   `reason`. `append`: an append failed (told once per run); everything the
   log holds above the watermark is appended again once the broker answers,
   and every start does the same, so a hub stopped or closed with ops waiting
@@ -1159,7 +1159,7 @@ What a hub does with the log (`src/sync/shared.js`):
   them too.
 - **A hub that cannot write** — a follower (`readOnly: true`), a writer
   whose lease was lost — hosts over the log and nowhere else (`sync.unit()`
-  is `READ_ONLY` without a shared log). Its hello answers the vector as the
+  is `ALX_ERR_READ_ONLY` without a shared log). Its hello answers the vector as the
   topic moved it (a shadow), its push is verified as a writer verifies one
   (forged and unsigned ops stop there, counted and announced), held to the
   shadow and to what it forwarded before (for 30 s), and forwarded to the
@@ -1270,10 +1270,10 @@ hold.
   one kind everywhere: a register outranks a counter, a counter a set, a set
   a list, a list a text, a text a tree, on the op path and in a snapshot
   merge. Where the winner's op arrives the loser's state is dropped; where
-  the winner is held the loser's op is refused for that field (`OP_REFUSED`,
+  the winner is held the loser's op is refused for that field (`ALX_ERR_OP_REFUSED`,
   the field's `reason` naming the kind that holds it) and still logged and
   relayed. A local write of the wrong kind is refused before it is stamped
-  (`FIELD_KIND`). Set elements are told apart by their JSON text: `1` and
+  (`ALX_ERR_FIELD_KIND`). Set elements are told apart by their JSON text: `1` and
   `'1'` are two elements, and so are `{ a: 1, b: 2 }` and `{ b: 2, a: 1 }`.
 - **A field is one register however deep its value.** Merging is per field
   — a top-level name or a [path](#the-op) of names joined by `/`: a nested
@@ -1283,16 +1283,16 @@ hold.
 - **A counter keeps to the safe range.** Each stream's running sum of a
   counter stays within ±`Number.MAX_SAFE_INTEGER`: an `inc` that would take
   it past is refused as a bound (`detail: 'counter'`) — locally
-  `FIELD_KIND`, from a peer `OP_REFUSED`, the same on every node — and a
+  `ALX_ERR_FIELD_KIND`, from a peer `ALX_ERR_OP_REFUSED`, the same on every node — and a
   snapshot slot past it is not taken. The sums add up in the order of their
   keys, so a counter of fractions reads the same everywhere.
 - **A peer's op is checked before it is read**, and **a payload where it
   lands** — see [The op](#the-op). A malformed or skewed op is a gap in its
   stream; a payload the engine does not admit changes nothing, is reported
-  as `OP_REFUSED` with `reason: 'malformed'`, and is logged and relayed as a
+  as `ALX_ERR_OP_REFUSED` with `reason: 'malformed'`, and is logged and relayed as a
   no-op.
 - **Bounded, and a refusal is final.** An op past a [bound](#bounds) is
-  refused for that field (`OP_REFUSED`, `reason: 'bound'`, with `detail`,
+  refused for that field (`ALX_ERR_OP_REFUSED`, `reason: 'bound'`, with `detail`,
   `count` and `max`), then logged and relayed: the vector moves past it, so
   this node never takes it, and each node it reaches decides by its own
   bounds. Pending work depends on the order ops arrive in, so two nodes can
@@ -1308,13 +1308,13 @@ hold.
   batch only once its records were written. The append is the commit point:
   a write whose record file (or chain block) fails after it still stands and
   replicates, its record is held in memory so reads see it, and the database
-  reports `code: 'UNPERSISTED'`.
+  reports `code: 'ALX_ERR_UNPERSISTED'`.
 - **A node's own ops are kept for the nodes it dials**, until they have them
   — see [The dialer](#the-dialer).
 - **A host checks, every node decides.** A host that skips a peer's op — its
-  validator fails it (`OP_INVALID`), `beforeApply` returns `false`, the record
-  is unreadable here (`OP_UNREADABLE`) — or refuses it for a field
-  (`OP_REFUSED`) still logs and relays it: a withheld op would be a gap in
+  validator fails it (`ALX_ERR_OP_INVALID`), `beforeApply` returns `false`, the record
+  is unreadable here (`ALX_ERR_OP_UNREADABLE`) — or refuses it for a field
+  (`ALX_ERR_OP_REFUSED`) still logs and relays it: a withheld op would be a gap in
   its origin's stream for every node behind the host. What stops at the host
   is an op declaring a scope the peer was not granted, a malformed or skewed
   one, a signature refused, an equivocation, and a `beforeApply` that throws
@@ -1328,7 +1328,7 @@ hold.
   the registry, checkpoints — are written `atomic` (a temporary file renamed
   into place on `node:fs`; OPFS, IndexedDB and memory write a file whole); an
   open group and a record file are not, so a torn open group can only be the
-  newest, unannounced batch, and a torn record file reads as `INTEGRITY`
+  newest, unannounced batch, and a torn record file reads as `ALX_ERR_INTEGRITY`
   until `repair(id)` rebuilds it from the log.
 - **Encrypted records do not sync.** They are sealed for this node's key
   alone; an op that reaches a record sealed here is logged and relayed, never
@@ -1361,26 +1361,26 @@ a snapshot buys nothing an op could not:
 | Record id | 1 to 128 characters of `[A-Za-z0-9._@-]`, not starting with `.` | `malformed` |
 | Stream name (`origin`, `scope`) | 1 to 128 characters, no `@`, no control character | `malformed` |
 | Field path | 16 segments, 512 characters, no empty segment, no `__proto__` | refused |
-| Fields per record | 4 096 paths; the first in sorted order stay | `OP_REFUSED` `detail: 'paths'` |
+| Fields per record | 4 096 paths; the first in sorted order stay | `ALX_ERR_OP_REFUSED` `detail: 'paths'` |
 | `msg` | 1 024 characters | `malformed` |
 | `actor`, `from` | 256 characters each (`MAX_ACTOR`; a value of another shape by its JSON): claims taken as they are, but in the header every node hashes | `malformed`; locally a `TypeError` |
-| Stamp ahead of the receiver | `sync.maxSkew`, 24 hours — an op's `ts`, every stamp a `merge`'s `meta` holds | `SKEW` |
+| Stamp ahead of the receiver | `sync.maxSkew`, 24 hours — an op's `ts`, every stamp a `merge`'s `meta` holds | `ALX_ERR_SKEW` |
 | How deep a field of an op, or a snapshot record's `data` or `meta`, nests | 80 levels (`MAX_WIRE_DEPTH`; every object or array on the deepest path a level) | `malformed`; a snapshot record left out |
 | How deep what a local write takes nests | 64 levels (`MAX_JSON_DEPTH`): the 16 between leave room for what an op and a meta wrap around a value | `TypeError` |
-| A seq taken for a node's own stream from a host (`REWOUND`) | 2⁵³ − 1 − 2³² | not taken |
-| A counter's sum per stream | ±2⁵³ − 1 | `OP_REFUSED` `detail: 'counter'` |
-| A run's length | 2²⁰ elements (`MAX_RUN`) — an extension parked ahead of its run counted against it where it arrives, and against the field's slots while it waits | `OP_REFUSED` `detail: 'run'`; a snapshot's parked extension past it left out |
-| Pending ops per block | `sync.pendingMax`, 4 096 | `OP_REFUSED` `detail: 'pending'` |
-| A splice's cut ranges | 65 536 (`MAX_CUTS`); overlapping ranges of one run read as one for the change report | `OP_REFUSED` `detail: 'cuts'` |
-| A text's marks | 65 536 (`MAX_MARKS`) | `OP_REFUSED` `detail: 'marks'`; a snapshot block past it is not taken |
+| A seq taken for a node's own stream from a host (`ALX_ERR_REWOUND`) | 2⁵³ − 1 − 2³² | not taken |
+| A counter's sum per stream | ±2⁵³ − 1 | `ALX_ERR_OP_REFUSED` `detail: 'counter'` |
+| A run's length | 2²⁰ elements (`MAX_RUN`) — an extension parked ahead of its run counted against it where it arrives, and against the field's slots while it waits | `ALX_ERR_OP_REFUSED` `detail: 'run'`; a snapshot's parked extension past it left out |
+| Pending ops per block | `sync.pendingMax`, 4 096 | `ALX_ERR_OP_REFUSED` `detail: 'pending'` |
+| A splice's cut ranges | 65 536 (`MAX_CUTS`); overlapping ranges of one run read as one for the change report | `ALX_ERR_OP_REFUSED` `detail: 'cuts'` |
+| A text's marks | 65 536 (`MAX_MARKS`) | `ALX_ERR_OP_REFUSED` `detail: 'marks'`; a snapshot block past it is not taken |
 | A tree's depth read, a fractional index | 512 levels, 1 024 characters | the deeper levels unread; `malformed` |
 | The fold's walk up from a move's parent (`MAX_WALK`) | 512 ancestors | the move is moot, like one that would make a cycle — the same on every node |
-| A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |
+| A tree field's moves (`MAX_MOVES`), every node's together | 65 536 | `ALX_ERR_OP_REFUSED` `detail: 'moves'`; a snapshot block past it is not taken; a join keeps the oldest in the fold's order |
 | Ops per push, bytes per push, ops per second | `unit({ limits })`, none by default | 413, 429 |
 | Bytes one `blobPut` carries | `unit({ limits: { bytesPerBlob } })`, and 64 MiB whatever it says | 413 `BYTES_PER_BLOB`, `BLOB_TOO_LARGE` |
 | Records per snapshot page, ops per `changes` page | `unit({ pageSize })`, 500 | — |
 | Presence state | 16 KiB, 64 keys, 8 deep; a stamp no more than 60 s ahead; 1 024 entries per update; 20 updates a second (kept across a repeated hello) | refused — by the receiver and by the host, which keeps and relays nothing it would refuse |
-| Scopes a hello asks for | 256, each a stream name or `*`, each once | `BAD_HELLO` |
+| Scopes a hello asks for | 256, each a stream name or `*`, each once | `ALX_ERR_BAD_HELLO` |
 
 ## Compatibility
 

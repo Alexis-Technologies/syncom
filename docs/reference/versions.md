@@ -35,7 +35,7 @@ that answered `false`, an op invalid under its schema — is no version here; on
 becomes one, at its own event id, once the node runs that version. `history(id, { limit })` lists the newest
 `limit` versions (50 by default, `Infinity` for all); `complete` is false when it leaves older ones out, and
 `history(id, { limit, before })` with the oldest version's `eventId` pages back from it. `before` is an event id
-of this log (another value is a `TypeError`, one of another incarnation `HISTORY_GONE` with `reason: 'epoch'`).
+of this log (another value is a `TypeError`, one of another incarnation `ALX_ERR_HISTORY_GONE` with `reason: 'epoch'`).
 Each version carries the op's `eventId`, `seq`, `type`, `origin`, `actor`, `message` and `ts`, the `fields` it
 changed (removed ones included), and `data` — the record as it read after the op, through the schema lens and
 the `afterRead` hook, `null` once deleted. A read at a version runs `beforeRead` and `afterRead` with
@@ -45,7 +45,7 @@ the `afterRead` hook, `null` once deleted. A read at a version runs `beforeRead`
 `atVersion(at)` is the whole database at a version: every id the log retains entries for and every catalog id
 folded to the version, and the vector of the ops within it, per stream — a stream with nothing retained was
 dropped whole below the floor and is inside the version; one retained only past the version is
-`HISTORY_GONE` (`reason: 'compacted'`). Its `snapshot()` pages the result the way `snapshot()` pages the
+`ALX_ERR_HISTORY_GONE` (`reason: 'compacted'`). Its `snapshot()` pages the result the way `snapshot()` pages the
 present, which is what a [branch](#branches) forks from.
 
 ## What the log can vouch for
@@ -56,22 +56,22 @@ among what an open could not read). From then on a version is exact only when a 
 (`set()`, `insert()`), a `delete()` or a `purge()` — stamped above `droppedTs` is inside the cut: a reset
 discards everything stamped below it, and everything dropped was stamped at or below `droppedTs`. `history()`
 lists the versions from that reset on and reports `exact: false` (with whatever is retained) when there is none;
-`get(id, { at })` rejects with `HISTORY_GONE` and `reason: 'compacted'` for a cut it cannot give exactly, and
+`get(id, { at })` rejects with `ALX_ERR_HISTORY_GONE` and `reason: 'compacted'` for a cut it cannot give exactly, and
 for a cut before anything retained of a record that exists. A record that never existed here reads as `null` at
 any version. Under `retention: 'all'` nothing is dropped and every version is exact.
 
 One exception the reset rule has, the one [`repair()`](./api#database) has too: a counter slot alive across the
 reset keeps a sum older increments went into, so the fold from the reset lacks them. With `droppedTs` above 0 the
 fold of everything retained is compared with the record as it is, which shows the difference whenever the
-present still carries it — `exact: false`, `HISTORY_GONE` — and the next reset ends it.
+present still carries it — `exact: false`, `ALX_ERR_HISTORY_GONE` — and the next reset ends it.
 
 A node that joined through a snapshot holds the joined state as one `merge` op: a version by event id or vector
 takes it as one op, but a stamp below the merge's cannot tell which of the joined ops were written by then and
 rejects with `reason: 'merge'`. A purge scrubs the payload of every entry of the record: `history()` still lists
 the ops, the purge among them, with `data: null`, `fields: []` and `scrubbed: true`, and a version before the
 purge rejects with `reason: 'scrubbed'`; one after it is `null`. An encrypted record has no ops and no past:
-`ENCRYPTED`. An event id from another incarnation of the log rejects with `reason: 'epoch'`; a seq the log has
-not reached, or an `at` of the wrong shape, is a `TypeError` with `code: 'INVALID_VERSION'`.
+`ALX_ERR_ENCRYPTED`. An event id from another incarnation of the log rejects with `reason: 'epoch'`; a seq the log has
+not reached, or an `at` of the wrong shape, is a `TypeError` with `code: 'ALX_ERR_INVALID_VERSION'`.
 
 `db.log.pin(keep)` holds the log's segments past retention for a reader that needs them — an undo stack, a
 long-running comparison: an entry `keep(entry)` answers true for stays, with its segment and everything after
@@ -101,16 +101,16 @@ In the engine's stores (under `<path>/` on the files engine):
 The order of writes: a tag's catalog, then `tags.json`, then the tag is registered; an untag moves the copies
 the older tag needs, then rewrites `tags.json`, then removes the files. A `tags/<name>` left without its line in
 `tags.json` — a crash in between — is unknown to every reader and is emptied when a tag of that name is taken
-again. A name is of the record-id form (another is a `TypeError`; a name in use is `TAG_EXISTS`, with `tag`),
+again. A name is of the record-id form (another is a `TypeError`; a name in use is `ALX_ERR_TAG_EXISTS`, with `tag`),
 and so is every name `tags.json` holds — a line of another name is dropped at open, with a warning, never read
 as a path.
 
 A copy is the file as it was, chain block included: a tampered or torn copy fails its check at the tag
-(`INTEGRITY`) and leaves the present alone; a sealed record's copy stays sealed for this node's key. The copy is
+(`ALX_ERR_INTEGRITY`) and leaves the present alone; a sealed record's copy stays sealed for this node's key. The copy is
 taken inside the write, in the write set ahead of the record, so a copy that cannot be written leaves the record
-held — the op is logged, the record reported `UNPERSISTED` and kept in memory, its file untouched, so the tag
+held — the op is logged, the record reported `ALX_ERR_UNPERSISTED` and kept in memory, its file untouched, so the tag
 still reads the file — and the next write of it lands with the copy. For the same reason `tag()` refuses with
-`UNPERSISTED` while a record is held: there is no file to copy from until it lands. Under
+`ALX_ERR_UNPERSISTED` while a record is held: there is no file to copy from until it lands. Under
 `createDatabase({ defer })` `tag()` lands the waiting files first, so the tag's catalog and the files agree; a
 record written after the tag whose file still waits reads at the tag from that file — still the tag's state —
 and the copy is taken when the file lands. A purge reaches the tags: every copy of the record goes and every
@@ -126,12 +126,12 @@ lands between the catalog and the position it names.
 
 An open reads `tags.json` and the newest tag's catalog — the one the write path copies into — and an older tag's
 catalog when the tag is first read, so an open costs one catalog however many tags there are. `at(name)` reads
-nothing: it throws `TAG_NOT_FOUND` for a name this node has not, and the view's first read reads the catalog,
+nothing: it throws `ALX_ERR_TAG_NOT_FOUND` for a name this node has not, and the view's first read reads the catalog,
 which is why `has()` and `list()` are promises. A tag whose catalog is gone is dropped then (the newest at open)
 as `untag()` would drop it, with a warning (`tags.dropped`), and the read that found it gone rejects with
-`TAG_NOT_FOUND`. An unreadable `tags.json` does not stop the open — the tags' names cannot be listed back from the
+`ALX_ERR_TAG_NOT_FOUND`. An unreadable `tags.json` does not stop the open — the tags' names cannot be listed back from the
 disk — so the file is kept as `tags.corrupt.json`, the database runs without tags (`stats().tags.corrupt`),
-`tag()` refuses with `CORRUPT` so nothing overwrites the names, and every record changed meanwhile has its file
+`tag()` refuses with `ALX_ERR_CORRUPT` so nothing overwrites the names, and every record changed meanwhile has its file
 kept under `.pending`; the next open with a repaired file hands those copies to the newest tag, so it reads as it
 did. A directory that holds tags is refused at `createDatabase()` without the `versions` plugin.
 
@@ -160,13 +160,13 @@ terms of the write API, one per field by its kind:
 A field that is gone is an `unset`. One that changed kind is an `unset` and then the field made again whole as
 what it is at `to`: a counter by an `inc` of its sum, a set by an `add`, a list or a text by a `splice`, a tree by
 its moves, and a register by a `put` of its value. The `unset` is not optional: on the op path a register outranks
-every other kind, but no local write lands on a field of another kind (`FIELD_KIND`), so the name is freed first.
+every other kind, but no local write lands on a field of another kind (`ALX_ERR_FIELD_KIND`), so the name is freed first.
 For the same reason every `unset` of a diff comes ahead of everything it makes, whatever the order of the fields:
 a text at `profile` is gone before `profile/city` is put under it. A field that was not there is made the same
 way, so a counter that reads `0` comes back as an `inc` of `0`. One thing a diff cannot make: a set, a list, a
 text or a tree that reads empty — no op makes an empty one — so where `to` holds such a field and `from` holds
 another kind, or none, the field is left out. And a list made again names its elements anew, so a diff that makes
-one again and also holds fields under its old elements is refused whole by `applyPatches()` (`NOT_FOUND`, nothing
+one again and also holds fields under its old elements is refused whole by `applyPatches()` (`ALX_ERR_NOT_FOUND`, nothing
 written): a diff does not rename them. A text's marks are not diffed. The diff reads both versions through the
 schema lens, raw, without the read hooks, and rejects as `get(id, { at })` would for either version.
 
@@ -174,7 +174,7 @@ schema lens, raw, without the read hooks, and rejects as `get(id, { at })` would
 many ops it took. A patch is checked as the method of its name checks its arguments — the wrong shape is a
 `TypeError` and nothing is written — and every patch is first resolved and applied over a scratch record, so an
 index out of range, a kind clash, a cycle, a sibling not there or a type change refuses the whole list with the
-error the method would have thrown (`OUT_OF_RANGE`, `FIELD_KIND`, `CYCLE`, `NOT_FOUND`, `TYPE_IMMUTABLE`), before
+error the method would have thrown (`ALX_ERR_OUT_OF_RANGE`, `ALX_ERR_FIELD_KIND`, `ALX_ERR_CYCLE`, `ALX_ERR_NOT_FOUND`, `ALX_ERR_TYPE_IMMUTABLE`), before
 anything is appended: a restore lands whole or not at all. The hooks and the validator run on each op as it is
 made, and one that throws on a later op leaves nothing written — no version in `history()`, no op on its way to
 the peers. A `restore()` whose diff is a reset makes texts again without their marks.
@@ -239,7 +239,7 @@ oldest step (conflicts are read from the log's entries), so a long stack holds s
 `branch(parent, { path, from, ...options })` (`@alexify/syncom/branch`) forks a database into a new directory — a
 new identity, its own keys and log — standing at the parent's state, at a tag of it (`from: { tag }`), or at any
 version its log can still give exactly (`from: { at }`, through `atVersion()`; a record compacted past it, or a
-stream cut with nothing of it inside, is `HISTORY_GONE`, never under `retention: 'all'`). It is opened with the
+stream cut with nothing of it inside, is `ALX_ERR_HISTORY_GONE`, never under `retention: 'all'`). It is opened with the
 options given, on the parent's `fsi` unless they name another; its `sync` gets `retention: { ops: 0 }`, so every op
 stays for the merge back, and `autoStart: false`. The fork pages the parent's snapshot (or the tag's, or the
 version's) into the branch and adopts the parent's vector, so the branch knows what it holds; what lands on the
@@ -255,10 +255,10 @@ a third node's included — is joined as state instead, its snapshot pages then 
 `joined: true`: a merge never reports success over a gap. A `signatures: 'require'` parent takes a branch's ops:
 they are signed by the branch's own key.
 
-`branch()` opens a new directory only: a path that holds files already is `BRANCH_EXISTS`, and a fork that fails
+`branch()` opens a new directory only: a path that holds files already is `ALX_ERR_BRANCH_EXISTS`, and a fork that fails
 halfway leaves nothing behind. `drop(branch)` closes it and removes every file of the known layout, the tags'
 included; the empty directories stay. It takes only what `branch()` made: a database with no `branch.json` is
-refused with a `TypeError` and keeps its files, an unreadable one with `CORRUPT`. A branch is a branch only here:
+refused with a `TypeError` and keeps its files, an unreadable one with `ALX_ERR_CORRUPT`. A branch is a branch only here:
 nothing of it replicates as such, and a peer sees merged ops like any other.
 
 ## Compact
@@ -268,7 +268,7 @@ places keeps a run per place, a field deleted from keeps its tombstones — is r
 source, message })`: a whole-record write of the registers and one op per field of another kind (an `inc`, an
 `add`, a text or a list as one run, a tree as one move per node), so what lies under it goes by the reset rule on
 every node, and the fields read as they did. It resolves to how many ops it took — `0` for a record that is not
-there, `ENCRYPTED` for an encrypted one — and is a whole-record write like any other: a peer's op stamped before
+there, `ALX_ERR_ENCRYPTED` for an encrypted one — and is a whole-record write like any other: a peer's op stamped before
 it and arriving after it is dropped by the reset, and a peer's typing stamped above it that was anchored in the old
 runs reads from the head (see [How a list or text merges](./text#how-a-list-or-text-merges)). A text's marks are
 laid again over the new run, in the order they were made and with the expand rule their anchors had, so `spans()`

@@ -107,7 +107,7 @@ A collection can also take the id from the record's own data, from one field or 
 Two instances writing to one database would number their ops the same way, and peers would drop
 one of them as a duplicate. So `createDatabase()` holds the path while it is open: through the Web Locks
 API in the browser, and through a lock file elsewhere. A second open of the same path rejects with
-`LOCKED`:
+`ALX_ERR_LOCKED`:
 
 <<< @/examples/database.mjs#lock
 
@@ -117,7 +117,7 @@ option](../reference/api#createdatabase-options) has the details.
 
 <<< @/examples/database.mjs#lock-wait
 
-Two browser tabs are two instances, so the second tab sees `LOCKED` too. To work with one database from
+Two browser tabs are two instances, so the second tab sees `ALX_ERR_LOCKED` too. To work with one database from
 several tabs, let one tab lead and the others follow: [Leader election](./leader-election) shows how, and
 [SharedWorker](./storage-shared-worker) covers the alternatives.
 
@@ -137,7 +137,7 @@ you.
 ## Close or remove a database
 
 `close()` stops replication, writes everything that is waiting, seals the log and releases the lock. After
-it, every write rejects with `CLOSED`:
+it, every write rejects with `ALX_ERR_CLOSED`:
 
 <<< @/examples/database.mjs#closed
 

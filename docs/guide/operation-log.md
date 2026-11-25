@@ -93,7 +93,7 @@ Clocks do not have to agree for nodes to converge, only for "last writer" to mea
 by it. When two nodes write the same field concurrently, the faster clock wins on both sides; skew
 changes who wins, never whether they agree. Keep clocks synced with NTP if that matters to you. A
 stamp more than `sync.maxSkew` ahead of the receiver's clock (24 hours by default) is a broken clock
-rather than a concurrent write: the op is refused as malformed and reported with `SKEW`, and the
+rather than a concurrent write: the op is refused as malformed and reported with `ALX_ERR_SKEW`, and the
 receiver's clock never observes it.
 
 ## Who wrote it, and nothing else: the hash chain
@@ -111,7 +111,7 @@ from an older copy, a second instance running under the same identity, or a key 
 Without it, two hosts holding different ops at `mallory:3` would each think the other's op is a
 duplicate, and the records would differ for good with equal vectors. With it, a node that holds one
 op at a seq and is handed another, or is handed an op whose `prev` is not the fingerprint it holds
-before it, refuses it and reports `EQUIVOCATION` with both fingerprints. Each node keeps the branch it
+before it, refuses it and reports `ALX_ERR_EQUIVOCATION` with both fingerprints. Each node keeps the branch it
 took first and never mixes the two. The chain detects a fork; it does not heal one, and the writer's
 identity is the one to retire.
 
@@ -135,7 +135,7 @@ order.
 Log first, then the record, is what makes a crash safe: if the process dies after the append and
 before the record file, the next open replays the log's unsealed tail onto the records. The append
 is the commit point, so a write whose record file then fails still stands and replicates; the database
-keeps the record in memory and reports `UNPERSISTED`. By default record files wait up to 16 ms
+keeps the record in memory and reports `ALX_ERR_UNPERSISTED`. By default record files wait up to 16 ms
 (`createDatabase({ defer })`) so that several writes to one record land as one file write; the log
 itself is durable at once.
 

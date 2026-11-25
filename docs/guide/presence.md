@@ -66,7 +66,7 @@ the instance's timers.
 ## What a state may hold
 
 A state is one JSON object of at most 64 keys, 8 levels deep and 16 KiB as JSON; `set()` rejects a larger
-one with `PRESENCE_SIZE`. Every `set()` replaces the whole state, and each carries a counter of this
+one with `ALX_ERR_PRESENCE_SIZE`. Every `set()` replaces the whole state, and each carries a counter of this
 node's, so where two updates arrive out of order the newer wins. Keep what changes often (a caret) small;
 16 KiB is the bound, not a target.
 

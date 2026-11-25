@@ -86,15 +86,15 @@ hub's other traffic.
 
 A page that cannot be applied, because a `beforeApply` hook threw or the log append failed, is a break
 in the stream, not a page to step over. The dialer drops the pages behind it, closes the feed, reports
-`PAGE_FAILED` with the saved `cursor` and the `attempt`, and subscribes again from that cursor, so the
-page comes again. The third failure in a row leaves the peer **stuck** (`STUCK`, `peers()[i].stuck`):
+`ALX_ERR_PAGE_FAILED` with the saved `cursor` and the `attempt`, and subscribes again from that cursor, so the
+page comes again. The third failure in a row leaves the peer **stuck** (`ALX_ERR_STUCK`, `peers()[i].stuck`):
 nothing past that page is taken until you fix the cause and call `enableNode(url, false)` and then
 `enableNode(url, true)`. The cursor never moves past a page that did not land.
 
 <FigResume />
 
 One problem stays local to one op instead of the page: an op whose record file this node cannot read
-is skipped and reported as `OP_UNREADABLE`, and the rest of the page lands.
+is skipped and reported as `ALX_ERR_OP_UNREADABLE`, and the rest of the page lands.
 
 ## Pick up after a reconnect
 
@@ -110,7 +110,7 @@ after a reconnect the dialer only repeats hello and the push:
 wrpc gives a reconnected client a new server-side identity, so the reopened subscription can reach
 the host before the new hello does; the host answers it with 428 ("say hello first") and the dialer
 greets again. A host that answers 428 to five fresh hellos in a row is reported once as
-`HANDSHAKE_LOOP` and not greeted again until the link reconnects. Timeouts on a call are the link's
+`ALX_ERR_HANDSHAKE_LOOP` and not greeted again until the link reconnects. Timeouts on a call are the link's
 too: give the wrpc client a `timeout`.
 
 ## Join from a snapshot
@@ -135,7 +135,7 @@ The joined state enters the dialer's own log as `merge` and `advance` ops, so a 
 from the dialer gets it too: a bootstrap is transitive. Those ops run in the dialer's `@~` stream and
 never travel back to the node the snapshot came from. A `beforeBootstrap` hook can refuse a bootstrap,
 and the dialer refuses one by itself from a host that runs fewer field kinds than it does
-(`KINDS_MISMATCH`), since that host's snapshot would lack those fields. A record the dialer keeps
+(`ALX_ERR_KINDS_MISMATCH`), since that host's snapshot would lack those fields. A record the dialer keeps
 [encrypted](./encryption) is left as it is, and a record with a stamp past the skew bound is left
 out.
 
@@ -150,9 +150,9 @@ through the same gate before anything is written. In order:
    levels.
 3. **Signature**: a signed op is verified against its origin; under `signatures: 'require'` an unsigned
    op is refused too.
-4. **Stamp**: a stamp beyond `sync.maxSkew` ahead of this node's clock is refused (`SKEW`).
+4. **Stamp**: a stamp beyond `sync.maxSkew` ahead of this node's clock is refused (`ALX_ERR_SKEW`).
 5. **Order**: an op this node already has is a duplicate, one that skips ahead is a gap.
-6. **Chain**: an op that forks its writer's stream is refused (`EQUIVOCATION`).
+6. **Chain**: an op that forks its writer's stream is refused (`ALX_ERR_EQUIVOCATION`).
 7. **The record's scope** (on a host): an op that would write a record outside the peer's scopes,
    before or after the op, is refused, and logged as a withheld scrub.
 8. **Rules**: the host's `authorizeWrite`, then your `beforeApply` hook.
@@ -168,7 +168,7 @@ the op comes again intact. An op declined at step 7, 8 or 9 (the record is outsi
 rule refuses it, the validator fails, a field's kind holds it) is still logged and relayed as a no-op, so
 that the nodes behind this one do not see a hole in the writer's stream. A refusal at step 7 or by
 `authorizeWrite` goes on as a withheld scrub, the header alone, which applies nowhere, not even as a
-purge, and the pusher is told (`WRITE_REFUSED`). A host checks, and every node decides by its own rules.
+purge, and the pusher is told (`ALX_ERR_WRITE_REFUSED`). A host checks, and every node decides by its own rules.
 
 ## Sync without the plugin
 

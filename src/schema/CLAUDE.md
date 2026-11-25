@@ -12,8 +12,7 @@ src/schema/api.js         what the plugin does over the lent core: loadVersion (
                           migrateRecord (one record, migrate()'s and a local write's first step: what the lens changed, as one
                           `version` op) — requires errors.js, shape.js, compose.js, entity.js only
 src/schema/entity.js      project / unproject / foldSet — the record as its validator sees it, the validated value as the op carries it;
-                          the core's side of the schema (commit.js and database.js require it), shared with the lens — requires shape.js,
-                          paths.js only
+                          the core's side of the schema (commit.js and database.js require it), shared with the lens — requires shape.js, paths.js and argument-errors.js only
 ```
 
 ## Rules

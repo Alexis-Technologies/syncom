@@ -29,7 +29,7 @@ is small, keep it on the node itself:
 <<< @/examples/trees.mjs#data
 
 `outline/intro/title` is a field of the node `intro`, a register that merges on its own; a read puts the
-node's fields under `data`. A write under a node that is not there is refused with `NOT_FOUND`.
+node's fields under `data`. A write under a node that is not there is refused with `ALX_ERR_NOT_FOUND`.
 
 ## Remove a subtree and bring it back
 
@@ -66,21 +66,21 @@ parent fell reads again once the parent is back.
 
 <<< @/examples/trees.mjs#errors
 
-Locally, a move that would put a node under one of its own descendants rejects with `CYCLE`, and an
-`after` or `before` sibling that is not under the parent rejects with `NOT_FOUND`. Both are decided against
+Locally, a move that would put a node under one of its own descendants rejects with `ALX_ERR_CYCLE`, and an
+`after` or `before` sibling that is not under the parent rejects with `ALX_ERR_NOT_FOUND`. Both are decided against
 the tree as it is when the write runs, so a race with a peer's move surfaces as the error rather than as a
 move that silently does nothing. A field is a tree for good: `update()`, `push()`, `add()` or `inc()` on it
-rejects with `FIELD_KIND`.
+rejects with `ALX_ERR_FIELD_KIND`.
 
 ## Costs and limits
 
 - A tree keeps every move of every node until the record is reset, a few dozen bytes each, and keeps its fold
   with the field, so a move costs the same in a large tree as in a small one. A field holds 65 536 moves in
-  all; past them `treeMove()` rejects with `FIELD_KIND` and `kind: 'bound'`.
+  all; past them `treeMove()` rejects with `ALX_ERR_FIELD_KIND` and `kind: 'bound'`.
   [`compact(id)`](./health#rewrite-a-record-that-has-grown) rewrites the field as one move per node.
-- A tree reads 512 levels deep; a move that would reach deeper rejects with `OUT_OF_RANGE`.
+- A tree reads 512 levels deep; a move that would reach deeper rejects with `ALX_ERR_OUT_OF_RANGE`.
 - A place among siblings is a fractional index of at most 1 024 characters. After tens of thousands of
-  inserts at one spot the next move there rejects with `OUT_OF_RANGE`; move a sibling away or compact the
+  inserts at one spot the next move there rejects with `ALX_ERR_OUT_OF_RANGE`; move a sibling away or compact the
   record.
 - The bounds a peer is held to are in the [wire reference](../reference/wire#bounds), and measured costs on
   the [benchmarks](./benchmarks) page.

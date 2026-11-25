@@ -11,7 +11,7 @@ src/<name>/<name>.js      every subpath is a folder under src/ with its entry an
 src/all/all.js            @alexify/syncom/all — the core with every shipped plugin registered (text, tree, signing, chain, encryption,
                           sync, schema, telemetry, query, versions, local): the API as it was before the blocks
 src/chain/chain.js        @alexify/syncom/chain — the chain plugin and Blockchain; SHA-256 through src/crypto/digest.js
-src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/resolve/diff/realize/migrate/compact/methods) and API modules; PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
+src/plugin.js             createPlugins — the registry one createDatabase() builds: kind modules (ranks, block codes, op types, apply/join/prune/render/resolve/diff/realize/migrate/compact/methods) and API modules; ALX_ERR_PLUGIN_MISSING; PENDING_MAX — requires shape.js, errors.js
 src/contracts/contracts.js the @alexify/syncom/contracts subpath — never back in the barrel
 src/local/local.js        @alexify/syncom/local — the local plugin: db.local over the `local` kv namespace, never an op (its own CLAUDE.md)
 src/state/state.js        @alexify/syncom/state — createState(db, name): app state by path over a record or a local document (its own CLAUDE.md)
@@ -24,13 +24,13 @@ src/connector/connector.js @alexify/syncom/connector — replicate(db, { name, c
 src/testing/testing.js    @alexify/syncom/testing — MemoryLink, createMesh, settle, waitUntil, withDatabase, memoryEngine: what a test over syncom stands on; the repository's tests run on it through tests/utils (its own CLAUDE.md)
 src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, readOnly, limit, sealed }): the tools an agent calls over a database in the Model Context Protocol's shape, every argument checked against the tool's inputSchema (its own CLAUDE.md)
 src/store/store.js        the @alexify/syncom/store subpath — toStore/fromEvents/toObservable: one store object for Svelte's contract and
-                          React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — no requires
-src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash only
-src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — no requires
-src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — no requires
+                          React's useSyncExternalStore over a cursor, a Record, get(), a presence or an emitter — requires argument-errors.js only
+src/inspect/inspect.js    the @alexify/syncom/inspect subpath — a record's anatomy (through the [SOURCE] seam's raw `entry`) and anonymize; requires compose, shape, symbols, hash and argument-errors.js only
+src/backend.js            the fsi contract (isFsi/checkFsi; sync, create and append optional), withSync — requires argument-errors.js only
+src/engine.js             the engine contract (isEngine/checkEngine/checkEngineDb, capabilitiesOf, kvNamespace/fsiNamespace) — requires argument-errors.js only
 src/blobs.js              the door of every blobs store: MAX_BLOB_BYTES (64 MiB, the one cap on plain bytes; a store takes MAX_STORED_BYTES, the seal's 28 more), isDigest/checkDigest (SHA-256 as 64 lowercase hex),
-                          checkBlobBytes (a Uint8Array within the cap, BLOB_TOO_LARGE past it) — the engines', attachments' and fetchBlob's; apart from engine.js, which every block bundles — no requires
-src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js only
+                          checkBlobBytes (a Uint8Array within the cap, ALX_ERR_BLOB_TOO_LARGE past it) — the engines', attachments' and fetchBlob's; apart from engine.js, which every block bundles — requires argument-errors.js only
+src/write-set.js          checkWriteSet — a write set as the contract shapes it: every name a key, every id admitted — requires engine.js and argument-errors.js only
 src/layout.js             DIRS, tagDirs — every directory a database keeps under its path (the kv namespaces, the files engine's, a tag's two): what engine.remove sweeps, tests/package/layout.test.js holds every module to — requires engine.js only
 src/readonly.js           readOnlyDb — an engine's database that refuses every write: what `createDatabase({ readOnly })` opens over — no requires
 src/layered/layered.js    @alexify/syncom/layered — layered([top, …, bottom], { write, fill, queue }): one fsi over several, a multi-level
@@ -54,23 +54,23 @@ src/header.js             what names an op, the core's: the header (v1, `prev` l
 src/shape.js              isPlainObject, own, asJson, isRecordId, isStreamName, wellFormed — what enters is checked here
 src/paths.js              field paths: isPath, ancestorsOf, under, valueAt, MAX_PATHS — no requires
 src/compose.js            compose (the paths nested for a reader), decompose (a reading back to the fields) — requires paths.js
-src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument checks, shared by Database and realize() in patch.js — requires paths.js only
+src/args.js               spliceArgs, treeArgs, markArgs, setElements, jsonValue, isNodeId — the write API’s argument checks, shared by Database and realize() in patch.js — requires paths.js and argument-errors.js only
 src/order/order.js        the @alexify/syncom/order subpath — fractional indexes over a 62-letter alphabet (Loro's rule, MIT), as
-                          strings, for ordering records — no requires; the tree plugin uses it for a node's place
-src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js only
+                          strings, for ordering records — requires argument-errors.js only; the tree plugin uses it for a node's place
+src/patch.js              patches — the one vocabulary of diff()/applyPatches()/restore(): diffViews by kind, realize() to an op — requires shape.js, args.js, paths.js, plugin.js and argument-errors.js only
 src/symbols.js            COMMIT / REFRESH / SOURCE — the module-private seams between Database and what it hands out — no requires
 src/lazy.js               lazyField, putLazy, copyData, assignData — a field read when it is read (a list's, `mod.lazy`): an accessor the data and the delta share, copied as it is — no requires
 src/options.js            normalizeStorageOptions — createDatabase()'s plain options checked and defaulted (lock, cache, chain, skew…)
 src/lock.js               exclusive open: Web Locks or the root namespace's lock.json, stale by pid or age — requires errors.js, engine.js only
 src/catalog.js            the record catalog: live ids, collections, indexed values, the sorted indexes; catalog.json through a kv store — requires engine.js, sorted.js only
-src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — no requires
+src/sorted.js             SortedIndex — a sorted (keys, id) index over chunked sorted arrays: seek, insert, remove, build, iterate (forward, or backward by group of equal keys), ordinal; compare/rankOf, the one order of values — requires argument-errors.js only
 src/database.js           Database — the facade: open sequence, the mutation queue, the public API, the `core` it lends; `createDatabase()`
 src/writes.js             the facade's write helpers: checkOrm (an entity's methods/statics against what a Document and a Collection answer to), tombstone (a delete's payload), operate (an operator delta as the calls over a transaction's api), modifyIn (`modify(id, fn)` as the difference) — requires document.js, collection.js, operators.js, plugin.js, shape.js, errors.js only
-src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js only
+src/drop.js               dropDatabase(path, { engine | fsi }) — a closed database taken away under its lock; a directory holding no database refused — requires engine.js, files/files.js, backend.js, fsi.js, lock.js and argument-errors.js only
 src/defer.js              DeferredWindow — `createDatabase({ defer })`'s slots, timer and landing step — no requires
-src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId); a rotated source's moved.json refused (MOVED) — requires errors.js, shape.js only
+src/identity.js           loadIdentity — which node a directory is (the signing key, node.json, getId); a rotated source's moved.json refused (ALX_ERR_MOVED) — requires errors.js, shape.js only
 src/observe.js            Observers — `observe()`'s registry over the `transaction` event — requires paths.js only
-src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js only
+src/operators.js          the update operators ($set/$unset/$inc/$addToSet/$pull/$push/$pop/$min/$max/$rename) as a pure expansion onto the write API by the kind of each field (isOperators, expand; Database runs it inside the queue, `operate`) — requires args.js, shape.js, paths.js and argument-errors.js only
 src/fields.js             the API of the core's kinds beyond registers — inc/add/remove — over the lent core; a plugin's methods come with it; Database keeps a delegate per method
 src/patches.js           reading, applyPatches, compact — the present and its patches, the core's (the undo subpath stands on applyPatches); appliedHere lives in log.js
 src/entries.js            EntryStore — record files under data/ (a large block's runs in pieces beside them: `<id>~<n>.json`), the bounded cache, the catalog row each change leaves, the folded tombstones in the tombstones kv namespace
@@ -79,7 +79,8 @@ src/collection.js         Collection — an entity's records, `db.<Entity>`; pub
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`); `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
-src/errors.js             SyncomError (a field never its own name, code or stack, never `__proto__`), ValidationError, typed() — no requires
+src/errors.js             SyncomError (a field never its own name, code or stack, never `__proto__`), ValidationError, isQuotaError, the TypeError family re-exported — requires argument-errors.js only
+src/argument-errors.js    ArgumentError, ArgumentRangeError (ALX_ERR_INVALID_ARGUMENT), DataError (a DataErrorCode, `details`): what a module that throws nothing else requires — no requires
 src/wire-error.js         packError/unpackError — an error as JSON between two sides of this package (the tabs' channel, the remote engine) — requires errors.js only
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids
@@ -94,11 +95,11 @@ src/                      ships as-is — no build step, CommonJS, 'use strict';
   and one slot `meta.blocks[field] = { k, ts, … }` for every other kind; `k` names the plugin's block
   code, `ts` the newest stamp it holds, and a block is never mutated in place. The op types and their
   codes stay the protocol's (`OP_TYPES`, `TYPE_CODES`): a node without the plugin admits, logs and
-  relays the op and refuses it as `reason: 'kind'` (`OP_REFUSED`, a dirk, never a gap), drops a
+  relays the op and refuses it as `reason: 'kind'` (`ALX_ERR_OP_REFUSED`, a dirk, never a gap), drops a
   snapshot block of that kind with `sync.record.kind`, refuses a local call or patch with
-  `PLUGIN_MISSING` (typed, like `NO_CHAIN`) naming the subpath, refuses a reopen of a directory that
+  `ALX_ERR_PLUGIN_MISSING` (typed, like `ALX_ERR_NO_CHAIN`) naming the subpath, refuses a reopen of a directory that
   ran with a kind it lacks, and never bootstraps from a host whose `hello.kinds` lack one of its own
-  (`KINDS_MISMATCH`). Precedence is the registry's ranks (register 0, counter 1, set 2, a plugin's ≥ 3,
+  (`ALX_ERR_KINDS_MISMATCH`). Precedence is the registry's ranks (register 0, counter 1, set 2, a plugin's ≥ 3,
   unique), read alone. A plugin's methods are stubs on the facade (`Database#api`); `applyOp`,
   `mergeEntry`, `normalizeMeta`, `latestClock(meta, false, limits)`, `diffViews` and `realize` take
   the registry through `limits.plugins` / `plugins`, and `/all` pre-binds them. Tests that need the
@@ -115,12 +116,12 @@ src/                      ships as-is — no build step, CommonJS, 'use strict';
 sign, verify, signMessage }`, the signing plugin), `seal` (`{ encrypt, decrypt }`, the
   encryption plugin), `chain` (a Blockchain, the chain plugin), `local` and `attachments` (the stores the facade hands out as `db.local` and `db.attachments`) — and `open(ctx)` — `{ storage,
 options, settings, logger }`, run after the replay — hands back `sync` (the SyncManager, the
-  sync plugin: `storage.sync` is PLUGIN_MISSING without it). The core reads them as
+  sync plugin: `storage.sync` is ALX_ERR_PLUGIN_MISSING without it). The core reads them as
   `core.sign`/`core.verify`, `core.seal`, `core.chain`, and `core.hash` is
   `sha256` from `src/crypto/digest.js` (async on both platforms; its one crypto half is the hash —
   signing and sealing are the plugins'). Without a hook: the node id is what `getId` mints (checked by `isStreamName`), ops are
   neither signed nor verified (`checkPage` answers OK for every op), `block: null`, and an
-  encrypted write is `PLUGIN_MISSING`. What the options ask for and no plugin provides is
+  encrypted write is `ALX_ERR_PLUGIN_MISSING`. What the options ask for and no plugin provides is
   refused in `#open` with `missing()` — `signatures: 'require'`, `chain: true`, `encrypted` —
   never silently downgraded. A new api plugin adds a hook name here and a line in
   `docs/reference/api.md` Plugins; it never reaches the storage's state except through `ctx`
@@ -148,7 +149,7 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   recurse; `checkPage` runs after `wellFormed` and never throws, a throwing
   check is that op's FORGED); a stamp beyond `sync.maxSkew` ahead of
   `Date.now()` — the op's `ts` or any stamp a `merge`'s meta holds
-  (`latestClock`) — is refused the same way (`SKEW`), never observed into
+  (`latestClock`) — is refused the same way (`ALX_ERR_SKEW`), never observed into
   the clock, and a stamp a record already holds past it is not observed by a
   write either (`core.observe`, `clock.skew.ignored`). `malformed` ops are
   counted, not logged, not relayed. A local write deeper than
@@ -161,7 +162,7 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   does not back never comes along. A `for...in` or a bare `obj[key]` over peer-shaped data is a bug.
 - **The chain is optional, the log is not.** Without the `chain` plugin, or under `createDatabase({ chain: false })`
   with it, `core.chain` is null: `persistLocal`/`seal` in `src/commit.js` and `#persistBatch` write `block: null`,
-  `verify` is forced off, `validate()` throws `NO_CHAIN` (the message says which of the two). A new place that reads
+  `verify` is forced off, `validate()` throws `ALX_ERR_NO_CHAIN` (the message says which of the two). A new place that reads
   the chain must take null. A cold read is verified against its block (`validate(id, data, block)` through
   `EntryStore`'s `verify`): the block read, parsed and hashed once and kept (`#blockOf`, `VERIFIED_BLOCKS`), so the N
   records of a batch cost one hash each, never N parses of a block N long.
@@ -204,12 +205,12 @@ options, settings, logger }`, run after the replay — hands back `sync` (the Sy
   a register write and on an unset of the prefix). A counter, a set or a
   block holds its prefix alone: `roomFor` (`holderAbove`) refuses an op
   under it with `rejected.prefix` — locally `kindClash` does, before the
-  stamp, as `FIELD_KIND { prefix }` — and `dropUnder` takes the subtree
+  stamp, as `ALX_ERR_FIELD_KIND { prefix }` — and `dropUnder` takes the subtree
   where one lands (the mergeEntry tail does the same) — unless the kind
   NESTS (`mod.nests[kind]`: a list's elements, a tree's nodes carry fields;
   `members`/`holds`/`pick`/`nest` are the plugin's seam for src/compose.js;
   a text does not): under it the next segment is a member, no field, and
-  `kindClash` refuses a member that is not there as `NOT_FOUND { field,
+  `kindClash` refuses a member that is not there as `ALX_ERR_NOT_FOUND { field,
 elem }` while a peer's lands unreachable — not composed, not in a diff
   (`readAt`), dropped by `compact`). The reader's view
   is `compose(entry, plugins)` (`Database#view`, cached as `entry.composed`; the lens
@@ -230,7 +231,7 @@ elem }` while a peer's lands unreachable — not composed, not in a diff
   `splice`, `setAt` → `assign`, `move` → `move`, `mark`/`unmark`/`unmarkById`
   → `mark`, `treeMove`/`treeRemove` → `tree`, `delete` → tombstone — DELETE WINS: a field op above it lands in the
   meta unseen (`isAlive` reads `meta.deleted` alone; no change reported, a peer's validated nowhere), only a `write`
-  revives; locally a field op on a deleted record is `NOT_FOUND` (`prepareOp`), on an absent one makes it. Registers
+  revives; locally a field op on a deleted record is `ALX_ERR_NOT_FOUND` (`prepareOp`), on an absent one makes it. Registers
   are last-writer-wins by `(ts, origin)`; counters are per-stream sums — a slot per vector key, `origin` or
   `origin@scope` (`opKey`: seqs run per stream, so a seq is only ever compared within its stream; a bare-origin
   slot is the global stream's) — each within ±`MAX_COUNT` and added up in slot-key order; a set
@@ -249,12 +250,12 @@ elem }` while a peer's lands unreachable — not composed, not in a diff
   at once (`prune`, the same on either side of a reset) and a block's `ts` is
   derived from what it holds, so a cut never bumps it — which is what makes
   meta, not only data, order-free. Mixing two kinds on one field throws
-  locally (`FIELD_KIND`, `kindClash` in `src/commit.js`, before the stamp);
+  locally (`ALX_ERR_FIELD_KIND`, `kindClash` in `src/commit.js`, before the stamp);
   from a peer the kinds' PRECEDENCE decides, on the op path (`yieldTo` in
   `src/ops.js`) as in the snapshot merge: a register, then a counter, wins
   over a set, a set over a list, a list over a text, a text over a tree —
   where the winner arrives the loser's state is dropped, where the winner is
-  held the loser's op is `OP_REFUSED`. The rule reads kinds alone, never
+  held the loser's op is `ALX_ERR_OP_REFUSED`. The rule reads kinds alone, never
   stamps, which is what makes it commute; do not add a path that decides a
   clash another way. The wire: `splice` is code `/` with `{ cut, at |
 run/from, content }` (`content` naming the kind even when empty), `assign`
@@ -263,7 +264,7 @@ run/from, content }` (`content` naming the kind even when empty), `assign`
 fi }` — what is the op's own origin's named short (a run by its stamp, an element `ts:offset`;
   src/text/kind.js `fullRefs` lays the origin back where an op enters the engine). An index, a sibling or a range is resolved in `prepareOp` INSIDE the
   queue (`resolveSplice`/`resolveMove`/`resolveMark`/`resolveTree` in
-  `src/commit.js`: `OUT_OF_RANGE`, `CYCLE`, `NOT_FOUND`, and `SURROGATE` for an
+  `src/commit.js`: `ALX_ERR_OUT_OF_RANGE`, `ALX_ERR_CYCLE`, `ALX_ERR_NOT_FOUND`, and `ALX_ERR_SURROGATE` for an
   index of a text between the halves of a pair — `wholeCharacters` in
   src/text/kind.js, over the rendered text; `spliceArgs` refuses content with
   a lone half; src/text/myers.js diffs by code points where a surrogate is
@@ -323,7 +324,7 @@ fi }` — what is the op's own origin's named short (a run by its stamp, an elem
   `reason: 'malformed'` in `rejected` (`malformed()` in `src/ops.js`): on the
   local path `refuse()` in `src/commit.js` throws a `TypeError` — the
   arguments were checked, so this is a bug — and from a peer it is
-  `OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
+  `ALX_ERR_OP_REFUSED{reason:'malformed'}`, counted in `syncom.ops.rejected`, the op
   still logged and relayed as a no-op (a dirk, never a gap). A `bound`
   refusal carries `detail` (`pending`/`run`/`field`/`cuts`/`marks`/`moves`/`counter`/`paths`), `count`
   and `max`.
@@ -408,19 +409,19 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   it is never thrown through — `core.persist` (`Database#land`) and `land` in
   src/commit.js hold the entries in memory (`EntryStore.hold`, never
   evicted), leave the batch unapplied for the next open to replay, and
-  report `UNPERSISTED`. A node that dials keeps its own ops past retention
+  report `ALX_ERR_UNPERSISTED`. A node that dials keeps its own ops past retention
   until every enabled registered node in their scope holds them
   (`OpLog.retain(keep)`, `node.acked` — the own keys of a peer's vector,
   replaced at hello, raised by push answers); a host behind what the log
-  retains is `UNDELIVERABLE`, and a host ahead of the node's own stream at
-  hello is `REWOUND`. A node's own streams move by its own writes alone: a
+  retains is `ALX_ERR_UNDELIVERABLE`, and a host ahead of the node's own stream at
+  hello is `ALX_ERR_REWOUND`. A node's own streams move by its own writes alone: a
   feed's `advance` and `adoptVector` leave their keys out (and any seq that is
   no positive safe integer); `#rewind` in src/sync/manager.js moves them past
   the host's (`storage[REWIND]`, up to `MAX_SAFE_INTEGER − 2^32`, then
   bootstrap) only on PROOF — the hello answer's `proof`, the host's newest op
   of the stream, this node's own at the claimed seq and verified under its
   key (`storage[SIGNER]`) — or under `sync.rewind: 'adopt'`; unproven, the
-  stream stays, `REWOUND` says `adopted: {}` and `peer.rewound` keeps it from
+  stream stays, `ALX_ERR_REWOUND` says `adopted: {}` and `peer.rewound` keeps it from
   that host until the next hello. Never adopt a host's word on own keys.
 - **A log file is whole or it is nothing.** `fileOf`/`readFile` in src/files/journal.js
   (src/log.js re-exports them) are the ONLY writer and reader of a log file's text: `{"e":[…],"c":"…"}`,
@@ -433,7 +434,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   whole or not at all; a mismatch is
   `log.segment.unreadable`/`log.open.unreadable` with `reason: 'checksum'`,
   counted in `corrupt`, never read in part — an open group file so is moved to `log/corrupt/`,
-  never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `CORRUPT`). A file without a hash is not
+  never deleted; a read that fails other than ENOENT fails the open (`readOrNull`, `ALX_ERR_CORRUPT`). A file without a hash is not
   whole. The segments are what the directory lists — the index names none and is written where
   compaction dropped something; a gap among them is `log.segment.missing`. `retention: 'all'` is `{ ops: Infinity }`
   (`retainedOps` Infinity) — normalized in the OpLog constructor, nowhere else.
@@ -496,11 +497,11 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   compaction); both move at the append and go back with the vector in `#fail`.
   `admit` (src/apply.js) holds a peer's op to them: a duplicate with another
   fingerprint, and a next op whose `prev` is not the one held at seq − 1 (or
-  none, signed), are `EQUIVOCATION` (`reason` `'seq'`/`'chain'`) — not logged,
+  none, signed), are `ALX_ERR_EQUIVOCATION` (`reason` `'seq'`/`'chain'`) — not logged,
   not relayed, a gap, reported once per page, never a throw. Where nothing is
-  held at seq − 1 (a stream joined by snapshot, a REWOUND stream without its
+  held at seq − 1 (a stream joined by snapshot, a ALX_ERR_REWOUND stream without its
   proof op) the op is taken and the chain held from it; an unsigned op without
-  `prev` is a hand-made one, taken. A REWOUND proof's op becomes the stream's
+  `prev` is a hand-made one, taken. A ALX_ERR_REWOUND proof's op becomes the stream's
   head (`log.adoptHeads`). A new path that mints an op of this node's own goes
   through `link` before it signs, or its next op names the wrong predecessor.
 - **`merge` adds numbers.** `merge({ hits: 10 }, { hits: 1 })` is `11`. This is
@@ -524,7 +525,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   `write`/`merge`/`delete`, or a `purge` even scrubbed), folds the rest with
   `applyOp`, and writes through `#persistBatch` like a replay — one chain
   block, the catalog put by `EntryStore.write`. No such op is
-  `UNRECOVERABLE`; an integrity failure is never repaired implicitly on
+  `ALX_ERR_UNRECOVERABLE`; an integrity failure is never repaired implicitly on
   read — it is evidence first.
 - **The catalog is derived state, kept at one seam.** `EntryStore`
   (`src/entries.js`) is the only place that `catalog.put`: `write` (every
@@ -542,15 +543,15 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   record's file must put too, or the catalog lies until the next rebuild.
 - **A collection is a definition over the one write path, never a path of its own.** `Collection` (src/collection.js)
   derives the id its data names through `namedId` (src/schema/entity.js: the composite id's fields or the id field,
-  a value with the separator or not a string/number/boolean INVALID_ID with `entity`/`field`) and writes through the
-  core — `insert` as a `write` with `expect: ABSENT` (EXISTS decided inside the queue, an encrypted write too),
+  a value with the separator or not a string/number/boolean ALX_ERR_INVALID_ID with `entity`/`field`) and writes through the
+  core — `insert` as a `write` with `expect: ABSENT` (ALX_ERR_EXISTS decided inside the queue, an encrypted write too),
   `upsert`/`set` as a `write`, the operators expanded in the queue (`operate`), `modify` as the difference, a bulk as
   ONE `transact` with a verdict per row (`ownVerdict`: a row's own refusal is its verdict, anything else fails the
   batch) — MAX_BATCH (10 000) rows a transaction; the fields of a composite id and `$type` are immutable
   (`immutables` in src/commit.js). `addCollections`/`removeCollection` are `Catalog.define` (the postings, unique keys
   and sorted indexes of the type dropped and built once; the records re-indexed in pages inside the queue behind the
   landings) — nothing persisted, a reopen rebuilds. A write from inside a hook or a transaction's `fn` through the
-  database is IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
+  database is ALX_ERR_IN_TRANSACTION (`taskScope`, src/utils.js: the frame inactive once `fn` settled). The `[SOURCE]` seam is
   write-capable for the blocks — `foldMany`/`forgetMany` (cleanup), `purgeMany` (a collection's purge), `transact`
   (a cursor's writes), `guard` (a local write), `revert` (the sync manager's: a host's reading laid back through the
   kinds' patches) — every member a `#run` of the queue or a refusal of it; a new member goes through the queue the
@@ -569,7 +570,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
 - **The engine is injected.** `createDatabase({ engine })` is the medium of every byte (src/engine.js: stores `kv`, `records`,
   `pieces`, `copies`, `log`, `write(batch)`); `createDatabase({ fsi })` is `filesEngine(fsi)`. `#init` opens the engine BEFORE
   the lock — a key of the root namespace, or the engine's own lease where `capabilities.lock` is `'native'` (lost, the
-  database is read-only: `LEASE_LOST` once, `READ_ONLY` after); `#open` hands plugins `ctx.db` beside `ctx.fsi` (`null` under
+  database is read-only: `ALX_ERR_LEASE_LOST` once, `ALX_ERR_READ_ONLY` after); `#open` hands plugins `ctx.db` beside `ctx.fsi` (`null` under
   a native engine), the log its `store`, `EntryStore` the database, a catalog a `kvNamespace`; the registry and a branch
   reach it through `storage[DB]`. A new `fsi.`/`engine.` call on a module-level default is a bug. A batch of records is
   ONE write set (`EntryStore.writeMany`), atomic where the engine has transactions — the chain's block and tail ride in
@@ -588,7 +589,7 @@ position)`) and `land` (outside the queue, through `core.landing`, in log
   `beforeRead`/`afterRead` call `runHook` directly — a write from a read hook
   queues. A collection's events (`Collection#hear`, fed by `Catalog.subscribe` inside the landing) are queued
   there and told on a microtask after it — the row in the catalog, the landing never held by a listener. A
-  plugin's own write (a local document) asks the seam's `guard(what)` first: CLOSED, or READ_ONLY as `#run` refuses
+  plugin's own write (a local document) asks the seam's `guard(what)` first: ALX_ERR_CLOSED, or ALX_ERR_READ_ONLY as `#run` refuses
   one. Every event leaves through `notify()` (a path module's through `core.emit`, which is it):
   never `await this.emit(...)`, never emit `error` any other way (the Emitter
   throws on an unheard `error`, and that throw used to fail a push before the

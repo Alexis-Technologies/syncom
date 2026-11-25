@@ -786,7 +786,7 @@
         "kindClash": {
           "mark": "",
           "text": "fixed precedence, not stamps: register > counter > set > list > text > tree",
-          "note": "Where the winner arrives the loser's state is dropped; where the winner is held the loser's op is refused (`OP_REFUSED` error event). The loser's ops stay in the log, so `history()` on a node that applied them still shows them.",
+          "note": "Where the winner arrives the loser's state is dropped; where the winner is held the loser's op is refused (`ALX_ERR_OP_REFUSED` error event). The loser's ops stay in the log, so `history()` on a node that applied them still shows them.",
           "source": "src/ops.js:418-454; src/ops.js:889-946; docs/guide/replication.md:163-174"
         },
         "schema": {
@@ -802,8 +802,8 @@
         },
         "idReuse": {
           "mark": "⚠️",
-          "text": "one open per directory (lock); `SELF` and `REWOUND` caught at hello",
-          "note": "A host refuses a hello from its own id (409 `SELF`), and a node whose stream a host holds more of is told `REWOUND` and moves past it. Two live copies writing at once mint the same seqs: whichever op arrives second under a seq is dropped as a duplicate.",
+          "text": "one open per directory (lock); `SELF` and `ALX_ERR_REWOUND` caught at hello",
+          "note": "A host refuses a hello from its own id (409 `SELF`), and a node whose stream a host holds more of is told `ALX_ERR_REWOUND` and moves past it. Two live copies writing at once mint the same seqs: whichever op arrives second under a seq is dropped as a duplicate.",
           "source": "src/sync/hosting.js; src/sync/manager.js; src/apply.js:185-188; src/lock.js:1-20"
         },
         "author": {
@@ -887,7 +887,7 @@
         "counterReset": {
           "mark": "",
           "text": "a reset drops increments stamped below it; a register outranks the counter",
-          "note": "A peer's register write takes the field whatever its stamp (locally `update()` of a counter throws `FIELD_KIND`). A counter one origin incremented both before and after a concurrent reset does not converge — documented and left so.",
+          "note": "A peer's register write takes the field whatever its stamp (locally `update()` of a counter throws `ALX_ERR_FIELD_KIND`). A counter one origin incremented both before and after a concurrent reset does not converge — documented and left so.",
           "source": "docs/guide/replication.md:155-157; src/ops.js:337-360; src/ops.js:448-454; src/versions/history.js"
         },
         "set": {
@@ -964,12 +964,12 @@
         },
         "surrogates": {
           "mark": "✅",
-          "text": "refused: an index between the halves of a pair is `SURROGATE`; `updateText` diffs by code points",
+          "text": "refused: an index between the halves of a pair is `ALX_ERR_SURROGATE`; `updateText` diffs by code points",
           "source": "src/text/text.js:259 (wholeCharacters); src/text/myers.js; docs/guide/lists.md#binding-an-editor"
         },
         "splice": {
           "mark": "✅",
-          "text": "`splice(id, key, index, count, text)`; past the end is `OUT_OF_RANGE`",
+          "text": "`splice(id, key, index, count, text)`; past the end is `ALX_ERR_OUT_OF_RANGE`",
           "source": "src/fields.js:51-56; docs/guide/lists.md:27-39"
         },
         "updateText": {
@@ -1070,7 +1070,7 @@
         "treeCycle": {
           "mark": "",
           "text": "Kleppmann et al. 2021: moves fold in stamp order, the cyclic one skipped",
-          "note": "The older move stands on every node; the lost move is kept and can count later. Locally a move under a descendant throws `CYCLE`.",
+          "note": "The older move stands on every node; the lost move is kept and can count later. Locally a move under a descendant throws `ALX_ERR_CYCLE`.",
           "source": "src/tree/moves.js; docs/guide/lists.md:201-206; tests/tree.test.js:113"
         },
         "treeOrder": {
@@ -1184,7 +1184,7 @@
         "timeTravelNeeds": {
           "mark": "⚠️",
           "text": "the retained log: a fold of the record's ops, exact from a reset",
-          "note": "Once compaction ran, a version is exact only from a reset stamped above `droppedTs`, else `HISTORY_GONE`; the cost is one `applyOp` per retained op of the record. A tag costs a copied file per record changed after it.",
+          "note": "Once compaction ran, a version is exact only from a reset stamped above `droppedTs`, else `ALX_ERR_HISTORY_GONE`; the cost is one `applyOp` per retained op of the record. A tag costs a copied file per record changed after it.",
           "source": "src/versions/history.js; docs/guide/versions.md:56-91; docs/guide/versions.md:324-333"
         },
         "versionDiff": {
@@ -1213,7 +1213,7 @@
         "trim": {
           "mark": "✅",
           "text": "log retention drops old segments; `compact(id)` rewrites a record's metadata",
-          "note": "Before what compaction dropped a version is `HISTORY_GONE`, and a peer behind the floor bootstraps from a snapshot. `compact()` lays a text's marks again; it names the elements anew, so old cursors read `null` and a stacking mark has a new id.",
+          "note": "Before what compaction dropped a version is `ALX_ERR_HISTORY_GONE`, and a peer behind the floor bootstraps from a snapshot. `compact()` lays a text's marks again; it names the elements anew, so old cursors read `null` and a stacking mark has a new id.",
           "source": "docs/guide/replication.md; src/versions/api.js (compact, marksOf, inRuns); docs/guide/versions.md#costs"
         },
         "purge": {
@@ -1393,7 +1393,7 @@
         "malformed": {
           "mark": "✅",
           "text": "dropped and counted, never thrown: not logged, not relayed (a gap)",
-          "note": "A payload `applyOp` cannot admit — of any op type — is `OP_REFUSED` (malformed) and logged as a no-op; a page that throws is retried from its cursor.",
+          "note": "A payload `applyOp` cannot admit — of any op type — is `ALX_ERR_OP_REFUSED` (malformed) and logged as a no-op; a page that throws is retried from its cursor.",
           "source": "src/apply.js:169-183; src/ops.js:561-564; docs/guide/replication.md:346-354"
         },
         "bounds": {

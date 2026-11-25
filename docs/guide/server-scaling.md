@@ -60,7 +60,7 @@ cursor the client resumes from. How long the topic keeps entries is the broker's
 `trim()`); a client whose cursor was trimmed away bootstraps again. A [revocation](./partial-sync) made
 on one hub goes into the topic too, so no hub grants those scopes again.
 
-When the broker fails, the hub reports `SHARED_LOG_FAILED` on its manager's `error` event with a
+When the broker fails, the hub reports `ALX_ERR_SHARED_LOG_FAILED` on its manager's `error` event with a
 `reason`, and recovers by itself: an append that failed (`append`) is retried with everything its log
 holds above the last position it knows reached the topic, a cursor the broker trimmed (`gone`) is read
 from the oldest entry, an entry that could not be applied (`apply`) is retried with backoff. An entry

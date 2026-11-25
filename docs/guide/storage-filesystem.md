@@ -76,9 +76,9 @@ before the record lands loses nothing: the next open replays the logged operatio
 torn by the crash is dropped before anyone was told of it, and the files the log does not replay (its index,
 `node.json`, `tags.json`, the catalog) are written to a temporary file and renamed into place.
 
-A record file torn in the middle of a write reads as `INTEGRITY` until `repair(id)` rebuilds it. A disk that
+A record file torn in the middle of a write reads as `ALX_ERR_INTEGRITY` until `repair(id)` rebuilds it. A disk that
 fills up after the log took a write does not fail it: the write resolves, the record stays readable from memory,
-and the database's `error` event carries `UNPERSISTED` until the next open lands it.
+and the database's `error` event carries `ALX_ERR_UNPERSISTED` until the next open lands it.
 
 ## Survive a power loss
 
@@ -95,7 +95,7 @@ alone has no `sync`, so `durable` can do nothing there and says so at debug leve
 <<< @/examples/storage-filesystem.mjs#locked
 
 Two instances over one directory would hand out the same sequence number for two different operations, so the
-first instance holds the directory with `lock.json` and a second open rejects with `LOCKED`. A lock whose
+first instance holds the directory with `lock.json` and a second open rejects with `ALX_ERR_LOCKED`. A lock whose
 process is gone is stale, and the next open takes it over. To wait instead:
 
 <<< @/examples/storage-filesystem.mjs#wait

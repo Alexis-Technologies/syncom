@@ -24,7 +24,7 @@ the record encrypted with AES-256-GCM under a fresh key, and that key wrapped wi
 between the two. To seal every record of a database by default, open it with `createDatabase({ encrypted: true })`.
 
 Sealed records are the `encryption` plugin. `@alexify/syncom/all` registers it; with the lean core, add `encryption`
-to `plugins`, or a sealed write rejects with `PLUGIN_MISSING`.
+to `plugins`, or a sealed write rejects with `ALX_ERR_PLUGIN_MISSING`.
 
 ## Why sealed records never sync
 
@@ -42,9 +42,9 @@ Because it is outside the log, a sealed record also cannot use what the log give
 <<< @/examples/encryption.mjs#refused
 
 `inc()`, `add()`, `remove()`, every list, text and tree edit, and `history()`, `diff()` and `compact()` on a sealed
-record reject with `ENCRYPTED`, and so does a sealed write inside a [transaction](./transactions-conflicts), whose
+record reject with `ALX_ERR_ENCRYPTED`, and so does a sealed write inside a [transaction](./transactions-conflicts), whose
 ops all go to the log. A record never changes kind: an encrypted write over a record that already replicates is
-refused with `ENCRYPTED` too, so you cannot pull a record back from your peers by sealing it.
+refused with `ALX_ERR_ENCRYPTED` too, so you cannot pull a record back from your peers by sealing it.
 
 Queries find sealed records on the node that holds the key, and only there: a host answering a peer's query, an
 agent's [tools](./mcp) and a [connector](./connectors) leave them out.
@@ -71,7 +71,7 @@ files engine, which is what a `path` opens by default, is wrapped at its backend
 its log reads back what it appends. Each value is bound to its place, so a ciphertext copied over another record's
 place, or into another database of the same engine, does not open.
 
-A file that is not the key's is refused with `DECRYPT_FAILED` and a `reason`: `'key'` for another key or a
+A file that is not the key's is refused with `ALX_ERR_DECRYPT_FAILED` and a `reason`: `'key'` for another key or a
 ciphertext cut short, `'plain'` for a file that was never encrypted, `'torn'` for one whose text is damaged. The
 first such file fails `createDatabase()`.
 
@@ -84,7 +84,7 @@ The key is changed by copying the database, never in place:
 `rotateAtRest()` copies everything the database holds into `into` (another path, another engine or backend, or
 both), sealed under the new key. The copy is the same node, with the same id, log and position in every stream, so
 no peer has to bootstrap from it. Once the copy is complete, the old place is fenced: `createDatabase()` there
-rejects with `MOVED` and names where the database went, until `dropDatabase()` removes it. That keeps two copies of
+rejects with `ALX_ERR_MOVED` and names where the database went, until `dropDatabase()` removes it. That keeps two copies of
 one node from writing at the same time. A copy cut short leaves the source as it was; the next rotation into the
 same target clears the leftovers first. Over an engine, pass the engine instead of `{ fsi, filesEngine }`.
 

@@ -96,7 +96,7 @@ Either side may be left out for a pull-only or push-only connector. The connecto
 - **The schema carries the compare-and-set.** The adapter posts what your `variables` build; if the server should
   check a revision rather than the data, return the revision with every document and keep it in your readers.
 - **An answer with `errors` fails the whole call.** The connector retries it after a backoff and reports it as the
-  `cause` of a `REPLICATION_FAILED` error, with the server's `errors` on it (an HTTP failure carries its `status`).
+  `cause` of a `ALX_ERR_REPLICATION_FAILED` error, with the server's `errors` on it (an HTTP failure carries its `status`).
   A row the server cannot write at all (an id it refuses, a body too large) belongs in the push answer as
   `{ id, error: { code, message } }`, which needs a field for it in your schema, so the rest of the batch still lands.
 - **Tell an absent `assumed` from `null`.** `null` means "you held nothing" and the row should be written; absent

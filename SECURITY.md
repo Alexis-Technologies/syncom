@@ -94,8 +94,8 @@ These are the areas where a report matters most, roughly in order:
   derived from its public key (a canonical base64url form, or one key would
   be several ids), and `verify` answering `false` — never anything else, never
   a throw — for a malformed id or signature. Half a key pair of either kind
-  is refused (`KEYS_INCOMPLETE`), never replaced; a `node.json` naming
-  another signing key is refused (`IDENTITY_MISMATCH`), never silently
+  is refused (`ALX_ERR_KEYS_INCOMPLETE`), never replaced; a `node.json` naming
+  another signing key is refused (`ALX_ERR_IDENTITY_MISMATCH`), never silently
   rekeyed. A *silent* mismatch that produces wrong plaintext rather
   than an error is in scope, as is any way an encrypted record's plaintext
   leaves the node (they are deliberately excluded from replication).

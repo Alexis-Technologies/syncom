@@ -18,41 +18,40 @@ src/connector/same.js     canonical, same — the zone's one "the same reading" 
                           no requires
 src/connector/lookback.js checkLookback, lookbackPull — what the four adapters whose cursor is a timestamp share: a pull run that starts
                           `lookback` ms before its checkpoint, the checkpoint never behind (`from` while a run is under way), `reread`
-                          for the connector — no requires
+                          for the connector — requires argument-errors.js only
 src/connector/jsonfile.js jsonFile(store, { poll }) — one JSON file as a backend, what the two drives share: `n` the position of a document's
                           newest write, the ETag the compare-and-set (412 or 409 read again and tried RETRIES times; an empty text an
                           empty collection), a probe for the stream; requester — the fetch with the common headers that throws with the
-                          status — requires same.js only
+                          status — requires same.js and argument-errors.js only
 src/connector/couchdb.js  @alexify/syncom/connector/couchdb — couchdb({ url, fetch, headers, longpoll }): the handlers over one CouchDB
                           database through an injected fetch — _changes with the documents, a long poll from the checkpoint as the stream,
                           _bulk_docs with the revisions last seen, a conflict read back, a probe read back, another refusal the row's
-                          `{ id, error }`; credentials in the url moved to the Authorization header — no requires
+                          `{ id, error }`; credentials in the url moved to the Authorization header — requires argument-errors.js only
 src/connector/graphql.js  @alexify/syncom/connector/graphql — graphql({ url, fetch, headers, request, pull, push, stream }): the application's
-                          queries posted and their answers read by its functions; one adapter for every schema — no requires
+                          queries posted and their answers read by its functions; one adapter for every schema — requires argument-errors.js only
 src/connector/mongodb.js  @alexify/syncom/connector/mongodb — mongodb({ collection, changes, lookback, now }): the handlers over one
                           collection of the injected driver — _rev, _deleted, _updated the adapter's fields, a change stream the signal
-                          (its error or close END), a server's code on a document the row's `{ id, error }` — requires lookback.js only
+                          (its error or close END), a server's code on a document the row's `{ id, error }` — requires lookback.js and argument-errors.js only
 src/connector/supabase.js @alexify/syncom/connector/supabase — supabase({ client, table, primaryKey, modifiedColumn, deletedColumn, schema,
                           channel, stream, lookback, now }): the handlers over one table through the injected client — PostgREST with the
                           modified column as the compare-and-set, Realtime's postgres_changes the signal (the channel's error, timeout or
-                          close END), a code of the database's on a row the row's `{ id, error }` — requires lookback.js only
+                          close END), a code of the database's on a row the row's `{ id, error }` — requires lookback.js and argument-errors.js only
 src/connector/firestore.js @alexify/syncom/connector/firestore — firestore({ sdk, database, collection, stampField, deletedField, stream,
                           lookback }): the handlers over one collection through the injected modular SDK — the server stamp and a
                           tombstone the adapter's fields, a cursor after the checkpoint, a transaction per 500 rows a push, onSnapshot the
-                          signal (its error END), an id or a body the SDK refuses the row's `{ id, error }` — requires same.js,
-                          lookback.js only
+                          signal (its error END), an id or a body the SDK refuses the row's `{ id, error }` — requires same.js, lookback.js and argument-errors.js only
 src/connector/appwrite.js @alexify/syncom/connector/appwrite — appwrite({ client, databases, Query, databaseId, collectionId, deletedField,
                           stream, lookback }): the handlers over one collection through the injected SDK — $updatedAt the position, a
                           boolean attribute the tombstone, a read then a write the push, a 400 the row's `{ id, error }`, Realtime the
-                          signal — requires same.js, lookback.js only
+                          signal — requires same.js, lookback.js and argument-errors.js only
 src/connector/gdrive.js   @alexify/syncom/connector/gdrive — gdrive({ fetch, token, headers, name, fileId, folder, endpoint, poll }): one JSON
                           file of the collection in the user's Drive (the application data folder) through an injected fetch — the oldest
                           by createdTime, the v2 metadata's ETag, alt=media, the media upload under If-Match (never without: no ETag is
                           a 428, the file read all the same), a create listed again (an older file wins, ours deleted), a file found
-                          where the last read found none a 412 — requires jsonfile.js only
+                          where the last read found none a 412 — requires jsonfile.js and argument-errors.js only
 src/connector/onedrive.js @alexify/syncom/connector/onedrive — onedrive({ fetch, token, headers, path, drive, endpoint, poll }): one JSON file
                           of the collection in the user's OneDrive through Microsoft Graph — root:/<path> for the eTag, /content, PUT
-                          under If-Match or, for a file not known, conflictBehavior=fail (a 409 another device's) — requires jsonfile.js only
+                          under If-Match or, for a file not known, conflictBehavior=fail (a 409 another device's) — requires jsonfile.js and argument-errors.js only
 ```
 
 ## Rules
@@ -143,7 +142,7 @@ cause)` — the `refused` event, `connector.document.refused`,
   lands the page again (at least once) and makes an offline edit of that record a conflict. Every document and row is counted through the seam's writer (`#count`:
   `syncom.connector.rows` by direction and result — pulled, applied, pushed, probed, refused, parked, conflict,
   failed; `stats()` the same from memory). A handler that throws is
-  told (`error`, `REPLICATION_FAILED` with `direction` and `retryIn`), kept
+  told (`error`, `ALX_ERR_REPLICATION_FAILED` with `direction` and `retryIn`), kept
   (`errors`, the newest twenty) and tried again after a backoff (`#failed`: `retryTime · 2^n` up to `maxRetryTime`,
   ±25 % jitter, `#attempts` per direction reset by a success); nothing is skipped and no checkpoint moves past it. A
   pull whose checkpoint does not move while it answers full pages is asked `MAX_STALLS` times, then left to the stream.

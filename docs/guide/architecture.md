@@ -95,7 +95,7 @@ sequenceDiagram
   C-->>A: resolves
 ```
 
-The field's kind is checked before anything is stamped (`FIELD_KIND`), and an index, a sibling or a
+The field's kind is checked before anything is stamped (`ALX_ERR_FIELD_KIND`), and an index, a sibling or a
 range is resolved inside the queue, against the record as it is. A write that changes nothing stops
 after `applyOp` and appends nothing. The queue holds a write only up to the append (step 6): from there
 the next write runs, building on the entry in flight, while the disk is written outside the queue.

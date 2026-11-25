@@ -11,7 +11,7 @@ src/testing/link.js       MemoryLink: an in-process SyncLink over a host's unit(
                           generator, the hazards (latency, drop, duplicate, maxMessage, disconnect, wrpc's reconnect), wrpc's binary
                           streams in process under `streams` (pipe) — requires utils.js only
 src/testing/mesh.js       createMesh(names, edges, { createStorage, link, sync, nodes, unit, scopes }), the host's server (rooms, sendTo),
-                          settle, waitUntil, sameVectors, prng — requires link.js only
+                          settle, waitUntil, sameVectors, prng — requires link.js and argument-errors.js only
 ```
 
 ## Rules

@@ -59,7 +59,7 @@ Node.js ports already speak the shape `serveEngine()` reads, so no adapter is ne
 ## Several windows
 
 A database opened through the main process belongs to one window at a time: a second window that opens the same
-path gets `LOCKED`, as a second process would. Give each window its own port and its own `allow` list, and its own
+path gets `ALX_ERR_LOCKED`, as a second process would. Give each window its own port and its own `allow` list, and its own
 path when the windows hold different data.
 
 When several windows should show the same data, treat them as tabs. Windows that load the same origin in one session

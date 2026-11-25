@@ -51,7 +51,7 @@ Once a node is accepted, the scopes it asked for are a boundary, not a hint. The
 pushes for a record outside them. The host checks the record itself, before and after the op, with its
 own `sync.scope`, so a node cannot write a record into or out of a scope by claiming another one in the
 op. A refused op goes on as a header that applies nowhere, so the node's later writes still land, and the
-node reports `WRITE_REFUSED` with `reason: 'scope'`; the host hands it nothing of a record it may not see.
+node reports `ALX_ERR_WRITE_REFUSED` with `reason: 'scope'`; the host hands it nothing of a record it may not see.
 
 ## Register a host with scopes
 
@@ -112,7 +112,7 @@ node ids `authorize` noted:
 <<< @/examples/partial-sync.mjs#revoke
 
 The laptop's live feed ends at once, the laptop is told, and its registry entry narrows to the scopes it
-keeps. It reports `REVOKED` on its `error` event and opens its feed again under the narrower grant. The
+keeps. It reports `ALX_ERR_REVOKED` on its `error` event and opens its feed again under the narrower grant. The
 revocation is saved on the server, so the next hello, even after a restart, grants no more; over a
 [shared log](./replication-nats) every hub takes it back.
 

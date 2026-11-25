@@ -26,10 +26,10 @@ with its own id. Three things are refused locally, before anything is stamped (t
 `move()`, `mark()` and `unmark()`):
 
 - **Past the end.** An index, or an index plus a count, beyond the field's length rejects with
-  `OUT_OF_RANGE` and `{ id, field, index, count, length }`. The check runs inside the mutation queue, against
+  `ALX_ERR_OUT_OF_RANGE` and `{ id, field, index, count, length }`. The check runs inside the mutation queue, against
   the field as it is then: a concurrent peer's op cannot shift it between the check and the write.
 - **Another kind.** A register, a counter, a set, a list, a text or a tree, never two: `splice()` on a field a
-  register holds is `FIELD_KIND` with `kind: 'register'`, `update()` on a text `kind: 'text'`, `setAt()` on a
+  register holds is `ALX_ERR_FIELD_KIND` with `kind: 'register'`, `update()` on a text `kind: 'text'`, `setAt()` on a
   text too, and so is content of the other kind — an array spliced into a text, a string into a list.
 - **Arguments.** A non-string key, an index or a count that is not a non-negative integer, content that is
   neither a string nor an array, an element JSON cannot carry, or a call that neither removes nor inserts is
@@ -47,7 +47,7 @@ fields out of the defaults.
 ## When a peer's op is refused
 
 An op the engine will not apply for a field is still logged and relayed — the vector moves past it, so it is
-never a gap — and is reported through the database's `error` event as `OP_REFUSED`, with `op` and `rejected`,
+never a gap — and is reported through the database's `error` event as `ALX_ERR_OP_REFUSED`, with `op` and `rejected`,
 one entry per field refused, `{ field, reason, … }`:
 
 | `reason` | Why | More fields |
@@ -62,7 +62,7 @@ refusal is reported once per page — a hub without the text plugin refuses ever
 first op, its `rejected`, the `count` of ops refused that way and the `kinds`; a snapshot block of such a kind
 is left out of the join (`sync.record.kind`). Every refused op is counted in `syncom.ops.rejected` by its
 reason. A refusal is final on this node: the op is never taken again, and each node it reaches decides by its
-own bounds and plugins. Locally the same conditions are `FIELD_KIND` (a kind, or `kind: 'bound'` with the same
+own bounds and plugins. Locally the same conditions are `ALX_ERR_FIELD_KIND` (a kind, or `kind: 'bound'` with the same
 `detail`, `count` and `max`), and a malformed payload a local call could not have made is a `TypeError`.
 
 ## How a list or text merges
@@ -97,7 +97,7 @@ What follows, the same on every node:
   anew — is a run from the head too, and runs from the head order by their writers' ids like any siblings.
 - A list or a text touched after a `delete()` does not revive the record (delete wins, as over every field):
   the op lands in the block, out of sight, and a whole-record write stamped below it brings the record back
-  with the text on it. Locally such an edit is `NOT_FOUND`.
+  with the text on it. Locally such an edit is `ALX_ERR_NOT_FOUND`.
 
 The one case Fugue orders differently from FugueMax: two writers inserting right after the same element
 while each sees a different element following it (right siblings with different right origins) may have
@@ -133,11 +133,11 @@ read composes it into the element (over the element's value, which must be an ob
 gives way) or into the node's `data`. `elementAt(id, key, index)` names the element at an index and
 `elements(id, key)` all of them, in order; an element keeps its name across moves, so a path under it holds.
 
-A write under an element or a node that is not there is refused before anything is stamped (`NOT_FOUND`, with
+A write under an element or a node that is not there is refused before anything is stamped (`ALX_ERR_NOT_FOUND`, with
 `field` the list or tree and `elem` the name); from a peer such a field lands and waits. A field under an
 element that was removed, or a node under the trash, is **unreachable**: not read, not in a diff, kept in the
 record until [`compact()`](./versions#compact) rewrites it without. A text's characters carry nothing: a path
-under a text is `FIELD_KIND`. A `setAt()` of the element's value and the children under it are apart: the value
+under a text is `ALX_ERR_FIELD_KIND`. A `setAt()` of the element's value and the children under it are apart: the value
 is one register, the children theirs.
 
 ## Marks
@@ -178,7 +178,7 @@ the type needs. `isEmbed: true` is an **inline embed**, a character wide, with m
 - **Through the string.** `get()` reads the slots as U+FFFC. `updateText()` keeps the slots its text keeps,
   markers and all, and refuses a text that adds one (a `TypeError`: a slot enters with its marker, through
   `insertEmbed()` or `splitBlock()`), as `splice()` and `push()` do. A cut takes a slot like any character;
-  `joinBlock()` is that cut checked against a marker (`NOT_FOUND` for a slot that holds none). Text before the
+  `joinBlock()` is that cut checked against a marker (`ALX_ERR_NOT_FOUND` for a slot that holds none). Text before the
   first marker is a block of type `null` in `blocks()`.
 - **Patches and versions.** `diff()` hands a splice patch its `vals` and a changed marker a `setAt` patch;
   `restore()`, `compact()` and an undo lay the markers again with the slots; a `commit` event carries the
@@ -218,13 +218,13 @@ merge rule is Kleppmann, Mulligan, Beresford and Gomes's (2021), the one Loro's 
   it is moved out again, and a move into a subtree removed concurrently is hidden with it. A node not known here
   is created there by `treeRemove()`, so a concurrent creation lands removed; a second removal is nothing.
 - Siblings that share an index order by stamp, and a node put after one of them lands after all of them.
-- A move to where the node already is makes no op. A parent that hangs under the node rejects with `CYCLE`
-  (`{ id, field, node, parent }`), an `after`/`before` sibling not under the parent with `NOT_FOUND`
+- A move to where the node already is makes no op. A parent that hangs under the node rejects with `ALX_ERR_CYCLE`
+  (`{ id, field, node, parent }`), an `after`/`before` sibling not under the parent with `ALX_ERR_NOT_FOUND`
   (`{ id, field, node }`, the sibling) — both decided inside the mutation queue, against the tree as it is, so
   a race with a peer's move surfaces as the error. The node as its own parent or sibling, or both `after` and
   `before`, are `TypeError`s.
 - A reset (`write`, `delete`) drops the moves below it, and a node whose parent fell reads again once the
-  parent is back. `update()`, `push()`, `add()`, `inc()` on the field are `FIELD_KIND` with `kind: 'tree'`;
+  parent is back. `update()`, `push()`, `add()`, `inc()` on the field are `ALX_ERR_FIELD_KIND` with `kind: 'tree'`;
   the tree ranks last, so a peer's op of any other kind on the field takes it, and a peer's `tree` op on a field
   of another kind is refused.
 
@@ -259,7 +259,7 @@ newest piece and no other.
 keystroke — what an editor binding stands on.
 
 - **What it reads.** The field as the storage announced it, with what was typed here on top. An edit is
-  resolved and stamped over that reading and applied to it at once; one the field refuses (`OUT_OF_RANGE`, a
+  resolved and stamped over that reading and applied to it at once; one the field refuses (`ALX_ERR_OUT_OF_RANGE`, a
   lone surrogate) throws and changes nothing.
 - **When it is logged.** `window` ms later (the storage's `defer` by default; `0` for the end of the turn), as
   one transaction: keystrokes that continue each other — typed on at the end of their run, a chain of cuts, or a
@@ -273,12 +273,12 @@ keystroke — what an editor binding stands on.
   handle's.
 - **A flush that cannot be logged** — the append failed, a hook or a validator refused — drops what was not
   logged: its edits, the flushes taken behind it (they may anchor in what was dropped) and what was typed
-  since. `flushed` rejects with `UNLOGGED` (the handle's `error` event too), the handle reads the field as
+  since. `flushed` rejects with `ALX_ERR_UNLOGGED` (the handle's `error` event too), the handle reads the field as
   announced again, its observers hear `reset`, and the storage logs `handle.unlogged`. A step that fails after
-  the append (an `afterWrite` hook) is that error, not `UNLOGGED`: the edits are logged and kept. The
-  storage's `flush()` and `tag()` reject with one `UNLOGGED` for every handle that could not be flushed
+  the append (an `afterWrite` hook) is that error, not `ALX_ERR_UNLOGGED`: the edits are logged and kept. The
+  storage's `flush()` and `tag()` reject with one `ALX_ERR_UNLOGGED` for every handle that could not be flushed
   (`handles`, `edits`); `close()` closes and logs `edits.unlogged`. Once `close()` is called, an edit is
-  `CLOSED`.
+  `ALX_ERR_CLOSED`.
 - **Several writers of one node** — handles, and the storage itself — each over its own reading, never grow one
   run from two readings: while a handle is open every extension of a run reserves its next offset, and a writer
   whose reading is behind it begins a run of its own. Nothing typed by any of them is lost.
@@ -302,7 +302,7 @@ over UTF-16 units, after the common prefix and suffix are set aside — and send
 first, in one turn of the queue, so a peer's op cannot land between the diff and the splices. It resolves to how
 many ops it took; a difference deeper than a thousand edit steps is one op replacing the middle. Indices are
 UTF-16 code units, as `String#slice` counts them, and a surrogate pair is never split: `splice()`, `mark()`,
-`unmark()` and `cursor()` refuse an index between its halves with `SURROGATE` (`id`, `field`, `index`),
+`unmark()` and `cursor()` refuse an index between its halves with `ALX_ERR_SURROGATE` (`id`, `field`, `index`),
 `updateText()` diffs by code points where one is about, and a string with a lone half is a `TypeError`.
 
 `toDelta(changes, field)` composes a turn's [changes](./events#changes) into one delta in Quill's form —
@@ -311,7 +311,7 @@ with the marks it reads with as attributes), a mark as attributes over its range
 slot as `{ insert: { embed: marker } }`, a marker changed as `{ retain: 1, attributes: { embed } }`; `null` for a
 change no delta can say. `applyDelta(id, key, delta, { expect, revision })` makes a delta the field's edits as
 one transaction, so a peer sees them land together: an insert's attributes are exactly its marks (every mark it
-lays has `expand: 'none'`), and with `expect`, the text the delta was made over, it refuses with `STALE` when
+lays has `expand: 'none'`), and with `expect`, the text the delta was made over, it refuses with `ALX_ERR_STALE` when
 the field moved under it, before any op; `revision` spares comparing the text while the field is still at that
 revision.
 
@@ -334,14 +334,14 @@ revision.
   others undoes and redoes those. A field read from its JSON — a record loaded from its file, a snapshot, a
   merge — is folded whole once.
 - A tree field holds 65 536 moves (`MAX_MOVES`), every node's together: past them `treeMove()` and
-  `treeRemove()` reject with `FIELD_KIND`, `kind: 'bound'`, `detail: 'moves'`, a peer's move is refused and a
+  `treeRemove()` reject with `ALX_ERR_FIELD_KIND`, `kind: 'bound'`, `detail: 'moves'`, a peer's move is refused and a
   snapshot block holding more is not taken (a join keeps the oldest in the fold's order).
 - A tree reads 512 levels: a node that would hang deeper is folded but not shown, on every node alike, and
-  `treeMove()` refuses a move that would reach there (`OUT_OF_RANGE` with `node`, `depth` and `max`). The fold's
+  `treeMove()` refuses a move that would reach there (`ALX_ERR_OUT_OF_RANGE` with `node`, `depth` and `max`). The fold's
   cycle check walks 512 ancestors up from a move's parent at most (`MAX_WALK`): a peer's move under a node deeper
   than that is moot, like a move that would make a cycle, the same on every node. A place among siblings is a
   fractional index of at most 1 024 characters: after some thirty thousand inserts at one spot the next
-  `treeMove()` there is `OUT_OF_RANGE` (`reason: 'fi'`, `length`, `max`) — move a sibling away, or reset the
+  `treeMove()` there is `ALX_ERR_OUT_OF_RANGE` (`reason: 'fi'`, `length`, `max`) — move a sibling away, or reset the
   field. A peer's place that is not a fractional index is malformed and never lands.
 - A run holds at most 1 048 576 slots (`MAX_RUN`) and a field 4 194 304 (`MAX_FIELD`), tombstones included. One
   `splice()` inserts at most a run's worth; typing past a full run starts a new one and reads the same; a field
@@ -349,7 +349,7 @@ revision.
   again without its tombstones. A splice cuts at most 65 536 ranges (`MAX_CUTS`; overlapping ranges of one run
   read as one for the change report), a text holds at most 65 536 marks (`MAX_MARKS`), and an extension that
   arrives ahead of its run counts against `MAX_RUN` and the field's slots where it arrives, never only where it
-  lands. Locally a call past a bound rejects with `FIELD_KIND`, `kind: 'bound'`, `detail`, `count` and `max`.
+  lands. Locally a call past a bound rejects with `ALX_ERR_FIELD_KIND`, `kind: 'bound'`, `detail`, `count` and `max`.
 - Pending work — a run whose anchor has not arrived, a cut or an extension of a run not here, a register for an
   element not here, a mark switched off before it arrived — is bounded per field by `sync.pendingMax` (4 096;
   `Infinity` disables it). Past it a peer's op is refused for good on this node (`reason: 'bound'`,

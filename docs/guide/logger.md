@@ -65,7 +65,7 @@ everywhere:
 - `debug`: routine work, such as `catalog.rebuild` or `log.epoch.new`.
 
 Many `error` and `warn` lines have a matching `error` event on the database or its sync manager carrying a `code`
-(`UNPERSISTED`, `OP_INVALID`, `SKEW`…). Handle those in code with `db.on('error', …)`, and use the log for what an
+(`ALX_ERR_UNPERSISTED`, `ALX_ERR_OP_INVALID`, `ALX_ERR_SKEW`…). Handle those in code with `db.on('error', …)`, and use the log for what an
 operator reads. Every event name, its level and its fields are in the
 [log events table](../reference/telemetry#log-events).
 

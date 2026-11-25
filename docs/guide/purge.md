@@ -35,7 +35,7 @@ The phone edits a customer while offline, a moment before the server purges it:
 A purge wins over every other op, older or newer, from any node: the phone's edit arrives after the purge
 and changes nothing. Without that rule, a concurrent edit, or one made by a node that has not heard of the
 purge yet, would bring the record back. The id stays purged for good: a later write to it is accepted and
-changes nothing, an `update()` rejects with `NOT_FOUND`, and new data belongs under a new id.
+changes nothing, an `update()` rejects with `ALX_ERR_NOT_FOUND`, and new data belongs under a new id.
 
 ## What stays behind
 
@@ -49,7 +49,7 @@ verifies. Without the nonce, the digest cannot be used to guess a short payload 
 
 The [audit chain](./chain) keeps only hashes, never record content. [`history()`](./versions) still lists the
 record's ops, the purge among them, with `data: null` and `scrubbed: true`, and a read at a version before
-the purge rejects with `HISTORY_GONE` and `reason: 'scrubbed'`.
+the purge rejects with `ALX_ERR_HISTORY_GONE` and `reason: 'scrubbed'`.
 
 ## Forget a record on one node only
 

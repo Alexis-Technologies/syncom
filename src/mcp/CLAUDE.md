@@ -7,7 +7,7 @@ The tools an agent calls over a database, in the shape of the Model Context Prot
 ```
 src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections, tools, readOnly, limit, sealed, regex }): per collection query,
                           count, get, changes, wait_changes, insert, upsert, delete as { name, description, inputSchema, annotations,
-                          execute }; checkArgs — requires symbols.js only
+                          execute }; checkArgs — requires symbols.js and argument-errors.js only
 ```
 
 ## Rules
@@ -30,7 +30,7 @@ src/mcp/mcp.js            @alexify/syncom/mcp — createTools(db, { collections,
   never ahead of them. A `$regex` anywhere in a query (`forbidRegex`: own keys, arrays, `MAX_QUERY_DEPTH` deep) is a
   `TypeError` at the door unless `createTools(db, { regex: true })`: the query plugin bounds a pattern's length, not
   its backtracking, and `^(a+)+$` over 27 letters held the event loop for seconds — a model's pattern never runs
-  unasked. The collection's own refusals (`NOT_FOUND`, a validator's, `PLUGIN_MISSING` without the query plugin)
+  unasked. The collection's own refusals (`ALX_ERR_NOT_FOUND`, a validator's, `ALX_ERR_PLUGIN_MISSING` without the query plugin)
   come through as the SyncomErrors they are.
   Every call is counted through the seam's writer (`syncom.mcp.calls` by verb: `ok`, `refused` — a TypeError at the
   door — or `error`), never through a require of the telemetry plugin.

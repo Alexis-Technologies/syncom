@@ -68,9 +68,9 @@ what `createDatabase()` takes, plus the `createDatabase` function itself and an 
 The leader is a full database: it writes, and it is the only instance that runs [replication](./replication),
 so there is one connection to the server however many tabs are open. Every follower is a read-only database
 over the same engine. It reads what the leader writes and hears about it through the engine's change
-stream, so queries and live documents work in every tab. On a follower, `shared.sync` throws `NOT_LEADER`,
+stream, so queries and live documents work in every tab. On a follower, `shared.sync` throws `ALX_ERR_NOT_LEADER`,
 and a write is forwarded to the leader over a `channel` you give `openShared()`; without one, as here, a
-follower's write is refused with `NOT_LEADER`. [SharedWorker storage](./storage-shared-worker) shows the
+follower's write is refused with `ALX_ERR_NOT_LEADER`. [SharedWorker storage](./storage-shared-worker) shows the
 channel over wrpc, where a SharedWorker holds the election and every tab follows.
 
 `isLeader()` tells you the role now, `waitForLeadership()` resolves when this instance leads, and
@@ -96,11 +96,11 @@ and the `rebind` event fires once everything was moved. A live `shared.document(
 the change and reads the record again once from the new instance.
 
 A follower's write that reached no leader (the old one was already gone) waits for the new leader and runs
-there, for up to `failover` milliseconds (10 seconds by default); past that it rejects with `LEADER_LOST`. A
+there, for up to `failover` milliseconds (10 seconds by default); past that it rejects with `ALX_ERR_LEADER_LOST`. A
 write that may have reached the old leader is never run twice: the new leader does not know it, so it rejects
-at once with `LEADER_LOST` and `maybeApplied: true`, which means the write may have landed. Read the record
+at once with `ALX_ERR_LEADER_LOST` and `maybeApplied: true`, which means the write may have landed. Read the record
 before writing again.
-An instance granted the lead that cannot open the database reports `PROMOTE_FAILED` on its `error` event,
+An instance granted the lead that cannot open the database reports `ALX_ERR_PROMOTE_FAILED` on its `error` event,
 steps aside so the next instance can lead, and asks again later; it never holds a lock it cannot use.
 
 ## Trade-offs

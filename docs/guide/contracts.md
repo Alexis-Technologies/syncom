@@ -38,8 +38,8 @@ write that replicates like any other.
 
 When the procedure throws, the failure is appended to the chain as `{ contract, args, error, timestamp }`
 and the error is rethrown, so a rejected execution leaves a record instead of vanishing. Loading a hash
-whose block is no contract rejects with `NOT_CONTRACT`, and a hash with no block at all with
-`BLOCK_NOT_FOUND`.
+whose block is no contract rejects with `ALX_ERR_NOT_CONTRACT`, and a hash with no block at all with
+`ALX_ERR_BLOCK_NOT_FOUND`.
 
 ## Only load contracts from a chain you control
 

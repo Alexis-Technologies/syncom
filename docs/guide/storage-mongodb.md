@@ -42,7 +42,7 @@ the database next opens. On a standalone server, turn off what it lacks:
 <<< @/examples/storage-mongodb.mjs#locked
 
 The first instance takes a lease on the database: a document in the `locks` collection, renewed every third of
-its length on the server's clock, so the instances' own clocks never matter. Another instance gets `LOCKED`
+its length on the server's clock, so the instances' own clocks never matter. Another instance gets `ALX_ERR_LOCKED`
 until the lease is released or lapses, and with `lock: 'wait'` it waits and takes over. `lock: { staleAfter }`
 sets the lease's length, 30 seconds by default.
 
@@ -54,16 +54,16 @@ A writer that loses its lease (a network partition, a pause longer than the leas
 
 Every document carries the generation of the lease that wrote it, and a write of an older generation is
 refused, so a writer that lost its lease cannot write over the new one's documents even before it notices. It
-hears `LEASE_LOST` once on its `error` event, becomes read-only, and leaves what it had logged but not stored
+hears `ALX_ERR_LEASE_LOST` once on its `error` event, becomes read-only, and leaves what it had logged but not stored
 to the next holder, which replays it.
 
 ## Follow the writer from another instance
 
 <<< @/examples/storage-mongodb.mjs#follower
 
-A follower opens with `readOnly: true`, holds no lease, and writes nothing (a write rejects with `READ_ONLY`).
+A follower opens with `readOnly: true`, holds no lease, and writes nothing (a write rejects with `ALX_ERR_READ_ONLY`).
 It hears every record the writer lands through a change stream on the `records` collection and wakes its
-queries. When the stream ends it reports `FOLLOW_LOST`, subscribes again and reads every record again. A
+queries. When the stream ends it reports `ALX_ERR_FOLLOW_LOST`, subscribes again and reads every record again. A
 follower can also [host other nodes](./server-scaling) when the instances share a log:
 `mongoSharedLog()` from the same subpath is that log, kept in two more collections.
 

@@ -19,49 +19,52 @@ on the code, and rethrow what you do not handle:
 
 <<< @/examples/errors.mjs#by-code
 
-`NOT_FOUND` here carries the `id` it could not find. Switch on `code`, never on `message`: the message is written
+`ALX_ERR_NOT_FOUND` here carries the `id` it could not find. Switch on `code`, never on `message`: the message is written
 for a person and may change, the code is part of the API. The messages are complete in every build, so a log line
 reads well without a development mode.
 
 Some codes are worth handling in almost every app. A second open of a directory that another instance holds
-rejects with `LOCKED`, which in a browser usually means a second tab (see [Leader election](./leader-election)):
+rejects with `ALX_ERR_LOCKED`, which in a browser usually means a second tab (see [Leader election](./leader-election)):
 
 <<< @/examples/errors.mjs#locked
 
-An `insert()` whose data names the id of a record that is already there rejects with `EXISTS`, with the `id` and
+An `insert()` whose data names the id of a record that is already there rejects with `ALX_ERR_EXISTS`, with the `id` and
 the collection as `entity`:
 
 <<< @/examples/errors.mjs#exists
 
-## A TypeError means the call is wrong
+## An ArgumentError means the call is wrong
 
-A wrong argument, a misspelled option or a hook that returns the wrong thing is a `TypeError` without a code. Do not
-catch it to recover; fix the call. A few `TypeError`s do carry a `code`, because the bad value came from data
-rather than from your code, and you may want to tell a user about it. An id typed into a form is the common case:
+A wrong argument, a misspelled option or a hook that returns the wrong thing is an `ArgumentError`, a `TypeError`
+whose `code` is always `ALX_ERR_INVALID_ARGUMENT`. Do not catch it to recover; fix the call. A `DataError` is a
+`TypeError` too, but its bad value came from data rather than from your code, and you may want to tell a user about
+it. An id typed into a form is the common case:
 
 <<< @/examples/errors.mjs#type-error
 
-The `TypeError`s with a code are `INVALID_ID`, `TYPE_IMMUTABLE` (a write that changes a record's collection),
-`ID_IMMUTABLE` (a write that changes a field a composite id is made of), `INVALID_VERSION`, `BLOB_TOO_LARGE`,
-`PRESENCE_SIZE`, and two about configuration: `NO_CHAIN` and `PLUGIN_MISSING`. A call into a feature whose
-[plugin](./plugins) this database was not opened with is `PLUGIN_MISSING`, and the message names the import that
+The codes of a `DataError` are `ALX_ERR_INVALID_ID`, `ALX_ERR_TYPE_IMMUTABLE` (a write that changes a record's collection),
+`ALX_ERR_ID_IMMUTABLE` (a write that changes a field a composite id is made of), `ALX_ERR_INVALID_VERSION`, `ALX_ERR_BLOB_TOO_LARGE`,
+`ALX_ERR_PRESENCE_SIZE`, and two about configuration: `ALX_ERR_NO_CHAIN` and `ALX_ERR_PLUGIN_MISSING`. A call into a feature whose
+[plugin](./plugins) this database was not opened with is `ALX_ERR_PLUGIN_MISSING`, and the message names the import that
 fixes it:
 
 <<< @/examples/errors.mjs#plugin-missing
 
-In TypeScript the two unions are `SyncomErrorCode` (the codes of `SyncomError`) and `TypedErrorCode` (the codes a
-`TypeError` may carry), both exported from the package root.
+What a code documents beside it is under `details`: a collection's refused id names its `entity` and `field`, a blob
+past the cap its `length` and `max`. In TypeScript the unions are `SyncomErrorCode` (the codes of `SyncomError`),
+`DataErrorCode` (the codes of `DataError`) and `ErrorCode` (every code, `ALX_ERR_INVALID_ARGUMENT` included), all
+exported from the package root with the classes.
 
 ## When a hook throws
 
-A [hook](./hooks) that throws fails the operation it runs in with a `HookError`: `code` is `HOOK_FAILED`, `hook`
+A [hook](./hooks) that throws fails the operation it runs in with a `HookError`: `code` is `ALX_ERR_HOOK_FAILED`, `hook`
 names the hook, and `cause` is what your hook threw.
 
 <<< @/examples/errors.mjs#hook
 
 For a `before*` hook the operation did not happen: nothing was written. For an `after*` hook it did, and only the
 caller's promise rejects. `HookError` is a `SyncomError`, so a handler that switches on `code` sees it as
-`HOOK_FAILED`.
+`ALX_ERR_HOOK_FAILED`.
 
 ## When a record does not validate
 
@@ -108,7 +111,7 @@ reports it.
 ## Coming from RxDB
 
 RxDB throws an `RxError` with a code such as `COL20` or `CONFLICT` and the details in `parameters`; the readable
-message ships only with the dev-mode plugin. A syncom code is a word (`EXISTS`, `NOT_FOUND`, `LOCKED`), the details
+message ships only with the dev-mode plugin. A syncom code is a word (`ALX_ERR_EXISTS`, `ALX_ERR_NOT_FOUND`, `ALX_ERR_LOCKED`), the details
 are fields on the error itself, and the message is always there. Inserting a record whose id exists, side by side:
 
 ::: code-group

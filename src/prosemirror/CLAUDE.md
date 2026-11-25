@@ -7,5 +7,5 @@ The document as one text with block markers. The rules of the core — the op mo
 ```
 src/prosemirror/prosemirror.js  the @alexify/syncom/prosemirror subpath — ProseMirror (injected `{ model, state, transform, view? }`)
                           over the editor binding: the document as one text with a marker per block-level node, the replace
-                          step, cursors as decorations, undo commands over /undo; requires editor/editor.js only
+                          step, cursors as decorations, undo commands over /undo; requires editor/editor.js and argument-errors.js only
 ```

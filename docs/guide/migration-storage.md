@@ -15,7 +15,7 @@ so its peers resume syncing with it where they left off, with no full re-downloa
 ### Close the database
 
 The copy holds the source and the target the way an open database holds its directory, so close every instance
-first. A copy of a database that is still open is refused with `LOCKED`.
+first. A copy of a database that is still open is refused with `ALX_ERR_LOCKED`.
 
 <<< @/examples/migration-storage.mjs#close
 
@@ -48,7 +48,7 @@ is written.
 The node's identity is the last thing written, so a copy cut short by a crash is not a node yet. A failed copy
 removes what it wrote, and the next copy into a target that a crash interrupted clears it before it begins. If
 the target engine cannot keep attachment bytes while the source holds some, the copy is refused
-(`BLOBS_UNSUPPORTED`) rather than leaving records that name bytes nowhere. Every engine that ships with syncom
+(`ALX_ERR_BLOBS_UNSUPPORTED`) rather than leaving records that name bytes nowhere. Every engine that ships with syncom
 keeps them.
 
 Never open the source and the copy at the same time and let both sync: they are one node, and two instances

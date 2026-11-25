@@ -34,7 +34,7 @@ longer checks:
 The receiver refuses it: not applied, not logged, not relayed, and its vector does not move, so the op is a
 gap in its author's stream until it arrives again intact. The refusal is counted (`forged` in the result of
 the page, `syncom.ops.rejected` in [telemetry](./telemetry)) and reported once per page as an `error` event
-with `code: 'BAD_SIGNATURE'`. A host also emits `refused` on its sync manager, naming the peer that pushed
+with `code: 'ALX_ERR_BAD_SIGNATURE'`. A host also emits `refused` on its sync manager, naming the peer that pushed
 it.
 
 The signature covers the op's header (its origin, sequence number, stamp, type, record id, scope, actor and
@@ -58,7 +58,7 @@ while the header still verifies.
 `'verify'` is the default so that a mesh can mix nodes with and without the plugin. Its weakness is that a
 relay can strip a signature and the op is taken as unsigned. Only `'require'` resists that, and it is for a
 mesh where every node signs: the plugin on every node and `'require'` on every node. `'require'` without
-the plugin is refused at `createDatabase()` with `PLUGIN_MISSING`, and a `'require'` host refuses the
+the plugin is refused at `createDatabase()` with `ALX_ERR_PLUGIN_MISSING`, and a `'require'` host refuses the
 hello of a node whose id is no key (403 `UNSIGNED`) instead of refusing every push from it in silence.
 
 ## Make peers prove their key at hello
@@ -70,7 +70,7 @@ at hello and serves nothing until the peer signs it:
 
 The dialing node signs the challenge with its key before it pushes anything. Until it has, its push,
 snapshot, changes, query, count and blob calls are refused with 403 `UNPROVEN`, and a node without the
-signing plugin cannot prove anything: its peer view's `lastError` says `UNPROVEN`. `prove` is on by default
+signing plugin cannot prove anything: its peer view's `lastError` says `ALX_ERR_UNPROVEN`. `prove` is on by default
 for a unit under `signatures: 'require'`, and needs the signing plugin on the host.
 
 Proof of key matters when the host grants something per node: [scopes](./partial-sync) by node id, an
@@ -94,7 +94,7 @@ whatever path it took. It does not prove more than that:
 A writer can produce two ops with the same sequence number: a directory restored from an old backup, two
 processes running under one identity, or a key holder that lies to different hosts. Every op names the
 fingerprint of the op before it in its stream, so a node that holds one branch refuses the other with an
-`error` event of code `EQUIVOCATION`. Each node keeps the branch it saw first and never mixes the two. The
+`error` event of code `ALX_ERR_EQUIVOCATION`. Each node keeps the branch it saw first and never mixes the two. The
 fork is detected, not healed: retire the identity that forked. The [wire reference](../reference/wire#the-per-stream-chain)
 has the details.
 

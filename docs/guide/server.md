@@ -92,7 +92,7 @@ shows the whole flow.
 
 ## What a refused write looks like
 
-On the client, a write the host refuses arrives as a `WRITE_REFUSED` error on the manager, and the
+On the client, a write the host refuses arrives as a `ALX_ERR_WRITE_REFUSED` error on the manager, and the
 record goes back to what the host holds. Here the laptop deletes a task, the server's rule refuses the
 delete, and the task returns on the laptop.
 
@@ -168,7 +168,7 @@ P2P](./replication-webrtc) shows the setup.
 - **The host should run your peers' plugins.** An op of a kind the host has no plugin for (a text
   field on a core-only host) is still logged and relayed, so the host carries it between peers, but
   its own copy of that field stays empty, and a dialer that runs more kinds than the host will not
-  bootstrap from it (`KINDS_MISMATCH`).
+  bootstrap from it (`ALX_ERR_KINDS_MISMATCH`).
 - **Rules are per op and per record, not per field of a query.** There is no field that exists only
   on the server. Keep server-only data in records of a scope that clients are not granted, or in
   [local documents](./local), which never replicate.

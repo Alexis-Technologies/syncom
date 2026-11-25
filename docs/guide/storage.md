@@ -94,7 +94,7 @@ writes nothing, which only a storage several instances may open at once can serv
 for what the storage cannot say. In a browser the numbers come from the Storage API for the whole origin, and
 `db.persist()` asks the browser not to evict the origin's storage. A storage that fills up between a write's log
 entry and its record does not fail the write: it resolves, the record stays readable from memory, the database's
-`error` event carries `UNPERSISTED` with `quota: true`, and the next open lands the record.
+`error` event carries `ALX_ERR_UNPERSISTED` with `quota: true`, and the next open lands the record.
 
 ## Move a database to another storage
 

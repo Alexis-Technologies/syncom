@@ -10,7 +10,7 @@ src/shared/shared.js      @alexify/syncom/shared — openShared({ createDatabase
                           recorded transaction, live things made again at a failover, serve() — requires emitter.js, errors.js, hooks.js,
                           election.js, channel.js only
 src/shared/election.js    elect({ name, locks, channel, follower, heartbeat, misses }) — Web Locks, or a heartbeat over a BroadcastChannel, a
-                          follower that never leads, or alone; re-armable: onLead at every grant, yield(), request() — no requires
+                          follower that never leads, or alone; re-armable: onLead at every grant, yield(), request() — requires argument-errors.js only
 src/shared/channel.js     the follower's channel to the leader: describe/revive (wire-error.js's packError/unpackError), answerOf, unwrap,
                           callLeader — requires errors.js, wire-error.js only
 ```
@@ -33,17 +33,17 @@ args, retry }` (`callOf`), the token the election's — otherwise; the leader's 
   round-trips over any wire (`revive`: a SyncomError with its code and fields, a TypeError with its data code). The
   forward is at-least-once and deduplicated by id: the leader keeps the answers (`ANSWERS_KEPT` per token,
   `TOKENS_KEPT` tokens, in memory, one `serve()`'s) and answers a call tried again from what it kept, in flight or
-  done; a `retry` it never saw is `CALL_UNKNOWN`, never run, which the follower turns into `LEADER_LOST
+  done; a `retry` it never saw is `ALX_ERR_CALL_UNKNOWN`, never run, which the follower turns into `ALX_ERR_LEADER_LOST
 { maybeApplied: true }`. A call that rejected may have reached the leader (`sent`, unless the transport says
-  `sent: false`); a dial that failed, a `NOT_LEADER`, `LEADER_LOST` or `CLOSED` answer marks nothing sent. Every
+  `sent: false`); a dial that failed, a `ALX_ERR_NOT_LEADER`, `ALX_ERR_LEADER_LOST` or `ALX_ERR_CLOSED` answer marks nothing sent. Every
   such failure drops the channel and tries again — `channel()` dialed anew, one dial for every write waiting —
   while a leader comes within `failover` ms, this instance's own where the election made it so meanwhile; past it,
-  `LEADER_LOST` with the cause and `maybeApplied`. A follower's `transact(fn)` is RECORDED: `fn` runs here against a recorder
+  `ALX_ERR_LEADER_LOST` with the cause and `maybeApplied`. A follower's `transact(fn)` is RECORDED: `fn` runs here against a recorder
   (`TX_WRITERS` note the call and answer at once; `get`/`has` read this instance), the batch goes as one `transact`
   call and runs in one transaction there — `insert` is refused on the recorder (its id would be the leader's); an
   `update` carrying the core's CREATE (createState's first write — `Symbol.for('syncom.create')`, so nothing of the
   core is required) goes as `[name, args, { create: true }]`, the flag beside the args where a follower's own options
-  never reach: a symbol crosses no wire, and losing it made a follower's first state write `NOT_FOUND`. The
+  never reach: a symbol crosses no wire, and losing it made a follower's first state write `ALX_ERR_NOT_FOUND`. The
   leader validates every name of a recorded batch against `TX_WRITERS` and the transaction's api. Three procedures
   stand beside the writers (`PROCEDURES` = `MUTATORS` + `transact` + them; `[CALL]` runs them here on the leader,
   forwards them else): `collection` (`[name, method, args]`, `method` one of `COLLECTION_WRITERS` — the list of
@@ -57,17 +57,17 @@ name]` → `db.sync.fetchBlob`, the bytes landing in the shared store, `{ length
   refuses the write, a blob is content-addressed and outside the write set) and forwards the register
   (`Attachments.prepare` makes both).
 - **A promotion opens the leader beside the follower, then swaps.** Granted the lock, the instance opens the
-  database as the leader (the follower holds no lock, so both stand; `LOCKED` — the old leader still letting go —
+  database as the leader (the follower holds no lock, so both stand; `ALX_ERR_LOCKED` — the old leader still letting go —
   is tried LOCKED_RETRIES times), checks the election still names it (two heartbeat leaders settling: the writer
   goes), moves `#db` to it, counts `generation` up, makes every live thing again (`live`, `document`), says
   `leader`, and only then closes the follower: `shared.db` is never null. A leader that lost the election (the
   heartbeat's two-leaders rule, a lock stolen) opens a follower and swaps the other way — after a promotion in
-  flight, never under it. The leadership waiters resolve at the promotion and reject `CLOSED` at `close()`. An
-  elected instance that cannot open says `PROMOTE_FAILED` on `error` (`attempt`, `cause`), YIELDS the election so
+  flight, never under it. The leadership waiters resolve at the promotion and reject `ALX_ERR_CLOSED` at `close()`. An
+  elected instance that cannot open says `ALX_ERR_PROMOTE_FAILED` on `error` (`attempt`, `cause`), YIELDS the election so
   the next in line leads, and asks again after `min(LOCKED_STEP · 2^attempt, MAX_BACKOFF)` ms — it never holds a
   lock it cannot use. `[START]` is honest the same way: a first open that fails releases the election and throws
   (`openShared` never resolves with `db === null`); a follower on a fresh path waits for the elected instance's
-  identity (READ_ONLY tried again every step, `LEADER_LOST` `fresh` past `failover`); `close()` stops the live
+  identity (ALX_ERR_READ_ONLY tried again every step, `ALX_ERR_LEADER_LOST` `fresh` past `failover`); `close()` stops the live
   things, rejects the waiters, closes the channel, waits for a promotion in flight, closes the database and
   releases the election LAST, so the next leader never meets this one's database lock.
 - **The election is Web Locks first, and re-armable.** `navigator.locks.request('syncom:leader:<path>', { mode:

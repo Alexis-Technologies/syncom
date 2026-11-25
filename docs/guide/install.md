@@ -64,7 +64,7 @@ collections and queries adds two plugins:
 
 Nothing is registered for the whole process: two databases in one process can run with different
 plugins. Calling a method whose plugin the database was not opened with rejects with a `TypeError` whose
-`code` is `PLUGIN_MISSING`, and the message names the subpath to import:
+`code` is `ALX_ERR_PLUGIN_MISSING`, and the message names the subpath to import:
 
 <<< @/examples/install-lean.mjs#missing
 

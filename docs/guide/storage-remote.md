@@ -35,7 +35,7 @@ engine you pass to `createDatabase()` like any other:
 <<< @/examples/storage-remote.mjs#connect
 
 Everything the database does goes through the port: the lock, every record read and written, every group of the
-log appended. Errors come back with their codes (`LOCKED`, `INTEGRITY`, a file's `EEXIST`), and a served engine's
+log appended. Errors come back with their codes (`ALX_ERR_LOCKED`, `ALX_ERR_INTEGRITY`, a file's `EEXIST`), and a served engine's
 change stream and the loss of its lease are pushed back as they happen, so the database behaves as it would over
 the engine directly.
 
@@ -44,7 +44,7 @@ the engine directly.
 <<< @/examples/storage-remote.mjs#unreachable
 
 When the port closes or the worker behind it exits, every call waiting and every call after rejects with
-`ENGINE_UNREACHABLE` and `reason: 'closed'`, and the serving side lets go of what that port held: its leases, its
+`ALX_ERR_ENGINE_UNREACHABLE` and `reason: 'closed'`, and the serving side lets go of what that port held: its leases, its
 subscriptions, its databases. `engine.close()` closes your end and leaves the served databases open;
 `server.close()` stops answering and closes every database opened through that port.
 
@@ -63,7 +63,7 @@ Give a less trusted side, such as a window that renders remote content, its own 
 
 ## Know when the other side is slow or gone
 
-`timeout` (in milliseconds, none by default) fails a call that waits longer as `ENGINE_UNREACHABLE` with
+`timeout` (in milliseconds, none by default) fails a call that waits longer as `ALX_ERR_ENGINE_UNREACHABLE` with
 `reason: 'timeout'`. `engine.stats()` says how the port is doing:
 
 <<< @/examples/storage-remote.mjs#stats
@@ -82,7 +82,7 @@ other side yourself, pass them to `remoteEngine()` instead:
 ## Limitations
 
 - **One database, one side.** The database is opened on one side of the port, and the usual
-  [one instance per directory](./database) rule holds across it: a second side opening the same path gets `LOCKED`.
+  [one instance per directory](./database) rule holds across it: a second side opening the same path gets `ALX_ERR_LOCKED`.
   For several windows or tabs over one database, see [SharedWorker](./storage-shared-worker).
 - **Every call is a round trip.** A query that reads many records from the engine reads them through the port.
   Measure it for your data before moving a hot path behind one.

@@ -119,14 +119,14 @@ What the root namespace's keys hold:
 
 | Key | Content |
 | --- | --- |
-| `node.json` | `{ id, plugins }`: this node's identity — its signing key, or what `getId` minted without the `signing` plugin — and the kind plugins the directory ran with (a reopen without one of them is `PLUGIN_MISSING`) |
+| `node.json` | `{ id, plugins }`: this node's identity — its signing key, or what `getId` minted without the `signing` plugin — and the kind plugins the directory ran with (a reopen without one of them is `ALX_ERR_PLUGIN_MISSING`) |
 | `schema.json` | `{ version, migrated, hash }`: the schema version and snapshot hash this directory last ran, and when that version first ran here (see [Versions and the lens](./api#versions-and-the-lens)) |
 | `tags.json` | `{ format: 1, tags: [{ name, eventId, seq, ts, vector, createdAt }] }`, oldest first; `tags.corrupt.json` once it could not be read (see [Tags](./versions#tags)) |
 | `branch.json` | `{ format: 1, parent, forkedAt, createdAt }`, in a branch only (see [Branches](./versions#branches)) |
 | `lock.json` | `{ pid, id, since }` while an instance holds the database through the lock key outside a browser (see [One instance per database](#one-instance-per-database)) |
 | `revoked.json` | `{ v: 1, nodes: { [node]: scopes } }`: the scopes a host took back, per peer |
 | `uploads.json` | `{ v: 1, nodes: { [url]: [[digest, id, name], …] } }`: the attachments each dialed node still waits for the bytes of, oldest first, 1 024 a node (see [`blobPut`](./wire#blobput)) |
-| `moved.json` | `{ to: { path, engine }, at }`: where `rotateAtRest()` copied the database; the directory opens nowhere until `dropDatabase()` (`MOVED`) |
+| `moved.json` | `{ to: { path, engine }, at }`: where `rotateAtRest()` copied the database; the directory opens nowhere until `dropDatabase()` (`ALX_ERR_MOVED`) |
 | `copy.json` | `{ from, started }` while `copyEngine()` writes a target; a target that holds it without an identity is a copy cut short |
 
 Every record names the chain block that committed it (`block`), which is what makes `validate()` possible, and
@@ -138,7 +138,7 @@ its file as a tombstone until a cleanup folds an old one into the `tombstones` n
 
 `get(id)` → the stored record (`{ data, meta, encrypted, timestamp, block, gen?, type? }`, `type` the
 collection of a tombstone whose data is empty) or `null`; a record the medium holds that is no record rejects
-with `INTEGRITY` (`reason: 'unreadable'`, the parse error as `cause`). `raw(id)` → its text as the medium holds
+with `ALX_ERR_INTEGRITY` (`reason: 'unreadable'`, the parse error as `cause`). `raw(id)` → its text as the medium holds
 it (a native engine stringifies on demand). `has(id)`. `getMany(ids)` → a `Map` of the ids found, in the
 order asked. `ids({ after, limit })` → every id the medium holds, tombstones included, in id order, after
 `after`, at most `limit`. Records are written only through `write(batch)`.
@@ -160,7 +160,7 @@ Attachments' bytes by their SHA-256: `get(digest)` → a `Uint8Array` or `null`,
 `put(digest, bytes)`, `remove`. A copy goes in and a copy comes out. Every store checks the key at its door
 (`checkDigest`: 64 lowercase hex characters, a `TypeError` otherwise) and takes a `Uint8Array` of at most
 `MAX_STORED_BYTES`: `MAX_BLOB_BYTES` (64 MiB, the cap on plain bytes at every door that takes them) plus the 28
-bytes the at-rest seal adds; past it, `BLOB_TOO_LARGE`. Blobs are outside the write set: a blob is written
+bytes the at-rest seal adds; past it, `ALX_ERR_BLOB_TOO_LARGE`. Blobs are outside the write set: a blob is written
 before the record names it, and the same bytes are the same blob.
 
 ### catalog, changes, lock, estimate
@@ -172,7 +172,7 @@ store holds none of this catalog's rows and `all()` is every row).
 `changes.subscribe(listener)` → the unsubscribe. The listener hears `{ p, records: ids }` per write set of
 another instance (IndexedDB also `{ p, log: [first, last] }` per log group), never this instance's own, and
 `{ error }` once when the stream ends; the subscription is then over. A follower subscribes before it loads,
-subscribes again after an end and reads every record again (`FOLLOW_LOST`).
+subscribes again after an end and reads every record again (`ALX_ERR_FOLLOW_LOST`).
 
 `lock({ mode, staleAfter, poll, timeout, onLost })` → a lease `{ release(), gen?, expiresAt?, subscribe? }`;
 see [One instance per database](#one-instance-per-database).
@@ -238,7 +238,7 @@ A kv namespace is a directory under the path and a key a file in it:
 The [guide](../guide/storage-filesystem#see-what-is-on-disk) lists what each file holds. A name reaches the
 backend only as `isKvKey` admits it. The backend lists in its own order, so `records.ids` and `copies.ids`
 collect every name, sort, and page after. A write set is never atomic: the log append stays the commit point
-and a landing that fails is `UNPERSISTED`. `remove(path)` empties every directory of the layout (`DIRS` in
+and a landing that fails is `ALX_ERR_UNPERSISTED`. `remove(path)` empties every directory of the layout (`DIRS` in
 `src/layout.js`, the tags' two each) and `branch.json` last, so a removal cut short leaves a directory
 `drop()` still takes; the empty directories stay (an fsi has no `rmdir`). The files engine has no `estimate`.
 
@@ -300,7 +300,7 @@ survives the process.
 
 Seven object stores made at once in the one upgrade a new database gets, at version 1: `kv` `[p, ns, key]`,
 `records` `[p, id]` (the structured clone of the object handed in; a text that is no record kept as
-`{ text }`, read as `INTEGRITY`), `pieces` `[p, id, name]`, `copies` `[p, tag, id]`, `log` `[p, seq]` (the entry
+`{ text }`, read as `ALX_ERR_INTEGRITY`), `pieces` `[p, id, name]`, `copies` `[p, tag, id]`, `log` `[p, seq]` (the entry
 and its group's first seq), `meta` `[p, key]` (the log's index and segments, the catalog's rows) and `blobs`
 `[p, digest]`. Every key begins with the database's path, so a listing is one key range and `remove(path)` a
 range delete per store, in one transaction. A write set is one readwrite transaction over the stores it
@@ -379,13 +379,13 @@ The op log append is the commit point. A local write resolves once its group of 
 its chain block are landed after it, in log order, up to `defer` ms later (16 by default; `0` lands every
 write at once; `flush()`, `tag()` and `close()` land them first). A crash before the landing is replayed at the
 next open: the log keeps the batch unapplied until its records land. A torn open group file, or a journal's
-torn last line, is dropped before anyone was told of it; a record file torn the same way reads as `INTEGRITY`
+torn last line, is dropped before anyone was told of it; a record file torn the same way reads as `ALX_ERR_INTEGRITY`
 until `repair(id)` rebuilds it.
 
 A landing that fails after the append (a full disk, a browser's `QuotaExceededError`) does not undo the write:
 it resolves, the op replicates, the record is held in memory so reads see it, and the database's `error` event
-carries `code: 'UNPERSISTED'` with the `ids` (and `quota: true` when the medium is full). The next open replays
-it; `tag()` rejects with `UNPERSISTED` while such a record is held.
+carries `code: 'ALX_ERR_UNPERSISTED'` with the `ids` (and `quota: true` when the medium is full). The next open replays
+it; `tag()` rejects with `ALX_ERR_UNPERSISTED` while such a record is held.
 
 `createDatabase({ durable: true })` asks the medium to wait for the disk:
 
@@ -422,27 +422,27 @@ it reads anything, with one of two mechanisms:
   `staleAfter` have passed since the last one that landed, then the lease is lost. A release leaves the
   document lapsed, so the generation counts on. Every document a holder writes carries its `gen`, and every
   put, removal and log group is fenced to documents of its generation or older: a holder whose lease was taken
-  cannot write over what the new holder wrote (the statement fails as `LEASE_LOST`; under `transactions: true`
-  the lease is checked inside the transaction first). The database then hears `LEASE_LOST` once on its `error`
-  event, becomes read-only (`READ_ONLY` for every write after) and holds what it logged but did not land
-  (`UNPERSISTED`) for the next holder's replay. The `lease` event says `{ state: 'renewed' | 'late' | 'lost',
+  cannot write over what the new holder wrote (the statement fails as `ALX_ERR_LEASE_LOST`; under `transactions: true`
+  the lease is checked inside the transaction first). The database then hears `ALX_ERR_LEASE_LOST` once on its `error`
+  event, becomes read-only (`ALX_ERR_READ_ONLY` for every write after) and holds what it logged but did not land
+  (`ALX_ERR_UNPERSISTED`) for the next holder's replay. The `lease` event says `{ state: 'renewed' | 'late' | 'lost',
   path }`.
 
 | `createDatabase({ lock })` | Meaning |
 | --- | --- |
-| `'fail'` (default) | A second open rejects with `LOCKED` |
+| `'fail'` (default) | A second open rejects with `ALX_ERR_LOCKED` |
 | `'wait'` | Polls until the database is free (or stale, or lapsed) |
 | `false` | No lock: coordinating instances is yours |
-| `{ mode, staleAfter, poll, timeout }` | `mode` `'fail'` or `'wait'`; `staleAfter` (the lock key: 30 minutes; the lease: 30 000 ms, its length); `poll` (100 ms); `timeout` turns a `'wait'` that never ends into `LOCKED` |
+| `{ mode, staleAfter, poll, timeout }` | `mode` `'fail'` or `'wait'`; `staleAfter` (the lock key: 30 minutes; the lease: 30 000 ms, its length); `poll` (100 ms); `timeout` turns a `'wait'` that never ends into `ALX_ERR_LOCKED` |
 
 `db.stats().lock` is `{ kind: 'kv' | 'native', mode, expiresAt, lost }` (`expiresAt` the lease's, on this
 clock; `null` for the lock key) or `null` under `lock: false`. `dropDatabase(path, { engine | fsi })` holds the
-same lock while it removes a closed database; an open instance's is `LOCKED`.
+same lock while it removes a closed database; an open instance's is `ALX_ERR_LOCKED`.
 
 A second instance that only reads is a **follower**, `createDatabase({ readOnly: true })`, over an engine whose
 `capabilities.shared` is true (memory, IndexedDB, MongoDB); the files engine and SQLite refuse it with a
 `TypeError`, since the files engine's journal and SQLite's connection are one instance's. A follower holds no
-lock, writes nothing (`READ_ONLY`), never dials, and hears what the writer lands through `db.changes` where the
+lock, writes nothing (`ALX_ERR_READ_ONLY`), never dials, and hears what the writer lands through `db.changes` where the
 engine has one; it hosts only over a shared log.
 
 ## Layers
@@ -487,10 +487,10 @@ a name. The wrapped engine keeps no index of its own (`indexes` false). The file
 backend, `filesEngine(atRest(fsi, options))`, never as an engine.
 
 What it does not hide or prevent: the names of files and keys and their sizes, and an older ciphertext put
-back in its place. A value that is not the key's is `DECRYPT_FAILED` with a `reason`: `'key'` (another key, a
+back in its place. A value that is not the key's is `ALX_ERR_DECRYPT_FAILED` with a `reason`: `'key'` (another key, a
 torn ciphertext, a blob never sealed or moved), `'plain'` (a text never encrypted), `'torn'` (not base64); the
 first such file fails `createDatabase()`. The key is rotated by a copy (`rotateAtRest`), which fences the
-source with `moved.json` (`MOVED`). See [Encryption](../guide/encryption).
+source with `moved.json` (`ALX_ERR_MOVED`). See [Encryption](../guide/encryption).
 
 ## An engine over a port
 
@@ -507,13 +507,13 @@ started with `start()` where the port has one (and `close` when it goes). Electr
 neither — its `on('message')` hands an event and it waits for `start()` — so it is served through a few lines
 that shape it as a web port; [Electron](../guide/electron) shows them.
 
-An error crosses with its code and fields (`EEXIST`, `INTEGRITY`, `LOCKED`…), never a file system's `path`,
+An error crosses with its code and fields (`EEXIST`, `ALX_ERR_INTEGRITY`, `ALX_ERR_LOCKED`…), never a file system's `path`,
 `syscall` or `errno`; a change stream, a lease's life and its loss are pushed back; a group the served store
 cannot write fails the append on the calling side. The served side trusts the port as it trusts the process,
 no further: a call names a store and a method of the contract and nothing else, every key, id, tag, piece's
 name and path is checked before a store sees it, and `remove(path)` takes only what that port opened, or the
 paths `allow` lists, which also limits what the port may open. A port that closes or a worker that exits fails
-every call waiting and every call after with `ENGINE_UNREACHABLE` (`reason: 'closed'`), and the served side lets
+every call waiting and every call after with `ALX_ERR_ENGINE_UNREACHABLE` (`reason: 'closed'`), and the served side lets
 go of what the port held (its leases, subscriptions, databases); a call past `timeout` ms (0, the default,
 waits) fails the same with `reason: 'timeout'`. `engine.stats()` is `{ inflight, oldestMs, calls, failures,
 closed }`. See [Worker](../guide/storage-worker) and [Remote engine](../guide/storage-remote).
@@ -528,8 +528,8 @@ entries as one segment; `batch`, 500 by default, records or log entries per writ
 same identity, epoch, vector and heads, so a peer resumes its cursor without a bootstrap.
 
 Both databases are held as `createDatabase()` holds them (a lease lost on the way fails the copy with
-`LEASE_LOST`). A target that holds `node.json` or a record is `TARGET_NOT_EMPTY`; a target without a blobs
-store while the source holds blobs is `BLOBS_UNSUPPORTED`. The copy marks its target first (`copy.json`,
+`ALX_ERR_LEASE_LOST`). A target that holds `node.json` or a record is `ALX_ERR_TARGET_NOT_EMPTY`; a target without a blobs
+store while the source holds blobs is `ALX_ERR_BLOBS_UNSUPPORTED`. The copy marks its target first (`copy.json`,
 removed last), lands the identity (the keys, then `node.json`) last, and removes what it wrote when it fails;
 a target marked without an identity is a copy cut short, taken away by the next copy before it begins. It
 answers `{ records, pieces, copies, kv, entries, blobs }`. Two copies of one node are two writers of one

@@ -37,7 +37,7 @@ that syncs with peers relays them like any other node's. A parent running with
 
 `from: { tag }` forks at a [tag](./versions#name-the-whole-database-with-a-tag), and `from: { at }` at any
 version the log can still give exactly: an event id, a stamp or `{ vector }`. A version the log no longer
-holds what it needs for rejects with `HISTORY_GONE`, and an unknown tag with `TAG_NOT_FOUND`.
+holds what it needs for rejects with `ALX_ERR_HISTORY_GONE`, and an unknown tag with `ALX_ERR_TAG_NOT_FOUND`.
 
 ## See what a branch is, and throw it away
 
@@ -50,7 +50,7 @@ without `branch.json` is refused with a `TypeError` and keeps its files.
 
 ## What to know
 
-- `branch()` only creates: a path that already holds files is refused with `BRANCH_EXISTS`, so it never
+- `branch()` only creates: a path that already holds files is refused with `ALX_ERR_BRANCH_EXISTS`, so it never
   takes over another database. A fork that fails halfway leaves nothing behind.
 - A branch keeps every op for the merge back (its sync retention is `{ ops: 0 }`, nothing dropped) and does
   not dial any peer until you start its sync.

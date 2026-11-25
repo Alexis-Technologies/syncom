@@ -5,7 +5,7 @@ description: Run one database for every tab of your app in a SharedWorker, with 
 
 # SharedWorker
 
-A database is opened by one instance at a time: a second tab that opens the same path gets `LOCKED`, because two
+A database is opened by one instance at a time: a second tab that opens the same path gets `ALX_ERR_LOCKED`, because two
 writers would hand out the same sequence numbers. With `@alexify/syncom/shared` every tab still gets a working
 database. One instance leads: it holds the full database, writes, and syncs with other nodes. Every other instance
 follows: it reads the same store itself and sends its writes to the leader. In a browser the natural leader is a
@@ -24,7 +24,7 @@ to the leader and resolves to the leader's answer. Both are plain values, so a f
 <<< @/examples/storage-shared-worker.mjs#channel
 
 The leader answers every call as a value, `{ ok: true, value }` or `{ ok: false, error }`, never by throwing, so a
-refusal such as `NOT_FOUND` reaches the tab with its code and fields intact, and the tab throws it again. Each call
+refusal such as `ALX_ERR_NOT_FOUND` reaches the tab with its code and fields intact, and the tab throws it again. Each call
 carries an id, and the leader keeps its recent answers: a call sent again after a lost answer is answered from what
 the leader kept, never run twice.
 
@@ -64,7 +64,7 @@ The insert went to the worker and was written there; the tab's live query heard 
 ## Run sync in the worker
 
 Replication is the leader's job. Pass `sync` options to the worker's `openShared()` and use `shared.sync` there; on
-a follower, reading `sync` throws `NOT_LEADER`, and a follower never dials or hosts. The worker's database is a node
+a follower, reading `sync` throws `ALX_ERR_NOT_LEADER`, and a follower never dials or hosts. The worker's database is a node
 like any other: the [Sync engine](./replication) page applies to it unchanged, and the tabs see what it receives as
 it lands in the store.
 
@@ -74,12 +74,12 @@ A follower is a read-only database with its writes forwarded, which leaves a few
 
 - `observe()` is not offered on the shared database, because a follower raises no `transaction` event; use a
   live query (`select().watch()`) or `shared.document(id)` instead.
-- A collection's `modify(id, fn)` and a write by query (`remove()`) reject with `NOT_LEADER`: a function does not
+- A collection's `modify(id, fn)` and a write by query (`remove()`) reject with `ALX_ERR_NOT_LEADER`: a function does not
   cross a port.
 - `transact(fn)` on a follower is recorded: `fn` runs in the tab, its writes are noted and sent as one transaction,
   so `fn` cannot read what it wrote, and `insert()` is refused inside it (use `set()` with an id of your own).
 - A write waits for a leader for up to `failover` milliseconds (10 000 by default), for example while a new worker
-  takes over, and then rejects with `LEADER_LOST`; `maybeApplied: true` on that error means read the record before
+  takes over, and then rejects with `ALX_ERR_LEADER_LOST`; `maybeApplied: true` on that error means read the record before
   you write it again.
 
 ## Limitations

@@ -12,7 +12,7 @@ src/branch/branch.js      the @alexify/syncom/branch subpath — fork a storage,
 
 - **A branch is a storage; a merge is a push.** `src/branch/branch.js` opens the
   fork through `parent.constructor` (the subpath bundles no engine), never
-  copies the directory (a copied identity is `SELF`/`REWOUND`), gives it
+  copies the directory (a copied identity is `SELF`/`ALX_ERR_REWOUND`), gives it
   `retention: { ops: 0 }` + `autoStart: false`, joins the parent's (or the
   tag's) snapshot pages and adopts the vector. `merge` = `outbound(source.log,
 { exclude: into.nodeId, vector: into.vector, own: source.nodeId,

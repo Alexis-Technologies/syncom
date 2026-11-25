@@ -49,7 +49,7 @@ search, which is the `search` option of `createDatabase()` rather than a plugin 
 ## Plugins belong to one database
 
 Nothing is registered for the whole process. Two databases in one process can run different plugins, and a call
-into a plugin the database was not opened with rejects with a `TypeError` whose `code` is `PLUGIN_MISSING` and
+into a plugin the database was not opened with rejects with a `TypeError` whose `code` is `ALX_ERR_PLUGIN_MISSING` and
 whose message names the import that fixes it:
 
 <<< @/examples/plugins.mjs#per-instance
@@ -64,9 +64,9 @@ There are two sorts of plugin, and they differ in how they affect sync.
 A **kind plugin** (`text`, `tree`) brings field kinds: how their ops apply, how they merge and how they read. Every
 node that should read those fields needs the plugin. A node without it still accepts a peer's op of that kind,
 keeps it in its log and relays it to the peers behind it, so a hub does not have to run every kind its clients use;
-it does not apply the op, and reports it on its `error` event as `OP_REFUSED` with `reason: 'kind'`. Once a
+it does not apply the op, and reports it on its `error` event as `ALX_ERR_OP_REFUSED` with `reason: 'kind'`. Once a
 directory has run with a kind, opening it without that plugin is refused, and a node never joins a snapshot from a
-host that lacks one of its kinds (`KINDS_MISMATCH`), since the snapshot would leave those fields out.
+host that lacks one of its kinds (`ALX_ERR_KINDS_MISMATCH`), since the snapshot would leave those fields out.
 
 When two nodes write one field as different kinds at the same time, every node keeps the same one, decided by a fixed
 order of the kinds: register, counter, set, then the plugins' kinds by their rank. `createPlugins()` builds the
@@ -80,7 +80,7 @@ validators, `sync` the sync manager, `signing` the node's key. A feature plugin 
 so nodes with different feature plugins still sync; each accepts what its own options allow (a node that requires
 signatures refuses unsigned ops). What the options ask for is checked when the database opens: the `schema` option
 without the `schema` plugin, `chain: true` without `chain`, or `sync.signatures: 'require'` without `signing` fails
-`createDatabase()` with `PLUGIN_MISSING` rather than running without it.
+`createDatabase()` with `ALX_ERR_PLUGIN_MISSING` rather than running without it.
 
 ## Add methods with a plugin of your own
 

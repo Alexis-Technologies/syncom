@@ -65,14 +65,14 @@ importer sees the same names (`tests/package/esm.test.js`). Types sit beside eve
 ## What a plugin changes, and what it does not
 
 - A method of a plugin the database was not opened with (`splice()` without `text`, `treeMove()` without
-  `tree`) rejects with a `TypeError` whose `code` is `PLUGIN_MISSING` and whose message names the subpath.
+  `tree`) rejects with a `TypeError` whose `code` is `ALX_ERR_PLUGIN_MISSING` and whose message names the subpath.
   So does a patch of its action in `applyPatches()`, and a reopen of a directory that ran with the plugin
   before (`node.json` names the kinds it ran with; more kinds than before is fine).
 - The op types and their codes on the wire are the protocol's, not a plugin's: a node without the plugin
-  admits, logs and relays a peer's op of that kind and refuses to apply it (`OP_REFUSED`,
+  admits, logs and relays a peer's op of that kind and refuses to apply it (`ALX_ERR_OP_REFUSED`,
   `reason: 'kind'`). A hub that runs the core alone carries a text between two nodes that have the plugin.
   A snapshot it serves lacks the field, which is why a node never bootstraps from a host whose `hello`
-  named fewer kinds than its own (`KINDS_MISMATCH`, reported once; the feed resumes as it can). The rule
+  named fewer kinds than its own (`ALX_ERR_KINDS_MISMATCH`, reported once; the feed resumes as it can). The rule
   for a mesh: every node that holds a record needs the kinds its peers write to it, and a hosting unit that
   serves snapshots should have every kind its peers use.
 - The kinds' precedence (what wins when two nodes make one field as two kinds) is the registry's declared
@@ -81,15 +81,15 @@ importer sees the same names (`tests/package/esm.test.js`). Types sit beside eve
 - Security is opt-in, not opt-out of a level: without `signing` a node's ops are taken by a `'verify'` peer
   as unsigned ops always were, and a `'require'` host refuses its hello (its id is no key). The
   configuration that resists a stripped signature is `'require'` with `signing` on every node. What the
-  options ask for and no plugin provides is refused at `createDatabase()` with `PLUGIN_MISSING`:
+  options ask for and no plugin provides is refused at `createDatabase()` with `ALX_ERR_PLUGIN_MISSING`:
   `sync.signatures: 'require'` without `signing`, `chain: true` without `chain`, `encrypted: true` without
   `encryption`, `schema` or `validator` without `schema`, an OpenTelemetry api or tracer without
   `telemetry`, a directory that holds tags without `versions`. A directory keeps the key it was given as
   its id when opened without `signing`; one born without it is rekeyed once, with a warning, when the
   plugin arrives.
 - Without `signing` the node id is what `getId` mints (a UUID by default), ops go unsigned and unchecked;
-  without `chain` no block is written and `validate()` is `NO_CHAIN`; without `sync`, `db.sync` is
-  `PLUGIN_MISSING`. `db.plugins` lists the plugins a database runs with, `db.kinds` the kind plugins among
+  without `chain` no block is written and `validate()` is `ALX_ERR_NO_CHAIN`; without `sync`, `db.sync` is
+  `ALX_ERR_PLUGIN_MISSING`. `db.plugins` lists the plugins a database runs with, `db.kinds` the kind plugins among
   them (what `hello` carries).
 
 ## The browser build

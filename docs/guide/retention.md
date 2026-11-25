@@ -1,6 +1,6 @@
 ---
 title: Retention and acknowledgements
-description: How long the operation log keeps ops, why a node keeps its own until its hosts have them, what UNDELIVERABLE and REWOUND mean, and how cleanup and purge fit in.
+description: How long the operation log keeps ops, why a node keeps its own until its hosts have them, what ALX_ERR_UNDELIVERABLE and ALX_ERR_REWOUND mean, and how cleanup and purge fit in.
 ---
 
 # Retention and acknowledgements
@@ -57,7 +57,7 @@ node that is never reached holds this node's ops back until you remove it or dis
 
 Ops written before the first `addNode()` are retained like any others, because no host was there to
 wait for. If they were compacted before a host was registered, the host lacks the start of this node's
-stream and this log no longer holds it. The node reports `UNDELIVERABLE` once per hello:
+stream and this log no longer holds it. The node reports `ALX_ERR_UNDELIVERABLE` once per hello:
 
 <<< @/examples/retention.mjs#undeliverable
 
@@ -71,7 +71,7 @@ may write for long before its first sync a retention large enough to cover it.
 A data directory restored from an older copy has forgotten its newest ops, but its hosts have not. If
 it wrote again under the old numbers, each host would take the new ops for ones it already holds. The
 node notices at the next hello: the host holds more of the node's own stream than the node's log does,
-and the node reports `REWOUND`:
+and the node reports `ALX_ERR_REWOUND`:
 
 <<< @/examples/retention.mjs#rewound
 

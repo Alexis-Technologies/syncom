@@ -30,7 +30,7 @@ src/signing/sign.js       canonical form, signOp, verifyOp — what a signature 
   base64url chars, canonical last char — a non-canonical one is the same key under another
   id); `keys/sign-*.pem` next to the RSA pair, `node.json` names the id (a non-key id there —
   a UUID from before signing, or a directory opened without the plugin — is rekeyed once with
-  `identity.rekeyed`; another key id is `IDENTITY_MISMATCH`, never silent). Without the plugin
+  `identity.rekeyed`; another key id is `ALX_ERR_IDENTITY_MISMATCH`, never silent). Without the plugin
   the id is what `node.json` names or `getId` mints, and a key id stays the id. `src/signing/sign.js` signs
   `[1, origin, seq, ts, type, id, scope, from, v, actor, digest, msg, prev]`
   (`headerOf` in src/header.js) with `digest = sha256(nonce + canonical(payload))`
@@ -42,7 +42,7 @@ src/signing/sign.js       canonical form, signOp, verifyOp — what a signature 
   page is verified in `checkPage` (src/apply.js) BEFORE the sequential
   `admit`, sixty-four at a time through `verifyAsync` (the thread pool in
   Node.js — a synchronous verify there would hold a page to one check at a
-  time); it never throws (a throw there would be `PAGE_FAILED`, a
+  time); it never throws (a throw there would be `ALX_ERR_PAGE_FAILED`, a
   stream-stopper). `OpLog.scrub` deletes the nonce with
   the payload and keeps `sig`+`digest`, so a scrubbed op's header verifies.
   A refused op is a gap, like a malformed one. `'verify'` is the default

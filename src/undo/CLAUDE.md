@@ -5,7 +5,7 @@ The stack of inverse patches over the commit event. The rules of the core — th
 ## Layout
 
 ```
-src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js, paths.js only
+src/undo/undo.js          the @alexify/syncom/undo subpath — the undo stack over the commit event; requires patch.js, emitter.js, symbols.js, paths.js and argument-errors.js only
 ```
 
 ## Rules
@@ -38,4 +38,4 @@ true`; conflicts are read from `log.entriesOf(id)` after the step's
   register. The way back of such a field is an `unset` and the field made again (src/patch.js), with no looser
   form: where others touched the field since, its patches are skipped TOGETHER (`reset` in `#apply`) — the
   made-again kind taken alone as the "loose" alternative lands on a field of the other kind and refuses the whole
-  undo (`FIELD_KIND`).
+  undo (`ALX_ERR_FIELD_KIND`).

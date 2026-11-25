@@ -15,7 +15,7 @@ src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes
                           a shared log (wrpc's BrokerLog shape) over two collections — a topic's entries `[topic, n]` numbered by its head
                           document (`<collection>_heads`: epoch, next, first) in one findOneAndUpdate; a read a range by `n` (the head once a
                           page) then a tail woken by a change stream or a poll; a hole told, a tombstone passed; 410/400 as wrpc's feeds
-                          speak them; trim, trimBefore, retention — no requires
+                          speak them; trim, trimBefore, retention — requires argument-errors.js only
 ```
 
 ## Rules
@@ -53,9 +53,9 @@ src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes
   `updateOne({ _id, gen: { $not: { $gt: gen } } }, { $set: { …, gen } }, { upsert: true })`
   and every `deleteOne`/`deleteMany` carries the same filter: a document of a newer lease does not match, the
   upsert tries an insert, the `_id` collides, E11000 stops the ordered bulk and the statement — the write set,
-  the log group, a seal, the index, a kv or copies put — fails as `LEASE_LOST` (`fenced`; `kv.create`'s E11000
+  the log group, a seal, the index, a kv or copies put — fails as `ALX_ERR_LEASE_LOST` (`fenced`; `kv.create`'s E11000
   stays `EEXIST`). Under `transactions: true` the lease (`{ _id, owner, gen }`) is read inside the transaction
-  first, absent → `LEASE_LOST` before anything is written. The driver is 6 or later (`findOneAndUpdate` answers
+  first, absent → `ALX_ERR_LEASE_LOST` before anything is written. The driver is 6 or later (`findOneAndUpdate` answers
   the document; `taken?.value ?? taken` reads an older one defensively). Every lease the engine holds is renewed on
   ONE timer, in one bulk write a tick at the shortest margin among them (keyed by the holder's token: a lease lost and
   not yet noticed and the next on the same path are two); a tick that lands short or fails hands each lease its own
@@ -66,7 +66,7 @@ src/mongodb/shared-log.js mongoSharedLog({ client, db, name, collection, changes
   (`findOneAndUpdate` with a pipeline, upsert — the one round trip two appenders agree through, so two never share
   a number) and inserts the entry after it, so a reader that finds `n + 1` before `n` waits `gapTimeout` for `n`
   (an insert is one round trip behind its number), reads it once more, and then yields it as a HOLE — `{ id,
-value: null, headers: { hole: '1' } }`, `shared.hole` warned — which the hub tells (`SHARED_LOG_FAILED` `hole`)
+value: null, headers: { hole: '1' } }`, `shared.hole` warned — which the hub tells (`ALX_ERR_SHARED_LOG_FAILED` `hole`)
   and passes; never skipped in silence. An insert that failed marks its number a tombstone (`hole: true`, best
   effort) and one slower than `gapTimeout` — a live reader may have passed it — marks its number and takes a fresh
   one (`MAX_RENUMBER` times, then 503): a tombstone is passed without a word, nothing was lost. The epoch is
@@ -88,7 +88,7 @@ value: null, headers: { hole: '1' } }`, `shared.hole` warned — which the hub t
   dropped once. One message per document, never per set: a follower re-reads what it hears. The stream's
   `error`, `close` and `end` are listened to (an unheard `error` would crash the process): the listener hears
   `{ error }` once and the subscription is over — the follower subscribes again and reads every record again
-  (`FOLLOW_LOST`). `changes: false` for a standalone server, where `watch` would fail.
+  (`ALX_ERR_FOLLOW_LOST`). `changes: false` for a standalone server, where `watch` would fail.
 - **A blob is parts of bytes under a head.** A document holds 16 MiB and a blob may hold 64 (MAX_BLOB_BYTES), so `blobs`
   keeps a blob as parts of `BLOB_CHUNK` (15 MiB) — `_id` `[p, digest, n]`, `{ p, digest, n, b }` for n ≥ 1 (`b` the
   driver's Binary, answered as a Uint8Array through `bytesOf`; a fake's own Uint8Array as it is) — and a head `n: 0`

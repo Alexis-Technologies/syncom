@@ -28,7 +28,7 @@ without one is refused when the database opens.
 
 The bytes can be a `Uint8Array`, an `ArrayBuffer` or a string (stored as UTF-8). The name is up to 128 letters,
 digits, `.`, `_`, `@` and `-`, and putting under a name that exists replaces what it names. The record must
-exist; `put()` on an id that is not there rejects with `NOT_FOUND`.
+exist; `put()` on an id that is not there rejects with `ALX_ERR_NOT_FOUND`.
 
 ## Read them back
 
@@ -62,7 +62,7 @@ that syncs a thousand records with photos downloads the photos it opens, not a t
 A host hands out bytes only to a peer that may read a record naming them: the record must be live and in the
 peer's [scopes](./partial-sync). A peer that knows a digest but cannot read a record holding it gets nothing.
 
-When no peer can be reached, or none has the bytes, `get()` rejects with `BLOB_NOT_FOUND`. Pass `{ fetch: false }`
+When no peer can be reached, or none has the bytes, `get()` rejects with `ALX_ERR_BLOB_NOT_FOUND`. Pass `{ fetch: false }`
 to read only what this node holds:
 
 <<< @/examples/attachments.mjs#offline
@@ -79,7 +79,7 @@ a phone both dial a server; the laptop attaches a sketch and the phone reads it 
 [server](./replication-server) the same way. The host takes the bytes only for a live record in the node's [scopes](./partial-sync) that names them under that
 name, and only if they hash to the digest. A hub that relays the entry before the bytes reach it uploads them to
 its own host once they arrive, so a chain of hubs carries them as well. An upload the host refuses (past
-`limits.bytesPerBlob`, say) is reported on the manager's `error` event as `BLOB_UPLOAD_FAILED` and never fails the
+`limits.bytesPerBlob`, say) is reported on the manager's `error` event as `ALX_ERR_BLOB_UPLOAD_FAILED` and never fails the
 push; one that failed on the way is tried again at the next push.
 
 ### Finish an upload after a restart
@@ -121,9 +121,9 @@ counts without removing. Deleting or purging a record leaves its bytes for the n
 from time to time, for example next to [cleanup](./cleanup).
 
 The log is not part of the sweep. If you restore an old version of a record whose bytes were swept, a read fetches
-them from a peer that still holds them, or rejects with `BLOB_NOT_FOUND`. In a browser with several tabs open
+them from a peer that still holds them, or rejects with `ALX_ERR_BLOB_NOT_FOUND`. In a browser with several tabs open
 (the [leader election](./leader-election) setup), sweep from the tab that leads while the others are not attaching
-files: a sweep on a follower is refused with `READ_ONLY`, and a put in progress on another tab is not visible to it.
+files: a sweep on a follower is refused with `ALX_ERR_READ_ONLY`, and a put in progress on another tab is not visible to it.
 
 ## Compress the stored bytes
 
@@ -136,8 +136,8 @@ inflate it. Compression pays off for text, CSV and JSON; images and video are co
 
 ## Limits
 
-An attachment is at most 64 MiB; a larger `put()` is refused with `BLOB_TOO_LARGE` before anything is stored. An
-[encrypted](./encryption) record takes no attachments (`put()` rejects with `ENCRYPTED`): the blob store holds
+An attachment is at most 64 MiB; a larger `put()` is refused with `ALX_ERR_BLOB_TOO_LARGE` before anything is stored. An
+[encrypted](./encryption) record takes no attachments (`put()` rejects with `ALX_ERR_ENCRYPTED`): the blob store holds
 bytes in the clear, which the record's key does not cover. To encrypt the bytes on disk, wrap the engine in
 encryption at rest, which seals blobs as it seals records.
 
@@ -151,7 +151,7 @@ attachments may be larger. A host still holds one attachment in memory while it 
 
 They go up only with the push of the entry that names them, from a node that holds them. What a node still has
 to upload is saved with its database, 1,024 attachments per host at most. Past that the oldest is dropped; a read
-on the host then fetches those bytes from a peer the host dials, or rejects with `BLOB_NOT_FOUND`. A
+on the host then fetches those bytes from a peer the host dials, or rejects with `ALX_ERR_BLOB_NOT_FOUND`. A
 [JSON export](./import-export) carries the `_attachments` entries but not the bytes.
 
 Behind a load balancer with several hubs over one database and a [shared log](./replication-nats), a node may be
@@ -160,12 +160,12 @@ has landed the record, usually a moment later. Until then it answers "not yet", 
 follower's feed goes quiet, then at its next push or connection, without reporting anything. The follower
 remembers what it forwarded for 30 seconds and only in memory. If it restarts, or the load balancer moves the node
 to another hub, and the node asks before the record has landed there, the upload is refused once
-(`BLOB_UPLOAD_FAILED`, `retry: false`) and dropped; put the attachment again to send it. A hub that lost its lease
+(`ALX_ERR_BLOB_UPLOAD_FAILED`, `retry: false`) and dropped; put the attachment again to send it. A hub that lost its lease
 on the database takes no bytes at all and refuses the same way, for good, until it is restarted.
 
 A peer's entry is believed only as far as it is a valid entry. A digest that is not 64 lowercase hex characters, or
-a length past the limit, makes `get()` and `has()` reject with `ATTACHMENT_INVALID`, and bytes that do not match
-the entry's length reject with `BLOB_MISMATCH`.
+a length past the limit, makes `get()` and `has()` reject with `ALX_ERR_ATTACHMENT_INVALID`, and bytes that do not match
+the entry's length reject with `ALX_ERR_BLOB_MISMATCH`.
 
 ## Coming from RxDB
 

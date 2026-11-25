@@ -89,7 +89,7 @@ to trust each other or the network. A deployment where every node is yours can o
 The [chain](./chain) adds a hash-linked block to every landing and verifies a record against its block when the
 record is read cold. A hub that only replicates has nothing to audit: `chain: false` drops the block and the
 chain's tail from every landing (two files fewer on the files engine, two rows fewer in the write set elsewhere),
-and `validate()` rejects with `NO_CHAIN`. In the Apply benchmark, a peer's page of 100 field writes on cached
+and `validate()` rejects with `ALX_ERR_NO_CHAIN`. In the Apply benchmark, a peer's page of 100 field writes on cached
 records applied at about 8,900 ops a second with the chain and about 10,200 without. The core alone, without
 `@alexify/syncom/all` or the chain plugin, has no chain to turn off.
 

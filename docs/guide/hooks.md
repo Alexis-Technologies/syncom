@@ -35,7 +35,7 @@ a `TypeError` from `createDatabase()`, so a misspelled hook fails loudly instead
 
 <<< @/examples/hooks.mjs#hook-error
 
-The operation rejects with a `HookError`: its `code` is `HOOK_FAILED`, `hook` names the hook and `cause`
+The operation rejects with a `HookError`: its `code` is `ALX_ERR_HOOK_FAILED`, `hook` names the hook and `cause`
 is what your function threw. A hook's error is never swallowed. When a `before` hook throws, nothing was
 stamped, logged or written. When an `after` hook throws, the write already happened and is announced to
 listeners and peers like any other; only the promise of the call rejects. [Errors](./errors) covers the
@@ -46,7 +46,7 @@ other errors syncom raises.
 Every local write and every batch from a peer goes through one queue, and the write and apply hooks run
 inside it. A hook that awaits something slow holds every other write for that long. A hook that writes
 would wait for the queue, which waits for the hook, so syncom refuses such a write with a `SyncomError`
-whose code is `IN_HOOK` instead of letting it deadlock. Reads (`get()`, `has()`) are fine from any hook.
+whose code is `ALX_ERR_IN_HOOK` instead of letting it deadlock. Reads (`get()`, `has()`) are fine from any hook.
 
 <FigWriteHooks />
 

@@ -60,7 +60,7 @@ logged, and the database's `flush()` and `close()` flush open handles first.
 
 Another writer's changes, a peer's or a write through the database, reach the handle's observers as a delta
 in the handle's indices. A flush that cannot be logged, because a hook or a validator refused it, drops what
-was not logged: `flushed` rejects with `UNLOGGED`, the handle reads the field as announced again, and its
+was not logged: `flushed` rejects with `ALX_ERR_UNLOGGED`, the handle reads the field as announced again, and its
 observers hear `reset`. [Editors](./editors) builds a full editor binding on this handle.
 
 ## Style text with marks
@@ -128,7 +128,7 @@ changes into a delta, then send your own edits back the same way:
 one, in the field's indices. `toDelta()` composes them into a delta in Quill's form (`retain`, `insert`
 with attributes, `delete`), or `null` when the change is one a delta cannot say, such as a reset: read the
 field again then. `applyDelta()` makes a delta the field's edits as one transaction, so a peer sees them
-land together; with `expect`, the text you made the delta over, it rejects with `STALE` before any op if the
+land together; with `expect`, the text you made the delta over, it rejects with `ALX_ERR_STALE` before any op if the
 field changed in between. The [editor binding](./editors) does all of this for you.
 
 ## Characters outside the Basic Multilingual Plane
@@ -137,7 +137,7 @@ An emoji takes two UTF-16 units, and an index between them would split it:
 
 <<< @/examples/text.mjs#surrogate
 
-`splice()`, `mark()`, `unmark()` and `cursor()` refuse such an index with `SURROGATE`. `updateText()` diffs
+`splice()`, `mark()`, `unmark()` and `cursor()` refuse such an index with `ALX_ERR_SURROGATE`. `updateText()` diffs
 by code point around such characters, so its edits never split one.
 
 ## Costs and limits

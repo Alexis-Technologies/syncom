@@ -14,7 +14,7 @@ list, and shows what happens when the browser runs out of room.
 
 | Storage                          | How you choose it             | Pick it when                                             | Keep in mind                                    |
 | -------------------------------- | ----------------------------- | -------------------------------------------------------- | ----------------------------------------------- |
-| [OPFS](./storage-opfs)           | the default, no option        | one tab or one worker owns the database                  | a second tab gets `LOCKED`; a file per record   |
+| [OPFS](./storage-opfs)           | the default, no option        | one tab or one worker owns the database                  | a second tab gets `ALX_ERR_LOCKED`; a file per record   |
 | [IndexedDB](./storage-indexeddb) | `engine: idbEngine({ name })` | several tabs open the database, or it holds many records | every awaited write is an IndexedDB transaction |
 | [Memory](./storage-memory)       | `engine: memoryEngine()`      | tests, previews, data you can fetch again                | nothing survives a reload                       |
 
@@ -35,7 +35,7 @@ Your code does not change with the storage: collections, queries, live queries a
 ## OPFS or IndexedDB
 
 **OPFS** needs no setup and works on the page and in a worker. It stores the same files a database writes on disk
-in Node.js. The database holds it through the Web Locks API, so a second tab that opens it gets `LOCKED` (or
+in Node.js. The database holds it through the Web Locks API, so a second tab that opens it gets `ALX_ERR_LOCKED` (or
 waits, with `lock: 'wait'`); a tab that closes or crashes lets go. Each record is a file, and each group of ops in
 the log a small file, since OPFS cannot append to a file.
 
@@ -79,10 +79,10 @@ such API.
 
 When the origin is full, a write fails in one of two places:
 
-- **The log refuses the op.** Nothing was written: the write rejects with `QUOTA`, the platform's error as its
+- **The log refuses the op.** Nothing was written: the write rejects with `ALX_ERR_QUOTA`, the platform's error as its
   `cause`, and the next write goes through once there is room.
 - **The record cannot land.** The op is already in the log and replicates, so the write resolves and its record is
-  held in memory, where reads find it. The database's `error` event carries `UNPERSISTED` with `quota: true` and
+  held in memory, where reads find it. The database's `error` event carries `ALX_ERR_UNPERSISTED` with `quota: true` and
   the ids, and the next open replays the log onto the storage.
 
 OPFS needs a secure context (HTTPS or `localhost`), and so does Web Crypto, which syncom hashes with on every
@@ -93,6 +93,6 @@ storage, IndexedDB included, so serve the app over one.
 RxDB's article measures every browser storage, localStorage and WebAssembly SQLite included, because RxDB offers
 storages over most of them (some Premium). syncom offers fewer: OPFS by default and IndexedDB for several tabs,
 both free, and leaves localStorage and WebAssembly SQLite out. What it adds is quota handling in the core: a full
-origin is a `QUOTA` refusal or an `UNPERSISTED` write held in memory, not a raw `QuotaExceededError`.
+origin is a `ALX_ERR_QUOTA` refusal or an `ALX_ERR_UNPERSISTED` write held in memory, not a raw `QuotaExceededError`.
 
 <FromRxdb page="articles/localstorage-indexeddb-cookies-opfs-sqlite-wasm" :rows="['browser', 'opfs', 'indexeddb', 'localStorage', 'quotas']" />

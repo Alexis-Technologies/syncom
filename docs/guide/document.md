@@ -35,7 +35,7 @@ without `save()`.
 
 Assigning a property and saving it writes a plain field, so it only works for fields that are plain values.
 A counter, a set, a list, a text or a tree changes through its own methods; saving an assignment to one is
-refused with `FIELD_KIND`:
+refused with `ALX_ERR_FIELD_KIND`:
 
 <<< @/examples/document.mjs#not-a-register
 
@@ -89,7 +89,7 @@ fresh one. What `get()` and queries return are plain copies instead; use them wh
 
 ## Limitations
 
-- A save that is refused (by the validator, or with `FIELD_KIND`) keeps the staged changes, and there is
+- A save that is refused (by the validator, or with `ALX_ERR_FIELD_KIND`) keeps the staged changes, and there is
   no method to drop them. Assign the old values back, or write through the collection instead.
 - Properties exist for the fields the record has. A new field becomes a property once a write that adds it
   lands.

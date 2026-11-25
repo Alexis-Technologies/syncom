@@ -106,7 +106,7 @@ log's normal retention, so a laptop that works offline for a month still deliver
 reconnects. That guarantee starts with the first `addNode()`. Ops written before any host is registered
 are kept only as long as the log's retention keeps any op (about the newest 10 000 by default). If older ones
 were dropped by the time you add a host, that host can never be sent this node's writes: the node reports
-`UNDELIVERABLE`, and its data stays on this node alone. Register the host when the app first starts,
+`ALX_ERR_UNDELIVERABLE`, and its data stays on this node alone. Register the host when the app first starts,
 before it writes ([Retention](./retention#when-a-host-can-no-longer-be-caught-up) has the details).
 
 ## Edit the same field on two nodes
@@ -172,9 +172,9 @@ waited for.
 page received (`applied`, and counts of what was skipped). `bootstrap` fires when a snapshot was joined.
 `error` carries the failures on the way to a peer, each with its `url`. Three of them are worth handling
 in an app. A numeric `403` means the host refused the hello: a wrong token, or [scopes](./partial-sync)
-it does not grant. `STUCK` means a page of the feed failed three times in a row and nothing more is taken
+it does not grant. `ALX_ERR_STUCK` means a page of the feed failed three times in a row and nothing more is taken
 from that host until you fix the cause and call `enableNode(url, false)`, then `enableNode(url, true)`.
-`REVOKED` means the host took scopes back ([Partial sync](./partial-sync#take-access-back)). The other
+`ALX_ERR_REVOKED` means the host took scopes back ([Partial sync](./partial-sync#take-access-back)). The other
 codes and every payload are in the [events reference](../reference/events#sync-manager-events) and the
 [error codes](../reference/api#syncomerror).
 
@@ -190,7 +190,7 @@ are `pending`, whether it is `behind` after a failed push, `caughtUp` with its f
 
 `enableNode(url, false)` hangs up but keeps the node, its saved position and how far it holds this
 node's ops; `enableNode(url, true)` dials it again and resumes where it stopped. `removeNode(url)` hangs up and
-forgets the node, and adding the same url twice rejects with `NODE_EXISTS`. `stop()` closes every link
+forgets the node, and adding the same url twice rejects with `ALX_ERR_NODE_EXISTS`. `stop()` closes every link
 and `start()` dials every enabled node again; a database with `connect` starts on open unless you pass
 `sync: { autoStart: false }`. `sync()` pushes what the peers lack right now and dials a node whose dial
 failed. On the hosting side, `revoke(node, scopes)` takes scopes back from a node that dials you, which

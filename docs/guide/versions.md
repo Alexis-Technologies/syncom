@@ -11,7 +11,7 @@ them, see what changed between two versions, and restore an old one with new ops
 A tag names the whole database at a moment, so you can query it as it was.
 
 The past is the `versions` plugin, which `@alexify/syncom/all` registers. Without it, `history()`, `diff()`,
-`restore()`, `get(id, { at })` and the tag methods reject with `PLUGIN_MISSING`.
+`restore()`, `get(id, { at })` and the tag methods reject with `ALX_ERR_PLUGIN_MISSING`.
 
 ## List a record's history and read an old version
 
@@ -53,7 +53,7 @@ A tag costs nothing when you take it. The first time a record changes after a ta
 record's file for the tag; a record that never changes is its own copy. So a tag costs one file per record
 changed after it, however many times it changes. Tags are this node's own: they do not replicate, and a peer
 that needs the same version takes its own tag. `untag(name)` drops one. A name already in use rejects with
-`TAG_EXISTS`, and `at()` of an unknown name throws `TAG_NOT_FOUND`.
+`ALX_ERR_TAG_EXISTS`, and `at()` of an unknown name throws `ALX_ERR_TAG_NOT_FOUND`.
 
 ## Compare versions and restore one
 
@@ -98,7 +98,7 @@ cheap and survive compaction. An origin is a node id, the node's signing key whe
 
 The log does not keep everything forever. Once [retention](./retention) drops old ops, a version is exact
 only from a whole-record write (an `insert()`, a `set()`, a `delete()`) newer than what was dropped:
-`history()` says `exact: false` and `get(id, { at })` rejects with `HISTORY_GONE` and `reason: 'compacted'`
+`history()` says `exact: false` and `get(id, { at })` rejects with `ALX_ERR_HISTORY_GONE` and `reason: 'compacted'`
 for a version it cannot give. A [purge](./purge) takes the payload of every op of the record, so versions
 before it reject with `reason: 'scrubbed'`. A node that joined through a snapshot holds the joined state as
 one op, so a stamp before it rejects with `reason: 'merge'`.

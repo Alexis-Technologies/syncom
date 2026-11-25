@@ -75,7 +75,7 @@ feed.
 
 `sync.shared()` reports how a hub stands to the log: its read position, how far its own ops have been
 appended, whether it is behind or stuck, and counts of what it relayed and applied. Failures come as
-`SHARED_LOG_FAILED` on the sync manager's `error` event, and the hub recovers by itself: an append that
+`ALX_ERR_SHARED_LOG_FAILED` on the sync manager's `error` event, and the hub recovers by itself: an append that
 failed is appended again once the broker answers, also at the next start.
 
 ## Options that matter

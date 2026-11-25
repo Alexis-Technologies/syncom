@@ -44,7 +44,7 @@ depend on the order in which the ops arrived.
 | Text     | `updateText()`, `splice()` with a string (the `text` plugin) | Both edits are kept, character by character, with their formatting            |
 | Tree     | `treeMove()` (the `tree` plugin)                             | Both moves apply, and a move that would make a cycle is dropped on every node |
 
-A field keeps its kind: `inc()` on a field that holds a register is refused with `FIELD_KIND`, so a typo
+A field keeps its kind: `inc()` on a field that holds a register is refused with `ALX_ERR_FIELD_KIND`, so a typo
 cannot turn a title into a counter. If two nodes make the same field two different kinds at the same
 time, a fixed order decides the same way everywhere (a register, then a counter, beats a set, a set beats
 a list, a list a text, a text a tree). [Fields that merge](./fields) covers registers, counters and sets

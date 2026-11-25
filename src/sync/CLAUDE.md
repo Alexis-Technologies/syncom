@@ -15,13 +15,11 @@ src/sync/hosting.js       createUnit — the hosting side: hello/greet, push and
 src/sync/rules.js         what the procedures stand on: a refusal on the wire (coded, refuse, refuseCall), the peer of a call (peerOf: greeted,
                           proven under `prove`), the refusals told (announceRefused, refuseOps), the unit's options (normalizeAllow,
                           normalizeLimits), the push limits (limit), the scopes a read covers (grant), the proof of the key (challengeOf,
-                          prove — the message protocol.js's), the sessions a revoke reaches (remember, joinRooms, handPresence) — requires
-                          hooks.js, protocol.js, scope.js, symbols.js only
+                          prove — the message protocol.js's), the sessions a revoke reaches (remember, joinRooms, handPresence) — requires hooks.js, protocol.js, scope.js, symbols.js and argument-errors.js only
 src/sync/reads.js         the thin client's reads: query/count (normalizeQuery, the $regex gate regexRefusal, cursorOf, the scoped walk
                           walkScoped, greeted/ungreet for a hello carried by the call) and blob (blobNamed: served by the record that names
                           it; blobPut's door too; namedBlobs: the registers an op's data names — what a dialer uploads and a forwarding
-                          hub waits for) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js,
-                          chunks.js, blobs.js only
+                          hub waits for) — requires rules.js, protocol.js, safe-regex.js, scope.js, shape.js, symbols.js, pem.js, chunks.js, blobs.js and argument-errors.js only
 src/sync/chunks.js        a blob's bytes over a link's stream: streams (a host's client that carries binary streams), sendAll (the
                           transport's own writeAll, wrpc ≥ 2.1, then the end) and collect (the pieces read to the size announced, no
                           further) — both halves use both — no requires
@@ -55,7 +53,7 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   this node's `sync.scope` reads it — is outside it (`outOfScope`): logged and relayed as a withheld scrub
   (`refuse` in src/apply.js, as a rule's refusal is — the header alone, applied nowhere, a purge included), so its
   stream goes on, and named in the answer's `refused` with `reason: 'scope'` and NO `current` — the record is one
-  the pusher may not read; the dialer reports it (`WRITE_REFUSED`) and reverts nothing. Relaying it with its payload
+  the pusher may not read; the dialer reports it (`ALX_ERR_WRITE_REFUSED`) and reverts nothing. Relaying it with its payload
   would hand the write to every peer of the declared scope. A local op takes the scope of
   the record as it leaves it (`scopeData` in `src/commit.js`, re-read after
   validation), never of a `set`'s delta alone. `applyRemote`'s `scopes`
@@ -70,8 +68,8 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
 - **A failed page is a break in the stream.** `#receive` runs pages one after
   another per peer (`peer.inbound`), numbered by `peer.feed`; a rejection goes
   to `#pageFailed`, which closes the feed (pages of the old feed are dropped),
-  reports `PAGE_FAILED` with the saved cursor, and resubscribes from it —
-  `STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
+  reports `ALX_ERR_PAGE_FAILED` with the saved cursor, and resubscribes from it —
+  `ALX_ERR_STUCK` after `MAX_PAGE_RETRIES`. Never move `node.cursor` past a page that
   did not land, and never catch inside `#receive` to "keep going". A peer the host refused for good — a 403 on the
   feed or the bootstrap, a handshake loop, a stuck feed, a kinds mismatch — is `terminal` (`#terminal`): not waited
   for by the awaits (`#peerOf` answers null, as for a failed dial, and `#settle()` runs so a waiter is told) until a
@@ -106,7 +104,7 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   (`#forwarded`, by stream key, `FORWARD_TTL`) and forwards the page to the inbox — the shadow moves on topic
   entries alone (`#shadowAdvance`, which lets a hold go as it passes it), never on a forward, so a writer's refusal
   is never acked for good — serves no snapshot (403
-  `READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
+  `ALX_ERR_READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
   bootstraps from a hub that writes) and stops reading the inbox (the next writer takes it from the saved cursor,
   which only a writer saves). The writer rules the inbox as it rules a push — `#apply` passes the manager's
   `authorizeWrite` (`sync.authorizeWrite`, every unit's default) as `authorize`, a refusal — the rule's, or a record out of the client's scopes — logged as a withheld
@@ -117,14 +115,14 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   that landed covers its positions (`#cover`), an op read from the topic covers its own, and the watermark moves
   only over a contiguous run of them (`#advance`) — never to `lastEventId`, which runs ahead of ops still landing
   (a batch that failed behind one that landed was lost that way). A failure is told once and recovered from
-  (`SHARED_LOG_FAILED`, `reason`): the relay falls `behind` and re-appends `log.since(watermark)` — every start
+  (`ALX_ERR_SHARED_LOG_FAILED`, `reason`): the relay falls `behind` and re-appends `log.since(watermark)` — every start
   does the same, so a stop with ops waiting loses none — and moves the watermark to the last of them (`#reached`;
   duplicates in the topic are every consumer's to drop); a watermark the log compacted past is told once (`lost`)
   and moved to the floor, what the log retains going to the topic; `stop()` waits `stopWait` for an append in
   flight, then lets go of it; a cursor gone reads from the oldest; a hole the log yields (`value: null` — a number
   whose entry never came) is told (`hole`) and passed, `stats().holes` counting; an entry the engine refuses (the
   medium down, a lease late, the log's group refused) is tried again, backed off to `MAX_BACKOFF`, told once per run
-  (`apply`, `stats().retrying`), until it lands, and one a rule refuses (`HOOK_FAILED`, a `TypeError`) three times
+  (`apply`, `stats().retrying`), until it lands, and one a rule refuses (`ALX_ERR_HOOK_FAILED`, a `TypeError`) three times
   leaves its topic `stuck` — never skipped, a skipped entry is a gap for good. A writer trims the inbox past
   its cursor every `INBOX_TRIM_EVERY` entries passed (`log.trimBefore`, where the log has it): what it landed is no
   one else's to read, and a second writer over the same inbox reads what it missed from the topic. The loops begin a turn after `start()` (setImmediate), so a listener
@@ -151,7 +149,7 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   `prove`: a `require` host (or `unit({ prove: true })`) hands a `challenge` at hello and refuses push, blobPut, snapshot,
   changes, query, count and blob (403 `UNPROVEN`) until `syncom/prove` carries its signature under the peer's key —
   `[1, 'prove', challenge, host, node]`, both ids bound in — which the dialer answers before it pushes (`#prove`; no
-  signing plugin: `UNPROVEN` reported, nothing pushed); the rooms are joined and the presence handed at the proof,
+  signing plugin: `ALX_ERR_UNPROVEN` reported, nothing pushed); the rooms are joined and the presence handed at the proof,
   not at hello (`joinRooms`, `state.keep`), and an unproven presence update is `PRESENCE_UNPROVEN`. `blob` serves a
   digest under `allow.blob` `'named'` (the default) only where a live record in the peer's scopes names it under the
   name the call gives (`blobNamed`: the catalog's row, the seam's `load`, `ATTACHMENTS_FIELD` of protocol.js, the
@@ -207,7 +205,7 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   revocations are durable — `revoked.json` of the root kv (`#loadRevoked`/`#saveRevoked`, coalesced; a read-only hub
   saves none) — and shared: a writer over a shared log appends `{ v, node, revoke }` to the topic (`SharedHub.revoke`),
   every hub folds it (`manager.adoptRevocation`: never appended again, `revoke` event `via: 'shared'`). The dialer narrows its registry entry, reports
-  `REVOKED`, runs `onRevoke` or forgets the records of those scopes (`storage.forget`: the file and the row gone,
+  `ALX_ERR_REVOKED`, runs `onRevoke` or forgets the records of those scopes (`storage.forget`: the file and the row gone,
   the deferred slot settled with them — a flush after would lay the record back — and the log's entries scrubbed and
   flagged skipped in the same turn of the queue; never an op, the host would refuse it) and subscribes again (a
   feed's end never takes a newer handle off the peer: `#subscribe` compares). `query`/`count` are opt-in

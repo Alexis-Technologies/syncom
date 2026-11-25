@@ -83,7 +83,7 @@ every option.
 ## Limitations
 
 - **Node.js only.** The subpath is not part of the browser build; use [IndexedDB](./storage-indexeddb) there.
-- **No followers.** One instance holds a database (a second open gets `LOCKED`), and SQLite serves no
+- **No followers.** One instance holds a database (a second open gets `ALX_ERR_LOCKED`), and SQLite serves no
   read-only follower in another process. Sync a second process instead.
 - **One lane per engine.** Statements of every database on one engine run one after another.
 

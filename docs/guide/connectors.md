@@ -37,8 +37,8 @@ conflict.
 A connector's collection holds plain fields only, so the Quickstart's `votes` (a counter) and `tags` (a set) do not
 belong in one. The backend stores whole documents of plain values: it cannot hold a counter's count per node or a
 set's concurrent adds, so everything the connector pulls lands as plain fields, and `inc()`, `add()` or `remove()` on
-such a field rejects with `FIELD_KIND`. A field you make a counter or a set here goes out as a plain value, but the
-backend's next version of that record is refused with `FIELD_KIND` and never lands. Write such fields as plain
+such a field rejects with `ALX_ERR_FIELD_KIND`. A field you make a counter or a set here goes out as a plain value, but the
+backend's next version of that record is refused with `ALX_ERR_FIELD_KIND` and never lands. Write such fields as plain
 values (`update(id, { votes: 4 })`), and keep [fields that merge](./fields) to collections that sync natively.
 
 ## Connect a collection to a backend
@@ -208,7 +208,7 @@ same counts are the `syncom.connector.rows` metric.
 
 ## When the backend is down
 
-A handler that throws is reported as an `error` event carrying `REPLICATION_FAILED`, the `direction` (`'pull'` or
+A handler that throws is reported as an `error` event carrying `ALX_ERR_REPLICATION_FAILED`, the `direction` (`'pull'` or
 `'push'`) and `retryIn`, the wait before the next attempt. The wait starts at `retryTime`, doubles with each failure
 in a row up to `maxRetryTime` (60 seconds by default; both are options of `replicate()`), and varies by a quarter
 either way so that many clients do not retry in step. The first success resets it. Nothing is skipped: the rows stay
@@ -258,7 +258,7 @@ saved position, every record of the collection is checked against the backend on
 
 `cancel()` stops the stream and the timers, waits for what is in flight and saves the checkpoint. Closing the
 database cancels its connectors the same way, so no handler runs after `close()`. A canceled connector stays
-canceled: `start()` on it throws `REPLICATION_FAILED`, and you create a new one with the same `name` to go on.
+canceled: `start()` on it throws `ALX_ERR_REPLICATION_FAILED`, and you create a new one with the same `name` to go on.
 Pass `autoStart: false` to create a connector without starting it and call `start()` yourself.
 
 ## Write your own adapter

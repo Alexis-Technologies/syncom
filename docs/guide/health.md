@@ -46,7 +46,7 @@ file at once, for a process that may be killed between a write and the next fram
 
 When a file write fails (a full disk, a quota), the write is not undone, since it replicates from the log
 already. The record is held in memory until the next open, which replays it onto the file, and the
-database emits an `error` event with `code: 'UNPERSISTED'` and the `ids`. `stats().held` counts such
+database emits an `error` event with `code: 'ALX_ERR_UNPERSISTED'` and the `ids`. `stats().held` counts such
 records.
 
 ## See how much room is left
@@ -57,12 +57,12 @@ records.
 files engine reports the volume's `quota`, and either is `null` where the medium says nothing. In a browser,
 `persist()` asks the browser to keep this origin's storage out of eviction (`navigator.storage.persist()`)
 and resolves to whether it will; where there is nothing to ask, as in Node.js, it resolves `true`. An
-`UNPERSISTED` error that carries `quota: true` means the medium is full: the moment to check `quota()`.
+`ALX_ERR_UNPERSISTED` error that carries `quota: true` means the medium is full: the moment to check `quota()`.
 
 ## Repair a record that fails its check
 
 A record file whose data no longer hashes to what its [chain](./chain) block recorded, or that no longer
-parses (a write torn by a crash), rejects every read with `INTEGRITY`. It stays that way until you act,
+parses (a write torn by a crash), rejects every read with `ALX_ERR_INTEGRITY`. It stays that way until you act,
 because a file that changed under the chain is evidence first:
 
 <<< @/examples/health.mjs#repair
@@ -72,7 +72,7 @@ the first whole-record op among them (a `write`, a `merge`, a `delete` or a `pur
 the usual way, with a chain block of its own. The result is what a peer replaying this log would hold, the
 same fold [`history()`](./versions) reads. A record the log cannot rebuild, because its whole-record op was
 compacted away, it was never written here, or it is encrypted (an encrypted record has no ops), rejects with
-`UNRECOVERABLE`; a peer that still holds the record is the way back then, through a
+`ALX_ERR_UNRECOVERABLE`; a peer that still holds the record is the way back then, through a
 [bootstrap](./replication).
 
 ## Rewrite a record that has grown
@@ -94,7 +94,7 @@ reads empty is left out, because no op makes an empty one. And like any whole-re
 peer's op stamped before it that arrives after it; a peer's typing stamped after it but anchored in the old
 runs reads from the start of the field. So compact a record when it is quiet, not while people are editing
 it. `compact()` resolves to how many ops it took, `0` for a record that is not there, and rejects with
-`ENCRYPTED` for an encrypted record.
+`ALX_ERR_ENCRYPTED` for an encrypted record.
 
 ## Check the audit chain
 

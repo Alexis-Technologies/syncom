@@ -6,8 +6,7 @@ One object a node keeps by name, by path. The rules of the core are in [src/CLAU
 
 ```
 src/state/state.js        @alexify/syncom/state — createState(db, name, { local }): get/set/delete/observe by path over the record
-                          `state.<name>` (a path a register of its own) or the local document `state.<name>` — requires paths.js,
-                          shape.js, symbols.js only
+                          `state.<name>` (a path a register of its own) or the local document `state.<name>` — requires paths.js, shape.js, symbols.js and argument-errors.js only
 ```
 
 ## Rules

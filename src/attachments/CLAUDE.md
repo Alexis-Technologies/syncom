@@ -17,14 +17,14 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   idempotent, outside the write set — the same bytes are the same blob whoever names them) and then the register
   `_attachments/<name>` through the database's own `update`: logged, replicated, tagged, undone like any field. `remove` is an
   `unset` of the register; the bytes stay (another name, another record may share them — there is no reference count) until
-  `sweep({ dryRun, tags })`: a mark-and-sweep through the `[SOURCE]` seam — `guard('a sweep')` first (CLOSED, READ_ONLY on a
+  `sweep({ dryRun, tags })`: a mark-and-sweep through the `[SOURCE]` seam — `guard('a sweep')` first (ALX_ERR_CLOSED, ALX_ERR_READ_ONLY on a
   follower), the live rows (`all()` minus `gone`) read `SWEEP_PAGE` at a time through `loadMany` (a sealed record's data as
   the key here opens it), every valid register's digest marked; with `tags` the copies of every tag in `tags.json` and of
   `.pending` (the engine's `copies`, the record file's `data`; a sealed copy reads as none), the puts in flight (`#pending`:
   a count per digest between the blob's put and the register's landing) marked too — then `blobs.list()` minus the marks
-  removed. The log is NOT marked (a restored register's bytes come from a peer or are `BLOB_NOT_FOUND`), and a follower's
+  removed. The log is NOT marked (a restored register's bytes come from a peer or are `ALX_ERR_BLOB_NOT_FOUND`), and a follower's
   put in flight is not the leader's to see — said in the guide. A sealed record (`row.encrypted`) takes no attachment:
-  `put` is `ENCRYPTED` before the blob is stored — the store holds bytes the record's key does not cover. Nothing of a
+  `put` is `ALX_ERR_ENCRYPTED` before the blob is stored — the store holds bytes the record's key does not cover. Nothing of a
   blob is an op, and a peer's op never carries bytes.
 - **Bytes are believed by digest alone, and a register only as far as it is one.** A node that reads a register whose
   bytes it lacks asks the connected peers (`sync.fetchBlob(digest, { id, name })`, `syncom/blob { digest, id, name }` — a
@@ -34,11 +34,11 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   the connection carries one — the bytes as bytes, in pieces of 64 KiB each written as the transport takes it
   (src/sync/chunks.js; the rule is src/sync/CLAUDE.md's), an empty blob a stream of no bytes — base64 on a text
   transport (`toBase64` of crypto/pem.js — the one base64), and 404 `BLOB_NOT_FOUND` for what it lacks; a peer's answer past MAX_BLOB_BYTES (64 MiB, `src/blobs.js` — the one cap, every
-  store's `put` and `attachments.put` refuse past it as `BLOB_TOO_LARGE`) is refused. A register is a peer's word:
+  store's `put` and `attachments.put` refuse past it as `ALX_ERR_BLOB_TOO_LARGE`) is refused. A register is a peer's word:
   `#entry` takes it only where `validEntry` holds (`isDigest` — 64 lowercase hex, never a path: a digest is the files
-  engine's file name — a `type`, a safe `length` within the cap, a known `encoding`), `ATTACHMENT_INVALID` from
+  engine's file name — a `type`, a safe `length` within the cap, a known `encoding`), `ALX_ERR_ATTACHMENT_INVALID` from
   `get`/`has`, left out of `list` with one `attachments.register.invalid`; every engine's store checks the digest at its
-  own door too (`checkDigest`). The bytes read are what the register says or `BLOB_MISMATCH` (`#mismatch`: a plain
+  own door too (`checkDigest`). The bytes read are what the register says or `ALX_ERR_BLOB_MISMATCH` (`#mismatch`: a plain
   blob of another `length`, a compressed one that inflates past `length` — `inflate` counts the chunks and cancels the
   reader there, nothing inflated whole on a register's word — or to another length). A fetched blob is kept ONCE: the
   dialer's `fetchBlob` puts it (a store that refuses is `sync.blob.keep.failed`, the bytes answered all the same), the
@@ -49,7 +49,7 @@ src/attachments/attachments.js @alexify/syncom/attachments — attachments({ com
   where no stream goes; the host's door is `blobNamed` again, the digest checked over the bytes, `bytesPerBlob`
   and the cap); bytes a relay lacks wait in the node's queue until they land (`#blobLanded`: an upload taken, a fetch
   kept), so a chain of hubs carries them. A refused upload is final, a failed one retried at the next push, both
-  `BLOB_UPLOAD_FAILED`, never the push's failure. A follower hub takes the bytes too — into the engine's store its
+  `ALX_ERR_BLOB_UPLOAD_FAILED`, never the push's failure. A follower hub takes the bytes too — into the engine's store its
   writer reads, once it hears the record ("not yet", 425, until then; asked again at its feed's lull) — and a hub
   whose lease was lost takes none, for good (403; the rule is src/sync/CLAUDE.md's). What waits is on disk
   (src/sync/uploads.js, `uploads.json` of the root kv, 1024 a node): a restart uploads it at the next hello, with

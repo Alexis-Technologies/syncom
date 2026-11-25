@@ -34,7 +34,7 @@ block that committed it:
 
 <<< @/examples/chain.mjs#tampered
 
-A record whose bytes no longer hash to what its block recorded rejects every read with `INTEGRITY`, and
+A record whose bytes no longer hash to what its block recorded rejects every read with `ALX_ERR_INTEGRITY`, and
 stays that way. Nothing repairs it behind your back, because a file that changed under the chain is evidence
 first. When you have looked, [`repair(id)`](./health#repair-a-record-that-fails-its-check) rebuilds the
 record from the node's own log.
@@ -48,8 +48,8 @@ The check costs one hash per record on a cold read; a record already in the cach
 
 A node that only relays ops between others, a hub, has nothing of its own to audit. `chain: false` keeps the
 plugin registered and the chain off: no blocks, two file writes fewer per record, no check on reads, and
-`validate()` rejects with `NO_CHAIN`. A database opened without the plugin behaves the same, and asking for
-`chain: true` without it is `PLUGIN_MISSING`.
+`validate()` rejects with `ALX_ERR_NO_CHAIN`. A database opened without the plugin behaves the same, and asking for
+`chain: true` without it is `ALX_ERR_PLUGIN_MISSING`.
 
 ## Keep a chain of your own
 
@@ -59,7 +59,7 @@ plugin registered and the chain off: no blocks, two file writes fewer per record
 [smart contracts](./contracts). A block is `{ prev, timestamp, data }`, its hash is the SHA-256 of that
 object, and the tail is kept in `.blockchain.json` so the chain reopens without scanning. Like a database,
 the constructor returns a promise: `await new Blockchain(path)`. `readBlock()` of an unknown hash rejects
-with `BLOCK_NOT_FOUND`. Give each chain a directory of its own; two writers of one directory overwrite each
+with `ALX_ERR_BLOCK_NOT_FOUND`. Give each chain a directory of its own; two writers of one directory overwrite each
 other's tail.
 
 ## What the chain is not

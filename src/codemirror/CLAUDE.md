@@ -7,5 +7,5 @@ A ChangeSet as a delta, line breaks fitted. The rules of the core — the op mod
 ```
 src/codemirror/codemirror.js  the @alexify/syncom/codemirror subpath — CodeMirror 6 (injected `{ state, view? }`) over the editor
                           binding: a ChangeSet as a delta and back, line breaks fitted, cursors as decorations, undo commands;
-                          requires editor/editor.js only
+                          requires editor/editor.js and argument-errors.js only
 ```

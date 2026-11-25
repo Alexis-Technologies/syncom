@@ -54,7 +54,7 @@ instead ([Worker](./storage-worker)).
 <<< @/examples/storage-opfs.mjs#locked
 
 The first instance holds the database through the Web Locks API, which the browser releases when that tab or
-worker closes or crashes. A second tab gets `LOCKED` and can wait with `lock: 'wait'`. For tabs that all work on
+worker closes or crashes. A second tab gets `ALX_ERR_LOCKED` and can wait with `lock: 'wait'`. For tabs that all work on
 one database, open it over [IndexedDB](./storage-indexeddb#open-the-same-database-in-several-tabs), where other
 tabs can follow the writer, and let [leader election](./leader-election) pick the tab that writes.
 

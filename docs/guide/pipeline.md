@@ -64,7 +64,7 @@ so a burst of writes becomes a few handler calls, not one per write.
 <<< @/examples/pipeline.mjs#failure
 
 A handler that throws stops the pipeline before that batch. The checkpoint stays where it was, the database emits
-an `error` with code `PIPELINE_FAILED` (with the cause), the error is kept in `pipeline.errors` (the newest twenty),
+an `error` with code `ALX_ERR_PIPELINE_FAILED` (with the cause), the error is kept in `pipeline.errors` (the newest twenty),
 and `stopped` becomes true. Nothing more is handed over until you call `start()` again, which hands the failed
 batch over first. Fix the cause (a service that was down, a bug) and start the pipeline again; a retry loop with
 backoff around `start()` is yours to write if you want one.

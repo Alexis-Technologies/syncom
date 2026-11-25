@@ -46,7 +46,7 @@ the event loop. The example file runs as both threads:
 <<< @/examples/storage-worker.mjs#close
 
 Close the database before you stop the worker, so its last writes and the log reach the engine. A worker that
-exits first fails every call still waiting with `ENGINE_UNREACHABLE`.
+exits first fails every call still waiting with `ALX_ERR_ENGINE_UNREACHABLE`.
 
 </div>
 

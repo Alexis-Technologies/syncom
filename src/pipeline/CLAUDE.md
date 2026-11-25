@@ -16,7 +16,7 @@ src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name
 - **At least once, in order, never skipped; checkpointed after the write.** A turn's batch is handled inside one
   transaction; the checkpoint (the turn's `eventId`, which the `transaction` event carries) is written after the
   transaction landed, so a crash between hands the turn over again, never skips it. A handler that throws STOPS the
-  pipeline before the turn (`halt`): the checkpoint stays, the database's `error` event carries `PIPELINE_FAILED`
+  pipeline before the turn (`halt`): the checkpoint stays, the database's `error` event carries `ALX_ERR_PIPELINE_FAILED`
   (`name`, `eventId`, `cause`), `errors` keeps the newest twenty, and `start()` hands the turn over again — the
   checkpoint never moves past a turn the handler did not finish. A replay from the log hands the ids alone
   (`changes: null`); where the log cannot resume, every record of the source once (`rebuilt`) — both `PAGE` (500) ids
@@ -34,5 +34,5 @@ src/pipeline/pipeline.js  @alexify/syncom/pipeline — createPipeline(db, { name
   leader resumes where the last one left; the stop it answers marks the binding `gone`, takes its listener off and
   drops its queued batches. `live()` calls the old stop a microtask AFTER the new `make`, so nothing is shared
   between two bindings but the queue (each item carries its binding) and `bound` moves only to the newest. A batch
-  of a binding let go of that fails is nobody's to tell (no `PIPELINE_FAILED`): the next leader hands the turn over —
+  of a binding let go of that fails is nobody's to tell (no `ALX_ERR_PIPELINE_FAILED`): the next leader hands the turn over —
   at least once, as after a crash. A started pipeline on a follower is not `stopped`: it waits for the lead.

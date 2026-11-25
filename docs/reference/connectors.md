@@ -52,9 +52,9 @@ A document that is no document (no valid record id, no object as `data` without 
 `collection` (the id belongs to a record of another collection, a tombstone included), `sealed` (an encrypted
 record), `value` (what `modifier.pull` returned is not JSON, or the document itself without a modifier; a `BigInt`,
 which has no JSON text to remember the backend's state by, even with one), `modifier` (`modifier.pull` threw or
-returned no object), or the code of the write the engine refused (a validator's `VALIDATION_FAILED`, a field's
+returned no object), or the code of the write the engine refused (a validator's `ALX_ERR_VALIDATION_FAILED`, a field's
 `TypeError`). A landing that fails as a whole (the engine, the database closing) is the pull's failure:
-`REPLICATION_FAILED`, the checkpoint unmoved, tried again.
+`ALX_ERR_REPLICATION_FAILED`, the checkpoint unmoved, tried again.
 
 A document refused for what it holds (every reason but `collection` and `sealed`) is not learned: the backend's
 state as known stays what this node last landed, and its id is kept (`refused` in the checkpoint). A later edit of
@@ -76,7 +76,7 @@ A pull that resumes after a timestamp misses a document that becomes visible lat
 transaction that committed late, a replica that lagged, a writer whose clock runs behind. A handler that looks back
 asks its backend from before the checkpoint it was handed, and answers `reread`: how many of the page's documents,
 the first ones, are at or behind that checkpoint. `reread` is a non-negative integer; anything else fails the pull
-(`REPLICATION_FAILED`, a `TypeError` as its cause). A handler that does not look back leaves it out, and nothing
+(`ALX_ERR_REPLICATION_FAILED`, a `TypeError` as its cause). A handler that does not look back leaves it out, and nothing
 below applies.
 
 A re-read document is passed over, before `modifier.pull` runs and without reading the record, when:
@@ -243,7 +243,7 @@ answer: that document is judged as it arrives, and the backend's next word on th
 
 A failure in either direction is kept (`errors`, the newest twenty), logged as `connector.failed`, and retried after
 `retryTime · 2^n` ms (n the failures in a row in that direction), capped at `maxRetryTime`, times a random factor
-between 0.75 and 1.25. `reSync()` on a connector that is not active rejects with `REPLICATION_FAILED` and a `null`
+between 0.75 and 1.25. `reSync()` on a connector that is not active rejects with `ALX_ERR_REPLICATION_FAILED` and a `null`
 direction, and `start()` on a canceled one throws the same.
 
 `awaitInitialReplication()` resolves when the first pull run and the first push drain have both succeeded;

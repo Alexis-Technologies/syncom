@@ -6,12 +6,12 @@ The cursor over `storage[SOURCE]`. The rules of the core — the op model, the w
 
 ```
 src/query/query.js        @alexify/syncom/query — the query plugin: setup hands the core a cursor factory (`query` hook); select()/count()
-                          on a Collection go through storage[CURSOR], PLUGIN_MISSING without it
+                          on a Collection go through storage[CURSOR], ALX_ERR_PLUGIN_MISSING without it
 src/query/cursor.js       compileQuery (Mango predicate), compareRows, Cursor — reads through storage[SOURCE]; requires live.js, cache.js,
                           plan.js beside the core's shape.js, catalog.js and search/distance.js
 src/query/plan.js         plan — how a cursor is answered over the declared indexes (the prefix of equalities, a range, the sort), what
                           explain() shows — no requires
-src/query/live.js         Live — a live query kept by event-reduce over the catalog's action stream (rows, or a count) — requires shape.js only
+src/query/live.js         Live — a live query kept by event-reduce over the catalog's action stream (rows, or a count) — requires shape.js and argument-errors.js only
 src/query/cache.js        QueryCache, keyOf — a result by its key with the catalog's generation, the one live run every watch() of a
                           key shares, an LRU of unobserved results — no requires
 src/query/safe-regex.js   safeRegex — whether a pattern's source has no nested quantifier, backreference or lookaround: what a host

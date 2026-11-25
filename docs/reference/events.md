@@ -105,7 +105,7 @@ and a vector that does not move has the sender offer the same page forever. Skip
 peers make their own with their own `beforeApply`. A skipped op is flagged in the log so a reopen's replay
 of the unsealed tail leaves it alone too. The same path takes an op that would leave the record invalid
 under this node's schema: skipped, logged, relayed, and reported through the `error` event
-(`OP_INVALID`) rather than a hook — and a peer's op on a record this node keeps sealed (`encrypted: true`),
+(`ALX_ERR_OP_INVALID`) rather than a hook — and a peer's op on a record this node keeps sealed (`encrypted: true`),
 which is logged and relayed, never applied.
 
 A throwing `beforeApply` aborts the batch before anything is durable. The sender sees a failed push (on
@@ -118,14 +118,14 @@ at the next handshake.
 gaps, malformed, unsigned, forged, outOfScope, equivocations }`:
 
 - `applied` counts every accepted op, skipped ones included; `applied - skipped` were applied here. An op
-  older than what the record holds, or one the engine refused (`OP_REFUSED`: the field is held by a kind
+  older than what the record holds, or one the engine refused (`ALX_ERR_OP_REFUSED`: the field is held by a kind
   that outranks the op's, a bound, a payload it does not admit), leaves the record as it was and is logged
   and relayed all the same, never a gap.
 - `skipped`: accepted but not applied here — a `beforeApply` returned `false`, the record would not pass
   its entity's validator, its file could not be read, it is sealed for this node, or the op waits for a
   newer schema version.
 - `malformed`, `unsigned` and `forged` were refused before anything read them, neither logged nor relayed;
-  `equivocations` because they fork their writer's stream (`EQUIVOCATION` in
+  `equivocations` because they fork their writer's stream (`ALX_ERR_EQUIVOCATION` in
   [`SyncomError`](./api#syncomerror)).
 - `outOfScope` (a host's push): the record they write is outside the pushing peer's scopes. Each is
   accepted as a withheld scrub — logged skipped without its payload, relayed as a header that applies
@@ -137,7 +137,7 @@ gaps, malformed, unsigned, forged, outOfScope, equivocations }`:
 Every local write and every peer batch runs through one mutation queue, and the write and apply hooks run
 inside it. A hook that awaits something slow holds every other write for that long. A hook that writes
 would wait for the queue, which is waiting for the hook — so a write issued from `beforeWrite`,
-`afterWrite`, `beforeApply` or `afterApply` is refused with a `SyncomError` (`code: 'IN_HOOK'`) rather
+`afterWrite`, `beforeApply` or `afterApply` is refused with a `SyncomError` (`code: 'ALX_ERR_IN_HOOK'`) rather
 than left to deadlock; a hook that awaits it and lets it throw fails with a `HookError` whose `cause` is
 that refusal. Reads (`get`, `has`, `record`) are fine from any hook. The read hooks run outside the queue:
 a write issued from `beforeRead` or `afterRead` queues, and a slow read hook holds no write.
@@ -151,7 +151,7 @@ a write issued from `beforeRead` or `afterRead` queues, and a slow read hook hol
 | `beforeConnect(node)` | Before a registered node is dialled — at `start()`, `addNode()` while started, or `enableNode()`. `node` is a copy of the registry entry | `false` leaves it registered but not dialled | Reported through the manager's `error` event, with `error.url` |
 | `beforeBootstrap({ url, node })` | When a host's log cannot resume this node and its whole state is about to be joined | `false` refuses: the peer stays connected for pushes but nothing is received from it until the next handshake asks again | Reported through `error` |
 | `beforeSend({ op, peer })` | Before an op goes to a peer — a push, a relay, a hosted `changes` page (over a shared log too) | `false` sends it scrubbed: the header alone, a no-op where it lands, no gap in its stream (the log's op is untouched). A snapshot page and a query answer are records, not ops: the scopes rule them | Reported through `error`; the push fails and is tried again |
-| `onRevoke({ url, node, scopes })` | A host took scopes back from this node (`REVOKED`); the registry entry is narrower already, the feed is opened again under the new grant after the hook | — | Reported through `error` |
+| `onRevoke({ url, node, scopes })` | A host took scopes back from this node (`ALX_ERR_REVOKED`); the registry entry is narrower already, the feed is opened again under the new grant after the hook | — | Reported through `error` |
 
 No hook ever withholds an op: seqs run contiguously per origin and scope, so an op missing at one peer is
 a gap that stops every later op of that stream at it. `beforeSend` sends the header instead — the op is
@@ -179,9 +179,9 @@ built only while something listens.
 | `apply` | `({ via, peer, ops, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A peer's batch is durable — `ops` are the accepted ones, skipped included; see [the apply result](#the-apply-result) |
 | `conflict` | `({ kind: 'unique', entity, fields, id, other, op })` or `({ kind: 'register', id, field, op, winner: { ts, origin, value }, loser: { ts, origin, value } })` | A peer's op left a unique key shared by two records (both kept: the application decides which yields); or a peer's register write (a `set`'s or `write`'s field) was stamped below the one this node holds — both made without seeing the other, the newer stamp won on every node, and the op is applied for its other fields all the same; `winner` is what the field reads as here, `loser` what the op carried. Only the apply path loses: a local write is stamped above everything the node holds |
 | `schema` | `({ kind: 'drift', peer, version, hash, local })` / `({ kind: 'ahead', op, held })` | A peer runs this node's schema version with another snapshot hash (reported after hello on both sides; the link stays up); a peer's op is from a newer version — applied as it is (`held` false) or held (`held` true) |
-| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `UNPERSISTED` | A peer's op the engine refused (`OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a limit (`detail`: `pending`, `run`, `field`, `cuts`, `marks`, `moves`, `counter` or `paths`), `malformed` for a payload it does not admit; skipped as invalid under this node's schema (`OP_INVALID`) or because its record's file cannot be read (`OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`SKEW`); a page's ops refused for their signature (`BAD_SIGNATURE`, `UNSIGNED`) or for forking a stream (`EQUIVOCATION`); logged ops whose record files could not be written (`UNPERSISTED`); the engine's lease gone to another instance (`LEASE_LOST`, `path`) or a follower's change stream ended (`FOLLOW_LOST`, `path`: subscribed again, every record read again); a pipeline's handler threw (`PIPELINE_FAILED`); a collection's bulk write whose `afterWrite` hook threw after the rows landed (`HOOK_FAILED`). The fields of each code: [`SyncomError`](./api#syncomerror) |
+| `error` | `(error)` with `error.code`: `error.op`, and `error.rejected` (`[{ field, reason, detail?, count?, max? }]`) or `error.entity` + `error.issues`; `error.count` for a signature; `error.ids` for `ALX_ERR_UNPERSISTED` | A peer's op the engine refused (`ALX_ERR_OP_REFUSED`) — `reason` the kind holding the field when it outranks the op's, `bound` past a limit (`detail`: `pending`, `run`, `field`, `cuts`, `marks`, `moves`, `counter` or `paths`), `malformed` for a payload it does not admit; skipped as invalid under this node's schema (`ALX_ERR_OP_INVALID`) or because its record's file cannot be read (`ALX_ERR_OP_UNREADABLE`), stamped beyond `sync.maxSkew` (`ALX_ERR_SKEW`); a page's ops refused for their signature (`ALX_ERR_BAD_SIGNATURE`, `ALX_ERR_UNSIGNED`) or for forking a stream (`ALX_ERR_EQUIVOCATION`); logged ops whose record files could not be written (`ALX_ERR_UNPERSISTED`); the engine's lease gone to another instance (`ALX_ERR_LEASE_LOST`, `path`) or a follower's change stream ended (`ALX_ERR_FOLLOW_LOST`, `path`: subscribed again, every record read again); a pipeline's handler threw (`ALX_ERR_PIPELINE_FAILED`); a collection's bulk write whose `afterWrite` hook threw after the rows landed (`ALX_ERR_HOOK_FAILED`). The fields of each code: [`SyncomError`](./api#syncomerror) |
 | `log` | `({ kind: 'roll', sealed, dropped, floor, segments })` | The op log sealed a segment, and compacted `dropped` of them; `floor` is where a resume is still possible ([the log](./wire#the-log)) |
-| `lease` | `({ state: 'renewed' \| 'late' \| 'lost', path })` | The engine's lease on the database (MongoDB) was renewed; a renewal failed and is being retried (`late`, once per run of failures); it went to another instance or was given up (`lost`, with the `error` event `LEASE_LOST`) |
+| `lease` | `({ state: 'renewed' \| 'late' \| 'lost', path })` | The engine's lease on the database (MongoDB) was renewed; a renewal failed and is being retried (`late`, once per run of failures); it went to another instance or was given up (`lost`, with the `error` event `ALX_ERR_LEASE_LOST`) |
 | `close` | — | After `close()` sealed the log |
 | `local` | `({ key, value })` | A [local document](../guide/local) written (`value`) or deleted (`null`) through `db.local` or a collection's — never an op, so no `change`; the `local` plugin's |
 
@@ -258,7 +258,7 @@ scale. A listener that throws is contained like an event listener.
 | `peer` | `({ url, connected, node?, reconnected?, schema? })` | Hello answered (with the host's `node` id and `schema`), the link closed, or it came back |
 | `sync` | `({ url, pushed })` / `({ url, received, applied, skipped, duplicates, gaps, malformed, unsigned, forged, outOfScope, equivocations })` | A push went out / a page came in |
 | `bootstrap` | `({ url, records })` | A host's whole state was joined |
-| `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw, a page that failed (`PAGE_FAILED` with `cursor` and `attempt`, `STUCK` the third in a row), five fresh hellos answered 428 (`HANDSHAKE_LOOP`), a host that holds more of this node's ops than its log (`REWOUND`) or lacks ones its log no longer holds (`UNDELIVERABLE`), scopes taken back (`REVOKED`); a refusal the host answered with comes as the link delivered it, a numeric `code` |
+| `error` | `(error)` with `error.url` | A failure on the way to a peer — a refused link, a failed push, a hook that threw, a page that failed (`ALX_ERR_PAGE_FAILED` with `cursor` and `attempt`, `ALX_ERR_STUCK` the third in a row), five fresh hellos answered 428 (`ALX_ERR_HANDSHAKE_LOOP`), a host that holds more of this node's ops than its log (`ALX_ERR_REWOUND`) or lacks ones its log no longer holds (`ALX_ERR_UNDELIVERABLE`), scopes taken back (`ALX_ERR_REVOKED`); a refusal the host answered with comes as the link delivered it, a numeric `code` |
 | `hello` | `({ node, scopes, schema })` | Hosting side: a peer greeted this node and was authorized |
 | `refused` | `({ node, reason, count, via? })` | Hosting side: what a peer sent was refused — ops `'scope'` (outside the peer's scopes), `'forged'`, `'unsigned'`, `'equivocation'`, `'rule'` (`authorizeWrite` said no); a presence update `'PRESENCE_RATE'`, `'PRESENCE_MALFORMED'`, `'PRESENCE_SCOPE'`, `'PRESENCE_FORGED'`, `'PRESENCE_UNSIGNED'`, `'PRESENCE_UNPROVEN'`, or one before hello (`'HELLO'`, `node` null); `via: 'inbox'` where the ops came through a follower's forward over the shared log, judged by the writer |
 | `revoke` | `({ node, scopes, via? })` | Hosting side: `sync.revoke(node, scopes)` took scopes back from a peer; `via: 'shared'` where the revocation came from another hub over the shared log |
@@ -269,15 +269,15 @@ These follow the same delivery rules; their events are declared beside them.
 
 | Emitter | Events | Declared in |
 | --- | --- | --- |
-| The shared facade (`openShared()`, `@alexify/syncom/shared`) | `leader`, `follower`, `rebind` (`{ path, generation }`), `error` (`PROMOTE_FAILED` and the current instance's) | `src/shared/shared.d.ts` |
+| The shared facade (`openShared()`, `@alexify/syncom/shared`) | `leader`, `follower`, `rebind` (`{ path, generation }`), `error` (`ALX_ERR_PROMOTE_FAILED` and the current instance's) | `src/shared/shared.d.ts` |
 | A presence room (`@alexify/syncom/presence`) | `change` (`{ added, updated, removed }`), `update`, `refused` | `src/presence/presence.d.ts` |
-| A connector (`replicate()`, `@alexify/syncom/connector`) | `received`, `sent`, `conflict`, `refused`, `error` (`REPLICATION_FAILED`), `active` (a boolean) | `src/connector/connector.d.ts` |
+| A connector (`replicate()`, `@alexify/syncom/connector`) | `received`, `sent`, `conflict`, `refused`, `error` (`ALX_ERR_REPLICATION_FAILED`), `active` (a boolean) | `src/connector/connector.d.ts` |
 | An undo manager (`@alexify/syncom/undo`) | `push`, `pop`, `change` | `src/undo/undo.d.ts` |
-| A text handle (`openText()`) | `error` (`UNLOGGED`), and `observe(listener)` | `index.d.ts` (`TextHandle`) |
+| A text handle (`openText()`) | `error` (`ALX_ERR_UNLOGGED`), and `observe(listener)` | `index.d.ts` (`TextHandle`) |
 
 ## `HookError`
 
-What an operation rejects with when one of its hooks threw: `name` `'HookError'`, `code` `'HOOK_FAILED'`,
+What an operation rejects with when one of its hooks threw: `name` `'HookError'`, `code` `'ALX_ERR_HOOK_FAILED'`,
 `hook` (the hook's name), `cause` (the original error). A `SyncomError`; exported from the package root.
 
 ```js
@@ -285,7 +285,7 @@ try {
   await db.Task.insert({});
 } catch (error) {
   error instanceof HookError; // true
-  error.code; // 'HOOK_FAILED'
+  error.code; // 'ALX_ERR_HOOK_FAILED'
   error.hook; // 'beforeWrite'
   error.cause.message; // what the hook threw
 }

@@ -26,7 +26,7 @@ several ([Choose how records are identified](./schema#choose-how-records-are-ide
 
 <<< @/examples/collection.mjs#insert
 
-Inserting under an id a live record already holds rejects with `EXISTS`, decided inside the write queue so
+Inserting under an id a live record already holds rejects with `ALX_ERR_EXISTS`, decided inside the write queue so
 that two concurrent inserts cannot both pass.
 
 ## Which calls are the collection's and which the database's
@@ -99,7 +99,7 @@ A batch that cannot reach the disk at all writes nothing. One call has a bound o
 To find records by their fields instead, use a [query](./query): `db.Task.select({ done: false })`.
 
 A collection only answers for its own records. A record of another collection reads as `null` through it,
-and writing it through the wrong collection rejects with `NOT_FOUND`:
+and writing it through the wrong collection rejects with `ALX_ERR_NOT_FOUND`:
 
 <<< @/examples/collection.mjs#foreign
 

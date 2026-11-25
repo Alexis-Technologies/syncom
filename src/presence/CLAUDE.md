@@ -5,7 +5,7 @@ Never logged; what a host relays. The rules of the core — the op model, the wr
 ## Layout
 
 ```
-src/presence/presence.js  the @alexify/syncom/presence subpath — ephemeral state per node, signed through storage[SIGNER]; requires emitter, shape, symbols, errors, scope only
+src/presence/presence.js  the @alexify/syncom/presence subpath — ephemeral state per node, signed through storage[SIGNER]; requires emitter, shape, symbols, argument-errors, scope only
 ```
 
 ## Rules

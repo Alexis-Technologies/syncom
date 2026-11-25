@@ -6,7 +6,7 @@ A database as JSON and back. The rules of the core are in [src/CLAUDE.md](../CLA
 
 ```
 src/dump/dump.js          @alexify/syncom/dump — exportPages/exportJSON (snapshot pages: tombstones with their meta, or the live
-                          data alone), importJSON (merge = mergeSnapshot, insert = plain writes under the same ids; SCHEMA_MISMATCH),
+                          data alone), importJSON (merge = mergeSnapshot, insert = plain writes under the same ids; ALX_ERR_SCHEMA_MISMATCH),
                           migrateStorage (copy = copyEngine, merge = export into another open database) — requires symbols.js,
                           shape.js, errors.js, the engines' copy.js only
 ```

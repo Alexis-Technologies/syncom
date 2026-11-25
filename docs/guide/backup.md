@@ -51,7 +51,7 @@ engine. Restoring is opening the copy, or copying it back. Only ever run one of 
 and two instances of one node writing at once fork its history.
 
 Restoring an older copy of a node that syncs has a catch: the node's peers hold ops it made after the copy was
-taken. At the next connection the node notices (`REWOUND` on the sync `error` event). When the peer proves it
+taken. At the next connection the node notices (`ALX_ERR_REWOUND` on the sync `error` event). When the peer proves it
 holds ops signed by this node, the node moves past them and bootstraps from that peer. Writes made on the node
 between the restore and that connection are lost to its peers. See the
 [error reference](../reference/api#syncomerror) for the details.

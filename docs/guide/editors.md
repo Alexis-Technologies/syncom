@@ -114,7 +114,7 @@ field as blocks, change them, and let `diffBlocks()` find the delta:
 
 `diffBlocks()` (and `diffSpans()` over spans) returns cuts and inserts, changed markers and changed marks as
 one delta, and `applyDelta()` applies it as one transaction. With `expect`, the text you read, it is
-refused with `STALE` instead of landing in the wrong place when the field changed meanwhile.
+refused with `ALX_ERR_STALE` instead of landing in the wrong place when the field changed meanwhile.
 `spansToDelta()`, `deltaToSpans()`, `spansToBlocks()` and `blocksToSpans()` convert between the forms, and
 `compose()`, `transform()` and `applyToText()` are the delta algebra the binding is built from, written here
 so the subpath needs no dependency.

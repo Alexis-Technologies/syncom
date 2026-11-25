@@ -64,7 +64,7 @@ Put the collection in `data.$type`, and mark records to delete with `deleted: tr
 <<< @/examples/import-export.mjs#mismatch
 
 A dump records the hash of the schema it was made under. Importing it into a database that runs another schema
-hash rejects with `SCHEMA_MISMATCH`, because records of one shape would be read as another. Pass `force: true` when
+hash rejects with `ALX_ERR_SCHEMA_MISMATCH`, because records of one shape would be read as another. Pass `force: true` when
 you know the records read the same under both, for example after a change that only added an optional field. A
 database without `schema.snapshot` has no hash, so dumps between such databases always import.
 

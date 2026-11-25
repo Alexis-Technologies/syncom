@@ -83,7 +83,7 @@ an element is either in or out.
 
 Once a field has a kind, writes of another kind are refused before anything is stamped: an `update()` of a
 counter, an `inc()` of a register, an `add()` to a counter. The error is a `SyncomError` with
-`code: 'FIELD_KIND'`, and `kind` says what the field is.
+`code: 'ALX_ERR_FIELD_KIND'`, and `kind` says what the field is.
 
 <<< @/examples/fields.mjs#one-kind
 
@@ -104,7 +104,7 @@ Two nodes that write `assignee/name` and `assignee/team` at the same time both k
 offline example above shows. Writing `assignee` whole with a new object is a register write at the prefix:
 it replaces what was under it, and a child written after it is laid over it. A counter, a set, a list, a
 text or a tree holds its path alone, so a write under it (`votes/today` under a counter `votes`) is refused
-with `FIELD_KIND`. How long a path may be and how many a record holds are in the
+with `ALX_ERR_FIELD_KIND`. How long a path may be and how many a record holds are in the
 [reference](../reference/api#field-kinds-and-paths).
 
 A write and a query spell the same path differently, because they look at different things:
@@ -128,7 +128,7 @@ of one call are written as one transaction.
 An operator applied to a field that does not exist yet creates the kind it means for `$inc` (a counter) and
 `$addToSet` (a set). On a register that holds an array, `$addToSet`, `$pull`, `$push` and `$pop` rewrite the
 array as a new register value, and an absent field given a `$push` becomes such an array. An operator that
-does not fit the field's kind, such as `$inc` on a register, is `FIELD_KIND`, the same as the method would
+does not fit the field's kind, such as `$inc` on a register, is `ALX_ERR_FIELD_KIND`, the same as the method would
 be. `$min`, `$max` and `$rename` work on registers.
 
 ## Remove a field
@@ -152,7 +152,7 @@ moment later, the task stays deleted on both nodes once they meet:
 Bob's edits reach every node, but they stay under the tombstone where no read finds them, so the record
 reads as gone everywhere, whichever of the two arrived first. Once Bob's device knows of the delete, a field
 method on the record (`update()`, `inc()`, `add()`, `remove()`, `unset()`, a list, text or tree edit)
-rejects with `NOT_FOUND`. Only a whole-record write (`set()`, `upsert()`, or `insert()` of the same id)
+rejects with `ALX_ERR_NOT_FOUND`. Only a whole-record write (`set()`, `upsert()`, or `insert()` of the same id)
 brings a deleted record back: it holds what that write gives it, and the edits of a field stamped after
 it.
 

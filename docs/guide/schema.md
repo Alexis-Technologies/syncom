@@ -44,7 +44,7 @@ entry, nothing sent to peers. Its `issues` say what is wrong, one entry per prob
 
 <<< @/examples/schema.mjs#error
 
-`code` is `VALIDATION_FAILED`, `entity` names the collection, and each issue has a `path`, a `message` and,
+`code` is `ALX_ERR_VALIDATION_FAILED`, `entity` names the collection, and each issue has a `path`, a `message` and,
 where the validator gives one, a `code`. When a validator throws an error of its own, it rides along as
 `cause`.
 
@@ -111,7 +111,7 @@ the id from several fields joined by a separator (the fields stay).
 
 <<< @/examples/schema.mjs#ids
 
-An id taken from the data can already be in use. `insert()` then rejects with `EXISTS`, decided inside the
+An id taken from the data can already be in use. `insert()` then rejects with `ALX_ERR_EXISTS`, decided inside the
 database's write queue so that two inserts cannot both pass, while `insertIfAbsent()` returns the record
 that is there and `upsert()` overwrites it:
 

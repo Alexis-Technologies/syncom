@@ -42,7 +42,7 @@ and tree rules), `reference/versions.md` (versions, tags, patches, undo and bran
   never a page of bullets. A table only for a real comparison. At most a couple of em dashes per page.
 - **Internals only when they explain behaviour.** If the reader cannot predict what happens without knowing a
   mechanism, explain the mechanism (with a figure when it moves); otherwise leave it to the reference.
-- **Error codes** appear where the reader handles them ("a second open rejects with `LOCKED`"), never as a
+- **Error codes** appear where the reader handles them ("a second open rejects with `ALX_ERR_LOCKED`"), never as a
   catalogue. The catalogue is `reference/api.md#syncomerror`.
 - **Be honest about trade-offs.** A "Limitations" or "When not to use this" section is welcome. Never claim a
   number nobody measured; link `/guide/benchmarks` for measured ones.

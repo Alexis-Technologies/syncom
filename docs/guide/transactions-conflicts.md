@@ -159,7 +159,7 @@ the collection's events, [Sync engine](./replication#watch-replication) the sync
 - **A nested object is one register.** Two nodes changing different keys of one nested object keep one of
   the objects, not both changes. Write keys that change independently as their own fields or as
   [paths](./fields#edit-part-of-an-object).
-- **A field keeps its kind.** Writing a counter with `update()` is refused locally (`FIELD_KIND`). If two
+- **A field keeps its kind.** Writing a counter with `update()` is refused locally (`ALX_ERR_FIELD_KIND`). If two
   nodes make one field two different kinds at the same time, a fixed rule picks the same kind on every
   node and the other kind's edits are dropped ([Fields that merge](./fields#a-field-is-one-kind)).
 - **One counter case does not merge.** A counter incremented by one node both before and after another

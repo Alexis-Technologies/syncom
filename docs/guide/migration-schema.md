@@ -147,7 +147,7 @@ With `ahead: 'hold'` the phone keeps the newer ops in its log, relays them to it
 the first open that runs that version. `schemaInfo.held` reports how many were applied (`replayed`) and how many
 the log had already dropped before the upgrade (`lost`). Holding needs a log that keeps ops long enough, so
 `sync.retention.ops` must be 1000 or more, or `0` to keep everything; anything else is a `TypeError` at open. A
-database that ran a newer version cannot be reopened on an older one with `'hold'` (`DOWNGRADE`).
+database that ran a newer version cannot be reopened on an older one with `'hold'` (`ALX_ERR_DOWNGRADE`).
 
 ## Catch two builds that disagree
 

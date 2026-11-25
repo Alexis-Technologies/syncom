@@ -28,7 +28,7 @@ database to check what survives a restart. A new engine is a clean slate.
 ## Close the database whatever happens
 
 A test that fails halfway leaves its database open, and the next test that opens the same path is refused with
-`LOCKED`. `withDatabase(open, fn)` opens the database, hands it to `fn`, and closes it when `fn` returns or throws:
+`ALX_ERR_LOCKED`. `withDatabase(open, fn)` opens the database, hands it to `fn`, and closes it when `fn` returns or throws:
 
 <<< @/examples/testing.mjs#with-database
 

@@ -8,7 +8,7 @@ The binding over a text handle, what the adapters share and never do. The rules 
 src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agnostic binding (over a text handle,
                           `openText`: edits at once, others' changes as deltas, reloads), delta compose/transform,
                           diffSpans/diffBlocks, spans↔blocks, selections as tokens, presence cursors, what an adapter
-                          shares (createFit, undoSteps, failureReporter); requires text/myers.js and text/quill.js only
+                          shares (createFit, undoSteps, failureReporter); requires text/myers.js, text/quill.js and argument-errors.js only
 ```
 
 ## Rules
@@ -16,7 +16,7 @@ src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agno
 - **An editor binding stands on a text handle.** `createTextBinding` opens `storage.openText(id, path,
 { source, window })` (src/text/handle.js) and loads the editor from its `spans()`; the handle's
   reading is what the editor shows, so an edit the adapter reports goes to `handle.applyDelta` at
-  once — resolved and stamped over that reading, never STALE, never rebased — and every other
+  once — resolved and stamped over that reading, never ALX_ERR_STALE, never rebased — and every other
   writer's change comes from `handle.observe` as a delta in the editor's indices (`local` ones are the
   editor's own). A `reset` from the handle (a change no delta says, a flush not logged) reloads the
   editor from `handle.spans()`; an editor that throws on a change, or a delta the handle refuses,
@@ -40,6 +40,6 @@ src/editor/editor.js      the @alexify/syncom/editor subpath — the editor-agno
   a delete, so an index beside a break stays beside it — a Myers diff pairs it with another
   `\n`), and a peer's delta over a held fit lands as the field's text read again
   (`state.toText`, then the diff), never transformed over the fit: both would insert the `\n`. A send
-  that fails other than STALE reloads the editor from the handle's reading at once and the
+  that fails other than ALX_ERR_STALE reloads the editor from the handle's reading at once and the
   binding stops after `MAX_FAILURES` in a row: never retry in a microtask loop (it starved the
   event loop for hours once).

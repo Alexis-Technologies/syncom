@@ -17,7 +17,7 @@ src/local/local.js        @alexify/syncom/local — the `local` plugin: setup ha
   — the database's `Post.x` and the collection Post's `x` are one key, by design. The changes of one key go one at a
   time (`#serial`, a lane per key shared by every scope): `set(key, fn)` reads the value the write before it left, so
   concurrent read-modify-writes compose; an observer that throws is contained (`listener.error`); a document that
-  does not parse is `CORRUPT`.
+  does not parse is `ALX_ERR_CORRUPT`.
 - **A local write is refused where the queue would refuse one.** `set()`/`delete()` ask the database's `guard` (the
-  `[SOURCE]` seam, taken at the first write): CLOSED after `close()`, READ_ONLY after a lost lease or under
+  `[SOURCE]` seam, taken at the first write): ALX_ERR_CLOSED after `close()`, ALX_ERR_READ_ONLY after a lost lease or under
   `readOnly: true` — never a write to an engine the database let go of; reads stay.

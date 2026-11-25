@@ -25,7 +25,7 @@ syncom stored the validator's output rather than the data you passed. The valida
 `$type`, the field syncom adds to name the collection.
 
 Validation is the `schema` plugin's job. `@alexify/syncom/all` registers it; with the lean core, add `schema` from
-`@alexify/syncom/schema` to `plugins`, or `createDatabase({ schema })` rejects with `PLUGIN_MISSING`
+`@alexify/syncom/schema` to `plugins`, or `createDatabase({ schema })` rejects with `ALX_ERR_PLUGIN_MISSING`
 ([Installation](./install#pick-only-the-plugins-you-need) shows the lean setup).
 
 ## Handle a refused write
@@ -103,7 +103,7 @@ when the client runs an old build that validates nothing:
 
 A peer's op is never rewritten. An op that would leave the record invalid is skipped here but still logged and
 relayed, so the stream it belongs to has no gap, and the node reports it through its `error` event with
-`code: 'OP_INVALID'`, `entity` and `issues` (and the `syncom.ops.rejected` metric, reason `validation`, when
+`code: 'ALX_ERR_OP_INVALID'`, `entity` and `issues` (and the `syncom.ops.rejected` metric, reason `validation`, when
 [telemetry](./telemetry) is on). The laptop keeps the empty task it wrote: the two nodes now disagree about that
 record, and only a new write fixes it. Because the op is not rewritten, a default the server's validator would add
 is not added to a peer's record either.
@@ -128,7 +128,7 @@ With the rule in every node's validator, the three nodes end up with two differe
 Each edit was valid where it was made: `5..10` on the laptop, `1..3` on the phone. Together they would read
 `5..3`, so whichever edit a node receives second is the one its validator skips. The server and the laptop got the
 phone's edit second and skipped it. The phone got the laptop's edit second and skipped that one instead. Every
-node reported `OP_INVALID`, and every node runs the same schema, so sharing the schema does not help here. The
+node reported `ALX_ERR_OP_INVALID`, and every node runs the same schema, so sharing the schema does not help here. The
 nodes stay apart until someone writes both fields again.
 
 This happens only with a rule whose verdict depends on more than the field being written. A rule about one field
@@ -139,7 +139,7 @@ fields once, at the node every write passes through:
 <<< @/examples/schema-validation-order.mjs#rule
 
 The server's `authorizeWrite` sees each pushed op with the record as the op would leave it. It refused the phone's
-edit, no node applied it, and the phone was told (`WRITE_REFUSED`) and took its `due` back from the server, so all
+edit, no node applied it, and the phone was told (`ALX_ERR_WRITE_REFUSED`) and took its `due` back from the server, so all
 three nodes read `5..10`. Leave the rule out of the nodes' validators when you do this: a node whose validator
 skips the other edit before the server's answer arrives would keep its own `starts`.
 

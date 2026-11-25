@@ -30,7 +30,7 @@ directory and a file name, and this one passes the backend contract's tests:
 <<< @/examples/storage-localstorage.mjs#open
 
 It works with `sessionStorage` or any object with the same calls. Once the quota runs out, a write rejects when
-the log cannot take it, or resolves and is held in memory as `UNPERSISTED` when only its record could not be
+the log cannot take it, or resolves and is held in memory as `ALX_ERR_UNPERSISTED` when only its record could not be
 stored.
 
 ## Coming from RxDB

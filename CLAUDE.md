@@ -76,12 +76,13 @@ folder's CLAUDE.md.
 ## Gates
 
 Before every commit: `pnpm lint`, `pnpm format:check`, `pnpm test:types`,
-`node scripts/size.js`, `node --test --test-timeout=120000 --test-force-exit tests/package/*.test.js`
+`node scripts/size.js`, `pnpm test:package` (`tests/package/*.test.js`)
 and the whole suite with `node --test --test-timeout=120000 --test-force-exit` (never a run without
 both: a test once hung for hours, and a file whose failed test left a message port open sat for eight
 hours after its last test). Coverage —
 `pnpm exec c8 --all --include 'src/**' --check-coverage --lines 95 --statements 95 --branches 90 --functions 95 node --test --test-timeout=120000 --test-force-exit`
-— is enforced in CI; see [tests/CLAUDE.md](./tests/CLAUDE.md).
+— is enforced in CI; see [tests/CLAUDE.md](./tests/CLAUDE.md). `pnpm run prepublishOnly` runs them all, coverage
+included; `pnpm docs:build` is the one gate it leaves to CI and the release.
 
 ## Rules for the whole repository
 
@@ -96,21 +97,24 @@ hours after its last test). Coverage —
   fails at resolve time on any bare import reaching a browser bundle, so a
   stray `require('some-pkg')` in shared code breaks `pnpm size`, not just the
   dependency count.
-- **Every operational error is a `SyncomError` with a `code`.** `src/errors.js`:
-  a failure that can happen to correct calling code — given the data, the
-  files or the peers — is `new SyncomError(code, message, { cause, ...fields })`,
-  and its code is in the `SyncomErrorCode` union of `index.d.ts` and the table
-  in `docs/reference/api.md` (one row per code: who raises it, which fields
-  ride on it). A wrong argument, option or hook result is a `TypeError`
-  without a code, except `typed(code, message)` for a value that is data
-  (`INVALID_ID`, `TYPE_IMMUTABLE`, `INVALID_VERSION`, `PRESENCE_SIZE`) or
-  configuration (`NO_CHAIN`, `PLUGIN_MISSING`) — the `TypedErrorCode` union,
-  never in `SyncomErrorCode`; `tests/package/consistency.test.js` reads every
-  code off `src/` and checks both unions and the `api.md` table. A host's
-  wire refusal (`coded` in `src/sync/hosting.js`) keeps the numeric code wrpc
-  carries and names the check in `reason`. `HookError` and `ValidationError`
-  extend `SyncomError`. Never `new Error(...)` for something a caller may
-  handle, never invent a code without its row in the table and the union.
+- **Every error syncom throws on purpose has a `code`, and every code starts with `ALX_ERR_`.** `src/errors.js`:
+  - a failure that can happen to correct calling code — given the data, the files or the peers — is
+    `new SyncomError(code, message, { cause, ...fields })`, its code in the `SyncomErrorCode` union of `index.d.ts`;
+    `HookError` and `ValidationError` extend it;
+  - a wrong argument, option, definition or hook result is an `ArgumentError` (it extends `TypeError`; one code,
+    `ALX_ERR_INVALID_ARGUMENT`), or an `ArgumentRangeError` (a `RangeError`, the same code) where the API always threw
+    a `RangeError` (`src/order/order.js`). Never a bare `TypeError`, `RangeError` or `Error` for it;
+  - a value that is data (`ALX_ERR_INVALID_ID`, `ALX_ERR_TYPE_IMMUTABLE`, `ALX_ERR_INVALID_VERSION`,
+    `ALX_ERR_PRESENCE_SIZE`…) or configuration (`ALX_ERR_NO_CHAIN`, `ALX_ERR_PLUGIN_MISSING`) is
+    `new DataError(code, message, details)` (a `TypeError`, one shape: `details` null where the code documents
+    nothing) — the `DataErrorCode` union, never in `SyncomErrorCode`.
+
+  `ErrorCode` is the union of all three, and the table of `docs/reference/api.md` has one row per code (who raises
+  it, which fields ride on it); `tests/package/consistency.test.js` reads every code off `src/` and holds both unions
+  and the table to it. **The wire is the exception:** a host's refusal (`coded` in `src/sync/rules.js`) keeps the
+  numeric code wrpc carries and names the check in `reason` (`403` `READ_ONLY`, `404` `BLOB_NOT_FOUND`): that
+  constant is the protocol's, not an error code, and keeps its name. Never `new Error(...)` for something a caller
+  may handle, never invent a code without its row in the table and its union.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
 - **Record types are phantom.** `Schema<Shapes>` (`shapes?`) and a Standard Schema's
   `~standard.types` are read by `index.d.ts` alone — `Collections<S>` maps them to
@@ -146,16 +150,26 @@ two differ; a folder's own CLAUDE.md wins over this one for the code of that fol
 
 - **Formatting.** oxfmt: 2 spaces, single quotes, semicolons, trailing commas, LF, and **120 columns** (`printWidth`
   in `.oxfmtrc.json`). Run `pnpm format` before committing; CI runs `format:check`.
-- **Lint.** oxlint over `src`, `tests`, `scripts`, `bench`, `examples` and `docs/examples` (`.oxlintrc.json`). Suppress
-  a rule only for an intentional construct, with a targeted `// oxlint-disable-next-line <rule>`.
-- **`'use strict'` in every file of `src/`.** alexiskills adds it only where a project already does; syncom does,
-  everywhere, and keeps it.
-- **No runtime dependencies, and no build.** The only bare `require` in `src/` is a `node:` built-in, and none at all
-  in a file that reaches a browser bundle; a helper goes in `src/utils.js`. `node:` prefix and `.js` in every relative
-  require.
-- **A platform split is a `*.browser.js` file** (dot, not dash), wired through `package.json#browser` and
-  `src/index.browser.js` (src/CLAUDE.md has the three edits it needs). `env.browser` stays on in the lint: the
-  shared modules run in both.
+- **Lint.** oxlint over `src`, `tests`, `scripts`, `bench`, `examples` and `docs/examples` (`.oxlintrc.json`), the
+  reference of alexiskills taken whole: `correctness` and `suspicious` as errors; `eqeqeq` always, `null` included;
+  `func-style: expression`, `max-depth` 4, `no-nested-ternary`, `no-console`; in `src/**` every array iteration method
+  (and `Array.from`) through `no-restricted-properties`, the unicorn rules and `max-lines-per-function` 80 as a
+  warning. `pnpm lint` reports an unused disable comment as an error. Suppress a rule only for an intentional
+  construct, with a targeted `// oxlint-disable-next-line <rule>` and the reason on the line above. Where syncom
+  differs from the reference, on purpose:
+  - `no-underscore-dangle` (a `suspicious` rule) is off: `_id`, `_rev`, `_deleted`, `_updated` and `_attachments`
+    are the field names of the backends and protocols syncom speaks (MongoDB, CouchDB, RxDB's), not a naming choice;
+  - `unicorn/prefer-add-event-listener` is off in `src/`: the event targets syncom drives are handed in and duck-typed
+    — an `indexedDB` factory whose requests may have the `on…` properties alone (`tests/idb.test.js` hands in such
+    a one), a BroadcastChannel- or MessagePort-shaped `channel` whose `onmessage` is its one handler and starts a
+    port — so `onsuccess =` and `onmessage =` are the contract, not a style;
+  - `no-console` is off where the repository prints on purpose: `scripts/`, `bench/`, `examples/`, `docs/examples/`
+    (the pages show what an example prints) and `tests/smoke/` (CI reads its summary);
+  - `import/no-unassigned-import` allows the side-effect imports that are one: `tests/utils/quiet-sqlite.js`,
+    `fake-indexeddb/auto` and `@alexify/wrpc/sse`;
+  - the stricter rules syncom had before stay: `preserve-caught-error`, the explicit rule list, `env.browser`.
+- **`'use strict'` in every file of `src/`**, which alexiskills adds only where a project already does; CommonJS, no
+  runtime dependency and no build are the rules above; a platform split is a `*.browser.js` file (src/CLAUDE.md).
 - **Iteration in `src/` is stricter than alexiskills.** Besides every array iteration method, `Array.from` is banned
   (a loop, or `[...iterable]` for a plain copy); `T.find` and `SL.find` are the rope's and the plist's own functions,
   and the editor APIs named `map` (`RangeSet.map`, `DecorationSet.map`) carry a disable comment. One walk does what it
@@ -165,12 +179,40 @@ two differ; a folder's own CLAUDE.md wins over this one for the code of that fol
   `fn(...array)` throw `RangeError` past ~130 000 elements, and a list run holds up to `MAX_RUN`. A new array is `[]`
   and `push`: `new Array(n)` filled by index stays holey for good, and a list's chunks built that way cost a text
   insert 8% (measured). A bulk copy stays native (`slice`, `concat`).
-- **Events leave through `notify()`** and never fail the operation they observe; a hook may fail it.
 - **`await` `calculateHash`, `encrypt`, `decrypt`, `sign` and `verify` in shared code**: synchronous in Node.js,
   promise-returning in the browser.
 - **The hot path** — applying and merging ops, `OpLog.append`, vector clocks, `packOps` — creates no closure or
   `RegExp` per call, keeps one object shape per kind of op and log entry, and has `try`/`catch` only around user code
   (hooks, listeners) and I/O. Run `pnpm bench` before and after touching it; a number that moved is a finding.
+- **Errors** are the rule above. A module that throws only the TypeError family requires `src/argument-errors.js`,
+  never `src/errors.js`: CommonJS is not tree-shaken, and a small subpath would carry every class.
+- **Tests** are `describe` and `it('should …')` over `node:assert/strict`; `--test-force-exit` stays (CONTRIBUTING.md).
+
+Where syncom keeps a way of its own, on purpose:
+
+- **`delete` stays where the object is a dictionary or data whose missing key means something**, never on a record
+  or an instance: the meta maps keyed by field, origin or stream (`clock`, `counters`, `sets`, `blocks`, `gone`), a
+  record's data by field, a purged meta's `v`/`vs` (the same on every node), the `covered` side table of a changes
+  array before it leaves `applyOp`, an op's `scope` and what `scrubOp` takes (an `undefined` would change the log
+  line's rest), the vector, a run's `vals` and a payload's `content` (absent is a pure cut on the wire), the run-key
+  and node-id dictionaries of the text and tree kinds, the style and attribute dictionaries of the editors, wrpc's
+  per-client data bag (absent: not greeted), a span's attribute map and a copy of an app state's JSON.
+- **`String(value)` stays where the value may be a symbol**: a thrown value turned into a message (`packError`, the
+  manager's `lastError`, a connector's parked row, a validator's issue), a property key (the shared tabs' `tx[name]`,
+  `collection[method]`), and a caller's value before `copyPayload` checks it. A template literal throws on a symbol.
+- **`.bind(this)` stays in `src/document.js` and `src/collection.js`**, the metaprogramming of an ORM: the Document
+  class is shared by every collection and a record's `$type` is known only once it loads, so a collection's `methods`
+  are own non-enumerable properties defined at the load beside the fields' own accessors, and bound because the docs
+  promise it (a method handed out on its own keeps its document); a Collection's `statics` the same, once per
+  collection. Never in a hot path, never for a listener.
+- **A database grows after its construction**: a collection is an own property (`db.Task`, RxDB's shape), made at the
+  open and by `addCollections()`. `removeCollection()` sets it `undefined` and unlisted instead of deleting it, and
+  keeps the name free for `addCollections()`.
+- **`for…in` with `Object.hasOwn` in `hasAny` of `src/ops.js`**: whether a set field holds any element, stopped at the
+  first own key — `Object.keys` built the array of 20 000 elements per op (the comment there).
+- **`max-lines-per-function` warns 57 times in `src/`**: the sequential protocols (the open sequence, the write
+  paths, the hosting procedures) stay long, as `js-conventions` allows; a new warning is a reason to look, not a
+  failure.
 
 ## Release process
 
@@ -181,40 +223,25 @@ are CONTRIBUTING.md's "Release checklist". What syncom adds to the steps of the 
 - **Gates (its step 1).** `prepublishOnly`, then `pnpm docs:build` (a dead link fails it), which CI runs and
   `prepublishOnly` does not. A coverage threshold is never lowered and a size budget never raised to get green.
   `pnpm outdated` and `pnpm audit` are about the devDependencies alone.
-- **Version (step 2).** The nav label of `docs/.vitepress/config.mts` (`text: 'v<version>'`) is hand-synced with
-  `package.json`; `tests/package/consistency.test.js` fails when they differ. **The first release:** `0.0.1` is the
-  placeholder the repository carries until the package meets its goals. The first version is picked with the user
-  (`0.1.0` is the usual choice for an API that may still change), and `package.json`, the nav label and the comparison
-  matrix move together.
+- **Version (step 2).** The nav label of `docs/.vitepress/config.mts` is hand-synced with `package.json` (the
+  consistency test). `0.0.1` is a placeholder until the first release, whose version is picked with the user (`0.1.0`
+  usually); `package.json`, the nav label and the comparison matrix move together.
 - **CHANGELOG (step 3).** On the first release the note that the package is unpublished leaves the top of the file,
   all of `[Unreleased]` lands in the version, and its link points to `releases/tag/v<version>`.
-- **Typings (step 4).** `index.d.ts` is the Node surface; `browser.d.ts` re-exports it and overrides the crypto
-  functions that are async in the browser; every subpath has its `.d.ts` and `tests/<name>.test-d.ts`. The event maps
-  and the hook option types match what `src/commit.js`, `src/apply.js`, `src/bootstrap.js`, `src/database.js` and
-  `src/sync/manager.js` emit and run.
-- **Docs (step 5).** The README's bundle-size table comes from `pnpm size`; the replication pages agree with
-  `src/sync/manager.js` and `src/sync/hosting.js`, the hooks and events pages with the files above;
-  `docs/public/llms.txt` is regenerated (`pnpm docs:llms`, `tests/package/docs-map.test.js`); the docs keywords
-  mirror `package.json#keywords`; SECURITY.md's table changes on a major (or the first) release.
-- **Package (step 6).** `files` is the allowlist (no `.npmignore`, no `dependencies`), `!**/CLAUDE.md` keeps the notes
-  out and `tests/package/pack.test.js` holds it. `pnpm pack --dry-run`, then the tarball smoked from a scratch consumer
-  (the one place `npm` and `npx` are used): `require()` it from a CJS file, and typecheck it with
-  `npx tsc --moduleResolution bundler --module esnext --noEmit`.
+- **Typings (step 4).** `index.d.ts`, `browser.d.ts` (the crypto functions async in the browser) and each subpath's
+  `.d.ts` with its `tests/<name>.test-d.ts`; the event maps and hook options match what the write paths emit and run.
+- **Docs (step 5).** The README's size table from `pnpm size`, `docs/public/llms.txt` from `pnpm docs:llms`, the
+  docs keywords from `package.json`, SECURITY.md's table on the first or a major release (docs/CLAUDE.md, the rest).
+- **Package (step 6).** `files` is the allowlist, `!**/CLAUDE.md` included (`tests/package/pack.test.js`);
+  `pnpm pack --dry-run`, then the tarball smoked from a scratch consumer, the one place `npm` and `npx` are used.
 - **Publish.** `pnpm publish` from the tagged commit (`chore(release): X.Y.Z`, tag `vX.Y.Z`), by hand, gated by
   `prepublishOnly`.
 
 ## Skills
 
-The skills are [alexiskills](https://alexiskills.vercel.app), `@alexify/metaskills` 1.1, a devDependency: all 37
-skills of its seven packs. `.claude/skills` is one symlink to `node_modules/@alexify/metaskills/skills`, made by the
-`prepare` script (`alexiskills claude`) on every `pnpm install`, a worktree's included, and left out by `.gitignore`.
-Until 2026-11-25 the directory held six skills of metarhia/metaskills 1.0.5, `js-conventions` and `npm-publish` adapted
-to this repository; what they said of syncom alone is in "Conventions" and "Release process" above.
-
-- **The skills are not edited here.** A change to one goes to `Alexis-Technologies/metaskills` and comes back with a
-  release of the package. A skill of this repository's own beside them would turn the symlink into a directory of
-  links, and one named like a skill of the package hides that skill.
-- **`js-conventions` and `npm-publish` are the Alexis ones, for every library.** What syncom does differently or adds
-  is here.
-
-**This file wins** if a skill and this file ever disagree.
+The skills are [alexiskills](https://alexiskills.vercel.app), `@alexify/metaskills` 1.1, a devDependency: its 37
+skills, `.claude/skills` one symlink to `node_modules/@alexify/metaskills/skills` that the `prepare` script
+(`alexiskills claude`) makes on every `pnpm install` and `.gitignore` leaves out. They are not edited here: a change
+goes to `Alexis-Technologies/metaskills` and comes back with a release. What the six metarhia 1.0.5 skills kept here
+until 2026-11-25 said of syncom alone is in "Conventions" and "Release process". **This file wins** if a skill and it
+ever disagree.

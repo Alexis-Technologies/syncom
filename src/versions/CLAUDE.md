@@ -19,7 +19,7 @@ src/versions/api.js      the versions API — get(id, { at }), history, diff/res
   and every catalog id through `versionEntry`, and computes the vector at the
   version per stream from the retained entries (a stream with nothing retained
   was dropped whole below the floor — inside the version; one retained only
-  past the version is `HISTORY_GONE compacted`); its `snapshot` is `pageOf`
+  past the version is `ALX_ERR_HISTORY_GONE compacted`); its `snapshot` is `pageOf`
   over a synthetic catalog — never a second page writer. `branch()` takes
   `from: { at }` through it. Blame (src/blame.js, the plugins' `editors`
   hook, the text plugin's `editorOf`) reads the metadata alone: an `origin`
@@ -31,7 +31,7 @@ src/versions/api.js      the versions API — get(id, { at }), history, diff/res
   `log.entriesOf(id)` filtered by `appliedHere` (skipped out, held in once
   the node runs the version), folded with `applyOp`. With `droppedTs > 0` the
   fold of everything retained must `deepEqual` the present (`present`) — the
-  counter straddle `repair()` also has — or it is `HISTORY_GONE compacted` /
+  counter straddle `repair()` also has — or it is `ALX_ERR_HISTORY_GONE compacted` /
   `exact: false`; a stamp below a retained `merge` is `reason: 'merge'`, a
   cut before a purge `'scrubbed'`. Never answer a version from the record
   file or the catalog, and never fold from an entry below the exact start.
@@ -47,11 +47,11 @@ src/versions/api.js      the versions API — get(id, { at }), history, diff/res
   at open and after every drop, an older one at its first use, and the sync
   readers `hasAt`/`rowAt`/`catalogOf` come after `ensure(name)` (a Cursor at
   a tag awaits its source's `ready`). `tag()` flushes deferred files first and
-  refuses (`UNPERSISTED`) while a record is held — its file is behind the
+  refuses (`ALX_ERR_UNPERSISTED`) while a record is held — its file is behind the
   cache and a copy from memory would carry no block to verify; a record held
   since the tag reads as its file, still the tag's state. An unreadable
   `tags.json` never fails `createDatabase()` (`tags.corrupt.json`, `stats().tags`,
-  `take()` refuses `CORRUPT`, the copies wait under `tags/.pending/data/` for
+  `take()` refuses `ALX_ERR_CORRUPT`, the copies wait under `tags/.pending/data/` for
   the next good open); never rebuild `tags.json` from the disk — fsi lists
   files, not directories. Every purge path goes through `core.scrub` (log +
   tags) — never `core.log.scrub` alone. The error field is `tag`, never
@@ -83,7 +83,7 @@ true` keeps this node's tags alone (`ownTags`): an undo revokes this node's
   been a plain value read `undefined` there. The `unset` cannot go: a register outranks every kind on the op path
   (`yieldTo`), but `kindClash` refuses a local op on a field of another kind before it is stamped, and
   `applyPatches` makes local ops. `diffViews` puts the `unset`s ahead of everything it makes, whatever the order
-  of the fields — a text at `profile` must be gone before `profile/city` is put (it was FIELD_KIND, the restore
+  of the fields — a text at `profile` must be gone before `profile/city` is put (it was ALX_ERR_FIELD_KIND, the restore
   refused whole). The kinds of each side are the caller's to give, and they must be that side's: the `commit`
   event's `kinds` names one kind a field (what `after` holds), `was` the kind `before` held where the op changed
   it, and the seam's `revert` takes the host's (`kinds` of the refusal). What no patch makes — an empty set,

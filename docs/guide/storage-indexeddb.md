@@ -45,7 +45,7 @@ lists them all with the seven object stores the engine creates.
 
 ## Open the same database in several tabs
 
-A second tab that opens the database with the default options gets `LOCKED`: one instance writes, so that two
+A second tab that opens the database with the default options gets `ALX_ERR_LOCKED`: one instance writes, so that two
 never hand out the same sequence number. A tab that only reads opens it with `readOnly: true` and follows the
 writer:
 
@@ -54,7 +54,7 @@ writer:
 <FigTabFollower />
 
 The follower hears each write set over a `BroadcastChannel`, reads the records again and wakes its queries.
-It writes nothing (a write rejects with `READ_ONLY`), and it sees a write once the writer has landed its record,
+It writes nothing (a write rejects with `ALX_ERR_READ_ONLY`), and it sees a write once the writer has landed its record,
 up to `defer` ms after the write resolved in the first tab. For tabs that all write, use
 [leader election](./leader-election): one tab leads and the others write through it, with a new leader when it
 closes.
@@ -83,7 +83,7 @@ engine; the file store is there for code that wants the files layout, for instan
 - **`durable: true` has no effect.** A write resolves when its transaction completes, as durable as the
   browser makes it; `durability` is the knob.
 - **A full origin.** A write whose log entry is in but whose record does not fit resolves, stays readable from
-  memory, and is reported on the database's `error` event as `UNPERSISTED` with `quota: true`.
+  memory, and is reported on the database's `error` event as `ALX_ERR_UNPERSISTED` with `quota: true`.
 
 ## Coming from RxDB
 

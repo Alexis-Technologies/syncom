@@ -40,8 +40,8 @@ frozen `{ name, description, inputSchema, annotations, execute }`:
 
 A tool runs the collection's own method (`select()`, `count()`, `insert()`…), so what applies to the app applies to
 the agent: the collection's [schema](./schema-validation) validates its writes, the writes go through your
-[hooks](./hooks), and they replicate. A refusal comes back as the `SyncomError` it is: `NOT_FOUND`, a
-`ValidationError`, `PLUGIN_MISSING` where the database has no query plugin. Nothing marks a write as the agent's:
+[hooks](./hooks), and they replicate. A refusal comes back as the `SyncomError` it is: `ALX_ERR_NOT_FOUND`, a
+`ValidationError`, `ALX_ERR_PLUGIN_MISSING` where the database has no query plugin. Nothing marks a write as the agent's:
 it is this node's write, made the way your app makes one.
 
 ## Tell a client which tools change data
@@ -67,7 +67,7 @@ the collections, and every collection of the database is served when you leave i
 ## What happens to a wrong call
 
 A model makes mistakes: a misspelled argument, a number where a string belongs, a window far too large. Each tool
-checks its arguments against its own `inputSchema` before anything runs, and a wrong call is a `TypeError` that
+checks its arguments against its own `inputSchema` before anything runs, and a wrong call is an `ArgumentError` (a `TypeError`, `ALX_ERR_INVALID_ARGUMENT`) that
 names the member:
 
 <<< @/examples/mcp.mjs#door
@@ -75,7 +75,7 @@ names the member:
 Every object in a schema is closed, so a member the schema does not name is refused, and so are inherited names
 such as `constructor` or `__proto__`. A `$regex` anywhere in a query is refused too, unless you pass
 `regex: true`: a regular expression runs on your event loop, and a pathological one such as `^(a+)+$` can hold it
-for seconds. Your server reports the `TypeError` to the model as the tool's error, and the model can try again.
+for seconds. Your server reports the `ArgumentError` to the model as the tool's error, and the model can try again.
 
 The same check is exported for your own tools, or for arguments you want to validate before they reach `execute`:
 
@@ -133,7 +133,7 @@ earlier builds, hence the fallback. Where neither exists, there is nothing to re
 | `regex`       | `false`          | Allow `$regex` in a query                                                                                              |
 
 With the [telemetry](./telemetry) plugin every call is counted as `syncom.mcp.calls`, by verb and by result: `ok`,
-`refused` (a `TypeError` at the door) or `error` (a refusal from the collection).
+`refused` (an `ArgumentError` at the door) or `error` (a refusal from the collection).
 
 ## Limitations
 

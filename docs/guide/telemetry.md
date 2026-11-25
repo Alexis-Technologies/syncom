@@ -12,7 +12,7 @@ both packages, and their spans meet in one trace.
 
 The adapter is the `telemetry` plugin, which `@alexify/syncom/all` registers; with the lean core, pass
 `plugins: [telemetry]` from `@alexify/syncom/telemetry`. Without it, `telemetry: { api }` is refused with
-`PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
+`ALX_ERR_PLUGIN_MISSING`, and a node that never traces ships none of the adapter.
 
 ## Turn it on
 
