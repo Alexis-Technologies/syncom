@@ -337,7 +337,7 @@
   },
   "devDependencies": {
     "@alexify/metaschema": "^3.4.0",
-    "@alexify/metaskills": "^1.1.0",
+    "@alexify/metaskills": "^1.1.2",
     "@alexify/wrpc": "^2.2.0",
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.15",

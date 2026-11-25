@@ -208,8 +208,6 @@ Where syncom keeps a way of its own, on purpose:
 - **A database grows after its construction**: a collection is an own property (`db.Task`, RxDB's shape), made at the
   open and by `addCollections()`. `removeCollection()` sets it `undefined` and unlisted instead of deleting it, and
   keeps the name free for `addCollections()`.
-- **`for…in` with `Object.hasOwn` in `hasAny` of `src/ops.js`**: whether a set field holds any element, stopped at the
-  first own key — `Object.keys` built the array of 20 000 elements per op (the comment there).
 - **`max-lines-per-function` warns 57 times in `src/`**: the sequential protocols (the open sequence, the write
   paths, the hosting procedures) stay long, as `js-conventions` allows; a new warning is a reason to look, not a
   failure.

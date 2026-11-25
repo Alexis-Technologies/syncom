@@ -2757,9 +2757,13 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
 
 ### Tooling
 
-- **The skills are alexiskills 1.1** (`@alexify/metaskills`, a devDependency), linked into `.claude/skills` by the
-  `prepare` script in place of the six metarhia 1.0.5 skills the repository kept; what they said of syncom alone is
-  in CLAUDE.md ("Conventions", "Release process").
+- **The skills are alexiskills 1.1.2** (`@alexify/metaskills` ^1.1.2, a devDependency), linked into `.claude/skills`
+  by the `prepare` script in place of the six metarhia 1.0.5 skills the repository kept; what they said of syncom
+  alone is in CLAUDE.md ("Conventions", "Release process"). 1.1.2 allows `for...of` and `for...in` in library `src/`:
+  the `Object.keys` loops stay, and the `for...in` of `hasAny` in `src/ops.js` is no longer an exception. Its rule
+  that a loop replacing an array method skips the holes of a caller's array as the method did restores nothing here:
+  no loop of this change replaced a method (`src/` had none since the lean-core release), and a sparse array from
+  the caller meets every loop it changed as it met them on `feature/leftovers`.
 - **The lint is alexiskills' reference**: `correctness` and `suspicious` as errors, `eqeqeq` with `null` included,
   `func-style`, `max-depth` 4, `no-nested-ternary`, `no-console`, the unicorn rules and `max-lines-per-function` in
   `src/`; an unused disable comment is an error. `no-underscore-dangle` and `unicorn/prefer-add-event-listener` are
