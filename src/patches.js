@@ -79,7 +79,10 @@ const applyPatches = async (core, id, patches, { actor, source = null, message }
   if (!isRecordId(id)) throw invalidId(id);
   if (!Array.isArray(patches)) throw new ArgumentError('applyPatches() takes an array of patches');
   const ops = [];
-  for (let i = 0; i < patches.length; i++) ops.push(realize(patches[i], core.plugins));
+  for (let i = 0; i < patches.length; i++) {
+    // A hole of the caller's list is no patch, as the `map` this loop replaced skipped it.
+    if (i in patches) ops.push(realize(patches[i], core.plugins));
+  }
   const apply = () => runOps(core, id, ops, { actor, source, message });
   const { otel } = core;
   if (!otel.enabled) return core.run(apply);

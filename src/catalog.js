@@ -958,16 +958,20 @@ class Catalog {
       const condition = query[key];
       if (key === '$and') {
         if (!Array.isArray(condition)) continue;
-        for (const sub of condition) {
-          const found = isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
+        for (let i = 0; i < condition.length; i++) {
+          const sub = condition[i];
+          const found = i in condition && isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
           if (found !== null) result = meet(result, found);
         }
       } else if (key === '$or') {
-        // One branch that cannot narrow is the whole collection.
+        // One branch that cannot narrow is the whole collection; a hole of the caller's list is no branch, as the
+        // predicate skips it (src/query/cursor.js).
         if (!Array.isArray(condition) || condition.length === 0) continue;
         const union = new Set();
         let whole = false;
-        for (const sub of condition) {
+        for (let i = 0; i < condition.length; i++) {
+          if (!(i in condition)) continue;
+          const sub = condition[i];
           const found = isObject(sub) && !Array.isArray(sub) ? this.#narrow(eq, sub) : null;
           if (found === null) {
             whole = true;
@@ -984,8 +988,9 @@ class Catalog {
         else continue;
         const posting = eq.get(key);
         const found = new Set();
-        for (const value of values) {
-          for (const id of posting.get(keyOf(value)) ?? []) found.add(id);
+        for (let i = 0; i < values.length; i++) {
+          if (!(i in values)) continue; // a hole of a caller's $in is no value, as the predicate skips it
+          for (const id of posting.get(keyOf(values[i])) ?? []) found.add(id);
         }
         result = meet(result, found);
       }

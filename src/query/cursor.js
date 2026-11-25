@@ -186,7 +186,8 @@ const compileField = (path, condition, depth = 0) => {
       if (!Array.isArray(expected)) throw new ArgumentError(`select(): ${op} takes an array`);
       const hit = (value) => {
         for (let i = 0; i < expected.length; i++) {
-          if (matches(value, expected[i])) return true;
+          // A hole of the caller's list is no value, as the `some` this loop replaced skipped it.
+          if (i in expected && matches(value, expected[i])) return true;
         }
         return false;
       };
@@ -261,7 +262,10 @@ const compileQuery = (query = {}, nested = false, depth = 0) => {
     if (key === '$and' || key === '$or' || key === '$nor') {
       if (!Array.isArray(value)) throw new ArgumentError(`select(): ${key} takes an array of queries`);
       const subs = [];
-      for (let i = 0; i < value.length; i++) subs.push(compileQuery(value[i], true, depth + 1));
+      for (let i = 0; i < value.length; i++) {
+        // A hole of the caller's list is no query, as the `map` this loop replaced skipped it.
+        if (i in value) subs.push(compileQuery(value[i], true, depth + 1));
+      }
       if (key === '$and') tests.push(allOf(subs));
       else if (key === '$or') tests.push(anyOf(subs));
       else {
@@ -286,7 +290,8 @@ const compileQuery = (query = {}, nested = false, depth = 0) => {
 const fieldsOf = (query, into = new Set()) => {
   for (const key of Object.keys(query)) {
     if (key === '$and' || key === '$or' || key === '$nor') {
-      for (const sub of query[key]) fieldsOf(sub, into);
+      const subs = query[key];
+      for (let i = 0; i < subs.length; i++) if (i in subs) fieldsOf(subs[i], into);
     } else if (key === '$not') fieldsOf(query[key], into);
     else if (key !== '$text') into.add(key);
   }
@@ -620,11 +625,18 @@ class Cursor {
 
   /** The fields each row carries (plus `id`); a dotted field comes back under its dotted name. */
   projection(fields) {
-    let valid = Array.isArray(fields);
-    for (let i = 0; valid && i < fields.length; i++) valid = typeof fields[i] === 'string' && fields[i] !== '__proto__';
-    if (!valid) throw new ArgumentError('projection() takes an array of field names');
+    if (!Array.isArray(fields)) throw new ArgumentError('projection() takes an array of field names');
+    // The fields kept dense: a hole of the caller's list is skipped, as the `every` this check replaced skipped it.
+    const names = [];
+    for (let i = 0; i < fields.length; i++) {
+      if (!(i in fields)) continue;
+      if (typeof fields[i] !== 'string' || fields[i] === '__proto__') {
+        throw new ArgumentError('projection() takes an array of field names');
+      }
+      names.push(fields[i]);
+    }
     const copy = this.#clone();
-    copy.#projection = fields;
+    copy.#projection = names;
     return copy;
   }
 

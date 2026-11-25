@@ -13,6 +13,7 @@
 
 const MAX = 100;
 const MAX_ROWS = 10_000;
+const HOLE = Object.freeze({ $hole: true });
 
 // A RegExp has no JSON of its own: keyed by its source and flags. An `undefined` value has none either, and
 // `{ f: undefined }` asks for a field missing where `{}` asks nothing: keyed as what it is, never dropped.
@@ -25,7 +26,8 @@ const replacer = (key, value) => {
 const canonical = (value) => {
   if (Array.isArray(value)) {
     const out = [];
-    for (let i = 0; i < value.length; i++) out.push(canonical(value[i]));
+    // A hole is keyed as one: the query skips it, where it reads an `undefined` it was handed.
+    for (let i = 0; i < value.length; i++) out.push(i in value ? canonical(value[i]) : HOLE);
     return out;
   }
   if (value === null || typeof value !== 'object' || value instanceof RegExp) return value;

@@ -240,17 +240,22 @@ class SyncManager extends Emitter {
     if (this.#nodes.has(url)) {
       throw new SyncomError('ALX_ERR_NODE_EXISTS', `Node with URL ${url} already exists`, { url });
     }
+    // The scopes kept dense: a hole of the caller's list is skipped, as the `every` this check replaced skipped it.
+    let named = null;
     if (scopes !== undefined) {
       if (!Array.isArray(scopes)) throw new ArgumentError('Node scopes must be an array of strings');
+      named = [];
       for (let i = 0; i < scopes.length; i++) {
+        if (!(i in scopes)) continue;
         if (typeof scopes[i] !== 'string') throw new ArgumentError('Node scopes must be an array of strings');
+        named.push(scopes[i]);
       }
     }
     if (!DIRECTIONS.has(direction)) throw new ArgumentError("Node direction must be 'both', 'pull' or 'push'");
     const node = {
       url,
       token,
-      scopes: scopes ?? [GLOBAL_SCOPE],
+      scopes: named ?? [GLOBAL_SCOPE],
       direction,
       enabled: true,
       lastSync: null,

@@ -26,6 +26,13 @@ const isObject = (value) => typeof value === 'object' && value !== null && !Arra
 // How many values a `$in` may hold for the index to scan it value by value.
 const MAX_IN = 16;
 
+// The values of a caller's `$in` list, its holes skipped as the predicate skips them (src/query/cursor.js).
+const present = (list) => {
+  const out = [];
+  for (let i = 0; i < list.length; i++) if (i in list) out.push(list[i]);
+  return out;
+};
+
 // The conjuncts of a query — its top level and every `$and` branch, which
 // hold together: per field, one equality value (the first), one `$in` list,
 // the range bounds, and whether anything else tests it; `other` for what no
@@ -34,7 +41,7 @@ const conjuncts = (query, out) => {
   for (const key of Object.keys(query)) {
     const value = query[key];
     if (key === '$and') {
-      for (let i = 0; i < value.length; i++) conjuncts(value[i], out);
+      for (let i = 0; i < value.length; i++) if (i in value) conjuncts(value[i], out);
       continue;
     }
     if (key === '$text') continue;
@@ -60,7 +67,7 @@ const conjuncts = (query, out) => {
         if (field.upper === null) field.upper = { value: value[op], inclusive: op === '$lte' };
         else field.more++;
       } else if (op === '$in') {
-        if (field.in === null && Array.isArray(value[op])) field.in = value[op];
+        if (field.in === null && Array.isArray(value[op])) field.in = present(value[op]);
         else field.more++;
       } else if (op !== '$options') field.more++;
     }

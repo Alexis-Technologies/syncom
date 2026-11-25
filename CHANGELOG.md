@@ -1079,7 +1079,7 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
   (Web Crypto in the browser), so a replica is not held to one check after
   another. `'verify'` (the default) checks a signature when there is one, `'require'`
   refuses unsigned ops and keyless origins too (and a keyless `hello`, 403
-  `ALX_ERR_UNSIGNED`). Refusals are `forged`/`unsigned` in the apply result and the
+  `UNSIGNED`). Refusals are `forged`/`unsigned` in the apply result and the
   `refused` event, `error` events `ALX_ERR_BAD_SIGNATURE`/`ALX_ERR_UNSIGNED` once per page,
   `syncom.ops.received{refused}` and `syncom.ops.rejected{forged|unsigned}`.
   New: `generateSigningKeys`, `loadSigningKeys`, `sign`, `verify` on both
@@ -1401,7 +1401,7 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
   no longer arrow fields. `delete` stays only on dictionaries and on data whose missing key means something.
 - **`removeCollection(name)` leaves `db.<name>` undefined and unlisted** rather than deleting it from the instance;
   `addCollections()` takes the name again.
-- **The bundles grew with it**: the main entry 78.7 → 79.7 KB min+gzip, `/all` 184.6 → 186.4 KB, a block 0.1 to
+- **The bundles grew with it**: the main entry 78.7 → 79.8 KB min+gzip, `/all` 184.6 → 186.6 KB, a block 0.1 to
   0.3 KB; the TypeError family lives in `src/argument-errors.js`, so a subpath that throws nothing else stays small
   (`order`, `store`, the connectors' adapters). Each budget was raised by name in `scripts/size.js`.
 
@@ -1828,6 +1828,13 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
 
 ### Fixed
 
+- **A sparse array from the caller works again where an array method read it** (alexiskills 1.1.2). The lean-core
+  release made loops of `every`, `some`, `map` and `flatMap` that read a hole as `undefined`, so a list with a hole
+  was refused or misread; each skips it again, as the method did, and hands on a dense copy: an entity's `index`
+  (and its compound keys), `search` and a compound `unique` key; a validator's `issues` and an issue's `path`; a
+  query's `$in`, `$nin`, `$and`, `$or` and `$nor` (the predicate, the planner, the catalog's narrowing and the
+  cache key, which keys a hole apart from an `undefined`); `projection()`; `applyPatches()` and a `remove` patch's
+  `removals`; `migrate({ entities })`; `sync.addNode({ scopes })`. `tests/holes.test.js` holds each.
 - **A copy reads a page at a time; a roll over the port sends seqs, not entries; a follower counts what it hears.**
   `copyEngine` read every record and every piece one call at a time (review №5, P-15): a page goes through
   `records.getMany` and a record's pieces through `pieces.getMany`, a record the medium holds that is no record
@@ -2761,9 +2768,8 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
   by the `prepare` script in place of the six metarhia 1.0.5 skills the repository kept; what they said of syncom
   alone is in CLAUDE.md ("Conventions", "Release process"). 1.1.2 allows `for...of` and `for...in` in library `src/`:
   the `Object.keys` loops stay, and the `for...in` of `hasAny` in `src/ops.js` is no longer an exception. Its rule
-  that a loop replacing an array method skips the holes of a caller's array as the method did restores nothing here:
-  no loop of this change replaced a method (`src/` had none since the lean-core release), and a sparse array from
-  the caller meets every loop it changed as it met them on `feature/leftovers`.
+  that a loop replacing an array method skips the holes of a caller's array as the method did is followed where the
+  lean-core release made those loops (see Fixed).
 - **The lint is alexiskills' reference**: `correctness` and `suspicious` as errors, `eqeqeq` with `null` included,
   `func-style`, `max-depth` 4, `no-nested-ternary`, `no-console`, the unicorn rules and `max-lines-per-function` in
   `src/`; an unused disable comment is an error. `no-underscore-dangle` and `unicorn/prefer-add-event-listener` are

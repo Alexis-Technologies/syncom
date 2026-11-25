@@ -60,7 +60,11 @@ const toIssue = (issue) => {
   if (!isObject(issue)) return { path: [], message: String(issue) };
   let path = [];
   if (Array.isArray(issue.path)) {
-    for (let i = 0; i < issue.path.length; i++) path.push(segment(issue.path[i]));
+    for (let i = 0; i < issue.path.length; i++) {
+      // A hole of the validator's path is skipped, as the `map` this loop replaced skipped it.
+      if (!(i in issue.path)) continue;
+      path.push(segment(issue.path[i]));
+    }
   } else if (typeof issue.instancePath === 'string') {
     path = pointer(issue.instancePath);
   }
@@ -72,8 +76,11 @@ const toIssue = (issue) => {
 const toIssues = (issues) => {
   if (!Array.isArray(issues) || issues.length === 0) return [{ path: [], message: 'invalid' }];
   const out = [];
-  for (let i = 0; i < issues.length; i++) out.push(toIssue(issues[i]));
-  return out;
+  for (let i = 0; i < issues.length; i++) {
+    // A hole is no issue, as the `map` this loop replaced skipped it; holes alone are a failure saying nothing.
+    if (i in issues) out.push(toIssue(issues[i]));
+  }
+  return out.length > 0 ? out : [{ path: [], message: 'invalid' }];
 };
 
 // Whatever a validator threw, as a ValidationError: its own, one carrying
@@ -172,10 +179,12 @@ const fieldList = (value) => {
   if (!Array.isArray(value) || value.length === 0) return null;
   const list = [];
   for (let i = 0; i < value.length; i++) {
+    // A caller's sparse list keeps working: a hole is skipped, as the `every` this loop replaced skipped it.
+    if (!(i in value)) continue;
     if (!isField(value[i])) return null;
     list.push(value[i]);
   }
-  return list;
+  return list.length > 0 ? list : null;
 };
 
 // An array of field names, each once, in the order first given.
@@ -183,6 +192,7 @@ const fieldNames = (value, entity, what) => {
   if (!Array.isArray(value)) throw fail(entity, `${what} must be an array of field names`);
   const names = new Set();
   for (let i = 0; i < value.length; i++) {
+    if (!(i in value)) continue; // a hole, skipped as the `every` this loop replaced skipped it
     if (!isField(value[i])) throw fail(entity, `${what} must be an array of field names`);
     names.add(value[i]);
   }
@@ -196,6 +206,7 @@ const explicitIndex = (value, entity) => {
   if (!Array.isArray(value)) throw fail(entity, 'index must be an array of field names and compound keys');
   const keys = [];
   for (let i = 0; i < value.length; i++) {
+    if (!(i in value)) continue; // a hole, skipped as the `every` this loop replaced skipped it
     const key = isField(value[i]) ? [value[i]] : fieldList(value[i]);
     if (key === null) throw fail(entity, 'index takes field names and arrays of them');
     keys.push(key);

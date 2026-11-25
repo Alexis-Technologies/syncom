@@ -63,6 +63,7 @@ const entityNames = (entities) => {
   if (!Array.isArray(entities)) return undefined;
   const names = new Set();
   for (let i = 0; i < entities.length; i++) {
+    if (!(i in entities)) continue; // a hole, skipped as the `every` this loop replaced skipped it
     if (typeof entities[i] !== 'string') return undefined;
     names.add(entities[i]);
   }

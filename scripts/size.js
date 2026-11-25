@@ -220,7 +220,9 @@ const ENTRIES = [
   // raised by name.
   // 79.75 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (79.707 KB measured). 79.75, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 79.75 },
+  // 79.8 with a caller's sparse array read as its methods read it (alexiskills 1.1.2, 2026-11-25): a hole
+  // skipped and a dense copy handed on in the schema, the query and the patches (79.775 KB measured). 79.8, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 79.8 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -518,7 +520,9 @@ const ENTRIES = [
   // (2026-11-16). 184.6, raised by name.
   // 186.5 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (186.443 KB measured). 186.5, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 186.5 },
+  // 186.65 with a caller's sparse array read as its methods read it (alexiskills 1.1.2, 2026-11-25): a hole
+  // skipped and a dense copy handed on in the schema, the query and the patches (186.630 KB measured). 186.65, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 186.65 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -741,6 +745,8 @@ const ENTRIES = [
   // with the core.
   // 42.2 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (42.175 KB measured). 42.2, raised by name.
+  // 42.25 with a caller's sparse array read as its methods read it (alexiskills 1.1.2, 2026-11-25): a hole
+  // skipped and a dense copy handed on in the schema, the query and the patches (42.213 KB measured). 42.25, raised by name.
   {
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
@@ -769,7 +775,7 @@ const ENTRIES = [
     // (2026-11-16). 41.7, raised by name.
     // 41.8 (over by bytes) with a kind change in a diff and the refusal's kinds it bundles (2026-11-16). 41.8,
     // raised by name.
-    budget: 42.2,
+    budget: 42.25,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.

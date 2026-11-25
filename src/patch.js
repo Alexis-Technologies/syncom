@@ -164,10 +164,19 @@ const isField = (value) => isPath(value);
 // `treeMove`, `treeRemove`) come from the registry.
 const ACTIONS = new Set(['put', 'unset', 'write', 'inc', 'add', 'remove', 'delete', 'purge']);
 
+// A caller's list without its holes: what a check that skipped them hands the write path, which copies it as JSON
+// (a hole would come back as a null).
+const dense = (list) => {
+  const out = [];
+  for (let i = 0; i < list.length; i++) if (i in list) out.push(list[i]);
+  return out;
+};
+
 // Exactly the tags a remove revokes: `[[element, { origin: addTs }]]`.
 const isRemovals = (list) => {
   if (!Array.isArray(list)) return false;
   for (let i = 0; i < list.length; i++) {
+    if (!(i in list)) continue; // a hole, skipped as the `every` this loop replaced skipped it
     const pair = list[i];
     if (!Array.isArray(pair) || pair.length !== 2 || !isJsonValue(pair[0]) || !isPlainObject(pair[1])) return false;
     const tags = pair[1];
@@ -216,7 +225,7 @@ const realize = (patch, plugins = EMPTY) => {
         if (!isRemovals(patch.removals)) {
           throw new ArgumentError('applyPatches(): remove needs removals as [[element, { origin: addTs }]]');
         }
-        return ['remove', { key: field, value: [], removals: patch.removals }];
+        return ['remove', { key: field, value: [], removals: dense(patch.removals) }];
       }
       const payload = { key: field, value: setElements(method, field, patch.elements) };
       if (patch.own === true) payload.own = true;
