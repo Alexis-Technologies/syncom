@@ -1,15 +1,15 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { runSchemaTests } = require('./suites/schema.js');
 
-test('Schema (node)', async (t) => {
+describe('Schema (node)', () => {
   // The same name within one subtest reopens the same directory.
   const dirs = new Map();
-  await runSchemaTests(t, assert, async (t2, name, options = {}) => {
+  runSchemaTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     let dir = dirs.get(key);
     if (!dir) {

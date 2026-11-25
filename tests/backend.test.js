@@ -4,20 +4,20 @@
 // suite as node:fs and OPFS, `isFsi` reads the shape, `withSync` is what
 // `durable` wraps a backend in.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { isFsi, checkFsi, withSync } = require('../src/backend.js');
 const { runFsiTests } = require('./suites/fsi.js');
 const { memory } = require('../src/memory/memory.js');
 
-test('memory()', async (t) => {
+describe('memory()', () => {
   let n = 0;
-  await runFsiTests(t, memory(), {
+  runFsiTests(memory(), {
     getRoot: async () => `mem-${n++}`,
     joinPath: (root, ...parts) => [root, ...parts].join('/'),
   });
 
-  await t.test('size and dump; content is kept as text', async () => {
+  it('should report size and dump, content kept as text', async () => {
     const fsi = memory();
     await fsi.write('a', 'x.json', '{"n":1}');
     await fsi.write('a/b', 'y.txt', 'y');
@@ -31,8 +31,8 @@ test('memory()', async (t) => {
   });
 });
 
-test('isFsi and checkFsi', async (t) => {
-  await t.test('the five functions, by name', () => {
+describe('isFsi and checkFsi', () => {
+  it('should read the five functions, by name', () => {
     const fsi = memory();
     assert.strictEqual(isFsi(fsi), true);
     assert.strictEqual(isFsi(withSync({ ...fsi, sync: async () => {} })), true);
@@ -41,7 +41,7 @@ test('isFsi and checkFsi', async (t) => {
       const broken = { read() {}, write() {}, exists() {}, remove() {}, list() {}, [name]: 'nope' };
       assert.strictEqual(isFsi(broken), false);
       assert.throws(() => checkFsi(broken, 'createDatabase({ fsi })'), {
-        name: 'TypeError',
+        name: 'ArgumentError',
         message: `createDatabase({ fsi }): adapter has no ${name}()`,
       });
     }
@@ -50,8 +50,8 @@ test('isFsi and checkFsi', async (t) => {
   });
 });
 
-test('withSync', async (t) => {
-  await t.test('every write is followed by sync; the rest passes through', async () => {
+describe('withSync', () => {
+  it('should follow every write with sync and pass the rest through', async () => {
     const calls = [];
     const inner = memory();
     const spied = {
@@ -79,7 +79,7 @@ test('withSync', async (t) => {
     await assert.rejects(() => durable.write('d', 'g', 'x'), /disk full/);
   });
 
-  await t.test('an append is followed by sync too; a backend without append gets none', async () => {
+  it('should follow an append with sync too, a backend without append getting none', async () => {
     const calls = [];
     const inner = memory();
     const durable = withSync({ ...inner, sync: async (dir, name) => void calls.push([dir, name]) });

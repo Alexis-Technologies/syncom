@@ -5,8 +5,8 @@
 // or taken away changes this list on purpose — the core is a seam, and a
 // seam that grows unnoticed is how it reached fifty-odd members.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { createDatabase } = require('../../src/index.js');
 const { memory } = require('../../src/memory/memory.js');
 
@@ -76,12 +76,14 @@ const MEMBERS = [
   'write',
 ];
 
-test('the core a storage lends is frozen and has the members this list names, no more', async (t) => {
-  let lent = null;
-  const spy = { name: 'spy', setup: () => ({}), methods: { peek: async (core) => void (lent = core) } };
-  const storage = await createDatabase({ fsi: memory(), lock: false, logger: false, plugins: [spy] });
-  t.after(() => storage.close());
-  await storage.peek();
-  assert.ok(Object.isFrozen(lent));
-  assert.deepStrictEqual(Object.keys(lent).sort(), MEMBERS);
+describe('the core a storage lends', () => {
+  it('should freeze the core a storage lends and give it the members this list names, no more', async (t) => {
+    let lent = null;
+    const spy = { name: 'spy', setup: () => ({}), methods: { peek: async (core) => void (lent = core) } };
+    const storage = await createDatabase({ fsi: memory(), lock: false, logger: false, plugins: [spy] });
+    t.after(() => storage.close());
+    await storage.peek();
+    assert.ok(Object.isFrozen(lent));
+    assert.deepStrictEqual(Object.keys(lent).sort(), MEMBERS);
+  });
 });

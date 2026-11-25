@@ -51,7 +51,8 @@ const compareValues = (a, b) => {
   const [rb, vb, nb] = rank(b);
   if (ra !== rb) return ra - rb;
   if (va !== vb) return va < vb ? -1 : 1;
-  return na < nb ? -1 : na > nb ? 1 : 0;
+  if (na < nb) return -1;
+  return na > nb ? 1 : 0;
 };
 
 const createFakeFirestore = ({ stampField = 'serverTimestamp', deletedField = '_deleted' } = {}) => {

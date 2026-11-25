@@ -4,13 +4,13 @@
 // sessions. Ops cross the hub-to-hub edge, a client moves between hubs, a
 // hub restarts and its clients resume from their cursors.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
 
-test('Hub mesh', async (t) => {
+describe('Hub mesh', () => {
   const dirs = new Map();
   const createStorage = async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
@@ -23,7 +23,7 @@ test('Hub mesh', async (t) => {
     return storage;
   };
 
-  await t.test('clients on different hubs converge, move between hubs, and survive a hub restart', async (t2) => {
+  it('should converge clients on different hubs, move them between hubs, and survive a hub restart', async (t2) => {
     const mesh = await createMesh(
       t2,
       ['H1', 'H2', 'C1', 'C2'],

@@ -14,7 +14,9 @@ const createFakeLocks = () => {
   const queues = new Map();
   const grant = (name) => {
     const queue = queues.get(name);
-    if (queue === undefined || queue.length === 0) return;
+    if (queue === undefined || queue.length === 0) {
+      return;
+    }
     const next = queue.shift();
     held.set(name, next);
     next.run();
@@ -23,7 +25,9 @@ const createFakeLocks = () => {
     held: (name) => held.has(name),
     waiting: (name) => queues.get(name)?.length ?? 0,
     request(name, options, callback) {
-      if (typeof options === 'function') [options, callback] = [{}, options];
+      if (typeof options === 'function') {
+        [options, callback] = [{}, options];
+      }
       return new Promise((resolve, reject) => {
         const entry = {
           stolen: false,
@@ -31,9 +35,13 @@ const createFakeLocks = () => {
           run: async () => {
             try {
               const value = await callback({ name, mode: 'exclusive' });
-              if (!entry.stolen) resolve(value);
+              if (!entry.stolen) {
+                resolve(value);
+              }
             } catch (error) {
-              if (!entry.stolen) reject(error);
+              if (!entry.stolen) {
+                reject(error);
+              }
             } finally {
               if (!entry.stolen) {
                 held.delete(name);
@@ -43,7 +51,9 @@ const createFakeLocks = () => {
           },
         };
         if (held.has(name)) {
-          if (options?.ifAvailable) return void Promise.resolve(callback(null)).then(resolve, reject);
+          if (options?.ifAvailable) {
+            return void Promise.resolve(callback(null)).then(resolve, reject);
+          }
           if (options?.steal) {
             const holder = held.get(name);
             holder.stolen = true;
@@ -53,7 +63,9 @@ const createFakeLocks = () => {
             return;
           }
           let queue = queues.get(name);
-          if (queue === undefined) queues.set(name, (queue = []));
+          if (queue === undefined) {
+            queues.set(name, (queue = []));
+          }
           queue.push(entry);
           return;
         }

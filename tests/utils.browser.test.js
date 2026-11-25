@@ -1,36 +1,38 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { webcrypto } = require('node:crypto');
 const { runEmitterTests } = require('./suites/emitter.js');
+// The browser half reads `crypto` when called, never when loaded: the global the hook below installs is the one
+// generateUUID meets.
+const utils = require('../src/utils.browser.js');
 
-test('utils.browser module', async (t) => {
-  const prevCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
-  Object.defineProperty(globalThis, 'crypto', {
-    value: webcrypto,
-    configurable: true,
-    writable: true,
-    enumerable: true,
+describe('utils.browser module', () => {
+  let prevCrypto = null;
+  before(() => {
+    prevCrypto = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+    Object.defineProperty(globalThis, 'crypto', {
+      value: webcrypto,
+      configurable: true,
+      writable: true,
+      enumerable: true,
+    });
   });
-  t.after(() => {
+  after(() => {
     if (prevCrypto) Object.defineProperty(globalThis, 'crypto', prevCrypto);
     else delete globalThis.crypto;
   });
 
-  const utils = require('../src/utils.browser.js');
+  describe('Emitter (the same contract as the node half)', () => runEmitterTests(assert, utils.Emitter));
 
-  await t.test('Emitter matches the node half', async (t2) => {
-    await runEmitterTests(t2, assert, utils.Emitter);
-  });
-
-  await t.test('generateUUID delegates to the Web Crypto API', () => {
+  it('should delegate generateUUID to the Web Crypto API', () => {
     const id = utils.generateUUID();
     assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     assert.notStrictEqual(id, utils.generateUUID());
   });
 
-  await t.test('no filesystem predicates are exported', () => {
+  it('should export no filesystem predicates', () => {
     assert.strictEqual(utils.fileExists, undefined);
     assert.strictEqual(utils.directoryExists, undefined);
   });

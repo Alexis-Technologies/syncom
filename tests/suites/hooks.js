@@ -2,27 +2,28 @@
 
 // Hooks: run inside the operation, can alter or abort it. Against whichever
 // storage half the caller builds — `createStorage(t, name, options)` gives
-// the SAME directory for the same name within one subtest (reopen cases).
+// the SAME directory for the same name within one test (reopen cases).
 
+const { it } = require('node:test');
 const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
 const { MemoryLink } = require('../utils/memory-link.js');
 const { packOps } = require('../../src/ops.js');
 
 const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date.now() + seq, type, id, ...extra });
 
-const runHooksTests = async (t, assert, createStorage) => {
-  const hookError = (hook) => ({ name: 'HookError', code: 'HOOK_FAILED', hook });
+const runHooksTests = (assert, createStorage) => {
+  const hookError = (hook) => ({ name: 'HookError', code: 'ALX_ERR_HOOK_FAILED', hook });
 
-  await t.test('an unknown or malformed hook is refused at open', async (t2) => {
+  it('should refuse an unknown or malformed hook at open', async (t2) => {
     await assert.rejects(() => createStorage(t2, 'bad-name', { hooks: { beforeWrtie: () => {} } }), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: "Storage: unknown hook 'beforeWrtie'",
     });
     await assert.rejects(() => createStorage(t2, 'bad-fn', { hooks: { afterWrite: 'nope' } }), TypeError);
     await assert.rejects(() => createStorage(t2, 'bad-shape', { hooks: 'nope' }), TypeError);
   });
 
-  await t.test('beforeWrite sees the write and the record it lands on', async (t2) => {
+  it('should show beforeWrite the write and the record it lands on', async (t2) => {
     const seen = [];
     const storage = await createStorage(t2, 'A', {
       hooks: { beforeWrite: (ctx) => void seen.push({ ...ctx, current: ctx.current && { ...ctx.current } }) },
@@ -140,7 +141,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual([tree.node, tree.parent, tree.after, tree.before], ['n', null, undefined, undefined]);
   });
 
-  await t.test('beforeWrite may replace the data of a write or a set, and only those', async (t2) => {
+  it('should let beforeWrite replace the data of a write or a set, and only those', async (t2) => {
     const storage = await createStorage(t2, 'A', {
       hooks: {
         beforeWrite: ({ type, data }) => {
@@ -159,22 +160,22 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.get(id), { title: 'b', stamped: 'set' });
     assert.deepStrictEqual(ops.at(-1).data, { title: 'b', stamped: 'set' }, 'the op carries the replacement');
     await assert.rejects(() => storage.inc(id, 'hits'), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'beforeWrite may only replace data for write and set',
     });
     await assert.rejects(() => storage.add(id, 'tags', ['x']), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'beforeWrite may only replace data for write and set',
     });
     await assert.rejects(() => storage.splice(id, 'body', 0, 0, 'x'), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'beforeWrite may only replace data for write and set',
     });
     const bad = await createStorage(t2, 'B', { hooks: { beforeWrite: () => 'text' } });
     await assert.rejects(() => bad.insert({ a: 1 }), /plain object or undefined/);
   });
 
-  await t.test('a throwing beforeWrite refuses the write: nothing stamped, logged or written', async (t2) => {
+  it('should refuse the write when beforeWrite throws: nothing stamped, logged or written', async (t2) => {
     const cause = new Error('not allowed');
     const storage = await createStorage(t2, 'A', {
       hooks: {
@@ -190,7 +191,7 @@ const runHooksTests = async (t, assert, createStorage) => {
       (e) => e,
     );
     assert.strictEqual(error.name, 'HookError');
-    assert.strictEqual(error.code, 'HOOK_FAILED');
+    assert.strictEqual(error.code, 'ALX_ERR_HOOK_FAILED');
     assert.strictEqual(error.hook, 'beforeWrite');
     assert.strictEqual(error.cause, cause);
     assert.deepStrictEqual(await storage.get(id), { ok: true });
@@ -201,7 +202,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual((await storage.list()).length, 1);
   });
 
-  await t.test('afterWrite sees the durable op; a throw fails the call but the op stays', async (t2) => {
+  it('should show afterWrite the durable op; a throw fails the call but the op stays', async (t2) => {
     const seen = [];
     let fail = false;
     const storage = await createStorage(t2, 'A', {
@@ -229,7 +230,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     ]);
   });
 
-  await t.test('encrypted writes go through the same hooks and stay local', async (t2) => {
+  it('should run encrypted writes through the same hooks and keep them local', async (t2) => {
     const seen = [];
     const storage = await createStorage(t2, 'A', {
       encrypted: true,
@@ -255,7 +256,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     );
   });
 
-  await t.test('a hook cannot write to the storage, but it can read', async (t2) => {
+  it('should let a hook read the storage but not write to it', async (t2) => {
     const reads = [];
     const storage = await createStorage(t2, 'A', {
       hooks: {
@@ -275,7 +276,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.get(id), { n: 2 }, 'the queue is not stuck');
   });
 
-  await t.test('beforeRead refuses, afterRead redacts — for get() and what reads through it', async (t2) => {
+  it('should let beforeRead refuse and afterRead redact — for get() and what reads through it', async (t2) => {
     let deny = false;
     const storage = await createStorage(t2, 'A', {
       hooks: {
@@ -312,7 +313,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.has(id), true);
   });
 
-  await t.test('beforeApply(false) skips an op here: logged, relayed, replay-safe', async (t2) => {
+  it('should skip an op here on beforeApply(false): logged, relayed, replay-safe', async (t2) => {
     const seen = [];
     let storage = await createStorage(t2, 'A', {
       hooks: {
@@ -371,7 +372,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual(storage.vector.peer, 3);
   });
 
-  await t.test('a throwing beforeApply aborts the batch before anything is durable', async (t2) => {
+  it('should abort the batch before anything is durable when beforeApply throws', async (t2) => {
     const storage = await createStorage(t2, 'A', {
       hooks: {
         beforeApply: ({ op }) => {
@@ -393,7 +394,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.has('r1'), false);
   });
 
-  await t.test('afterApply sees the durable batch; a throw fails the call but the batch stays', async (t2) => {
+  it('should show afterApply the durable batch; a throw fails the call but the batch stays', async (t2) => {
     const batches = [];
     const storage = await createStorage(t2, 'A', {
       hooks: {
@@ -426,7 +427,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(events, [1, 0]);
   });
 
-  await t.test('a skip is local: the op still reaches the peers behind this node', async (t2) => {
+  it('should keep a skip local: the op still reaches the peers behind this node', async (t2) => {
     const mesh = await createMesh(
       t2,
       ['A', 'B', 'C'],
@@ -449,7 +450,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await c.get(plain), { plain: true });
   });
 
-  await t.test('the hosting side runs beforeApply for a pushed page', async (t2) => {
+  it('should run beforeApply on the hosting side for a pushed page', async (t2) => {
     const seen = [];
     let refuse = false;
     const host = await createStorage(t2, 'H', {
@@ -479,7 +480,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(host.vector, { peer: 1 });
   });
 
-  await t.test('a peer whose page is refused hears about it as an error, and recovers', async (t2) => {
+  it('should tell a peer whose page is refused about it as an error, and let it recover', async (t2) => {
     let refuse = true;
     const host = await createStorage(t2, 'H', {
       hooks: {
@@ -505,14 +506,14 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await host.get(id), { n: 1 });
   });
 
-  await t.test('sync hooks are refused at open like storage hooks', async (t2) => {
+  it('should refuse sync hooks at open like storage hooks', async (t2) => {
     await assert.rejects(() => createStorage(t2, 'bad', { sync: { hooks: { beforeSned: () => {} } } }), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: "SyncManager: unknown hook 'beforeSned'",
     });
   });
 
-  await t.test('beforeConnect(false) leaves a node registered but not dialled', async (t2) => {
+  it('should leave a node registered but not dialled on beforeConnect(false)', async (t2) => {
     const host = await createStorage(t2, 'H');
     const unit = host.sync.unit({ access: 'public' });
     const seen = [];
@@ -552,7 +553,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual(dialled, 1);
   });
 
-  await t.test('a throwing beforeConnect is reported as an error, not thrown', async (t2) => {
+  it('should report a throwing beforeConnect as an error, not throw it', async (t2) => {
     const errors = [];
     const dialer = await createStorage(t2, 'D', {
       sync: {
@@ -574,7 +575,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual(errors[0].url, 'mem://host');
   });
 
-  await t.test('beforeBootstrap may refuse to join a peer’s state', async (t2) => {
+  it('should let beforeBootstrap refuse to join a peer’s state', async (t2) => {
     // A host whose log cannot resume a newcomer: the feed says bootstrap.
     const host = await createStorage(t2, 'H', { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
     for (let i = 0; i < 8; i++) await host.insert({ i });
@@ -627,7 +628,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     assert.strictEqual((await dialer.list()).length, 9);
   });
 
-  await t.test('the manager announces its lifecycle', async (t2) => {
+  it('should announce the manager’s lifecycle', async (t2) => {
     const host = await createStorage(t2, 'H');
     const hellos = [];
     host.sync.on('hello', (event) => hellos.push(event));
@@ -664,7 +665,7 @@ const runHooksTests = async (t, assert, createStorage) => {
     ]);
   });
 
-  await t.test('the order of a local write', async (t2) => {
+  it('should run the steps of a local write in order', async (t2) => {
     const order = [];
     const storage = await createStorage(t2, 'A', {
       hooks: {
@@ -680,13 +681,13 @@ const runHooksTests = async (t, assert, createStorage) => {
     await storage.update(id, { n: 2 });
     assert.deepStrictEqual(order, ['beforeWrite', 'afterWrite', 'update', 'change']);
   });
-  await runReadHookQueueTests(t, assert, createStorage);
+  runReadHookQueueTests(assert, createStorage);
 };
 
 module.exports = { runHooksTests, remoteOp, createMesh, settle, waitUntil, MemoryLink };
 
-const runReadHookQueueTests = async (t, assert, createStorage) => {
-  await t.test('read hooks run outside the queue: a write from one queues, a slow one holds no write', async (t2) => {
+const runReadHookQueueTests = (assert, createStorage) => {
+  it('should run read hooks outside the queue: a write from one queues, a slow one holds no write', async (t2) => {
     let release = null;
     const held = new Promise((resolve) => {
       release = resolve;

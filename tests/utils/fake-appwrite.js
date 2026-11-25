@@ -51,10 +51,14 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
     return new Date(last).toISOString();
   };
   const notify = (event, doc) => {
-    for (const listener of [...listeners]) listener({ events: [event], payload: clone(doc) });
+    for (const listener of [...listeners]) {
+      listener({ events: [event], payload: clone(doc) });
+    }
   };
   const check = (db, col) => {
-    if (db !== databaseId || col !== collectionId) throw new AppwriteException(404, 'Collection not found');
+    if (db !== databaseId || col !== collectionId) {
+      throw new AppwriteException(404, 'Collection not found');
+    }
   };
   const fake = {
     docs,
@@ -79,7 +83,9 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
         let rows = [...docs.values()].filter((doc) => filters.every((q) => matches(doc, q)));
         rows.sort((a, b) => {
           for (const attribute of orders) {
-            if (a[attribute] !== b[attribute]) return a[attribute] < b[attribute] ? -1 : 1;
+            if (a[attribute] !== b[attribute]) {
+              return a[attribute] < b[attribute] ? -1 : 1;
+            }
           }
           return 0;
         });
@@ -98,7 +104,9 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
         if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,35}$/.test(id)) {
           throw new AppwriteException(400, 'Invalid `documentId` param: UID must contain at most 36 chars.');
         }
-        if (docs.has(id)) throw new AppwriteException(409, 'Document with the requested ID already exists.');
+        if (docs.has(id)) {
+          throw new AppwriteException(409, 'Document with the requested ID already exists.');
+        }
         const doc = { $id: id, $updatedAt: stamp(), ...clone(data) };
         docs.set(id, doc);
         notify('create', doc);
@@ -108,7 +116,9 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
         check(db, col);
         fake.calls.push('update');
         const held = docs.get(id);
-        if (held === undefined) throw new AppwriteException(404, 'Document with the requested ID could not be found.');
+        if (held === undefined) {
+          throw new AppwriteException(404, 'Document with the requested ID could not be found.');
+        }
         const doc = { ...held, ...clone(data), $updatedAt: stamp() };
         docs.set(id, doc);
         notify('update', doc);
@@ -117,7 +127,9 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
       async getDocument(db, col, id) {
         check(db, col);
         const held = docs.get(id);
-        if (held === undefined) throw new AppwriteException(404, 'Document with the requested ID could not be found.');
+        if (held === undefined) {
+          throw new AppwriteException(404, 'Document with the requested ID could not be found.');
+        }
         return clone(held);
       },
     },
@@ -134,9 +146,13 @@ const createFakeAppwrite = ({ databaseId = 'db', collectionId = 'tasks' } = {}) 
     },
     read(id) {
       const doc = docs.get(id);
-      if (doc === undefined || doc.deleted === true) return null;
+      if (doc === undefined || doc.deleted === true) {
+        return null;
+      }
       const out = {};
-      for (const key of Object.keys(doc)) if (key[0] !== '$' && key !== 'deleted') out[key] = doc[key];
+      for (const key of Object.keys(doc)) {
+        if (key[0] !== '$' && key !== 'deleted') out[key] = doc[key];
+      }
       return out;
     },
   };

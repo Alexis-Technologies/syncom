@@ -6,8 +6,8 @@
 // stream, a database over it, the log over documents — and the same contract
 // over the real driver when MONGODB_URL names a replica set.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { createDatabase, memoryEngine } = require('../src/all/all.js');
 const { outbound } = require('../index.js');
 const { mongoEngine } = require('../src/mongodb/mongodb.js');
@@ -128,12 +128,17 @@ const until = async (check, what, timeout = 3000) => {
 // Every document of every collection, by `_id`: what a comparison before and after reads.
 // Every document of the database at `path`, by collection — the lease document included: what a fence test
 // compares, and nothing of another path's (over the driver one database serves every test of the file).
+const byId = (a, b) => {
+  if (a._id < b._id) return -1;
+  if (a._id > b._id) return 1;
+  return 0;
+};
 const dump = async (database, path) => {
   const out = [];
   for (const name of ['kv', 'records', 'pieces', 'copies', 'log', 'meta', 'catalog', 'locks']) {
     const filter = name === 'locks' ? { _id: path } : { p: path };
     const docs = await database.collection(name).find(filter).toArray();
-    docs.sort((a, b) => (a._id < b._id ? -1 : a._id > b._id ? 1 : 0));
+    docs.sort(byId);
     out.push([name, docs]);
   }
   return out;
@@ -162,10 +167,10 @@ const fenceHolds = async (client, name, path, transactions) => {
   const lost = [];
   const lease = await old.lock({ staleAfter: 60, onLost: (error) => lost.push(error) });
   assert.strictEqual(lease.gen, 1);
-  const set = (n) => ({
-    records: [{ id: 'r', stored: stored({ n }), pieces: { put: [['r~1.json', `{"n":${n}}`]] } }],
-    kv: { put: [['', 'node.json', `{"n":${n}}`, undefined]] },
-    copies: { put: [['v1', 'r', `{"n":${n}}`]] },
+  const set = (value) => ({
+    records: [{ id: 'r', stored: stored({ n: value }), pieces: { put: [['r~1.json', `{"n":${value}}`]] } }],
+    kv: { put: [['', 'node.json', `{"n":${value}}`, undefined]] },
+    copies: { put: [['v1', 'r', `{"n":${value}}`]] },
   });
   await old.write(set(1));
   await old.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 1 } }], null, { first: 1, last: 1, onFail() {} });
@@ -182,12 +187,12 @@ const fenceHolds = async (client, name, path, transactions) => {
   await next.log.append([{ seq: 1, op: { type: 'write', id: 'r', n: 2 } }], null, { first: 1, last: 1, onFail() {} });
   await next.log.saveIndex({ floor: 1, n: 2 });
   await next.log.seal([{ seq: 1 }], 1, 1);
-  const before = await dump(database, path);
-  for (const [collection, docs] of before) {
+  const snapshot = await dump(database, path);
+  for (const [collection, docs] of snapshot) {
     if (collection !== 'locks') for (const doc of docs) assert.strictEqual(doc.gen, 2, `${collection} ${doc._id}`);
   }
   // The old generation over the new one's documents: every statement refused, nothing moved.
-  const refused = { code: 'LEASE_LOST', path };
+  const refused = { code: 'ALX_ERR_LEASE_LOST', path };
   await assert.rejects(() => old.write(set('stale')), refused);
   await assert.rejects(() => old.kv.put('', 'node.json', '{"n":"stale"}'), refused);
   await assert.rejects(() => old.copies.put('v1', 'r', '{"n":"stale"}'), refused);
@@ -197,7 +202,7 @@ const fenceHolds = async (client, name, path, transactions) => {
     last: 1,
     onFail: (error) => failures.push(error),
   });
-  assert.deepStrictEqual([appended, failures.length, failures[0]?.code], [false, 1, 'LEASE_LOST']);
+  assert.deepStrictEqual([appended, failures.length, failures[0]?.code], [false, 1, 'ALX_ERR_LEASE_LOST']);
   await assert.rejects(() => old.log.saveIndex({ floor: 1, n: 'stale' }), refused);
   await assert.rejects(() => old.log.seal([{ seq: 1 }], 1, 1), refused);
   if (transactions) {
@@ -210,14 +215,14 @@ const fenceHolds = async (client, name, path, transactions) => {
     await old.write({ remove: ['r'], kv: { remove: [['', 'node.json']] } });
     await old.copies.drop('v1');
     await old.write({ records: [{ id: 'fresh', stored: stored({}) }] });
-    const fresh = JSON.stringify([path, 'fresh']);
-    assert.strictEqual((await database.collection('records').findOne({ _id: fresh })).gen, 1);
-    await database.collection('records').deleteOne({ _id: fresh });
+    const freshId = JSON.stringify([path, 'fresh']);
+    assert.strictEqual((await database.collection('records').findOne({ _id: freshId })).gen, 1);
+    await database.collection('records').deleteOne({ _id: freshId });
   }
   await lease.release();
   assert.deepStrictEqual(
     await dump(database, path),
-    before,
+    snapshot,
     'no document of the newer lease was written over, removed or sealed',
   );
   assert.strictEqual(
@@ -241,149 +246,141 @@ const lostLeaseWritesNothing = async (client, name, path) => {
   const x = await a.insert({ title: 'deferred' });
   assert.strictEqual(a.stats().deferred, 1);
   await takeOver(database, path);
-  await until(() => errors.length === 1, 'LEASE_LOST');
-  assert.strictEqual(errors[0].code, 'LEASE_LOST');
+  await until(() => errors.length === 1, 'ALX_ERR_LEASE_LOST');
+  assert.strictEqual(errors[0].code, 'ALX_ERR_LEASE_LOST');
   assert.strictEqual(a.readOnly, true);
   // The new holder — a database that never locks writes as the generation the lease document holds — replays the tail and writes on.
   const b = await createDatabase({ ...options, lock: false, defer: 0 });
   assert.strictEqual((await b.get(x)).title, 'deferred', 'the log held x: the new holder replayed it');
   await b.update(r, { title: 'second' });
   await b.close();
-  const before = await dump(database, path);
-  assert.strictEqual(docIn(before, 'records', JSON.stringify([path, r])).gen, 2);
-  assert.strictEqual(docIn(before, 'records', JSON.stringify([path, x])).gen, 2);
-  assert.strictEqual(docIn(before, 'meta', JSON.stringify([path, 'index'])).gen, 2);
-  // The old holder closes: no roll, no index, no catalog, the deferred window held as UNPERSISTED — nothing written.
+  const snapshot = await dump(database, path);
+  assert.strictEqual(docIn(snapshot, 'records', JSON.stringify([path, r])).gen, 2);
+  assert.strictEqual(docIn(snapshot, 'records', JSON.stringify([path, x])).gen, 2);
+  assert.strictEqual(docIn(snapshot, 'meta', JSON.stringify([path, 'index'])).gen, 2);
+  // The old holder closes: no roll, no index, no catalog, the deferred window held as ALX_ERR_UNPERSISTED — nothing
+  // written.
   await a.close();
   assert.strictEqual(errors.length, 2);
-  assert.strictEqual(errors[1].code, 'UNPERSISTED');
+  assert.strictEqual(errors[1].code, 'ALX_ERR_UNPERSISTED');
   assert.deepStrictEqual(errors[1].ids, [x]);
-  assert.deepStrictEqual(await dump(database, path), before, 'the old holder’s close wrote nothing');
+  assert.deepStrictEqual(await dump(database, path), snapshot, 'the old holder’s close wrote nothing');
 };
 
-test('MongoDB engine (the driver in memory)', async (t) => {
-  await t.test('the contract, in order', async (t2) => {
-    await runEngineTests(t2, { create: () => fresh(), root: vroot });
+describe('MongoDB engine (the driver in memory)', () => {
+  describe('the contract, in order', () => {
+    runEngineTests({ create: () => fresh(), root: vroot });
   });
-  await t.test('the contract, in transactions', async (t2) => {
-    await runEngineTests(t2, { create: () => fresh({ transactions: true }), root: vroot });
+  describe('the contract, in transactions', () => {
+    runEngineTests({ create: () => fresh({ transactions: true }), root: vroot });
   });
 
-  await t.test(
-    'a blob past one document is chunked and read back whole; has, list and remove see one blob',
-    async () => {
-      const client = createFakeMongo();
-      const engine = mongoEngine({ client, name: 'chunked' });
-      const db = await engine.open('/c', { logger: null });
-      const collection = engine.database.collection('blobs');
-      const CHUNK = 15 * 1024 * 1024;
-      // Two parts and a byte: three documents of bytes and a head — none past the driver's 16 MiB.
-      const big = new Uint8Array(2 * CHUNK + 1);
-      for (let i = 0; i < big.length; i += 4099) big[i] = (i / 4099) & 255;
-      big[big.length - 1] = 77;
-      const digest = 'c'.repeat(64);
-      await db.blobs.put(digest, big);
-      assert.strictEqual(await collection.countDocuments({ p: '/c', digest }), 4);
-      const head = await collection.findOne({ _id: JSON.stringify(['/c', digest, 0]) });
-      assert.deepStrictEqual(
-        { parts: head.parts, length: head.length, n: head.n },
-        { parts: 3, length: big.length, n: 0 },
-      );
-      const parts = await collection.find({ p: '/c', digest, n: { $gte: 1 } }).toArray();
-      assert.ok(parts.every((doc) => doc.b.length <= CHUNK));
-      const back = await db.blobs.get(digest);
-      assert.strictEqual(back.length, big.length);
-      assert.strictEqual(back[big.length - 1], 77);
-      assert.strictEqual(back[4099 * 5000], 5000 & 255, 'a byte of the second part, where it was');
-      assert.ok(Buffer.from(back).equals(Buffer.from(big)), 'read back whole, in order');
-      // Small blobs are a part and a head; has, list and remove see a blob, never its parts.
-      const small = 'd'.repeat(64);
-      await db.blobs.put(small, new Uint8Array([1, 2, 3]));
-      await db.blobs.put('e'.repeat(64), new Uint8Array(0));
-      assert.strictEqual(await collection.countDocuments({ p: '/c', digest: small }), 2);
-      assert.strictEqual(
-        await collection.countDocuments({ p: '/c', digest: 'e'.repeat(64) }),
-        1,
-        'an empty blob is its head',
-      );
-      assert.strictEqual(await db.blobs.has(digest), true);
-      assert.strictEqual(await db.blobs.has(small), true);
-      assert.deepStrictEqual(await db.blobs.list(), [digest, small, 'e'.repeat(64)]);
-      assert.deepStrictEqual([...(await db.blobs.get('e'.repeat(64)))], []);
-      await db.blobs.remove(digest);
-      assert.strictEqual(await collection.countDocuments({ p: '/c', digest }), 0, 'every part gone');
-      assert.strictEqual(await db.blobs.has(digest), false);
-      assert.strictEqual(await db.blobs.get(digest), null);
-      assert.deepStrictEqual(await db.blobs.list(), [small, 'e'.repeat(64)]);
-      // A head without its parts (a put cut short the other way round never happens: the head goes last) reads as none.
-      await collection.deleteMany({ p: '/c', digest: small, n: 1 });
-      assert.strictEqual(await db.blobs.get(small), null);
-      // The room is the server's to know: nothing said.
-      assert.strictEqual(db.estimate, undefined);
-      await db.close();
-    },
-  );
+  it('should chunk a blob past one document and read it back whole, has, list and remove seeing one blob', async () => {
+    const client = createFakeMongo();
+    const engine = mongoEngine({ client, name: 'chunked' });
+    const db = await engine.open('/c', { logger: null });
+    const collection = engine.database.collection('blobs');
+    const CHUNK = 15 * 1024 * 1024;
+    // Two parts and a byte: three documents of bytes and a head — none past the driver's 16 MiB.
+    const big = new Uint8Array(2 * CHUNK + 1);
+    for (let i = 0; i < big.length; i += 4099) big[i] = (i / 4099) & 255;
+    big[big.length - 1] = 77;
+    const digest = 'c'.repeat(64);
+    await db.blobs.put(digest, big);
+    assert.strictEqual(await collection.countDocuments({ p: '/c', digest }), 4);
+    const head = await collection.findOne({ _id: JSON.stringify(['/c', digest, 0]) });
+    assert.deepStrictEqual(
+      { parts: head.parts, length: head.length, n: head.n },
+      { parts: 3, length: big.length, n: 0 },
+    );
+    const parts = await collection.find({ p: '/c', digest, n: { $gte: 1 } }).toArray();
+    assert.ok(parts.every((doc) => doc.b.length <= CHUNK));
+    const back = await db.blobs.get(digest);
+    assert.strictEqual(back.length, big.length);
+    assert.strictEqual(back[big.length - 1], 77);
+    assert.strictEqual(back[4099 * 5000], 5000 & 255, 'a byte of the second part, where it was');
+    assert.ok(Buffer.from(back).equals(Buffer.from(big)), 'read back whole, in order');
+    // Small blobs are a part and a head; has, list and remove see a blob, never its parts.
+    const small = 'd'.repeat(64);
+    await db.blobs.put(small, new Uint8Array([1, 2, 3]));
+    await db.blobs.put('e'.repeat(64), new Uint8Array(0));
+    assert.strictEqual(await collection.countDocuments({ p: '/c', digest: small }), 2);
+    assert.strictEqual(
+      await collection.countDocuments({ p: '/c', digest: 'e'.repeat(64) }),
+      1,
+      'an empty blob is its head',
+    );
+    assert.strictEqual(await db.blobs.has(digest), true);
+    assert.strictEqual(await db.blobs.has(small), true);
+    assert.deepStrictEqual(await db.blobs.list(), [digest, small, 'e'.repeat(64)]);
+    assert.deepStrictEqual([...(await db.blobs.get('e'.repeat(64)))], []);
+    await db.blobs.remove(digest);
+    assert.strictEqual(await collection.countDocuments({ p: '/c', digest }), 0, 'every part gone');
+    assert.strictEqual(await db.blobs.has(digest), false);
+    assert.strictEqual(await db.blobs.get(digest), null);
+    assert.deepStrictEqual(await db.blobs.list(), [small, 'e'.repeat(64)]);
+    // A head without its parts (a put cut short the other way round never happens: the head goes last) reads as none.
+    await collection.deleteMany({ p: '/c', digest: small, n: 1 });
+    assert.strictEqual(await db.blobs.get(small), null);
+    // The room is the server's to know: nothing said.
+    assert.strictEqual(db.estimate, undefined);
+    await db.close();
+  });
 
-  await t.test(
-    'capabilities and names: atomic with transactions, exclusive create, a change stream unless told not',
-    () => {
-      const engine = fresh();
-      assert.strictEqual(engine.name, 'mongodb');
-      assert.strictEqual(engine.capabilities.atomicBatch, false);
-      assert.strictEqual(engine.capabilities.exclusiveCreate, true);
-      assert.strictEqual(engine.capabilities.changeStream, true);
-      assert.strictEqual(fresh({ transactions: true }).capabilities.atomicBatch, true);
-      assert.strictEqual(fresh({ changes: false }).capabilities.changeStream, false);
-      const client = createFakeMongo();
-      assert.strictEqual(mongoEngine({ client, name: 'named' }).database, client.db('named'));
-      assert.strictEqual(mongoEngine({ db: client.db('given') }).database, client.db('given'));
-      assert.throws(() => mongoEngine(), { name: 'TypeError', message: /client|database/ });
-      assert.throws(() => mongoEngine({ client: {} }), { name: 'TypeError', message: /client/ });
-      assert.throws(() => mongoEngine({ db: client.db('x'), transactions: true }), {
-        name: 'TypeError',
-        message: /sessions/,
-      });
-      assert.throws(() => mongoEngine({ db: {} }), { name: 'TypeError', message: /no collection/ });
-    },
-  );
+  it('should report its capabilities and names: atomic with transactions, exclusive create, a change stream unless told not', () => {
+    const engine = fresh();
+    assert.strictEqual(engine.name, 'mongodb');
+    assert.strictEqual(engine.capabilities.atomicBatch, false);
+    assert.strictEqual(engine.capabilities.exclusiveCreate, true);
+    assert.strictEqual(engine.capabilities.changeStream, true);
+    assert.strictEqual(fresh({ transactions: true }).capabilities.atomicBatch, true);
+    assert.strictEqual(fresh({ changes: false }).capabilities.changeStream, false);
+    const client = createFakeMongo();
+    assert.strictEqual(mongoEngine({ client, name: 'named' }).database, client.db('named'));
+    assert.strictEqual(mongoEngine({ db: client.db('given') }).database, client.db('given'));
+    assert.throws(() => mongoEngine(), { name: 'ArgumentError', message: /client|database/ });
+    assert.throws(() => mongoEngine({ client: {} }), { name: 'ArgumentError', message: /client/ });
+    assert.throws(() => mongoEngine({ db: client.db('x'), transactions: true }), {
+      name: 'ArgumentError',
+      message: /sessions/,
+    });
+    assert.throws(() => mongoEngine({ db: {} }), { name: 'ArgumentError', message: /no collection/ });
+  });
 
-  await t.test(
-    'a write set is a bulk write per collection, in the files engine’s order; a database’s write costs two (the log group, the landing)',
-    async () => {
-      const engine = fresh();
-      const db = await engine.open('/p');
-      const count = await bulkWrites(() =>
-        db.write({
-          records: [
-            { id: 'a', stored: stored({ n: 1 }), pieces: { put: [['a~1.json', '{}']] } },
-            { id: 'b', stored: stored({ n: 2 }) },
-          ],
-          kv: { put: [['blockchain', 'h.json', '{}', undefined]] },
-          copies: { put: [['v1', 'a', '{}']] },
-        }),
-      );
-      assert.strictEqual(count, 4, 'kv, pieces, records, copies');
-      assert.strictEqual(await bulkWrites(() => db.write({})), 0, 'an empty write set is nothing');
-      const plain = await createDatabase({ path: '/app', engine, logger: false, defer: 0, lock: false, chain: false });
-      await plain.insert({ title: 'warm' });
-      assert.strictEqual(await bulkWrites(() => plain.insert({ title: 'x' })), 2, 'the log group and the landing');
-      const perTransaction = await bulkWrites(() =>
-        plain.transact(async (tx) => {
-          for (let i = 0; i < 50; i++) await tx.insert({ n: i });
-        }),
-      );
-      assert.strictEqual(perTransaction, 2, 'fifty records: the same two');
-      await plain.close();
-      const chained = await createDatabase({ path: '/chained', engine, logger: false, defer: 0, lock: false });
-      await chained.insert({ title: 'warm' });
-      const withChain = await bulkWrites(() => chained.insert({ title: 'x' }));
-      assert.strictEqual(withChain, 3, 'the chain block and its tail are the kv collection’s bulk write');
-      assert.strictEqual(await chained.validate(), true);
-      await chained.close();
-    },
-  );
+  it('should make a write set a bulk write per collection, in the files engine’s order, and a database’s write cost two (the log group, the landing)', async () => {
+    const engine = fresh();
+    const db = await engine.open('/p');
+    const count = await bulkWrites(() =>
+      db.write({
+        records: [
+          { id: 'a', stored: stored({ n: 1 }), pieces: { put: [['a~1.json', '{}']] } },
+          { id: 'b', stored: stored({ n: 2 }) },
+        ],
+        kv: { put: [['blockchain', 'h.json', '{}', undefined]] },
+        copies: { put: [['v1', 'a', '{}']] },
+      }),
+    );
+    assert.strictEqual(count, 4, 'kv, pieces, records, copies');
+    assert.strictEqual(await bulkWrites(() => db.write({})), 0, 'an empty write set is nothing');
+    const plain = await createDatabase({ path: '/app', engine, logger: false, defer: 0, lock: false, chain: false });
+    await plain.insert({ title: 'warm' });
+    assert.strictEqual(await bulkWrites(() => plain.insert({ title: 'x' })), 2, 'the log group and the landing');
+    const perTransaction = await bulkWrites(() =>
+      plain.transact(async (tx) => {
+        for (let i = 0; i < 50; i++) await tx.insert({ n: i });
+      }),
+    );
+    assert.strictEqual(perTransaction, 2, 'fifty records: the same two');
+    await plain.close();
+    const chained = await createDatabase({ path: '/chained', engine, logger: false, defer: 0, lock: false });
+    await chained.insert({ title: 'warm' });
+    const withChain = await bulkWrites(() => chained.insert({ title: 'x' }));
+    assert.strictEqual(withChain, 3, 'the chain block and its tail are the kv collection’s bulk write');
+    assert.strictEqual(await chained.validate(), true);
+    await chained.close();
+  });
 
-  await t.test('a set that fails midway lands in order without transactions and not at all with them', async () => {
+  it('should land a set that fails midway in order without transactions and not at all with them', async () => {
     const set = {
       kv: { put: [['', 'new.json', '2', undefined]], remove: [['', 'kept.json']] },
       records: [{ id: 'r', stored: stored({ n: 1 }), pieces: { put: [['r~1.json', '{}']] } }],
@@ -417,281 +414,255 @@ test('MongoDB engine (the driver in memory)', async (t) => {
     assert.deepStrictEqual((await atomic.records.get('r')).data, { n: 1 }, 'the next set lands');
   });
 
-  await t.test(
-    'a log group whose write failed after it landed is wiped, never replayed: the seqs it left are the next group’s',
-    async () => {
-      await failedGroupIsNoGroup(createFakeMongo().db('r16'), '/app');
-    },
-  );
+  it('should wipe a log group whose write failed after it landed, never replay it, and give the seqs it left to the next group', async () => {
+    await failedGroupIsNoGroup(createFakeMongo().db('r16'), '/app');
+  });
 
-  await t.test(
-    'a lease taken by another instance fences the old holder: every statement over a newer document is LEASE_LOST, in order and in transactions',
-    async () => {
-      await fenceHolds(createFakeMongo(), 'fence', '/app', false);
-      await fenceHolds(createFakeMongo(), 'fence', '/app', true);
-    },
-  );
+  it('should fence the old holder when another instance takes the lease: every statement over a newer document is LEASE_LOST, in order and in transactions', async () => {
+    await fenceHolds(createFakeMongo(), 'fence', '/app', false);
+    await fenceHolds(createFakeMongo(), 'fence', '/app', true);
+  });
 
-  await t.test(
-    'a writer whose lease was lost writes nothing more, not at its close: the deferred window is UNPERSISTED',
-    async () => {
-      await lostLeaseWritesNothing(createFakeMongo(), 'lost', '/app');
-    },
-  );
+  it('should let a writer whose lease was lost write nothing more, not at its close, the deferred window UNPERSISTED', async () => {
+    await lostLeaseWritesNothing(createFakeMongo(), 'lost', '/app');
+  });
 
-  await t.test(
-    'another instance over the same database hears a record document, never its own; a removal once; the stream’s end as an error',
-    async () => {
-      const client = createFakeMongo();
-      const a = mongoEngine({ client, name: 'shared' });
-      const b = mongoEngine({ client, name: 'shared' });
-      const other = mongoEngine({ client, name: 'other' });
-      const heard = [];
-      const own = [];
-      const dbA = await a.open('/p');
-      const dbB = await b.open('/p');
-      const dbOther = await other.open('/p');
-      const elsewhere = await a.open('/q');
-      const stop = dbB.changes.subscribe((message) => heard.push(message));
-      const stopOwn = dbA.changes.subscribe((message) => own.push(message));
-      await dbA.write({ records: [{ id: 'r', stored: stored({}) }] });
-      await dbA.log.append([{ seq: 1, op: { type: 'write', id: 'r' } }], null, { first: 1, last: 1, onFail() {} });
-      await dbOther.write({ records: [{ id: 'elsewhere', stored: stored({}) }] });
-      await elsewhere.write({ records: [{ id: 'q', stored: stored({}) }] });
-      await dbA.write({ remove: ['r'] });
-      await settle();
-      assert.deepStrictEqual(heard, [
-        { p: '/p', records: ['r'] },
-        { p: '/p', records: ['r'] },
-      ]);
-      assert.deepStrictEqual(own, [], 'an instance never hears itself, its removals included');
-      stop();
-      stopOwn();
-      await dbB.write({ records: [{ id: 's', stored: stored({}) }] });
-      await settle();
-      assert.strictEqual(heard.length, 2, 'unsubscribed');
-      // The stream watches `records` of this path alone, without the record's text; an update is looked up.
-      const records = client.db('shared').collection('records');
-      const raw = [];
-      const stream = records.watch([{ $match: { 'fullDocument.p': '/p' } }, { $project: { 'fullDocument.t': 0 } }], {
-        fullDocument: 'updateLookup',
-      });
-      stream.on('change', (event) => raw.push(event));
-      await dbA.write({ records: [{ id: 'u', stored: stored({ n: 1 }) }] });
-      await dbA.write({ records: [{ id: 'u', stored: stored({ n: 2 }) }] });
-      await settle();
-      assert.deepStrictEqual(
-        raw.map((event) => [event.operationType, event.fullDocument.id, 't' in event.fullDocument]),
-        [
-          ['insert', 'u', false],
-          ['update', 'u', false],
-        ],
-      );
-      await stream.close();
-      // The stream's end — an error — reaches the subscriber once as `{ error }`, and the subscription is over.
-      const ended = [];
-      dbB.changes.subscribe((message) => ended.push(message));
-      records.breakStreams(new Error('the resume token is gone'));
-      await settle();
-      await dbA.write({ records: [{ id: 'after', stored: stored({}) }] });
-      await settle();
-      assert.strictEqual(ended.length, 1);
-      assert.strictEqual(ended[0].p, '/p');
-      assert.match(ended[0].error.message, /resume token/);
-    },
-  );
+  it('should let another instance over the same database hear a record document, never its own, a removal once and the stream’s end as an error', async () => {
+    const client = createFakeMongo();
+    const a = mongoEngine({ client, name: 'shared' });
+    const b = mongoEngine({ client, name: 'shared' });
+    const other = mongoEngine({ client, name: 'other' });
+    const heard = [];
+    const own = [];
+    const dbA = await a.open('/p');
+    const dbB = await b.open('/p');
+    const dbOther = await other.open('/p');
+    const elsewhere = await a.open('/q');
+    const stop = dbB.changes.subscribe((message) => heard.push(message));
+    const stopOwn = dbA.changes.subscribe((message) => own.push(message));
+    await dbA.write({ records: [{ id: 'r', stored: stored({}) }] });
+    await dbA.log.append([{ seq: 1, op: { type: 'write', id: 'r' } }], null, { first: 1, last: 1, onFail() {} });
+    await dbOther.write({ records: [{ id: 'elsewhere', stored: stored({}) }] });
+    await elsewhere.write({ records: [{ id: 'q', stored: stored({}) }] });
+    await dbA.write({ remove: ['r'] });
+    await settle();
+    assert.deepStrictEqual(heard, [
+      { p: '/p', records: ['r'] },
+      { p: '/p', records: ['r'] },
+    ]);
+    assert.deepStrictEqual(own, [], 'an instance never hears itself, its removals included');
+    stop();
+    stopOwn();
+    await dbB.write({ records: [{ id: 's', stored: stored({}) }] });
+    await settle();
+    assert.strictEqual(heard.length, 2, 'unsubscribed');
+    // The stream watches `records` of this path alone, without the record's text; an update is looked up.
+    const records = client.db('shared').collection('records');
+    const raw = [];
+    const stream = records.watch([{ $match: { 'fullDocument.p': '/p' } }, { $project: { 'fullDocument.t': 0 } }], {
+      fullDocument: 'updateLookup',
+    });
+    stream.on('change', (event) => raw.push(event));
+    await dbA.write({ records: [{ id: 'u', stored: stored({ n: 1 }) }] });
+    await dbA.write({ records: [{ id: 'u', stored: stored({ n: 2 }) }] });
+    await settle();
+    assert.deepStrictEqual(
+      raw.map((event) => [event.operationType, event.fullDocument.id, 't' in event.fullDocument]),
+      [
+        ['insert', 'u', false],
+        ['update', 'u', false],
+      ],
+    );
+    await stream.close();
+    // The stream's end — an error — reaches the subscriber once as `{ error }`, and the subscription is over.
+    const ended = [];
+    dbB.changes.subscribe((message) => ended.push(message));
+    records.breakStreams(new Error('the resume token is gone'));
+    await settle();
+    await dbA.write({ records: [{ id: 'after', stored: stored({}) }] });
+    await settle();
+    assert.strictEqual(ended.length, 1);
+    assert.strictEqual(ended[0].p, '/p');
+    assert.match(ended[0].error.message, /resume token/);
+  });
 
-  await t.test(
-    'a database over the engine: writes, pieces, tags, the chain; a reopen through another engine over the client; remove(path); destroy()',
-    async () => {
-      const client = createFakeMongo();
-      const first = mongoEngine({ client, name: 'app', transactions: true });
-      const options = { path: 'store', logger: false, defer: 0, lock: false };
-      const db = await createDatabase({ ...options, engine: first });
-      const id = await db.insert({ title: 'Draft' });
-      await db.push(id, 'body', 'y'.repeat(3000));
-      await db.tag('v1');
-      await db.update(id, { title: 'Final' });
-      await db.close();
-      await first.close();
-      const second = mongoEngine({ client, name: 'app' });
-      const again = await createDatabase({ ...options, engine: second });
-      assert.strictEqual(again.nodeId, db.nodeId);
-      assert.strictEqual((await again.get(id)).title, 'Final');
-      assert.strictEqual((await again.get(id)).body.length, 3000);
-      assert.deepStrictEqual((await again.at('v1').get(id)).title, 'Draft');
-      assert.strictEqual(await again.validate(), true, 'the chain reads back');
-      await again.close();
-      await second.remove('store');
-      const empty = await createDatabase({ ...options, engine: second });
-      assert.deepStrictEqual(await empty.list(), []);
-      await empty.close();
-      await second.destroy();
-      assert.deepStrictEqual(await client.db('app').listCollections(), []);
-    },
-  );
+  it('should keep a database over the engine through writes, pieces, tags, the chain and a reopen through another engine over the client, and take it with remove(path) and destroy()', async () => {
+    const client = createFakeMongo();
+    const first = mongoEngine({ client, name: 'app', transactions: true });
+    const options = { path: 'store', logger: false, defer: 0, lock: false };
+    const db = await createDatabase({ ...options, engine: first });
+    const id = await db.insert({ title: 'Draft' });
+    await db.push(id, 'body', 'y'.repeat(3000));
+    await db.tag('v1');
+    await db.update(id, { title: 'Final' });
+    await db.close();
+    await first.close();
+    const second = mongoEngine({ client, name: 'app' });
+    const again = await createDatabase({ ...options, engine: second });
+    assert.strictEqual(again.nodeId, db.nodeId);
+    assert.strictEqual((await again.get(id)).title, 'Final');
+    assert.strictEqual((await again.get(id)).body.length, 3000);
+    assert.deepStrictEqual((await again.at('v1').get(id)).title, 'Draft');
+    assert.strictEqual(await again.validate(), true, 'the chain reads back');
+    await again.close();
+    await second.remove('store');
+    const empty = await createDatabase({ ...options, engine: second });
+    assert.deepStrictEqual(await empty.list(), []);
+    await empty.close();
+    await second.destroy();
+    assert.deepStrictEqual(await client.db('app').listCollections(), []);
+  });
 
-  await t.test(
-    'the log over documents: a reopen replays the unsealed groups, a roll seals a range, compaction drops documents',
-    async () => {
-      const client = createFakeMongo();
-      const engine = mongoEngine({ client, name: 'log' });
-      const options = {
-        path: '/log',
-        engine,
-        logger: false,
-        defer: 0,
-        lock: false,
-        sync: { log: { rollAfter: 2 }, retention: { ops: 6 } },
-      };
-      const db = await createDatabase(options);
-      const ids = [];
-      for (let i = 0; i < 12; i++) ids.push(await db.insert({ n: i }));
-      await db.flush();
-      assert.ok(db.stats().log.floor > 1, 'compacted');
-      await db.purge(ids[11]);
-      const { floor, next, length } = db.stats().log;
-      await db.close();
-      const again = await createDatabase(options);
-      const reopened = again.stats().log;
-      assert.deepStrictEqual([reopened.floor, reopened.next, reopened.length], [floor, next, length]);
-      assert.deepStrictEqual(await again.get(ids[10]), { n: 10 });
-      assert.strictEqual(await again.get(ids[11]), null);
-      const kept = await client.db('log').collection('log').countDocuments({ p: '/log' });
-      assert.strictEqual(kept, length, 'a document per retained entry');
-      await again.close();
-    },
-  );
+  it('should keep the log over documents: a reopen replays the unsealed groups, a roll seals a range, compaction drops documents', async () => {
+    const client = createFakeMongo();
+    const engine = mongoEngine({ client, name: 'log' });
+    const options = {
+      path: '/log',
+      engine,
+      logger: false,
+      defer: 0,
+      lock: false,
+      sync: { log: { rollAfter: 2 }, retention: { ops: 6 } },
+    };
+    const db = await createDatabase(options);
+    const ids = [];
+    for (let i = 0; i < 12; i++) ids.push(await db.insert({ n: i }));
+    await db.flush();
+    assert.ok(db.stats().log.floor > 1, 'compacted');
+    await db.purge(ids[11]);
+    const { floor, next, length } = db.stats().log;
+    await db.close();
+    const again = await createDatabase(options);
+    const reopened = again.stats().log;
+    assert.deepStrictEqual([reopened.floor, reopened.next, reopened.length], [floor, next, length]);
+    assert.deepStrictEqual(await again.get(ids[10]), { n: 10 });
+    assert.strictEqual(await again.get(ids[11]), null);
+    const kept = await client.db('log').collection('log').countDocuments({ p: '/log' });
+    assert.strictEqual(kept, length, 'a document per retained entry');
+    await again.close();
+  });
 });
 
 const url = process.env.MONGODB_URL;
-test('MongoDB engine (the driver in memory): the catalog and what does not read', async (t) => {
-  await t.test(
-    'the catalog is a document a record: a save writes what changed, a reopen reads them, other indexes replace them',
-    async () => {
-      const client = createFakeMongo();
-      const engine = mongoEngine({ client, changes: false });
-      const schema = { entities: { Note: { index: ['kind'] } } };
-      const options = { path: 'cat', engine, logger: false, defer: 0, lock: false, chain: false, schema };
-      const rows = async () => client.db('syncom').collection('catalog').find({ p: 'cat' }).toArray();
-      const db = await createDatabase(options);
-      const ids = [];
-      for (let i = 0; i < 5; i++) ids.push(await db.insert({ $type: 'Note', kind: i % 2 ? 'a' : 'b' }));
-      await db.close();
-      assert.strictEqual((await rows()).length, 5, 'a document a record');
-      const again = await createDatabase(options);
-      assert.strictEqual(
-        (await again.Note.select({ kind: 'a' }).fetch()).length,
-        2,
-        'read from the documents, not rebuilt',
-      );
-      await again.update(ids[1], { kind: 'b' });
-      await again.delete(ids[0]);
-      await again.close();
-      const after = await rows();
-      assert.strictEqual(
-        JSON.parse(after.find((doc) => doc.id === ids[1]).row).fields.kind,
-        'b',
-        'the row that changed was written',
-      );
-      assert.strictEqual(
-        JSON.parse(after.find((doc) => doc.id === ids[0]).row).gone,
-        true,
-        'a tombstone is a row flagged gone',
-      );
-      const other = { ...options, schema: { entities: { Note: { index: ['kind', 'title'] } } } };
-      const rebuilt = await createDatabase(other);
-      await rebuilt.insert({ $type: 'Note', kind: 'c', title: 't' });
-      await rebuilt.close();
-      assert.strictEqual((await rows()).length, 6, 'other indexes: every document replaced, none left over');
-    },
-  );
+describe('MongoDB engine (the driver in memory): the catalog and what does not read', () => {
+  it('should keep the catalog as a document a record: a save writes what changed, a reopen reads them, other indexes replace them', async () => {
+    const client = createFakeMongo();
+    const engine = mongoEngine({ client, changes: false });
+    const schema = { entities: { Note: { index: ['kind'] } } };
+    const options = { path: 'cat', engine, logger: false, defer: 0, lock: false, chain: false, schema };
+    const rows = async () => client.db('syncom').collection('catalog').find({ p: 'cat' }).toArray();
+    const db = await createDatabase(options);
+    const ids = [];
+    for (let i = 0; i < 5; i++) ids.push(await db.insert({ $type: 'Note', kind: i % 2 ? 'a' : 'b' }));
+    await db.close();
+    assert.strictEqual((await rows()).length, 5, 'a document a record');
+    const again = await createDatabase(options);
+    assert.strictEqual(
+      (await again.Note.select({ kind: 'a' }).fetch()).length,
+      2,
+      'read from the documents, not rebuilt',
+    );
+    await again.update(ids[1], { kind: 'b' });
+    await again.delete(ids[0]);
+    await again.close();
+    const saved = await rows();
+    assert.strictEqual(
+      JSON.parse(saved.find((doc) => doc.id === ids[1]).row).fields.kind,
+      'b',
+      'the row that changed was written',
+    );
+    assert.strictEqual(
+      JSON.parse(saved.find((doc) => doc.id === ids[0]).row).gone,
+      true,
+      'a tombstone is a row flagged gone',
+    );
+    const other = { ...options, schema: { entities: { Note: { index: ['kind', 'title'] } } } };
+    const rebuilt = await createDatabase(other);
+    await rebuilt.insert({ $type: 'Note', kind: 'c', title: 't' });
+    await rebuilt.close();
+    assert.strictEqual((await rows()).length, 6, 'other indexes: every document replaced, none left over');
+  });
 
-  await t.test(
-    'a log document that does not parse is counted corrupt and left out; a meta document that does not is none',
-    async () => {
-      const client = createFakeMongo();
-      const engine = mongoEngine({ client, changes: false });
-      const options = { path: 'rows', engine, logger: false, defer: 0, lock: false, chain: false };
-      const db = await createDatabase(options);
-      const ids = [];
-      for (let i = 0; i < 3; i++) ids.push(await db.insert({ n: i }));
-      await db.close();
-      const log = client.db('syncom').collection('log');
-      await log.updateOne({ p: 'rows', seq: 2 }, { $set: { e: 'garbage' } });
-      await client
-        .db('syncom')
-        .collection('meta')
-        .updateOne({ p: 'rows', key: 'index' }, { $set: { v: '{not json' } });
-      const warned = [];
-      const logger = { warn: (event) => warned.push(event.event), info() {}, error() {}, debug() {} };
-      const again = await createDatabase({ ...options, logger });
-      const { corrupt, lost } = again.stats().log;
-      assert.deepStrictEqual([corrupt, lost], [1, true]);
-      assert.ok(warned.includes('log.row.unreadable') && warned.includes('log.meta.unreadable'), warned.join(','));
-      for (const id of ids) assert.ok(await again.get(id), 'the records are on their documents still');
-      await again.close();
-    },
-  );
+  it('should count a log document that does not parse corrupt and leave it out, and read a meta document that does not as none', async () => {
+    const client = createFakeMongo();
+    const engine = mongoEngine({ client, changes: false });
+    const options = { path: 'rows', engine, logger: false, defer: 0, lock: false, chain: false };
+    const db = await createDatabase(options);
+    const ids = [];
+    for (let i = 0; i < 3; i++) ids.push(await db.insert({ n: i }));
+    await db.close();
+    const log = client.db('syncom').collection('log');
+    await log.updateOne({ p: 'rows', seq: 2 }, { $set: { e: 'garbage' } });
+    await client
+      .db('syncom')
+      .collection('meta')
+      .updateOne({ p: 'rows', key: 'index' }, { $set: { v: '{not json' } });
+    const warned = [];
+    const logger = { warn: (event) => warned.push(event.event), info() {}, error() {}, debug() {} };
+    const again = await createDatabase({ ...options, logger });
+    const { corrupt, lost } = again.stats().log;
+    assert.deepStrictEqual([corrupt, lost], [1, true]);
+    assert.ok(warned.includes('log.row.unreadable') && warned.includes('log.meta.unreadable'), warned.join(','));
+    for (const id of ids) assert.ok(await again.get(id), 'the records are on their documents still');
+    await again.close();
+  });
 });
 
-test('MongoDB engine (the driver)', { skip: url ? false : 'MONGODB_URL unset' }, async (t) => {
-  const { MongoClient } = require('mongodb');
-  const client = await new MongoClient(url).connect();
+describe('MongoDB engine (the driver)', { skip: url ? false : 'MONGODB_URL unset' }, () => {
+  let client = null;
   const name = `syncom-test-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-  t.after(async () => {
+  before(async () => {
+    const { MongoClient } = require('mongodb');
+    client = await new MongoClient(url).connect();
+  });
+  after(async () => {
+    if (client === null) return;
     await client.db(name).dropDatabase();
     await client.close();
   });
-  await runEngineTests(t, { create: () => mongoEngine({ client, name, transactions: true }), root: vroot });
+  runEngineTests({ create: () => mongoEngine({ client, name, transactions: true }), root: vroot });
 
-  await t.test(
-    'a log group whose write failed after it landed is wiped, never replayed: the seqs it left are the next group’s (the driver)',
-    async () => {
-      await failedGroupIsNoGroup(client.db(name), '/r16');
-    },
-  );
+  it('should wipe a log group whose write failed after it landed, never replay it, and give the seqs it left to the next group (the driver)', async () => {
+    await failedGroupIsNoGroup(client.db(name), '/r16');
+  });
 
-  await t.test('a lease taken by another instance fences the old holder (the driver)', async () => {
+  it('should fence the old holder when another instance takes the lease (the driver)', async () => {
     await fenceHolds(client, name, '/fence-ordered', false);
     await fenceHolds(client, name, '/fence-transactions', true);
   });
 
-  await t.test('a writer whose lease was lost writes nothing more, not at its close (the driver)', async () => {
+  it('should let a writer whose lease was lost write nothing more, not at its close (the driver)', async () => {
     await lostLeaseWritesNothing(client, name, '/lost');
   });
 
-  await t.test(
-    'a database over the driver: writes, pieces, tags, the chain, a reopen; a follower hears it',
-    async () => {
-      const engine = mongoEngine({ client, name, transactions: true });
-      const follower = mongoEngine({ client, name });
-      const heard = [];
-      const stop = (await follower.open('real')).changes.subscribe((message) => heard.push(message));
-      const options = { path: 'real', engine, logger: false, defer: 0, lock: false };
-      const db = await createDatabase(options);
-      const id = await db.insert({ title: 'Draft' });
-      await db.push(id, 'body', 'y'.repeat(3000));
-      await db.tag('v1');
-      await db.update(id, { title: 'Final' });
-      await db.close();
-      const again = await createDatabase(options);
-      assert.strictEqual(again.nodeId, db.nodeId);
-      assert.strictEqual((await again.get(id)).title, 'Final');
-      assert.strictEqual((await again.get(id)).body.length, 3000);
-      assert.deepStrictEqual((await again.at('v1').get(id)).title, 'Draft');
-      assert.strictEqual(await again.validate(), true);
-      await again.close();
-      await new Promise((resolve) => setTimeout(resolve, 500));
-      stop();
-      assert.ok(
-        heard.some((message) => message.records?.[0] === id),
-        'the follower heard the record',
-      );
-      assert.ok(
-        heard.every((message) => message.log === undefined && message.error === undefined),
-        'the records alone, and no error',
-      );
-    },
-  );
+  it('should keep a database over the driver through writes, pieces, tags, the chain and a reopen, a follower hearing it', async () => {
+    const engine = mongoEngine({ client, name, transactions: true });
+    const follower = mongoEngine({ client, name });
+    const heard = [];
+    const stop = (await follower.open('real')).changes.subscribe((message) => heard.push(message));
+    const options = { path: 'real', engine, logger: false, defer: 0, lock: false };
+    const db = await createDatabase(options);
+    const id = await db.insert({ title: 'Draft' });
+    await db.push(id, 'body', 'y'.repeat(3000));
+    await db.tag('v1');
+    await db.update(id, { title: 'Final' });
+    await db.close();
+    const again = await createDatabase(options);
+    assert.strictEqual(again.nodeId, db.nodeId);
+    assert.strictEqual((await again.get(id)).title, 'Final');
+    assert.strictEqual((await again.get(id)).body.length, 3000);
+    assert.deepStrictEqual((await again.at('v1').get(id)).title, 'Draft');
+    assert.strictEqual(await again.validate(), true);
+    await again.close();
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    stop();
+    assert.ok(
+      heard.some((message) => message.records?.[0] === id),
+      'the follower heard the record',
+    );
+    assert.ok(
+      heard.every((message) => message.log === undefined && message.error === undefined),
+      'the records alone, and no error',
+    );
+  });
 });

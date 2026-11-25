@@ -31,14 +31,19 @@ const createFakeBackend = () => {
     },
     /** A row with this id is refused by name — answered `{ id, error }`, nothing written — until `refuse(id, null)`. */
     refuse(id, error) {
-      if (error === null) refusing.delete(id);
-      else refusing.set(id, error);
+      if (error === null) {
+        refusing.delete(id);
+      } else {
+        refusing.set(id, error);
+      }
     },
     /** A write made on the backend itself (another client's): told to the streams. */
     write(id, data, { deleted = false } = {}) {
       const doc = backend.set(id, data, { deleted });
       const seq = changes.length;
-      for (const emit of listeners) emit({ documents: [clone({ id, data: doc.data, deleted })], checkpoint: seq });
+      for (const emit of listeners) {
+        emit({ documents: [clone({ id, data: doc.data, deleted })], checkpoint: seq });
+      }
       return doc;
     },
     /** A write made on the backend that no stream tells of (another client's, behind the connector's back). */
@@ -69,7 +74,9 @@ const createFakeBackend = () => {
               // One row per document, as a change feed answers: its newest state, where a later change is this
               // page's or a later one's the document comes there.
               const current = docs.get(page[i].id) ?? page[i];
-              if (current !== page[i] && changes.indexOf(current) > from + i) continue;
+              if (current !== page[i] && changes.indexOf(current) > from + i) {
+                continue;
+              }
               documents.push(clone({ id: current.id, data: current.data, deleted: current.deleted }));
             }
             return { documents, checkpoint: from + page.length };

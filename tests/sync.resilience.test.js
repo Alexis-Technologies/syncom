@@ -4,8 +4,8 @@
 // resumes from the last saved cursor, the page comes again, and after three
 // failures in a row the peer is stuck — never a page silently stepped over.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { createMesh, settle, waitUntil } = require('./utils/mesh.js');
@@ -18,8 +18,8 @@ const createStorage = async (t, name, options = {}) => {
   return storage;
 };
 
-test('A page that fails is a break in the stream', async (t) => {
-  await t.test('the page is retried from the saved cursor; nothing behind it moves the cursor', async (t2) => {
+describe('a page that fails: a break in the stream', () => {
+  it('should retry the page from the saved cursor, nothing behind it moving the cursor', async (t2) => {
     let poison = null;
     let failures = 0;
     const mesh = await createMesh(t2, ['H', 'D'], [['D', 'H']], createStorage, {
@@ -52,7 +52,7 @@ test('A page that fails is a break in the stream', async (t) => {
     assert.deepStrictEqual(await d.get(before), { n: 0 });
     assert.strictEqual(failures, 1);
     assert.strictEqual(errors.length, 1);
-    assert.strictEqual(errors[0].code, 'PAGE_FAILED');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_PAGE_FAILED');
     assert.strictEqual(errors[0].cursor, saved, 'the cursor of the last page that landed');
     assert.strictEqual(errors[0].attempt, 1);
     assert.strictEqual(errors[0].url, 'mem://H');
@@ -63,7 +63,7 @@ test('A page that fails is a break in the stream', async (t) => {
     assert.deepStrictEqual(d.vector, h.vector, 'no gap was left behind');
   });
 
-  await t.test('three failures in a row leave the peer stuck, with the cursor where it was', async (t2) => {
+  it('should leave the peer stuck after three failures in a row, with the cursor where it was', async (t2) => {
     let broken = true;
     const mesh = await createMesh(t2, ['H', 'D'], [['D', 'H']], createStorage, {
       nodes: {
@@ -90,9 +90,9 @@ test('A page that fails is a break in the stream', async (t) => {
     assert.deepStrictEqual(
       errors.map((error) => [error.code, error.attempt]),
       [
-        ['PAGE_FAILED', 1],
-        ['PAGE_FAILED', 2],
-        ['STUCK', 3],
+        ['ALX_ERR_PAGE_FAILED', 1],
+        ['ALX_ERR_PAGE_FAILED', 2],
+        ['ALX_ERR_STUCK', 3],
       ],
     );
     const [peer] = d.sync.peers();

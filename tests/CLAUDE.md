@@ -10,7 +10,10 @@ tests/                    *.test.js are tests; anything else is a helper
 
 ## Testing
 
-`node:test` + `node:assert`. Browser halves run under Node with the OPFS mock
+`node:test` + `node:assert/strict`, as `describe` and `it('should …')` only (CONTRIBUTING.md, Tests): an async
+describe body runs at the file's load beside every other one, so a suite's setup is a `before`, its teardown an
+`after`, and what ran between two subtests stays in an `it`. A shared suite of `tests/suites/` is a function that
+registers its `it`s, called inside each wrapper's `describe`. Browser halves run under Node with the OPFS mock
 (`tests/utils/mock-opfs.js`) and `node:crypto`'s `webcrypto` — see
 `tests/index.browser.test.js`. `tests/utils/browser-env.js` primes the require cache with the browser halves ONCE,
 when a twin calls `prime()` right after requiring it and before its suite (the mesh's link loads `src/utils.js`;
@@ -50,7 +53,8 @@ headroom; do not lower them to land a change.
 prefix registry at its top), the tests that hold it; `tests/package/invariants.test.js` fails when an
 id names no test, a named title is gone, a prefix is not in the registry or a row is out of
 the registry's order. Rename a test and its row together; a new
-guarantee gets an id, a test and a row. Only plain-string titles are citable. The
+guarantee gets an id, a test and a row. Only plain-string titles of `describe` and `it` are citable, and a cited
+title is spelled as the test spells it — an error code in it keeps the short name the title uses. The
 hazard walk in `tests/suites/sync-engine.js` (drops, duplicate pages through
 `tests/utils/memory-link.js`'s `duplicate` hook, a reopen) is the one that must stay
 green whatever else moves.

@@ -24,7 +24,9 @@ const createFileStore = () => {
     /** The files of a name, the oldest first. */
     byName(name) {
       const found = [];
-      for (const file of files.values()) if (file.name === name) found.push(file);
+      for (const file of files.values()) {
+        if (file.name === name) found.push(file);
+      }
       found.sort((a, b) => a.createdTime - b.createdTime);
       return found;
     },
@@ -44,8 +46,9 @@ const createFileStore = () => {
         error.status = 404;
         throw error;
       }
-      if (ifMatch === undefined || ifMatch === null) store.unconditional++;
-      else if (ifMatch !== file.etag) {
+      if (ifMatch === undefined || ifMatch === null) {
+        store.unconditional++;
+      } else if (ifMatch !== file.etag) {
         const error = new Error('precondition failed');
         error.status = 412;
         throw error;
@@ -59,7 +62,9 @@ const createFileStore = () => {
       const held = store.byName(name)[0];
       if (held === undefined) {
         if (ifMatch === undefined || ifMatch === null) {
-          if (behavior !== 'fail') store.unconditional++;
+          if (behavior !== 'fail') {
+            store.unconditional++;
+          }
           const file = store.create(name);
           file.text = text;
           return file;
@@ -86,7 +91,9 @@ const createFileStore = () => {
     },
     read(name, id) {
       const file = store.byName(name)[0];
-      if (file === undefined || !file.text) return null;
+      if (file === undefined || !file.text) {
+        return null;
+      }
       const doc = JSON.parse(file.text).docs[id];
       return doc === undefined || doc.deleted === true ? null : doc.data;
     },
@@ -104,7 +111,9 @@ const answer = (status, body, { text = null, headers = {} } = {}) => ({
 
 const headerOf = (init, name) => {
   const headers = init.headers ?? {};
-  for (const key of Object.keys(headers)) if (key.toLowerCase() === name) return headers[key];
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === name) return headers[key];
+  }
   return null;
 };
 
@@ -127,15 +136,21 @@ const createFakeDrive = ({
       const url = new URL(target);
       const method = init.method ?? 'GET';
       drive.calls.push(`${method} ${url.pathname}`);
-      if (!target.startsWith(endpoint)) return answer(404, { error: 'not found' });
+      if (!target.startsWith(endpoint)) {
+        return answer(404, { error: 'not found' });
+      }
       if (method === 'GET' && url.pathname === '/drive/v3/files') {
         const match = /name = '((?:\\.|[^'])*)'/.exec(url.searchParams.get('q') ?? '');
         const wanted = match ? match[1].replace(/\\(.)/g, '$1') : null;
         const found = wanted === null ? [] : store.byName(wanted);
         // Unordered, Drive lists the newest first here: an adapter that takes `files[0]` without `orderBy` is wrong.
-        if (url.searchParams.get('orderBy') !== 'createdTime') found.reverse();
+        if (url.searchParams.get('orderBy') !== 'createdTime') {
+          found.reverse();
+        }
         const files = [];
-        for (const file of found) files.push({ id: file.id });
+        for (const file of found) {
+          files.push({ id: file.id });
+        }
         return answer(200, { files });
       }
       if (method === 'POST' && url.pathname === '/drive/v3/files') {
@@ -146,8 +161,12 @@ const createFakeDrive = ({
       let match = /^\/drive\/v2\/files\/([^/]+)$/.exec(url.pathname);
       if (match && method === 'GET') {
         const file = store.byId(decodeURIComponent(match[1]));
-        if (!file) return answer(404, { error: 'not found' });
-        if (drive.noEtag) return answer(200, { id: file.id });
+        if (!file) {
+          return answer(404, { error: 'not found' });
+        }
+        if (drive.noEtag) {
+          return answer(200, { id: file.id });
+        }
         return answer(200, drive.etagInHeader ? { id: file.id } : { id: file.id, etag: file.etag }, {
           headers: { etag: file.etag },
         });
@@ -155,7 +174,9 @@ const createFakeDrive = ({
       match = /^\/drive\/v3\/files\/([^/]+)$/.exec(url.pathname);
       if (match && method === 'GET' && url.searchParams.get('alt') === 'media') {
         const file = store.byId(decodeURIComponent(match[1]));
-        if (!file) return answer(404, { error: 'not found' });
+        if (!file) {
+          return answer(404, { error: 'not found' });
+        }
         return answer(200, null, { text: file.text });
       }
       if (match && method === 'DELETE') {
@@ -193,13 +214,17 @@ const createFakeGraph = ({
       const method = init.method ?? 'GET';
       const pathname = decodeURIComponent(url.pathname);
       graph.calls.push(`${method} ${pathname}${url.search}`);
-      if (!target.startsWith(endpoint)) return answer(404, { error: 'not found' });
+      if (!target.startsWith(endpoint)) {
+        return answer(404, { error: 'not found' });
+      }
       let match = new RegExp(`^${base}/root:/(.+?)(:/content)?$`).exec(pathname);
       if (match) {
         const name = match[1];
         if (method === 'GET' && !match[2]) {
           const file = store.byName(name)[0];
-          if (!file) return answer(404, { error: { code: 'itemNotFound' } });
+          if (!file) {
+            return answer(404, { error: { code: 'itemNotFound' } });
+          }
           return answer(200, { id: file.id, eTag: file.etag, name });
         }
         if (method === 'PUT' && match[2]) {
@@ -216,7 +241,9 @@ const createFakeGraph = ({
       match = new RegExp(`^${base}/items/([^/]+)/content$`).exec(pathname);
       if (match && method === 'GET') {
         const file = store.byId(match[1]);
-        if (!file) return answer(404, { error: { code: 'itemNotFound' } });
+        if (!file) {
+          return answer(404, { error: { code: 'itemNotFound' } });
+        }
         return answer(200, null, { text: file.text });
       }
       return answer(500, { error: `fake-graph: unsupported ${method} ${pathname}` });

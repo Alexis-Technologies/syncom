@@ -6,10 +6,10 @@
 // code with a `reason` beside it. Each code here is reached the way an
 // application would reach it.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
-const { typed } = require('../src/errors.js');
+const { ArgumentError, ArgumentRangeError, DataError } = require('../src/errors.js');
 const { memory } = require('../src/memory/memory.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');
@@ -24,40 +24,49 @@ const openTemp = async (t, options = {}) => {
   return storage;
 };
 
-test('SyncomError', async (t) => {
-  await t.test('carries a code, its fields and a cause; the two older classes are SyncomErrors', () => {
+describe('SyncomError', () => {
+  it('should carry a code, its fields and a cause, the two older classes being SyncomErrors', () => {
     const cause = new Error('disk');
-    const error = new SyncomError('CORRUPT', 'node.json is unreadable', { cause, file: 'node.json' });
+    const error = new SyncomError('ALX_ERR_CORRUPT', 'node.json is unreadable', { cause, file: 'node.json' });
     assert.ok(error instanceof Error);
     assert.strictEqual(error.name, 'SyncomError');
-    assert.strictEqual(error.code, 'CORRUPT');
+    assert.strictEqual(error.code, 'ALX_ERR_CORRUPT');
     assert.strictEqual(error.file, 'node.json');
     assert.strictEqual(error.cause, cause);
     assert.strictEqual(error.message, 'node.json is unreadable');
     assert.match(error.stack, /^SyncomError: node.json is unreadable/);
-    const bare = new SyncomError('CLOSED', 'Storage is closed');
+    const bare = new SyncomError('ALX_ERR_CLOSED', 'Storage is closed');
     assert.strictEqual('cause' in bare, false, 'no cause property when none was given');
     assert.deepStrictEqual(Object.keys(bare), ['name', 'code']);
 
     const hook = new HookError('beforeWrite', new Error('no'));
     assert.ok(hook instanceof SyncomError);
     assert.strictEqual(hook.name, 'HookError');
-    assert.strictEqual(hook.code, 'HOOK_FAILED');
+    assert.strictEqual(hook.code, 'ALX_ERR_HOOK_FAILED');
     assert.strictEqual(hook.hook, 'beforeWrite');
     assert.strictEqual(hook.cause.message, 'no');
     const validation = new ValidationError('Post', [{ path: ['title'], message: 'is required' }]);
     assert.ok(validation instanceof SyncomError);
     assert.strictEqual(validation.name, 'ValidationError');
-    assert.strictEqual(validation.code, 'VALIDATION_FAILED');
+    assert.strictEqual(validation.code, 'ALX_ERR_VALIDATION_FAILED');
     assert.strictEqual(validation.entity, 'Post');
     assert.strictEqual(validation.issues.length, 1);
 
-    const data = typed('INVALID_ID', 'Invalid record id');
+    const data = new DataError('ALX_ERR_INVALID_ID', 'Invalid record id', { entity: 'Task', field: 'key' });
     assert.ok(data instanceof TypeError);
-    assert.strictEqual(data.code, 'INVALID_ID');
+    assert.strictEqual(data.name, 'DataError');
+    assert.strictEqual(data.code, 'ALX_ERR_INVALID_ID');
+    assert.deepStrictEqual(data.details, { entity: 'Task', field: 'key' });
+    assert.strictEqual(new DataError('ALX_ERR_NO_CHAIN', 'no chain').details, null);
+    const wrong = new ArgumentError('createDatabase(): path is a string', { cause: data });
+    assert.ok(wrong instanceof TypeError);
+    assert.deepStrictEqual([wrong.name, wrong.code, wrong.cause], ['ArgumentError', 'ALX_ERR_INVALID_ARGUMENT', data]);
+    const range = new ArgumentRangeError('between(): the bounds are not in order');
+    assert.ok(range instanceof RangeError);
+    assert.deepStrictEqual([range.name, range.code], ['ArgumentRangeError', 'ALX_ERR_INVALID_ARGUMENT']);
   });
 
-  await t.test('the storage: CLOSED, IN_HOOK, NOT_FOUND, FIELD_KIND, CYCLE, ENCRYPTED, TYPE_IMMUTABLE', async (t2) => {
+  it('should raise the storage codes CLOSED, IN_HOOK, NOT_FOUND, FIELD_KIND, CYCLE, ENCRYPTED, TYPE_IMMUTABLE', async (t2) => {
     let store = null;
     const hooks = {
       beforeWrite: async (ctx) => {
@@ -70,30 +79,30 @@ test('SyncomError', async (t) => {
     await storage.inc(id, 'hits');
     await assert.rejects(() => storage.update(id, { hits: 5 }), {
       name: 'SyncomError',
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       field: 'hits',
       kind: 'counter',
       message: /is a counter; use inc\(\)/,
     });
     await assert.rejects(() => storage.inc(id, 'name'), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       field: 'name',
       kind: 'register',
       message: /is a register; use update\(\)/,
     });
     await storage.add(id, 'tags', ['x']);
     await assert.rejects(() => storage.update(id, { tags: [] }), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       field: 'tags',
       kind: 'set',
       message: /is a set; use add\(\) or remove\(\)/,
     });
-    await assert.rejects(() => storage.remove(id, 'hits', ['x']), { code: 'FIELD_KIND', kind: 'counter' });
+    await assert.rejects(() => storage.remove(id, 'hits', ['x']), { code: 'ALX_ERR_FIELD_KIND', kind: 'counter' });
     await storage.treeMove(id, 'outline', 'n');
     await storage.treeMove(id, 'outline', 'm', 'n');
     await assert.rejects(() => storage.treeMove(id, 'outline', 'n', 'm'), {
       name: 'SyncomError',
-      code: 'CYCLE',
+      code: 'ALX_ERR_CYCLE',
       id,
       field: 'outline',
       node: 'n',
@@ -102,29 +111,29 @@ test('SyncomError', async (t) => {
     });
     await assert.rejects(() => storage.treeMove(id, 'outline', 'n', null, { after: 'zz' }), {
       name: 'SyncomError',
-      code: 'NOT_FOUND',
+      code: 'ALX_ERR_NOT_FOUND',
       id,
       field: 'outline',
       node: 'zz',
       message: /is not under the root/,
     });
     await assert.rejects(() => storage.update(id, { outline: 1 }), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       field: 'outline',
       kind: 'tree',
       message: /is a tree; use treeMove\(\) or treeRemove\(\)/,
     });
     await storage.splice(id, 'body', 0, 0, 'hi');
     await assert.rejects(() => storage.update(id, { body: 'x' }), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       field: 'body',
       kind: 'text',
       message: /is a text; use splice\(\), push/,
     });
-    await assert.rejects(() => storage.splice(id, 'hits', 0, 0, 'x'), { code: 'FIELD_KIND', kind: 'counter' });
+    await assert.rejects(() => storage.splice(id, 'hits', 0, 0, 'x'), { code: 'ALX_ERR_FIELD_KIND', kind: 'counter' });
     await assert.rejects(() => storage.splice(id, 'body', 9, 0, 'x'), {
       name: 'SyncomError',
-      code: 'OUT_OF_RANGE',
+      code: 'ALX_ERR_OUT_OF_RANGE',
       id,
       field: 'body',
       index: 9,
@@ -133,37 +142,40 @@ test('SyncomError', async (t) => {
       message: /Index 9 is out of range for field body/,
     });
     await assert.rejects(() => storage.set(id, { $type: 'Other' }), {
-      name: 'TypeError',
-      code: 'TYPE_IMMUTABLE',
+      name: 'DataError',
+      code: 'ALX_ERR_TYPE_IMMUTABLE',
     });
     await assert.rejects(() => storage.update('nope', { a: 1 }), {
-      code: 'NOT_FOUND',
+      code: 'ALX_ERR_NOT_FOUND',
       message: 'Record nope not found',
     });
-    await assert.rejects(() => storage.swap('nope', { a: 1 }, { a: 0 }), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.swap('nope', { a: 1 }, { a: 0 }), { code: 'ALX_ERR_NOT_FOUND' });
     // A write from inside a write hook is refused where the deadlock would start.
     await assert.rejects(
       () => storage.set('from-hook', { a: 1 }),
       (error) => {
-        assert.strictEqual(error.code, 'HOOK_FAILED');
-        assert.strictEqual(error.cause.code, 'IN_HOOK');
+        assert.strictEqual(error.code, 'ALX_ERR_HOOK_FAILED');
+        assert.strictEqual(error.cause.code, 'ALX_ERR_IN_HOOK');
         assert.ok(error.cause instanceof SyncomError);
         return true;
       },
     );
     const sealed = await storage.insert({ secret: 1 }, { encrypted: true });
-    await assert.rejects(() => storage.inc(sealed, 'n'), { code: 'ENCRYPTED', message: /needs a replicated record/ });
-    await assert.rejects(() => storage.add(sealed, 'tags', ['x']), { code: 'ENCRYPTED', message: /add needs/ });
+    await assert.rejects(() => storage.inc(sealed, 'n'), {
+      code: 'ALX_ERR_ENCRYPTED',
+      message: /needs a replicated record/,
+    });
+    await assert.rejects(() => storage.add(sealed, 'tags', ['x']), { code: 'ALX_ERR_ENCRYPTED', message: /add needs/ });
     await assert.rejects(() => storage.set(id, { a: 1 }, { encrypted: true }), {
-      code: 'ENCRYPTED',
+      code: 'ALX_ERR_ENCRYPTED',
       message: /cannot become encrypted/,
     });
     await storage.close();
-    await assert.rejects(() => storage.set('late', { a: 1 }), { code: 'CLOSED', message: 'Storage is closed' });
-    await assert.rejects(() => storage.applyRemote([]), { code: 'CLOSED' });
+    await assert.rejects(() => storage.set('late', { a: 1 }), { code: 'ALX_ERR_CLOSED', message: 'Storage is closed' });
+    await assert.rejects(() => storage.applyRemote([]), { code: 'ALX_ERR_CLOSED' });
   });
 
-  await t.test('the files: CORRUPT, BLOCK_NOT_FOUND, BAD_ENVELOPE', async (t2) => {
+  it('should raise the file codes CORRUPT, BLOCK_NOT_FOUND, BAD_ENVELOPE', async (t2) => {
     const fsi = memory();
     const first = await syncom.createDatabase({ path: 'store', fsi, logger: false });
     await first.set('r1', { a: 1 });
@@ -172,25 +184,28 @@ test('SyncomError', async (t) => {
     await assert.rejects(
       () => syncom.createDatabase({ path: 'store', fsi, logger: false }),
       (error) => {
-        assert.strictEqual(error.code, 'CORRUPT');
+        assert.strictEqual(error.code, 'ALX_ERR_CORRUPT');
         assert.ok(error instanceof SyncomError);
         assert.ok(error.cause instanceof SyntaxError, 'the parse error is the cause');
         return true;
       },
     );
     const chain = await new syncom.Blockchain('store/blockchain', { fsi });
-    await assert.rejects(() => chain.readBlock('nope'), { code: 'BLOCK_NOT_FOUND', hash: 'nope' });
+    await assert.rejects(() => chain.readBlock('nope'), { code: 'ALX_ERR_BLOCK_NOT_FOUND', hash: 'nope' });
     const { privateKey } = await syncom.generateKeys();
     assert.throws(() => syncom.decrypt(JSON.stringify({ v: 2, alg: 'none' }), privateKey), {
-      code: 'BAD_ENVELOPE',
+      code: 'ALX_ERR_BAD_ENVELOPE',
       message: 'Unsupported ciphertext envelope',
     });
     const half = memory();
     await half.write('k', 'public.pem', 'x');
-    await assert.rejects(() => syncom.loadKeys('k', { fsi: half }), { name: 'SyncomError', code: 'KEYS_INCOMPLETE' });
+    await assert.rejects(() => syncom.loadKeys('k', { fsi: half }), {
+      name: 'SyncomError',
+      code: 'ALX_ERR_KEYS_INCOMPLETE',
+    });
   });
 
-  await t.test('the host: a refusal is a numeric code on the wire with a reason beside it', async (t2) => {
+  it('should refuse at the host with a numeric code on the wire and a reason beside it', async (t2) => {
     const refusals = [];
     const logger = { debug() {}, info() {}, warn: (entry) => refusals.push(entry), error() {} };
     const other = await openTemp(t2, { logger, sync: { autoStart: false } });

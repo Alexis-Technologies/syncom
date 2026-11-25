@@ -50,7 +50,7 @@ const MAX_DEPTH = 512;
 const MAX_FI = 1024;
 // The ancestors the cycle check walks: a parent the tree reads (MAX_DEPTH
 // levels) is never past it, and a local move under one deeper is refused
-// anyway (OUT_OF_RANGE), so only a peer's move under a node no reading
+// anyway (ALX_ERR_OUT_OF_RANGE), so only a peer's move under a node no reading
 // shows is moot by it. Unbounded, a chain of n nodes cost the fold n²/2
 // steps — 10 000 nodes, one snapshot block of 330 KB, four seconds of the
 // mutation queue on every later op of the field.
@@ -77,7 +77,10 @@ const isFi = (value) => typeof value === 'string' && value.length <= MAX_FI && i
 const own = (object, key) => (Object.hasOwn(object, key) ? object[key] : undefined);
 // A move is `[ts, origin, …]`: a stamp as compareClock reads one.
 const byStamp = (a, b) => compareClock(a, b);
-const byNode = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const byNode = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
 
 const createTree = () => ({ k: 'tree', ts: 0, moves: {} });
 

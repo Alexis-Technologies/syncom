@@ -10,8 +10,8 @@
 // block is forked, and the JSON round trip, a reset and a join start new
 // lineages midway.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const T = require('../src/tree/moves.js');
 const O = require('./utils/tree-oracle.js');
 
@@ -107,13 +107,20 @@ const walk = (seed, steps, deep) => {
     if (roll < 0.9 && deep) return pick(chain);
     return pick(ghosts);
   };
+  // A move's parent by its roll: the root, the trash, one of `nodes`, one of `near`, or any node.
+  const parentFor = (roll) => {
+    if (roll < 0.15) return null;
+    if (roll < 0.25) return T.TRASH;
+    if (roll < 0.6) return pick(nodes);
+    if (roll < 0.85) return pick(near);
+    return anyNode();
+  };
   let ts = 10_000;
   const made = [];
   for (let i = 0; i < steps; i++) {
     const node = anyNode();
     const roll = rnd();
-    const parent =
-      roll < 0.15 ? null : roll < 0.25 ? T.TRASH : roll < 0.6 ? pick(nodes) : roll < 0.85 ? pick(near) : anyNode();
+    const parent = parentFor(roll);
     if (parent === node) continue;
     // One in twenty under the last stamp again (forged), one in ten under the
     // last stamp's time by another origin (two clocks that read alike).
@@ -202,8 +209,8 @@ const both = (block, oblock, moves) => {
 };
 const delta = (before) => ({ folds: T.walks.folds - before.folds, undone: T.walks.undone - before.undone });
 
-test('the kept fold reads as the full fold, op by op', async (t) => {
-  await t.test('the fold, the reading and the change report agree with the full fold over a seeded walk', () => {
+describe('the kept fold reads as the full fold, op by op', () => {
+  it('should agree with the full fold in the fold, the reading and the change report over a seeded walk', () => {
     const before = { ...T.walks };
     let ops = 0;
     for (const seed of [1, 2, 3, 4, 5, 6]) ops += run(seed, 260, true, 6);
@@ -213,7 +220,7 @@ test('the kept fold reads as the full fold, op by op', async (t) => {
     assert.ok(T.walks.folds > before.folds, 'and some by a fold from scratch');
   });
 
-  await t.test('a move newest in the fold is one step; an older one undoes the newer and does them again', () => {
+  it('should take one step for a move newest in the fold; an older one undoes the newer and does them again', () => {
     let block = T.createTree();
     let oblock = O.createTree();
     const moves = [];
@@ -252,7 +259,7 @@ test('the kept fold reads as the full fold, op by op', async (t) => {
     agree(far.tree, ofar.tree, 'far out of order');
   });
 
-  await t.test('a walk exactly MAX_WALK long that ended on a name no move placed is moot once a move places it', () => {
+  it('should make a walk exactly MAX_WALK long that ended on a name no move placed moot once a move places it', () => {
     // g0 … g(MAX_WALK - 1) under `ghost`, which no move places: z under the
     // last walks MAX_WALK steps and takes. Once `ghost` is placed the walk is
     // one step longer: z's move is moot, in any order, as the full fold has it.
@@ -286,34 +293,31 @@ test('the kept fold reads as the full fold, op by op', async (t) => {
     assert.ok(T.walks.folds - before.folds >= 2);
   });
 
-  await t.test(
-    'a block whose fold moved on reads as it was: its JSON from the next block’s, its fold made again',
-    () => {
-      // Seven nodes moved in turn, each a few times: a block's JSON is the next
-      // one's with the moved node set back, newest first.
-      const move = (i) => [[i + 1, 'A'], { node: `n${i % 7}`, parent: i % 3 ? null : `n${(i + 3) % 7}`, fi: 'V' }];
-      let block = T.createTree();
-      const blocks = [];
-      for (let i = 0; i < 30; i++) {
-        blocks.push(block);
-        block = T.applyTreeMove(block, ...move(i)).tree;
-      }
-      const replay = (count) => {
-        let o = O.createTree();
-        for (let i = 0; i < count; i++) o = O.applyTreeMove(o, ...move(i)).tree;
-        return o;
-      };
-      // The newest but one, a middle one, then the oldest: each read through the chain of the ones after it.
-      for (const i of [29, 20, 2, 9]) {
-        const before = T.walks.folds;
-        agree(blocks[i], replay(i), `block ${i}`);
-        assert.strictEqual(T.walks.folds - before, 1, 'folded again, once');
-      }
-      agree(block, replay(30), 'the head');
-    },
-  );
+  it('should read a block whose fold moved on as it was: its JSON from the next block’s, its fold made again', () => {
+    // Seven nodes moved in turn, each a few times: a block's JSON is the next
+    // one's with the moved node set back, newest first.
+    const move = (i) => [[i + 1, 'A'], { node: `n${i % 7}`, parent: i % 3 ? null : `n${(i + 3) % 7}`, fi: 'V' }];
+    let block = T.createTree();
+    const blocks = [];
+    for (let i = 0; i < 30; i++) {
+      blocks.push(block);
+      block = T.applyTreeMove(block, ...move(i)).tree;
+    }
+    const replay = (count) => {
+      let o = O.createTree();
+      for (let i = 0; i < count; i++) o = O.applyTreeMove(o, ...move(i)).tree;
+      return o;
+    };
+    // The newest but one, a middle one, then the oldest: each read through the chain of the ones after it.
+    for (const i of [29, 20, 2, 9]) {
+      const before = T.walks.folds;
+      agree(blocks[i], replay(i), `block ${i}`);
+      assert.strictEqual(T.walks.folds - before, 1, 'folded again, once');
+    }
+    agree(block, replay(30), 'the head');
+  });
 
-  await t.test('siblings tied by a forged stamp read in the order of the first move of each that took', () => {
+  it('should read siblings tied by a forged stamp in the order of the first move of each that took', () => {
     // b took first, a after it; then one forged stamp moves both under r at
     // one place: they tie on the place and the stamp, and read b, a — the
     // fold's order of their first moves, not their ids — delivered in either order.
@@ -369,58 +373,57 @@ test('the kept fold reads as the full fold, op by op', async (t) => {
     );
   });
 
-  await t.test(
-    'a node at the last level a tree reads keeps no children in the reading, whatever lands under it',
-    () => {
-      const moves = {};
-      let parent = null;
-      for (let i = 0; i < T.MAX_DEPTH; i++) {
-        moves[`d${i}`] = [[i + 1, 'S', parent, 'V']];
-        parent = `d${i}`;
-      }
-      const start = { k: 'tree', ts: T.MAX_DEPTH, moves };
-      const last = `d${T.MAX_DEPTH - 1}`;
-      const [block] = both(JSON.parse(JSON.stringify(start)), JSON.parse(JSON.stringify(start)), [
-        [[T.MAX_DEPTH + 1, 'A'], { node: 'x', parent: null, fi: 'WV' }],
-        [[T.MAX_DEPTH + 2, 'A'], { node: 'x', parent: last, fi: 'V' }],
-        [[T.MAX_DEPTH + 3, 'A'], { node: 'y', parent: last, fi: 'V' }],
-        [[T.MAX_DEPTH + 4, 'A'], { node: 'x', parent: 'd3', fi: 'V' }],
-        [[T.MAX_DEPTH + 5, 'A'], { node: 'd1', parent: last, fi: 'V' }],
-        [[T.MAX_DEPTH + 6, 'A'], { node: 'd500', parent: null, fi: 'XV' }],
-      ]);
-      assert.strictEqual(T.renderTree(block).length, 2);
-    },
-  );
+  it('should keep no children in the reading for a node at the last level a tree reads, whatever lands under it', () => {
+    const moves = {};
+    let parent = null;
+    for (let i = 0; i < T.MAX_DEPTH; i++) {
+      moves[`d${i}`] = [[i + 1, 'S', parent, 'V']];
+      parent = `d${i}`;
+    }
+    const start = { k: 'tree', ts: T.MAX_DEPTH, moves };
+    const last = `d${T.MAX_DEPTH - 1}`;
+    const [block] = both(JSON.parse(JSON.stringify(start)), JSON.parse(JSON.stringify(start)), [
+      [[T.MAX_DEPTH + 1, 'A'], { node: 'x', parent: null, fi: 'WV' }],
+      [[T.MAX_DEPTH + 2, 'A'], { node: 'x', parent: last, fi: 'V' }],
+      [[T.MAX_DEPTH + 3, 'A'], { node: 'y', parent: last, fi: 'V' }],
+      [[T.MAX_DEPTH + 4, 'A'], { node: 'x', parent: 'd3', fi: 'V' }],
+      [[T.MAX_DEPTH + 5, 'A'], { node: 'd1', parent: last, fi: 'V' }],
+      [[T.MAX_DEPTH + 6, 'A'], { node: 'd500', parent: null, fi: 'XV' }],
+    ]);
+    assert.strictEqual(T.renderTree(block).length, 2);
+  });
 });
 
-test('a tree through the storage folds a local move, a peer’s page and an outline in one step a move', async () => {
-  const { createDatabase } = require('../src/all/all.js');
-  const { memory } = require('../src/memory/memory.js');
-  const storage = await createDatabase({ path: '/fold', fsi: memory(), logger: false });
-  const peer = await createDatabase({ path: '/peer', fsi: memory(), logger: false });
-  try {
-    const id = await storage.insert({ title: 't' });
-    await storage.treeMove(id, 'outline', 'root');
-    const before = { ...T.walks };
-    await storage.transact(async (tx) => {
-      for (let i = 0; i < 200; i++) await tx.treeMove(id, 'outline', `n${i}`, i < 10 ? 'root' : `n${i % 10}`);
-    });
-    for (let i = 0; i < 50; i++) {
-      await storage.treeMove(id, 'outline', `n${i}`, `n${(i * 7 + 3) % 200}`).catch(() => {});
+describe('the fold through the storage', () => {
+  it('should fold a local move, a peer’s page and an outline in one step a move in a tree through the storage', async () => {
+    const { createDatabase } = require('../src/all/all.js');
+    const { memory } = require('../src/memory/memory.js');
+    const storage = await createDatabase({ path: '/fold', fsi: memory(), logger: false });
+    const peer = await createDatabase({ path: '/peer', fsi: memory(), logger: false });
+    try {
+      const id = await storage.insert({ title: 't' });
+      await storage.treeMove(id, 'outline', 'root');
+      const before = { ...T.walks };
+      await storage.transact(async (tx) => {
+        for (let i = 0; i < 200; i++) await tx.treeMove(id, 'outline', `n${i}`, i < 10 ? 'root' : `n${i % 10}`);
+      });
+      for (let i = 0; i < 50; i++) {
+        await storage.treeMove(id, 'outline', `n${i}`, `n${(i * 7 + 3) % 200}`).catch(() => {});
+      }
+      await storage.treeRemove(id, 'outline', 'n3');
+      assert.deepStrictEqual(delta(before), { folds: 0, undone: 0 }, 'local moves: one step each');
+      // The same moves as a peer's pages, in order: one step each there too.
+      const ops = [];
+      for (const { op } of storage.log.read(undefined).entries) ops.push(op);
+      // The record and the field's first move (an empty block folded), then the rest.
+      await peer.applyRemote(ops.slice(0, 2));
+      const page = { ...T.walks };
+      await peer.applyRemote(ops.slice(2));
+      assert.deepStrictEqual(delta(page), { folds: 0, undone: 0 }, 'a page in stamp order: one step each');
+      assert.deepStrictEqual((await peer.get(id)).outline, (await storage.get(id)).outline);
+    } finally {
+      await storage.close();
+      await peer.close();
     }
-    await storage.treeRemove(id, 'outline', 'n3');
-    assert.deepStrictEqual(delta(before), { folds: 0, undone: 0 }, 'local moves: one step each');
-    // The same moves as a peer's pages, in order: one step each there too.
-    const ops = [];
-    for (const { op } of storage.log.read(undefined).entries) ops.push(op);
-    // The record and the field's first move (an empty block folded), then the rest.
-    await peer.applyRemote(ops.slice(0, 2));
-    const page = { ...T.walks };
-    await peer.applyRemote(ops.slice(2));
-    assert.deepStrictEqual(delta(page), { folds: 0, undone: 0 }, 'a page in stamp order: one step each');
-    assert.deepStrictEqual((await peer.get(id)).outline, (await storage.get(id)).outline);
-  } finally {
-    await storage.close();
-    await peer.close();
-  }
+  });
 });

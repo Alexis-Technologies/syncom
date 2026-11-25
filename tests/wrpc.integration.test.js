@@ -6,8 +6,8 @@
 // WrpcClients over WebSocket. Skips (never fails) when @alexify/wrpc is not
 // installed, the way wrpc's own adapter suites treat their frameworks.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createWrpcLink } = require('../src/wrpc/wrpc.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
@@ -76,8 +76,8 @@ const connect =
       }),
     );
 
-test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, async (t) => {
-  await t.test('two servers and a dialer: transitive replication over WebSocket', async (t2) => {
+describe('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, () => {
+  it('should replicate transitively over WebSocket with two servers and a dialer', async (t2) => {
     const a = await openTemp(t2);
     const b = await openTemp(t2);
     const c = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
@@ -104,40 +104,37 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.ok(peers.every((peer) => peer.subscribed));
   });
 
-  await t.test(
-    'presence over wrpc: the unit’s inbound event, relayed through the room, handed at hello',
-    async (t2) => {
-      const a = await openTemp(t2);
-      const b = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
-      const c = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
-      const hostA = await host(t2, a, { access: 'public', presence: { timeout: 2000 } });
-      const make = (storage) => {
-        const presence = createPresence(storage, { timeout: 2000 });
-        t2.after(() => presence.destroy());
-        storage.sync.presence(presence);
-        return presence;
-      };
-      const [pa, pb] = [a, b].map(make);
-      await b.sync.addNode({ url: hostA.url });
-      await b.sync.start();
-      await settle([a, b], { timeout: 10_000 });
-      await pb.set({ name: 'bob', cursor: 2 });
-      await waitUntil(() => pa.get(b.nodeId) !== undefined, { timeout: 5000 });
-      assert.deepStrictEqual(pa.get(b.nodeId), { name: 'bob', cursor: 2 });
-      // A newcomer is handed the room at hello; a state then travels to it through the room.
-      const pc = make(c);
-      await c.sync.addNode({ url: hostA.url });
-      await c.sync.start();
-      await waitUntil(() => pc.get(b.nodeId) !== undefined, { timeout: 5000 });
-      await pb.set({ name: 'bob', cursor: 3 });
-      await waitUntil(() => pc.get(b.nodeId)?.cursor === 3, { timeout: 5000 });
-      await pc.set({ name: 'cy' });
-      await waitUntil(() => pb.get(c.nodeId) !== undefined && pa.get(c.nodeId) !== undefined, { timeout: 5000 });
-      assert.strictEqual(a.log.length + b.log.length + c.log.length, 0, 'nothing of it is logged');
-    },
-  );
+  it('should carry presence over wrpc: the unit’s inbound event, relayed through the room, handed at hello', async (t2) => {
+    const a = await openTemp(t2);
+    const b = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
+    const c = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
+    const hostA = await host(t2, a, { access: 'public', presence: { timeout: 2000 } });
+    const make = (storage) => {
+      const presence = createPresence(storage, { timeout: 2000 });
+      t2.after(() => presence.destroy());
+      storage.sync.presence(presence);
+      return presence;
+    };
+    const [pa, pb] = [a, b].map(make);
+    await b.sync.addNode({ url: hostA.url });
+    await b.sync.start();
+    await settle([a, b], { timeout: 10_000 });
+    await pb.set({ name: 'bob', cursor: 2 });
+    await waitUntil(() => pa.get(b.nodeId) !== undefined, { timeout: 5000 });
+    assert.deepStrictEqual(pa.get(b.nodeId), { name: 'bob', cursor: 2 });
+    // A newcomer is handed the room at hello; a state then travels to it through the room.
+    const pc = make(c);
+    await c.sync.addNode({ url: hostA.url });
+    await c.sync.start();
+    await waitUntil(() => pc.get(b.nodeId) !== undefined, { timeout: 5000 });
+    await pb.set({ name: 'bob', cursor: 3 });
+    await waitUntil(() => pc.get(b.nodeId)?.cursor === 3, { timeout: 5000 });
+    await pc.set({ name: 'cy' });
+    await waitUntil(() => pb.get(c.nodeId) !== undefined && pa.get(c.nodeId) !== undefined, { timeout: 5000 });
+    assert.strictEqual(a.log.length + b.log.length + c.log.length, 0, 'nothing of it is logged');
+  });
 
-  await t.test('a server restart on the same port: wrpc reconnects, the feed resumes, offline ops flow', async (t2) => {
+  it('should survive a server restart on the same port: wrpc reconnects, the feed resumes, offline ops flow', async (t2) => {
     const a = await openTemp(t2);
     const c = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
     let hostA = await host(t2, a);
@@ -166,7 +163,7 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.strictEqual(c.sync.peers()[0].subscribed, true);
   });
 
-  await t.test('a late joiner bootstraps through a binary stream', async (t2) => {
+  it('should bootstrap a late joiner through a binary stream', async (t2) => {
     const a = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
     const id = await a.insert({ n: 0 });
     for (let i = 0; i < 10; i++) await a.inc(id, 'hits', 1);
@@ -189,63 +186,60 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.strictEqual((await c.get(id)).hits, 11);
   });
 
-  await t.test(
-    'an attachment larger than one wrpc message crosses a hub as bytes: uploaded and downloaded as a stream in chunks; an empty one a stream of no bytes',
-    async (t2) => {
-      const plugins = [attachments()];
-      const h = await openTemp(t2, { plugins });
-      // A host whose engine takes no message past 2 MiB — what a uWebSockets.js engine, permessage-deflate or a
-      // WebTransport session do at 16 MiB: the bytes must cross in pieces, whichever way they are encoded.
-      const limit = 2 * 1024 * 1024;
-      const hostH = await host(t2, h, { access: 'public' }, 0, { ws: { maxBuffer: limit } });
-      // What the dialers read of the host's streams, chunk by chunk.
-      const chunks = [];
-      const spying = async (node) => {
-        const link = await connect()(node);
-        const read = link.stream;
-        link.stream = (id) =>
-          (async function* spy() {
-            for await (const chunk of read(id)) {
-              chunks.push(chunk.length);
-              yield chunk;
-            }
-          })();
-        return link;
-      };
-      const a = await openTemp(t2, { plugins, sync: { connect: spying, autoStart: false } });
-      const b = await openTemp(t2, { plugins, sync: { connect: spying, autoStart: false } });
-      const errors = [];
-      for (const node of [a, b]) {
-        node.sync.on('error', (error) => errors.push(error));
-        await node.sync.addNode({ url: hostH.url });
-        await node.sync.start();
-      }
-      await settle([h, a, b], { timeout: 10_000 });
-      // 6 MiB: three of the host's messages as bytes, four as base64.
-      const bytes = new Uint8Array(6 * 1024 * 1024);
-      for (let i = 0; i < bytes.length; i += 4093) bytes[i] = i % 251;
-      const id = await a.insert({ title: 'a film' });
-      const entry = await a.attachments.put(id, 'film.bin', bytes, { type: 'application/octet-stream' });
-      await a.attachments.put(id, 'empty.bin', new Uint8Array(0), { type: 'application/octet-stream' });
-      await waitUntil(() => h.attachments.has(id, 'film.bin'), { timeout: 10_000 });
-      await waitUntil(() => h.attachments.has(id, 'empty.bin'), { timeout: 10_000 });
-      assert.strictEqual(await hashBytes((await h.attachments.get(id, 'film.bin')).bytes), entry.digest);
-      await waitUntil(async () => (await b.get(id)) !== null, { timeout: 10_000 });
-      chunks.length = 0;
-      const got = await b.attachments.get(id, 'film.bin');
-      assert.strictEqual(got.bytes.length, bytes.length);
-      assert.strictEqual(await hashBytes(got.bytes), entry.digest);
-      let largest = 0;
-      for (const size of chunks) if (size > largest) largest = size;
-      assert.ok(chunks.length >= 96, `the bytes come down in pieces (${chunks.length})`);
-      assert.ok(largest <= 64 * 1024, `no piece past 64 KiB (${largest})`);
-      assert.strictEqual((await b.attachments.get(id, 'empty.bin')).bytes.length, 0);
-      assert.deepStrictEqual(errors, [], 'no upload failed, no link dropped');
-      assert.ok(a.sync.peers()[0].connected && b.sync.peers()[0].connected);
-    },
-  );
+  it('should cross a hub with an attachment larger than one wrpc message as bytes: uploaded and downloaded as a stream in chunks; an empty one a stream of no bytes', async (t2) => {
+    const plugins = [attachments()];
+    const h = await openTemp(t2, { plugins });
+    // A host whose engine takes no message past 2 MiB — what a uWebSockets.js engine, permessage-deflate or a
+    // WebTransport session do at 16 MiB: the bytes must cross in pieces, whichever way they are encoded.
+    const limit = 2 * 1024 * 1024;
+    const hostH = await host(t2, h, { access: 'public' }, 0, { ws: { maxBuffer: limit } });
+    // What the dialers read of the host's streams, chunk by chunk.
+    const chunks = [];
+    const spying = async (node) => {
+      const link = await connect()(node);
+      const read = link.stream;
+      link.stream = (id) =>
+        (async function* spy() {
+          for await (const chunk of read(id)) {
+            chunks.push(chunk.length);
+            yield chunk;
+          }
+        })();
+      return link;
+    };
+    const a = await openTemp(t2, { plugins, sync: { connect: spying, autoStart: false } });
+    const b = await openTemp(t2, { plugins, sync: { connect: spying, autoStart: false } });
+    const errors = [];
+    for (const node of [a, b]) {
+      node.sync.on('error', (error) => errors.push(error));
+      await node.sync.addNode({ url: hostH.url });
+      await node.sync.start();
+    }
+    await settle([h, a, b], { timeout: 10_000 });
+    // 6 MiB: three of the host's messages as bytes, four as base64.
+    const bytes = new Uint8Array(6 * 1024 * 1024);
+    for (let i = 0; i < bytes.length; i += 4093) bytes[i] = i % 251;
+    const id = await a.insert({ title: 'a film' });
+    const entry = await a.attachments.put(id, 'film.bin', bytes, { type: 'application/octet-stream' });
+    await a.attachments.put(id, 'empty.bin', new Uint8Array(0), { type: 'application/octet-stream' });
+    await waitUntil(() => h.attachments.has(id, 'film.bin'), { timeout: 10_000 });
+    await waitUntil(() => h.attachments.has(id, 'empty.bin'), { timeout: 10_000 });
+    assert.strictEqual(await hashBytes((await h.attachments.get(id, 'film.bin')).bytes), entry.digest);
+    await waitUntil(async () => (await b.get(id)) !== null, { timeout: 10_000 });
+    chunks.length = 0;
+    const got = await b.attachments.get(id, 'film.bin');
+    assert.strictEqual(got.bytes.length, bytes.length);
+    assert.strictEqual(await hashBytes(got.bytes), entry.digest);
+    let largest = 0;
+    for (const size of chunks) if (size > largest) largest = size;
+    assert.ok(chunks.length >= 96, `the bytes come down in pieces (${chunks.length})`);
+    assert.ok(largest <= 64 * 1024, `no piece past 64 KiB (${largest})`);
+    assert.strictEqual((await b.attachments.get(id, 'empty.bin')).bytes.length, 0);
+    assert.deepStrictEqual(errors, [], 'no upload failed, no link dropped');
+    assert.ok(a.sync.peers()[0].connected && b.sync.peers()[0].connected);
+  });
 
-  await t.test('authorize gates the handshake by the token the node carries', async (t2) => {
+  it('should gate the handshake with authorize by the token the node carries', async (t2) => {
     const a = await openTemp(t2);
     const hostA = await host(t2, a, { access: 'public', authorize: (context, hello) => hello.token === 'secret' });
     const good = await openTemp(t2, { sync: { connect: connect(), autoStart: false } });
@@ -264,8 +258,8 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     assert.strictEqual(await bad.get(id), null);
   });
 
-  await t.test(
-    'the protocol over Server-Sent Events: a dialer on transport sse bootstraps from a plain page, pushes and hears a live update',
+  it(
+    'should run the protocol over Server-Sent Events: a dialer on transport sse bootstraps from a plain page, pushes and hears a live update',
     { skip: sse ? false : '@alexify/wrpc/sse unavailable' },
     async (t2) => {
       const a = await openTemp(t2);
@@ -294,57 +288,54 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     },
   );
 
-  await t.test(
-    'a thin client over plain HTTP: query and count against unit({ query: true }) with the hello carried in the call — no log, no node of its own',
-    async (t2) => {
-      const schema = { entities: { Task: { index: ['done'] } } };
-      const a = await openTemp(t2, { schema });
-      await a.insert({ $type: 'Task', title: 'write the recipe', done: false });
-      await a.insert({ $type: 'Task', title: 'test it', done: false });
-      await a.insert({ $type: 'Task', title: 'ship it', done: true });
-      const hostA = await host(t2, a, { access: 'public', query: true, limits: { rowsPerQuery: 100 } });
-      const client = await wrpc.WrpcClient.connect(hostA.url.replace(/^ws:/, 'http:'), {
-        transport: 'http',
-        logger: false,
-      });
-      t2.after(() => client.close());
-      // One request is one client over plain HTTP, so no hello can come first: the call carries it. The host greets the
-      // caller as it would (authorize, the scopes) and keeps nothing of it — no room, no session.
-      const hello = { node: 'thin-client', version: PROTOCOL };
-      await assert.rejects(() => client.call('syncom/query', { entity: 'Task' }), /hello/i);
-      const { rows } = await client.call('syncom/query', {
-        hello,
-        entity: 'Task',
-        query: { done: false },
-        order: ['title'],
-        limit: 10,
-      });
-      assert.deepStrictEqual(
-        rows.map((row) => row.title ?? row.data?.title),
-        ['test it', 'write the recipe'],
-      );
-      const { count } = await client.call('syncom/count', { hello, entity: 'Task', query: { done: true } });
-      assert.strictEqual(hostA.server.rooms.count('syncom:*'), 0, 'a thin client joins no room');
-      assert.strictEqual(count, 1);
-      // A host without `query` mounts no such procedure: wrpc answers Not Found.
-      const closed = await host(t2, a, { access: 'public' });
-      const other = await wrpc.WrpcClient.connect(closed.url.replace(/^ws:/, 'http:'), {
-        transport: 'http',
-        logger: false,
-      });
-      t2.after(() => other.close());
-      await assert.rejects(
-        () => other.call('syncom/query', { hello, entity: 'Task' }),
-        (error) => {
-          assert.match(String(error.message ?? error), /Not Found|queries/);
-          return true;
-        },
-      );
-    },
-  );
+  it('should serve a thin client over plain HTTP: query and count against unit({ query: true }) with the hello carried in the call — no log, no node of its own', async (t2) => {
+    const schema = { entities: { Task: { index: ['done'] } } };
+    const a = await openTemp(t2, { schema });
+    await a.insert({ $type: 'Task', title: 'write the recipe', done: false });
+    await a.insert({ $type: 'Task', title: 'test it', done: false });
+    await a.insert({ $type: 'Task', title: 'ship it', done: true });
+    const hostA = await host(t2, a, { access: 'public', query: true, limits: { rowsPerQuery: 100 } });
+    const client = await wrpc.WrpcClient.connect(hostA.url.replace(/^ws:/, 'http:'), {
+      transport: 'http',
+      logger: false,
+    });
+    t2.after(() => client.close());
+    // One request is one client over plain HTTP, so no hello can come first: the call carries it. The host greets the
+    // caller as it would (authorize, the scopes) and keeps nothing of it — no room, no session.
+    const hello = { node: 'thin-client', version: PROTOCOL };
+    await assert.rejects(() => client.call('syncom/query', { entity: 'Task' }), /hello/i);
+    const { rows } = await client.call('syncom/query', {
+      hello,
+      entity: 'Task',
+      query: { done: false },
+      order: ['title'],
+      limit: 10,
+    });
+    assert.deepStrictEqual(
+      rows.map((row) => row.title ?? row.data?.title),
+      ['test it', 'write the recipe'],
+    );
+    const { count } = await client.call('syncom/count', { hello, entity: 'Task', query: { done: true } });
+    assert.strictEqual(hostA.server.rooms.count('syncom:*'), 0, 'a thin client joins no room');
+    assert.strictEqual(count, 1);
+    // A host without `query` mounts no such procedure: wrpc answers Not Found.
+    const closed = await host(t2, a, { access: 'public' });
+    const other = await wrpc.WrpcClient.connect(closed.url.replace(/^ws:/, 'http:'), {
+      transport: 'http',
+      logger: false,
+    });
+    t2.after(() => other.close());
+    await assert.rejects(
+      () => other.call('syncom/query', { hello, entity: 'Task' }),
+      (error) => {
+        assert.match(String(error.message ?? error), /Not Found|queries/);
+        return true;
+      },
+    );
+  });
 
-  await t.test(
-    'two hubs over a wrpc broker’s log: ops cross through it, and a client moved between the hubs resumes without a bootstrap',
+  it(
+    'should cross ops through a wrpc broker’s log between two hubs, and resume a client moved between the hubs without a bootstrap',
     { skip: brokers ? false : '@alexify/wrpc/broker unavailable' },
     async (t2) => {
       const broker = new brokers.MemoryBroker({ logger: false });
@@ -399,99 +390,96 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
     },
   );
 
-  await t.test(
-    'several tabs over one database through wrpc on a worker port: the leader serves its writers, a follower writes through them, a failover keeps the port',
-    async (t2) => {
-      // The leader's writers behind one router, whichever instance leads now (the SharedWorker's server stays up
-      // while the tabs come and go).
-      const tabs = new Set();
-      let served = null;
-      const leading = () => {
-        for (const tab of tabs) if (tab.leader) return tab;
-        return null;
-      };
-      const procedure = (name) => ({
-        access: 'public',
-        async handler(context, args) {
-          if (served === null) served = leading()?.serve() ?? null;
-          if (served === null) throw new Error('no leader yet');
-          return served[name].handler(context, args);
-        },
+  it('should serve several tabs over one database through wrpc on a worker port: the leader serves its writers, a follower writes through them, a failover keeps the port', async (t2) => {
+    // The leader's writers behind one router, whichever instance leads now (the SharedWorker's server stays up
+    // while the tabs come and go).
+    const tabs = new Set();
+    let served = null;
+    const leading = () => {
+      for (const tab of tabs) if (tab.leader) return tab;
+      return null;
+    };
+    const procedure = (name) => ({
+      access: 'public',
+      async handler(context, args) {
+        if (served === null) served = leading()?.serve() ?? null;
+        if (served === null) throw new Error('no leader yet');
+        return served[name].handler(context, args);
+      },
+    });
+    const procedures = {};
+    // Every procedure a follower forwards — the writers, a transaction, a collection's, a local document's, a blob's.
+    for (const name of PROCEDURES) procedures[name] = procedure(name);
+    const router = wrpc.defineRouter({ 'syncom-db': procedures });
+    const server = new wrpc.Server({ router, host: '127.0.0.1', port: 0, protocol: 'http', logger: false });
+    await server.listen();
+    t2.after(() => server.close().catch(() => {}));
+    // The worker's end of every tab's channel: a `wrpc:connect` brings the port the page speaks on; attached.
+    const worker = () => {
+      const { port1, port2 } = new MessageChannel();
+      port1.addEventListener('message', (event) => {
+        if (event.data?.type === 'wrpc:connect' && event.ports?.[0]) server.rpc.attachPort(event.ports[0]);
       });
-      const procedures = {};
-      // Every procedure a follower forwards — the writers, a transaction, a collection's, a local document's, a blob's.
-      for (const name of PROCEDURES) procedures[name] = procedure(name);
-      const router = wrpc.defineRouter({ 'syncom-db': procedures });
-      const server = new wrpc.Server({ router, host: '127.0.0.1', port: 0, protocol: 'http', logger: false });
-      await server.listen();
-      t2.after(() => server.close().catch(() => {}));
-      // The worker's end of every tab's channel: a `wrpc:connect` brings the port the page speaks on; attached.
-      const worker = () => {
-        const { port1, port2 } = new MessageChannel();
-        port1.addEventListener('message', (event) => {
-          if (event.data?.type === 'wrpc:connect' && event.ports?.[0]) server.rpc.attachPort(event.ports[0]);
-        });
-        port1.start();
-        t2.after(() => {
-          port1.close();
-          port2.close();
-        });
-        return port2;
-      };
-      const engine = syncom.memoryEngine();
-      const locks = createFakeLocks();
-      const open = async () => {
-        const tab = await openShared({
-          createDatabase: syncom.createDatabase,
-          engine,
-          path: 'tabs',
-          logger: false,
-          defer: 0,
-          schema: { entities: { Task: {} } },
-          election: { locks },
-          grace: 20,
-          failover: 5000,
-          channel: async () =>
-            createSharedChannel(
-              await wrpc.WrpcClient.connect('worker://leader', { worker: worker(), logger: false, heartbeat: false }),
-            ),
-        });
-        tab.on('leader', () => {
-          served = null;
-        });
-        tabs.add(tab);
-        t2.after(() => tab.close().catch(() => {}));
-        return tab;
-      };
-      const a = await open();
-      const b = await open();
-      const c = await open();
-      assert.strictEqual(a.leader, true);
-      assert.strictEqual(b.leader, false);
-      const id = await b.insert({ $type: 'Task', title: 'from a tab' });
-      assert.deepStrictEqual(await a.get(id), { $type: 'Task', title: 'from a tab' });
-      await waitUntil(() => c.hasRecord(id), { timeout: 10_000 });
-      await c.transact(async (tx) => {
-        await tx.update(id, { done: true });
-        await tx.inc(id, 'edits', 1);
+      port1.start();
+      t2.after(() => {
+        port1.close();
+        port2.close();
       });
-      await waitUntil(async () => (await b.get(id))?.done === true, { timeout: 10_000 });
-      assert.strictEqual((await a.get(id)).edits, 1);
-      await assert.rejects(() => b.update('missing', { x: 1 }), { code: 'NOT_FOUND' });
-      // The leader's tab closes: the next takes the lock; the follower's channel still reaches the worker's server.
-      const leadership = b.waitForLeadership();
-      tabs.delete(a);
-      await a.close();
-      served = null;
-      await leadership;
-      assert.strictEqual(b.leader, true);
-      const later = await c.insert({ $type: 'Task', title: 'after the failover' });
-      assert.deepStrictEqual(await b.get(later), { $type: 'Task', title: 'after the failover' });
-      await waitUntil(() => c.hasRecord(later), { timeout: 10_000 });
-    },
-  );
+      return port2;
+    };
+    const engine = syncom.memoryEngine();
+    const locks = createFakeLocks();
+    const open = async () => {
+      const tab = await openShared({
+        createDatabase: syncom.createDatabase,
+        engine,
+        path: 'tabs',
+        logger: false,
+        defer: 0,
+        schema: { entities: { Task: {} } },
+        election: { locks },
+        grace: 20,
+        failover: 5000,
+        channel: async () =>
+          createSharedChannel(
+            await wrpc.WrpcClient.connect('worker://leader', { worker: worker(), logger: false, heartbeat: false }),
+          ),
+      });
+      tab.on('leader', () => {
+        served = null;
+      });
+      tabs.add(tab);
+      t2.after(() => tab.close().catch(() => {}));
+      return tab;
+    };
+    const a = await open();
+    const b = await open();
+    const c = await open();
+    assert.strictEqual(a.leader, true);
+    assert.strictEqual(b.leader, false);
+    const id = await b.insert({ $type: 'Task', title: 'from a tab' });
+    assert.deepStrictEqual(await a.get(id), { $type: 'Task', title: 'from a tab' });
+    await waitUntil(() => c.hasRecord(id), { timeout: 10_000 });
+    await c.transact(async (tx) => {
+      await tx.update(id, { done: true });
+      await tx.inc(id, 'edits', 1);
+    });
+    await waitUntil(async () => (await b.get(id))?.done === true, { timeout: 10_000 });
+    assert.strictEqual((await a.get(id)).edits, 1);
+    await assert.rejects(() => b.update('missing', { x: 1 }), { code: 'ALX_ERR_NOT_FOUND' });
+    // The leader's tab closes: the next takes the lock; the follower's channel still reaches the worker's server.
+    const leadership = b.waitForLeadership();
+    tabs.delete(a);
+    await a.close();
+    served = null;
+    await leadership;
+    assert.strictEqual(b.leader, true);
+    const later = await c.insert({ $type: 'Task', title: 'after the failover' });
+    assert.deepStrictEqual(await b.get(later), { $type: 'Task', title: 'after the failover' });
+    await waitUntil(() => c.hasRecord(later), { timeout: 10_000 });
+  });
 
-  await t.test('a wrpc onRequest hook reads unit({ meta }): the per-procedure rate-limit recipe', async (t2) => {
+  it('should read unit({ meta }) in a wrpc onRequest hook: the per-procedure rate-limit recipe', async (t2) => {
     // wrpc ships no limiter. The recipe in docs/guide/server.md is one
     // router-level `onRequest` hook that reads `context.procedure.meta.rateLimit`
     // — what `unit({ meta })` put on every syncom procedure — and answers 429;
@@ -557,7 +545,7 @@ test('syncom over wrpc', { skip: wrpc ? false : '@alexify/wrpc unavailable' }, a
 // What a test can drive without ICE is the raw-channel level — a pair of
 // fake channels, one end attached to a server or a PeerHost, the other
 // dialled — which is also the level every WrpcPeer link rests on.
-test('syncom over a WebRTC data channel', { skip: webrtc ? false : '@alexify/wrpc/webrtc unavailable' }, async (t) => {
+describe('syncom over a WebRTC data channel', { skip: webrtc ? false : '@alexify/wrpc/webrtc unavailable' }, () => {
   const dial = async (channel, clientOptions = {}) =>
     createWrpcLink(
       await wrpc.WrpcClient.connect('webrtc:host', {
@@ -570,7 +558,7 @@ test('syncom over a WebRTC data channel', { skip: webrtc ? false : '@alexify/wrp
       }),
     );
 
-  await t.test('a raw channel attached to an RpcServer: both directions, a streamed bootstrap, a close', async (t2) => {
+  it('should sync over a raw channel attached to an RpcServer: both directions, a streamed bootstrap, a close', async (t2) => {
     const a = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
     const id = await a.insert({ n: 0 });
     for (let i = 0; i < 10; i++) await a.inc(id, 'hits', 1);
@@ -607,129 +595,123 @@ test('syncom over a WebRTC data channel', { skip: webrtc ? false : '@alexify/wrp
     assert.ok(events.some((event) => event.connected === false));
   });
 
-  await t.test(
-    'a channel factory: wrpc rebuilds the link, the subscription resumes, syncom greets again',
-    async (t2) => {
-      const a = await openTemp(t2);
-      const hostA = await host(t2, a);
-      const channels = [];
-      // Every (re)open asks for the next channel: a new pair, its far end
-      // attached to the host — what an application's own signaling does.
-      const next = async () => {
-        const [mine, theirs] = createChannelPair();
-        webrtc.attachChannel(hostA.server.rpc, theirs, { peer: 'c' });
-        channels.push(mine);
-        return mine;
-      };
-      const c = await openTemp(t2, {
-        sync: {
-          autoStart: false,
-          connect: () => dial(next, { reconnect: { minDelay: 50, maxDelay: 100, jitter: false } }),
-        },
-      });
-      const events = [];
-      c.sync.on('peer', (event) => events.push(event));
-      c.sync.on('bootstrap', (event) => events.push({ bootstrap: true, ...event }));
-      await c.sync.addNode({ url: 'webrtc:host' });
-      await c.sync.start();
-      const first = await a.insert({ n: 1 });
-      await settle([a, c], { timeout: 10_000 });
-      assert.deepStrictEqual(await c.get(first), { n: 1 });
-      // The path dies; wrpc asks the factory, restores the subscription from
-      // its lastEventId (428: a fresh server-side client), syncom says hello
-      // again and pushes what it wrote meanwhile — no snapshot.
-      channels[0].close();
-      await waitUntil(() => c.sync.peers()[0]?.connected === false, { timeout: 5000 });
-      const whileDown = await c.insert({ whileDown: true });
-      const second = await a.insert({ n: 2 });
-      await settle([a, c], { timeout: 15_000 });
-      assert.strictEqual(channels.length, 2, 'one redial');
-      assert.deepStrictEqual(await c.get(second), { n: 2 });
-      assert.deepStrictEqual(await a.get(whileDown), { whileDown: true });
-      assert.ok(
-        events.some((event) => event.reconnected),
-        'the link announced its reconnect',
-      );
-      assert.ok(!events.some((event) => event.bootstrap), 'resumed from the cursor');
-      assert.strictEqual(c.sync.peers()[0].subscribed, true);
-    },
-  );
+  it('should resume through a channel factory: wrpc rebuilds the link, the subscription resumes, syncom greets again', async (t2) => {
+    const a = await openTemp(t2);
+    const hostA = await host(t2, a);
+    const channels = [];
+    // Every (re)open asks for the next channel: a new pair, its far end
+    // attached to the host — what an application's own signaling does.
+    const next = async () => {
+      const [mine, theirs] = createChannelPair();
+      webrtc.attachChannel(hostA.server.rpc, theirs, { peer: 'c' });
+      channels.push(mine);
+      return mine;
+    };
+    const c = await openTemp(t2, {
+      sync: {
+        autoStart: false,
+        connect: () => dial(next, { reconnect: { minDelay: 50, maxDelay: 100, jitter: false } }),
+      },
+    });
+    const events = [];
+    c.sync.on('peer', (event) => events.push(event));
+    c.sync.on('bootstrap', (event) => events.push({ bootstrap: true, ...event }));
+    await c.sync.addNode({ url: 'webrtc:host' });
+    await c.sync.start();
+    const first = await a.insert({ n: 1 });
+    await settle([a, c], { timeout: 10_000 });
+    assert.deepStrictEqual(await c.get(first), { n: 1 });
+    // The path dies; wrpc asks the factory, restores the subscription from
+    // its lastEventId (428: a fresh server-side client), syncom says hello
+    // again and pushes what it wrote meanwhile — no snapshot.
+    channels[0].close();
+    await waitUntil(() => c.sync.peers()[0]?.connected === false, { timeout: 5000 });
+    const whileDown = await c.insert({ whileDown: true });
+    const second = await a.insert({ n: 2 });
+    await settle([a, c], { timeout: 15_000 });
+    assert.strictEqual(channels.length, 2, 'one redial');
+    assert.deepStrictEqual(await c.get(second), { n: 2 });
+    assert.deepStrictEqual(await a.get(whileDown), { whileDown: true });
+    assert.ok(
+      events.some((event) => event.reconnected),
+      'the link announced its reconnect',
+    );
+    assert.ok(!events.some((event) => event.bootstrap), 'resumed from the cursor');
+    assert.strictEqual(c.sync.peers()[0].subscribed, true);
+  });
 
-  await t.test(
-    'a raw channel attached to a PeerHost: the browser hosts, and authorize sees the pseudo-session',
-    async (t2) => {
-      const b = await openTemp(t2);
-      let c = null;
-      const greeted = [];
-      const unit = b.sync.unit({
-        access: 'session',
-        authorize: (context, hello) => {
-          greeted.push([context.session?.data?.peer, hello.node]);
-          return context.session?.data?.peer === 'c' && hello.node === c.nodeId;
-        },
-        limits: { opsPerPush: 2 },
-      });
-      // What a browser would run: no RpcServer, no sessions — a PeerHost
-      // over the host half of the transport, with `trust: 'link'` handing
-      // every client a pseudo-session naming the peer.
-      const peerHost = new webrtc.PeerHost({ router: wrpc.defineRouter({ syncom: unit }), logger: false });
-      t2.after(() => peerHost.close());
-      const attach = (channel, peer) => peerHost.attach(new webrtc.RtcPeerTransport(channel, { peer }), { peer });
-      const [chC, chB] = createChannelPair();
-      attach(chB, 'c');
-      // A redial takes whatever channel the application negotiated last.
-      let current = chC;
-      c = await openTemp(t2, { sync: { autoStart: false, pageSize: 5, connect: () => dial(current) } });
-      const errors = [];
-      c.sync.on('error', (error) => errors.push(error));
-      await c.sync.addNode({ url: 'webrtc:host' });
-      await c.sync.start();
-      const fromB = await b.insert({ from: 'B' });
-      const fromC = await c.insert({ from: 'C' });
-      await settle([b, c], { timeout: 10_000 });
-      assert.deepStrictEqual(await c.get(fromB), { from: 'B' });
-      assert.deepStrictEqual(await b.get(fromC), { from: 'C' });
-      assert.deepStrictEqual(greeted, [['c', c.nodeId]]);
-      assert.strictEqual(peerHost.clients.size, 1);
-      assert.strictEqual(peerHost.trust, 'link');
-      // The host's limits hold over a PeerHost too: three ops in one page is 413.
-      await c.sync.enableNode('webrtc:host', false);
-      for (let i = 0; i < 3; i++) await c.insert({ i });
-      const [chC2, chB2] = createChannelPair();
-      attach(chB2, 'c');
-      current = chC2;
-      await c.sync.enableNode('webrtc:host', true);
-      await waitUntil(() => errors.some((error) => error.code === 413), { timeout: 5000 });
-      // Another peer id than the one authorize expects: 403 at hello.
-      const [chX, chBx] = createChannelPair();
-      attach(chBx, 'x');
-      const x = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chX) } });
-      const refused = [];
-      x.sync.on('error', (error) => refused.push(error));
-      await x.sync.addNode({ url: 'webrtc:host' });
-      await x.sync.start();
-      await waitUntil(() => refused.length > 0, { timeout: 5000 });
-      assert.strictEqual(refused[0].code, 403);
-      assert.match(refused[0].message, /Not authorized/);
-      assert.deepStrictEqual(greeted.at(-1), ['x', x.nodeId]);
-      // `trust: 'none'`: no session at all, so `access: 'session'` is 403 before hello.
-      const none = new webrtc.PeerHost({ router: wrpc.defineRouter({ syncom: unit }), logger: false, trust: 'none' });
-      t2.after(() => none.close());
-      const [chN, chBn] = createChannelPair();
-      none.attach(new webrtc.RtcPeerTransport(chBn, { peer: 'n' }), { peer: 'n' });
-      const n = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chN) } });
-      const denied = [];
-      n.sync.on('error', (error) => denied.push(error));
-      await n.sync.addNode({ url: 'webrtc:host' });
-      await n.sync.start();
-      await waitUntil(() => denied.length > 0, { timeout: 5000 });
-      assert.strictEqual(denied[0].code, 403);
-      assert.ok(
-        !greeted.some(([, node]) => node === n.nodeId),
-        'authorize never ran: refused by access before the handler',
-      );
-    },
-  );
+  it('should host in the browser over a raw channel attached to a PeerHost, and let authorize see the pseudo-session', async (t2) => {
+    const b = await openTemp(t2);
+    let c = null;
+    const greeted = [];
+    const unit = b.sync.unit({
+      access: 'session',
+      authorize: (context, hello) => {
+        greeted.push([context.session?.data?.peer, hello.node]);
+        return context.session?.data?.peer === 'c' && hello.node === c.nodeId;
+      },
+      limits: { opsPerPush: 2 },
+    });
+    // What a browser would run: no RpcServer, no sessions — a PeerHost
+    // over the host half of the transport, with `trust: 'link'` handing
+    // every client a pseudo-session naming the peer.
+    const peerHost = new webrtc.PeerHost({ router: wrpc.defineRouter({ syncom: unit }), logger: false });
+    t2.after(() => peerHost.close());
+    const attach = (channel, peer) => peerHost.attach(new webrtc.RtcPeerTransport(channel, { peer }), { peer });
+    const [chC, chB] = createChannelPair();
+    attach(chB, 'c');
+    // A redial takes whatever channel the application negotiated last.
+    let current = chC;
+    c = await openTemp(t2, { sync: { autoStart: false, pageSize: 5, connect: () => dial(current) } });
+    const errors = [];
+    c.sync.on('error', (error) => errors.push(error));
+    await c.sync.addNode({ url: 'webrtc:host' });
+    await c.sync.start();
+    const fromB = await b.insert({ from: 'B' });
+    const fromC = await c.insert({ from: 'C' });
+    await settle([b, c], { timeout: 10_000 });
+    assert.deepStrictEqual(await c.get(fromB), { from: 'B' });
+    assert.deepStrictEqual(await b.get(fromC), { from: 'C' });
+    assert.deepStrictEqual(greeted, [['c', c.nodeId]]);
+    assert.strictEqual(peerHost.clients.size, 1);
+    assert.strictEqual(peerHost.trust, 'link');
+    // The host's limits hold over a PeerHost too: three ops in one page is 413.
+    await c.sync.enableNode('webrtc:host', false);
+    for (let i = 0; i < 3; i++) await c.insert({ i });
+    const [chC2, chB2] = createChannelPair();
+    attach(chB2, 'c');
+    current = chC2;
+    await c.sync.enableNode('webrtc:host', true);
+    await waitUntil(() => errors.some((error) => error.code === 413), { timeout: 5000 });
+    // Another peer id than the one authorize expects: 403 at hello.
+    const [chX, chBx] = createChannelPair();
+    attach(chBx, 'x');
+    const x = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chX) } });
+    const refused = [];
+    x.sync.on('error', (error) => refused.push(error));
+    await x.sync.addNode({ url: 'webrtc:host' });
+    await x.sync.start();
+    await waitUntil(() => refused.length > 0, { timeout: 5000 });
+    assert.strictEqual(refused[0].code, 403);
+    assert.match(refused[0].message, /Not authorized/);
+    assert.deepStrictEqual(greeted.at(-1), ['x', x.nodeId]);
+    // `trust: 'none'`: no session at all, so `access: 'session'` is 403 before hello.
+    const none = new webrtc.PeerHost({ router: wrpc.defineRouter({ syncom: unit }), logger: false, trust: 'none' });
+    t2.after(() => none.close());
+    const [chN, chBn] = createChannelPair();
+    none.attach(new webrtc.RtcPeerTransport(chBn, { peer: 'n' }), { peer: 'n' });
+    const n = await openTemp(t2, { sync: { autoStart: false, connect: () => dial(chN) } });
+    const denied = [];
+    n.sync.on('error', (error) => denied.push(error));
+    await n.sync.addNode({ url: 'webrtc:host' });
+    await n.sync.start();
+    await waitUntil(() => denied.length > 0, { timeout: 5000 });
+    assert.strictEqual(denied[0].code, 403);
+    assert.ok(
+      !greeted.some(([, node]) => node === n.nodeId),
+      'authorize never ran: refused by access before the handler',
+    );
+  });
 });
 
 // The two packages meet in one trace: syncom opens `syncom.push` around the
@@ -744,74 +726,76 @@ const otel = wrpc &&
     ...require('@opentelemetry/core'),
   };
 
-test(
-  'syncom over wrpc: one trace from a write to the peer apply',
-  { skip: otel ? false : 'wrpc or otel unavailable' },
-  async (t) => {
-    const manager = new otel.AsyncLocalStorageContextManager().enable();
-    otel.api.context.setGlobalContextManager(manager);
-    otel.api.propagation.setGlobalPropagator(new otel.W3CTraceContextPropagator());
-    t.after(() => {
-      otel.api.context.disable();
-      otel.api.propagation.disable();
-    });
-    // Each side exports to its own memory, so a shared trace id proves the
-    // context crossed the socket rather than leaking within the process.
-    const tracing = (name) => {
-      const exporter = new otel.InMemorySpanExporter();
-      const provider = new otel.BasicTracerProvider({ spanProcessors: [new otel.SimpleSpanProcessor(exporter)] });
-      return { tracer: provider.getTracer(name), spans: () => exporter.getFinishedSpans() };
-    };
-    const hostSide = tracing('host');
-    const dialSide = tracing('dialer');
-    const wire = { propagation: otel.api.propagation, context: otel.api.context };
+describe('tracing over wrpc', () => {
+  it(
+    'should make one trace from a write to the peer apply for syncom over wrpc',
+    { skip: otel ? false : 'wrpc or otel unavailable' },
+    async (t) => {
+      const manager = new otel.AsyncLocalStorageContextManager().enable();
+      otel.api.context.setGlobalContextManager(manager);
+      otel.api.propagation.setGlobalPropagator(new otel.W3CTraceContextPropagator());
+      t.after(() => {
+        otel.api.context.disable();
+        otel.api.propagation.disable();
+      });
+      // Each side exports to its own memory, so a shared trace id proves the
+      // context crossed the socket rather than leaking within the process.
+      const tracing = (name) => {
+        const exporter = new otel.InMemorySpanExporter();
+        const provider = new otel.BasicTracerProvider({ spanProcessors: [new otel.SimpleSpanProcessor(exporter)] });
+        return { tracer: provider.getTracer(name), spans: () => exporter.getFinishedSpans() };
+      };
+      const hostSide = tracing('host');
+      const dialSide = tracing('dialer');
+      const wire = { propagation: otel.api.propagation, context: otel.api.context };
 
-    const a = await openTemp(t, { telemetry: { tracer: hostSide.tracer } });
-    const router = wrpc.defineRouter({ syncom: a.sync.unit({ access: 'public' }) });
-    const server = new wrpc.Server({
-      router,
-      host: '127.0.0.1',
-      port: 0,
-      protocol: 'http',
-      logger: false,
-      telemetry: { tracer: hostSide.tracer, ...wire },
-    });
-    await server.listen();
-    t.after(() => server.close().catch(() => {}));
-    const url = `ws://127.0.0.1:${server.address().port}${server.rpc.basePath}`;
+      const a = await openTemp(t, { telemetry: { tracer: hostSide.tracer } });
+      const router = wrpc.defineRouter({ syncom: a.sync.unit({ access: 'public' }) });
+      const server = new wrpc.Server({
+        router,
+        host: '127.0.0.1',
+        port: 0,
+        protocol: 'http',
+        logger: false,
+        telemetry: { tracer: hostSide.tracer, ...wire },
+      });
+      await server.listen();
+      t.after(() => server.close().catch(() => {}));
+      const url = `ws://127.0.0.1:${server.address().port}${server.rpc.basePath}`;
 
-    const c = await openTemp(t, {
-      telemetry: { tracer: dialSide.tracer },
-      sync: { connect: connect({ telemetry: { tracer: dialSide.tracer, ...wire } }), autoStart: false },
-    });
-    await c.sync.addNode({ url });
-    await c.sync.start();
-    // Greeted and subscribed first: a write that lands mid-handshake rides the
-    // handshake push AND a relay, and the chain below wants exactly one push.
-    await waitUntil(() => c.sync.peers().some((peer) => peer.subscribed));
-    const id = await c.insert({ from: 'C' });
-    await settle([a, c], { timeout: 10_000 });
-    assert.deepStrictEqual(await a.get(id), { from: 'C' });
+      const c = await openTemp(t, {
+        telemetry: { tracer: dialSide.tracer },
+        sync: { connect: connect({ telemetry: { tracer: dialSide.tracer, ...wire } }), autoStart: false },
+      });
+      await c.sync.addNode({ url });
+      await c.sync.start();
+      // Greeted and subscribed first: a write that lands mid-handshake rides the
+      // handshake push AND a relay, and the chain below wants exactly one push.
+      await waitUntil(() => c.sync.peers().some((peer) => peer.subscribed));
+      const id = await c.insert({ from: 'C' });
+      await settle([a, c], { timeout: 10_000 });
+      assert.deepStrictEqual(await a.get(id), { from: 'C' });
 
-    const one = (side, predicate) => {
-      const found = side.spans().filter(predicate);
-      const describe = (span) =>
-        `${span.name}(${span.attributes['syncom.push.reason'] ?? span.attributes['syncom.ops.count'] ?? ''})`;
-      assert.strictEqual(found.length, 1, `expected one span, got ${found.map(describe).join(', ')}`);
-      return found[0];
-    };
-    const commit = one(dialSide, (span) => span.name === 'syncom.commit');
-    const push = one(dialSide, (span) => span.name === 'syncom.push');
-    const clientCall = one(dialSide, (span) => span.name === 'syncom/push');
-    const serverCall = one(hostSide, (span) => span.name === 'syncom/push');
-    const apply = one(hostSide, (span) => span.name === 'syncom.apply');
-    assert.strictEqual(clientCall.kind, 2, 'CLIENT');
-    assert.strictEqual(serverCall.kind, 1, 'SERVER');
-    const chain = [commit, push, clientCall, serverCall, apply];
-    for (let i = 1; i < chain.length; i++) {
-      assert.strictEqual(chain[i].parentSpanContext?.spanId, chain[i - 1].spanContext().spanId, chain[i].name);
-      assert.strictEqual(chain[i].spanContext().traceId, commit.spanContext().traceId, chain[i].name);
-    }
-    assert.strictEqual(apply.attributes['syncom.ops.applied'], 1);
-  },
-);
+      const one = (side, predicate) => {
+        const found = side.spans().filter(predicate);
+        const label = (span) =>
+          `${span.name}(${span.attributes['syncom.push.reason'] ?? span.attributes['syncom.ops.count'] ?? ''})`;
+        assert.strictEqual(found.length, 1, `expected one span, got ${found.map(label).join(', ')}`);
+        return found[0];
+      };
+      const commit = one(dialSide, (span) => span.name === 'syncom.commit');
+      const push = one(dialSide, (span) => span.name === 'syncom.push');
+      const clientCall = one(dialSide, (span) => span.name === 'syncom/push');
+      const serverCall = one(hostSide, (span) => span.name === 'syncom/push');
+      const apply = one(hostSide, (span) => span.name === 'syncom.apply');
+      assert.strictEqual(clientCall.kind, 2, 'CLIENT');
+      assert.strictEqual(serverCall.kind, 1, 'SERVER');
+      const chain = [commit, push, clientCall, serverCall, apply];
+      for (let i = 1; i < chain.length; i++) {
+        assert.strictEqual(chain[i].parentSpanContext?.spanId, chain[i - 1].spanContext().spanId, chain[i].name);
+        assert.strictEqual(chain[i].spanContext().traceId, commit.spanContext().traceId, chain[i].name);
+      }
+      assert.strictEqual(apply.attributes['syncom.ops.applied'], 1);
+    },
+  );
+});

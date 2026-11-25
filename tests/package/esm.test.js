@@ -5,8 +5,8 @@
 // spell its exports in a shape that lexer reads, or `import { open } from
 // '@alexify/syncom'` throws outside a bundler.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const path = require('node:path');
 
 const ROOT = path.join(__dirname, '..', '..');
@@ -45,24 +45,26 @@ const ENTRIES = [
   'src/cleanup/cleanup.js',
 ];
 
-for (const entry of ENTRIES) {
-  test(`ESM sees every export of ${entry}`, async () => {
-    const file = path.join(ROOT, entry);
-    const required = require(file);
-    const imported = await import(file);
-    const named = Object.keys(imported).filter((name) => name !== 'default' && name !== 'module.exports');
-    assert.deepStrictEqual(named.sort(), Object.keys(required).sort());
-    for (const name of named) assert.strictEqual(imported[name], required[name], name);
+describe('ESM interop', () => {
+  for (const entry of ENTRIES) {
+    it(`should let ESM see every export of ${entry}`, async () => {
+      const file = path.join(ROOT, entry);
+      const required = require(file);
+      const imported = await import(file);
+      const named = Object.keys(imported).filter((name) => name !== 'default' && name !== 'module.exports');
+      assert.deepStrictEqual(named.sort(), Object.keys(required).sort());
+      for (const name of named) assert.strictEqual(imported[name], required[name], name);
+    });
+  }
+
+  // Node reads a `.js` file as CommonJS where no package.json says otherwise; Deno reads it as an ES module unless
+  // the closest package.json says "commonjs" — without the field `require` is not defined in a checkout run there
+  // (the smoke-deno job of CI, tests/smoke/smoke.js).
+  it('should say in package.json that the package is CommonJS', () => {
+    assert.strictEqual(require(path.join(ROOT, 'package.json')).type, 'commonjs');
   });
-}
 
-// Node reads a `.js` file as CommonJS where no package.json says otherwise; Deno reads it as an ES module unless
-// the closest package.json says "commonjs" — without the field `require` is not defined in a checkout run there
-// (the smoke-deno job of CI, tests/smoke/smoke.js).
-test('package.json says the package is CommonJS', () => {
-  assert.strictEqual(require(path.join(ROOT, 'package.json')).type, 'commonjs');
-});
-
-test('the root keeps verifyAsync to the engine', () => {
-  assert.strictEqual(require(path.join(ROOT, 'index.js')).verifyAsync, undefined);
+  it('should keep verifyAsync off the root, to the engine', () => {
+    assert.strictEqual(require(path.join(ROOT, 'index.js')).verifyAsync, undefined);
+  });
 });

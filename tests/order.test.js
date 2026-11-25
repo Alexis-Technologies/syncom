@@ -2,14 +2,14 @@
 
 // Fractional indexes: strings that sort with `<`, with room between any two.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { between, spread, compare, isKey } = require('../src/order/order.js');
 
 const sorted = (keys) => keys.every((key, i) => i === 0 || keys[i - 1] < key);
 
-test('order', async (t) => {
-  await t.test('between gives a key between its bounds, either side open', () => {
+describe('order', () => {
+  it('should give a key between its bounds with between, either side open', () => {
     const first = between();
     assert.strictEqual(first, 'V', 'the terminator alone, the middle digit');
     const after = between(first);
@@ -30,7 +30,7 @@ test('order', async (t) => {
     assert.strictEqual(isKey(7), false);
   });
 
-  await t.test('keys never run out: appending, prepending and bisecting stay ordered and short', () => {
+  it('should never run out of keys: appending, prepending and bisecting stay ordered and short', () => {
     const tail = [between()];
     for (let i = 0; i < 500; i++) tail.push(between(tail[tail.length - 1]));
     assert.ok(sorted(tail));
@@ -62,7 +62,7 @@ test('order', async (t) => {
     assert.strictEqual(new Set(keys).size, keys.length, 'all distinct');
   });
 
-  await t.test('spread gives n keys evenly; jitter keeps the order', () => {
+  it('should give n keys evenly with spread, jitter keeping the order', () => {
     const ten = spread(null, null, 10);
     assert.strictEqual(ten.length, 10);
     assert.ok(sorted(ten));

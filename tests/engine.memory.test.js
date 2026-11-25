@@ -3,35 +3,32 @@
 // The engine in memory: the contract suite, a database over it, a reopen
 // through the same engine, and what it keeps as objects.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { createDatabase, memoryEngine } = require('../src/all/all.js');
 const { runEngineTests, stored } = require('./suites/engine.js');
 
 let n = 0;
 const vroot = async () => `/mem-${++n}`;
 
-test('memory engine', async (t) => {
-  await runEngineTests(t, { create: memoryEngine, root: vroot });
+describe('memory engine', () => {
+  runEngineTests({ create: memoryEngine, root: vroot });
 
-  await t.test(
-    'capabilities: atomic write sets, exclusive create, the catalog’s rows; paths lists the databases',
-    async () => {
-      const engine = memoryEngine();
-      assert.strictEqual(engine.name, 'memory');
-      assert.strictEqual(engine.capabilities.atomicBatch, true);
-      assert.strictEqual(engine.capabilities.exclusiveCreate, true);
-      assert.strictEqual(engine.capabilities.indexes, true, 'the catalog’s rows are the engine’s');
-      assert.deepStrictEqual(engine.paths, []);
-      await engine.open('b');
-      await engine.open('a');
-      assert.deepStrictEqual(engine.paths, ['a', 'b']);
-      await engine.remove('b');
-      assert.deepStrictEqual(engine.paths, ['a']);
-    },
-  );
+  it('should report the capabilities atomic write sets, exclusive create and the catalog’s rows, and list the databases in paths', async () => {
+    const engine = memoryEngine();
+    assert.strictEqual(engine.name, 'memory');
+    assert.strictEqual(engine.capabilities.atomicBatch, true);
+    assert.strictEqual(engine.capabilities.exclusiveCreate, true);
+    assert.strictEqual(engine.capabilities.indexes, true, 'the catalog’s rows are the engine’s');
+    assert.deepStrictEqual(engine.paths, []);
+    await engine.open('b');
+    await engine.open('a');
+    assert.deepStrictEqual(engine.paths, ['a', 'b']);
+    await engine.remove('b');
+    assert.deepStrictEqual(engine.paths, ['a']);
+  });
 
-  await t.test('a record is kept as the object it was handed; raw() stringifies on demand', async () => {
+  it('should keep a record as the object it was handed, raw() stringifying it on demand', async () => {
     const db = await memoryEngine().open('objects');
     const record = stored({ title: 'x' });
     await db.write({ records: [{ id: 'r', stored: record }] });
@@ -40,7 +37,7 @@ test('memory engine', async (t) => {
     assert.strictEqual(db.size, 1);
   });
 
-  await t.test('a database in memory: writes, pieces, tags and a reopen through the same engine', async () => {
+  it('should keep a database in memory through writes, pieces, tags and a reopen through the same engine', async () => {
     const engine = memoryEngine();
     const options = { path: 'app', engine, logger: false, defer: 0, lock: false };
     const db = await createDatabase(options);
@@ -67,35 +64,32 @@ test('memory engine', async (t) => {
     await fresh.close();
   });
 
-  await t.test(
-    'the log rolls and compacts in memory: segments are ranges, the floor moves, a purge scrubs',
-    async () => {
-      const engine = memoryEngine();
-      const db = await createDatabase({
-        path: 'log',
-        engine,
-        logger: false,
-        defer: 0,
-        lock: false,
-        sync: { log: { rollAfter: 2 }, retention: { ops: 6 } },
-      });
-      const ids = [];
-      for (let i = 0; i < 12; i++) ids.push(await db.insert({ n: i }));
-      await db.flush();
-      assert.ok(db.stats().log.floor > 1, 'compacted');
-      assert.ok(db.stats().log.segments >= 1);
-      await db.purge(ids[11]);
-      assert.strictEqual(await db.get(ids[11]), null);
-      assert.deepStrictEqual(await db.get(ids[10]), { n: 10 }, 'a live record stays whatever the log compacted');
-      await db.close();
-    },
-  );
+  it('should roll and compact the log in memory: segments are ranges, the floor moves, a purge scrubs', async () => {
+    const engine = memoryEngine();
+    const db = await createDatabase({
+      path: 'log',
+      engine,
+      logger: false,
+      defer: 0,
+      lock: false,
+      sync: { log: { rollAfter: 2 }, retention: { ops: 6 } },
+    });
+    const ids = [];
+    for (let i = 0; i < 12; i++) ids.push(await db.insert({ n: i }));
+    await db.flush();
+    assert.ok(db.stats().log.floor > 1, 'compacted');
+    assert.ok(db.stats().log.segments >= 1);
+    await db.purge(ids[11]);
+    assert.strictEqual(await db.get(ids[11]), null);
+    assert.deepStrictEqual(await db.get(ids[10]), { n: 10 }, 'a live record stays whatever the log compacted');
+    await db.close();
+  });
 });
 
 // The log in memory under a wrapper that keeps copies of its entries (atRest
 // seals them, a port clones them): a scrub must reach the copies.
-test('memory engine: the log under a wrapper', async (t) => {
-  await t.test('a scrub replaces the entry at each seq with what the log hands back', async () => {
+describe('memory engine: the log under a wrapper', () => {
+  it('should replace the entry at each seq with what the log hands back on a scrub', async () => {
     const engine = memoryEngine();
     const db = await engine.open('scrub', { logger: null });
     const entry = (seq, secret) => ({

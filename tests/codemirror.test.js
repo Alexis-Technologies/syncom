@@ -4,8 +4,8 @@
 // @codemirror/* modules (devDependencies; skipped without them) and a view
 // that is its state and a dispatch — no DOM (CM-1).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createUndo } = require('../src/undo/undo.js');
@@ -39,6 +39,12 @@ const createDatabase = async (t, name, options = {}) => {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 
+// What a range is replaced with: text mostly, now and then a line break or nothing.
+const insertOf = (random, tag) => {
+  if (random() < 0.7) return `${tag}${Math.floor(random() * 10)}`;
+  return random() < 0.5 ? '\n' : '';
+};
+
 // A random edit as a user makes one: one or more ranges replaced at once.
 const randomEdit = (view, random, tag) => {
   const length = view.state.doc.length;
@@ -47,15 +53,15 @@ const randomEdit = (view, random, tag) => {
   for (let i = 0; i < 1 + Math.floor(random() * 3) && at <= length; i++) {
     const from = at + Math.floor(random() * (length - at + 1));
     const to = Math.min(length, from + Math.floor(random() * 3));
-    const insert = random() < 0.7 ? `${tag}${Math.floor(random() * 10)}` : random() < 0.5 ? '\n' : '';
+    const insert = insertOf(random, tag);
     changes.push({ from, to, insert });
     at = to + 1;
   }
   view.dispatch({ changes, selection: { anchor: Math.min(changes[0].from, length) } });
 };
 
-test('CodeMirror', { skip }, async (t) => {
-  await t.test('a ChangeSet reads as a delta over the document before it, and a delta as changes again', () => {
+describe('CodeMirror', { skip }, () => {
+  it('should read a ChangeSet as a delta over the document before it, and a delta as changes again', () => {
     const state = cm.state.EditorState.create({ doc: 'hello world' });
     const tr = state.update({
       changes: [
@@ -78,110 +84,104 @@ test('CodeMirror', { skip }, async (t) => {
     assert.deepStrictEqual(CM.changesOfDelta([{ retain: 1 }, { insert: { embed: null } }]), [{ from: 1, insert: '￼' }]);
   });
 
-  await t.test(
-    'two editors on two nodes stay the same as the field through edits of several ranges at once',
-    async (t2) => {
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
-      const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
-      const id = await sa.insert({});
-      await sa.updateText(id, 'body', 'line one\r\nline two');
-      await settle([sa, sb]);
-      const a = CM.createCodeMirror(sa, id, 'body', cm);
-      const b = CM.createCodeMirror(sb, id, 'body', cm);
-      const va = viewOf([a.extension]);
-      const vb = viewOf([b.extension]);
-      t2.after(() => a.stop());
-      t2.after(() => b.stop());
-      await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
-      await Promise.all([a.binding.flush(), b.binding.flush()]);
-      await settle([sa, sb]);
-      // CodeMirror reads `\r\n` as a line break; the field holds it until an editor's first edit.
-      assert.deepStrictEqual(
-        [(await sa.get(id)).body, va.state.doc.toString(), vb.state.doc.toString()],
-        ['line one\r\nline two', 'line one\nline two', 'line one\nline two'],
-      );
-      const same = async () => {
-        const text = (await sa.get(id)).body;
-        return text === (await sb.get(id)).body && va.state.doc.toString() === text && vb.state.doc.toString() === text;
-      };
-      for (const seed of [1, 2, 3, 4]) {
-        const random = prng(seed);
-        for (let i = 0; i < 50; i++) {
-          randomEdit(random() < 0.5 ? va : vb, random, random() < 0.5 ? 'a' : 'b');
-          if (random() < 0.3) await tick();
-        }
-        await Promise.all([a.binding.flush(), b.binding.flush()]);
-        await settle([sa, sb]);
-        await waitUntil(same);
+  it('should keep two editors on two nodes the same as the field through edits of several ranges at once', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
+    const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
+    const id = await sa.insert({});
+    await sa.updateText(id, 'body', 'line one\r\nline two');
+    await settle([sa, sb]);
+    const a = CM.createCodeMirror(sa, id, 'body', cm);
+    const b = CM.createCodeMirror(sb, id, 'body', cm);
+    const va = viewOf([a.extension]);
+    const vb = viewOf([b.extension]);
+    t2.after(() => a.stop());
+    t2.after(() => b.stop());
+    await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
+    await Promise.all([a.binding.flush(), b.binding.flush()]);
+    await settle([sa, sb]);
+    // CodeMirror reads `\r\n` as a line break; the field holds it until an editor's first edit.
+    assert.deepStrictEqual(
+      [(await sa.get(id)).body, va.state.doc.toString(), vb.state.doc.toString()],
+      ['line one\r\nline two', 'line one\nline two', 'line one\nline two'],
+    );
+    const same = async () => {
+      const text = (await sa.get(id)).body;
+      return text === (await sb.get(id)).body && va.state.doc.toString() === text && vb.state.doc.toString() === text;
+    };
+    for (const seed of [1, 2, 3, 4]) {
+      const random = prng(seed);
+      for (let i = 0; i < 50; i++) {
+        randomEdit(random() < 0.5 ? va : vb, random, random() < 0.5 ? 'a' : 'b');
+        if (random() < 0.3) await tick();
       }
-      // A peer's insert before the caret moves it; the editor's own history holds none of it.
-      va.dispatch({ selection: { anchor: 4 } });
-      await sb.splice(id, 'body', 0, 0, 'xyz');
-      await settle([sa, sb]);
-      await waitUntil(() => va.state.doc.toString().startsWith('xyz'));
-      assert.strictEqual(va.state.selection.main.head, 7);
-      assert.throws(() => a.attach(va), TypeError, 'once');
-      assert.throws(() => CM.createCodeMirror(sa, id, 'body', {}), TypeError);
-      const c = CM.createCodeMirror(sa, id, 'body', cm);
-      assert.throws(() => c.attach({}), TypeError);
-      assert.throws(() => c.attach(viewOf([])), TypeError, 'a state without the extension');
-    },
-  );
-
-  await t.test(
-    'line breaks CodeMirror reads otherwise reach the field with an editor’s next edit, never as an answer, once',
-    async (t2) => {
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
-      const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
-      const id = await sa.insert({});
-      // A lone `\r` and a `\r\n`: CodeMirror shows both as `\n`.
-      await sa.updateText(id, 'body', 'a\rb\r\nc');
-      await settle([sa, sb]);
-      const a = CM.createCodeMirror(sa, id, 'body', cm);
-      const b = CM.createCodeMirror(sb, id, 'body', cm);
-      assert.throws(() => a.indexOf(0), { name: 'TypeError', message: 'indexOf(): attach() first' });
-      assert.throws(() => a.posOf(0), { name: 'TypeError', message: 'posOf(): attach() first' });
-      const va = viewOf([a.extension]);
-      const vb = viewOf([b.extension]);
-      t2.after(() => a.stop());
-      t2.after(() => b.stop());
-      const own = () => [sa.vector[sa.nodeId] ?? 0, sb.vector[sb.nodeId] ?? 0];
-      const quiet = own();
-      await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
       await Promise.all([a.binding.flush(), b.binding.flush()]);
-      for (let i = 0; i < 5; i++) await tick();
       await settle([sa, sb]);
-      assert.deepStrictEqual(own(), quiet, 'opening the editors wrote nothing');
-      assert.deepStrictEqual(
-        [(await sa.get(id)).body, va.state.doc.toString(), vb.state.doc.toString()],
-        ['a\rb\r\nc', 'a\nb\nc', 'a\nb\nc'],
-      );
-      // The document's offsets against the field's indices: `c` is at 4 in one, 5 in the other.
-      assert.deepStrictEqual([a.indexOf(4), a.posOf(5), a.indexOf(2), a.posOf(2)], [5, 4, 2, 2]);
-      // A's edit carries the line breaks; B lays it over what it held and holds nothing more.
-      va.dispatch({ changes: { from: 5, insert: 'X' } });
-      await a.binding.flush();
-      await settle([sa, sb]);
-      await waitUntil(() => vb.state.doc.toString() === 'a\nb\ncX');
-      assert.strictEqual((await sb.get(id)).body, 'a\nb\ncX');
-      assert.deepStrictEqual([b.indexOf(4), b.posOf(4)], [4, 4], 'fitted: the indices agree');
-      vb.dispatch({ changes: { from: 0, insert: 'Y' } });
-      await b.binding.flush();
-      await settle([sa, sb]);
-      await waitUntil(() => va.state.doc.toString() === 'Ya\nb\ncX');
-      assert.deepStrictEqual(
-        [(await sa.get(id)).body, (await sb.get(id)).body, vb.state.doc.toString()],
-        ['Ya\nb\ncX', 'Ya\nb\ncX', 'Ya\nb\ncX'],
-        'one line break where each was',
-      );
-      const after = own();
-      for (let i = 0; i < 5; i++) await tick();
-      await settle([sa, sb]);
-      assert.deepStrictEqual(own(), after, 'nothing answered the edits');
-    },
-  );
+      await waitUntil(same);
+    }
+    // A peer's insert before the caret moves it; the editor's own history holds none of it.
+    va.dispatch({ selection: { anchor: 4 } });
+    await sb.splice(id, 'body', 0, 0, 'xyz');
+    await settle([sa, sb]);
+    await waitUntil(() => va.state.doc.toString().startsWith('xyz'));
+    assert.strictEqual(va.state.selection.main.head, 7);
+    assert.throws(() => a.attach(va), TypeError, 'once');
+    assert.throws(() => CM.createCodeMirror(sa, id, 'body', {}), TypeError);
+    const c = CM.createCodeMirror(sa, id, 'body', cm);
+    assert.throws(() => c.attach({}), TypeError);
+    assert.throws(() => c.attach(viewOf([])), TypeError, 'a state without the extension');
+  });
 
-  await t.test('an editor with a line separator of its own fits the field the same way', async (t2) => {
+  it('should bring line breaks CodeMirror reads otherwise to the field with an editor’s next edit, never as an answer, once', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createDatabase);
+    const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
+    const id = await sa.insert({});
+    // A lone `\r` and a `\r\n`: CodeMirror shows both as `\n`.
+    await sa.updateText(id, 'body', 'a\rb\r\nc');
+    await settle([sa, sb]);
+    const a = CM.createCodeMirror(sa, id, 'body', cm);
+    const b = CM.createCodeMirror(sb, id, 'body', cm);
+    assert.throws(() => a.indexOf(0), { name: 'ArgumentError', message: 'indexOf(): attach() first' });
+    assert.throws(() => a.posOf(0), { name: 'ArgumentError', message: 'posOf(): attach() first' });
+    const va = viewOf([a.extension]);
+    const vb = viewOf([b.extension]);
+    t2.after(() => a.stop());
+    t2.after(() => b.stop());
+    const own = () => [sa.vector[sa.nodeId] ?? 0, sb.vector[sb.nodeId] ?? 0];
+    const quiet = own();
+    await Promise.all([a.attach(va).ready, b.attach(vb).ready]);
+    await Promise.all([a.binding.flush(), b.binding.flush()]);
+    for (let i = 0; i < 5; i++) await tick();
+    await settle([sa, sb]);
+    assert.deepStrictEqual(own(), quiet, 'opening the editors wrote nothing');
+    assert.deepStrictEqual(
+      [(await sa.get(id)).body, va.state.doc.toString(), vb.state.doc.toString()],
+      ['a\rb\r\nc', 'a\nb\nc', 'a\nb\nc'],
+    );
+    // The document's offsets against the field's indices: `c` is at 4 in one, 5 in the other.
+    assert.deepStrictEqual([a.indexOf(4), a.posOf(5), a.indexOf(2), a.posOf(2)], [5, 4, 2, 2]);
+    // A's edit carries the line breaks; B lays it over what it held and holds nothing more.
+    va.dispatch({ changes: { from: 5, insert: 'X' } });
+    await a.binding.flush();
+    await settle([sa, sb]);
+    await waitUntil(() => vb.state.doc.toString() === 'a\nb\ncX');
+    assert.strictEqual((await sb.get(id)).body, 'a\nb\ncX');
+    assert.deepStrictEqual([b.indexOf(4), b.posOf(4)], [4, 4], 'fitted: the indices agree');
+    vb.dispatch({ changes: { from: 0, insert: 'Y' } });
+    await b.binding.flush();
+    await settle([sa, sb]);
+    await waitUntil(() => va.state.doc.toString() === 'Ya\nb\ncX');
+    assert.deepStrictEqual(
+      [(await sa.get(id)).body, (await sb.get(id)).body, vb.state.doc.toString()],
+      ['Ya\nb\ncX', 'Ya\nb\ncX', 'Ya\nb\ncX'],
+      'one line break where each was',
+    );
+    const after = own();
+    for (let i = 0; i < 5; i++) await tick();
+    await settle([sa, sb]);
+    assert.deepStrictEqual(own(), after, 'nothing answered the edits');
+  });
+
+  it('should fit the field the same way for an editor with a line separator of its own', async (t2) => {
     const storage = await createDatabase(t2, 'separator');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'a\r\nb');
@@ -200,60 +200,57 @@ test('CodeMirror', { skip }, async (t) => {
     assert.deepStrictEqual([view.state.doc.toString(), (await storage.get(id)).body], ['a\n\n!b', 'a\n\n!b']);
   });
 
-  await t.test(
-    'undo and redo are the storage’s commands; a presence room’s cursors are decorations and this editor’s selection is published',
-    async (t2) => {
-      const storage = await createDatabase(t2, 'undo');
-      const id = await storage.insert({});
-      const cmb = CM.createCodeMirror(storage, id, 'body', cm);
-      const manager = createUndo(storage, { trackedSources: [cmb.source], records: [id], mergeInterval: 0 });
-      const { undo, redo, keys } = cmb.commands(manager);
-      assert.deepStrictEqual(
-        keys.map((key) => key.key),
-        ['Mod-z', 'Mod-y'],
-      );
-      const presence = createPresence(storage, { timeout: 5000 });
-      t2.after(() => presence.destroy());
-      const cursors = cmb.cursors(presence);
-      t2.after(() => cursors.stop());
-      const view = viewOf([cmb.extension, cursors.extension]);
-      t2.after(() => cmb.stop());
-      await cmb.attach(view).ready;
-      view.dispatch({ changes: { from: 0, insert: 'hello' } });
-      await cmb.binding.flush();
-      view.dispatch({ changes: { from: 5, insert: ' world' }, selection: { anchor: 11 } });
-      await cmb.binding.flush();
-      assert.strictEqual(undo(view), true, 'can');
-      await waitUntil(() => view.state.doc.toString() === 'hello');
-      redo(view);
-      await waitUntil(() => view.state.doc.toString() === 'hello world');
-      assert.strictEqual(redo(view), false, 'nothing to redo');
-      // This editor's selection reached the room as tokens.
-      await waitUntil(() => presence.local?.cursor !== undefined);
-      assert.strictEqual(presence.local.cursor.field, 'body');
-      // Another node's cursor, over a range: a caret and a highlight.
-      const tokens = {
-        id,
-        field: 'body',
-        anchor: await storage.cursor(id, 'body', 0),
-        head: await storage.cursor(id, 'body', 5),
-      };
-      await presence.apply({ p: 1, scope: '*', s: [['other', 1, Date.now(), { cursor: tokens }]] });
-      const decorated = () => {
-        const found = [];
-        for (const provided of view.state.facet(cm.view.EditorView.decorations)) {
-          const set = typeof provided === 'function' ? provided(view) : provided;
-          set.between(0, view.state.doc.length, (from, to) => void found.push([from, to]));
-        }
-        return found;
-      };
-      await waitUntil(() => decorated().length === 2);
-      assert.deepStrictEqual(decorated(), [
-        [0, 5],
-        [5, 5],
-      ]);
-      assert.throws(() => cmb.commands({}), TypeError);
-      assert.throws(() => CM.createCodeMirror(storage, id, 'body', { state: cm.state }).cursors(presence), TypeError);
-    },
-  );
+  it('should make undo and redo the storage’s commands and a presence room’s cursors decorations, and publish this editor’s selection', async (t2) => {
+    const storage = await createDatabase(t2, 'undo');
+    const id = await storage.insert({});
+    const cmb = CM.createCodeMirror(storage, id, 'body', cm);
+    const manager = createUndo(storage, { trackedSources: [cmb.source], records: [id], mergeInterval: 0 });
+    const { undo, redo, keys } = cmb.commands(manager);
+    assert.deepStrictEqual(
+      keys.map((key) => key.key),
+      ['Mod-z', 'Mod-y'],
+    );
+    const presence = createPresence(storage, { timeout: 5000 });
+    t2.after(() => presence.destroy());
+    const cursors = cmb.cursors(presence);
+    t2.after(() => cursors.stop());
+    const view = viewOf([cmb.extension, cursors.extension]);
+    t2.after(() => cmb.stop());
+    await cmb.attach(view).ready;
+    view.dispatch({ changes: { from: 0, insert: 'hello' } });
+    await cmb.binding.flush();
+    view.dispatch({ changes: { from: 5, insert: ' world' }, selection: { anchor: 11 } });
+    await cmb.binding.flush();
+    assert.strictEqual(undo(view), true, 'can');
+    await waitUntil(() => view.state.doc.toString() === 'hello');
+    redo(view);
+    await waitUntil(() => view.state.doc.toString() === 'hello world');
+    assert.strictEqual(redo(view), false, 'nothing to redo');
+    // This editor's selection reached the room as tokens.
+    await waitUntil(() => presence.local?.cursor !== undefined);
+    assert.strictEqual(presence.local.cursor.field, 'body');
+    // Another node's cursor, over a range: a caret and a highlight.
+    const tokens = {
+      id,
+      field: 'body',
+      anchor: await storage.cursor(id, 'body', 0),
+      head: await storage.cursor(id, 'body', 5),
+    };
+    await presence.apply({ p: 1, scope: '*', s: [['other', 1, Date.now(), { cursor: tokens }]] });
+    const decorated = () => {
+      const found = [];
+      for (const provided of view.state.facet(cm.view.EditorView.decorations)) {
+        const set = typeof provided === 'function' ? provided(view) : provided;
+        set.between(0, view.state.doc.length, (from, to) => void found.push([from, to]));
+      }
+      return found;
+    };
+    await waitUntil(() => decorated().length === 2);
+    assert.deepStrictEqual(decorated(), [
+      [0, 5],
+      [5, 5],
+    ]);
+    assert.throws(() => cmb.commands({}), TypeError);
+    assert.throws(() => CM.createCodeMirror(storage, id, 'body', { state: cm.state }).cursors(presence), TypeError);
+  });
 });

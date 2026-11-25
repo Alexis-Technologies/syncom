@@ -26,7 +26,10 @@ const clone = (value) => structuredClone(value);
 // The real clock, taken before any test replaces `Date.now`.
 const realNow = Date.now;
 
-const compare = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+const compare = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
 
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -97,50 +100,41 @@ const evaluate = (expr, doc, clock) => {
   }
 };
 
+// One operator of a condition, held against the value.
+const matchesOperator = (value, key, expected) => {
+  switch (key) {
+    case '$gt':
+      return value !== undefined && compare(value, expected) > 0;
+    case '$gte':
+      return value !== undefined && compare(value, expected) >= 0;
+    case '$lt':
+      return value !== undefined && compare(value, expected) < 0;
+    case '$lte':
+      return value !== undefined && compare(value, expected) <= 0;
+    case '$in':
+      return expected.some((item) => same(item, value));
+    case '$nin':
+      return !expected.some((item) => same(item, value));
+    case '$ne':
+      return !same(value, expected);
+    case '$eq':
+      return same(value, expected);
+    case '$exists':
+      return (value !== undefined) === Boolean(expected);
+    case '$not':
+      return !matchesCondition(value, expected);
+    case '$regex':
+      return typeof value === 'string' && new RegExp(expected).test(value);
+    default:
+      throw new Error(`fake-mongo: operator ${key} is not supported`);
+  }
+};
+
 const matchesCondition = (value, condition) => {
   if (condition !== null && typeof condition === 'object' && !Array.isArray(condition)) {
     const keys = Object.keys(condition);
     if (keys.length > 0 && keys.every((key) => OPERATORS.has(key))) {
-      for (const key of keys) {
-        const expected = condition[key];
-        switch (key) {
-          case '$gt':
-            if (!(value !== undefined && compare(value, expected) > 0)) return false;
-            break;
-          case '$gte':
-            if (!(value !== undefined && compare(value, expected) >= 0)) return false;
-            break;
-          case '$lt':
-            if (!(value !== undefined && compare(value, expected) < 0)) return false;
-            break;
-          case '$lte':
-            if (!(value !== undefined && compare(value, expected) <= 0)) return false;
-            break;
-          case '$in':
-            if (!expected.some((item) => same(item, value))) return false;
-            break;
-          case '$nin':
-            if (expected.some((item) => same(item, value))) return false;
-            break;
-          case '$ne':
-            if (same(value, expected)) return false;
-            break;
-          case '$eq':
-            if (!same(value, expected)) return false;
-            break;
-          case '$exists':
-            if ((value !== undefined) !== Boolean(expected)) return false;
-            break;
-          case '$not':
-            if (matchesCondition(value, expected)) return false;
-            break;
-          case '$regex':
-            if (!(typeof value === 'string' && new RegExp(expected).test(value))) return false;
-            break;
-          default:
-            throw new Error(`fake-mongo: operator ${key} is not supported`);
-        }
-      }
+      for (const key of keys) if (!matchesOperator(value, key, condition[key])) return false;
       return true;
     }
   }

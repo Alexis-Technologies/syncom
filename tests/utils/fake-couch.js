@@ -23,7 +23,9 @@ const createFakeCouch = ({ url = 'https://couch.test/db' } = {}) => {
   const record = (id, doc) => {
     docs.set(id, doc);
     changes.push({ seq: changes.length + 1, id, deleted: doc._deleted === true });
-    for (const wake of [...waiters]) wake();
+    for (const wake of [...waiters]) {
+      wake();
+    }
   };
   const nextRev = (held) =>
     `${(held ? Number(held.split('-')[0]) : 0) + 1}-${(++revisions).toString(16).padStart(8, '0')}`;
@@ -32,11 +34,17 @@ const createFakeCouch = ({ url = 'https://couch.test/db' } = {}) => {
     for (let i = since; i < changes.length && results.length < limit; i++) {
       const change = changes[i];
       // One row per document, as CouchDB answers: the newest change of each.
-      if (changes.slice(i + 1).some((later) => later.id === change.id)) continue;
+      if (changes.slice(i + 1).some((later) => later.id === change.id)) {
+        continue;
+      }
       const doc = docs.get(change.id);
       const row = { seq: change.seq, id: change.id, changes: [{ rev: doc._rev }] };
-      if (doc._deleted === true) row.deleted = true;
-      if (includeDocs) row.doc = clone(doc);
+      if (doc._deleted === true) {
+        row.deleted = true;
+      }
+      if (includeDocs) {
+        row.doc = clone(doc);
+      }
       results.push(row);
     }
     const last = results.length > 0 ? results[results.length - 1].seq : since;
@@ -56,13 +64,17 @@ const createFakeCouch = ({ url = 'https://couch.test/db' } = {}) => {
     },
     read(id) {
       const doc = docs.get(id);
-      if (doc === undefined || doc._deleted === true) return null;
+      if (doc === undefined || doc._deleted === true) {
+        return null;
+      }
       const { _id, _rev, ...data } = doc;
       return data;
     },
     async fetch(target, init = {}) {
       couch.calls.push(`${init.method ?? 'GET'} ${target.slice(base.length)}`);
-      if (!target.startsWith(base)) return answer(404, { error: 'not_found' });
+      if (!target.startsWith(base)) {
+        return answer(404, { error: 'not_found' });
+      }
       const path = target.slice(base.length);
       const [route, query = ''] = path.split('?');
       const params = new URLSearchParams(query);
@@ -81,7 +93,9 @@ const createFakeCouch = ({ url = 'https://couch.test/db' } = {}) => {
             waiters.add(wake);
             init.signal?.addEventListener?.('abort', wake, { once: true });
           });
-          if (init.signal?.aborted) return answer(500, { error: 'aborted' });
+          if (init.signal?.aborted) {
+            return answer(500, { error: 'aborted' });
+          }
         }
         return answer(200, page(since, limit, includeDocs));
       }
@@ -116,7 +130,9 @@ const createFakeCouch = ({ url = 'https://couch.test/db' } = {}) => {
       if (route.startsWith('/') && !init.method) {
         const id = decodeURIComponent(route.slice(1));
         const doc = docs.get(id);
-        if (doc === undefined) return answer(404, { error: 'not_found', reason: 'missing' });
+        if (doc === undefined) {
+          return answer(404, { error: 'not_found', reason: 'missing' });
+        }
         return answer(200, doc);
       }
       return answer(500, { error: 'fake-couch: unsupported', route });

@@ -5,8 +5,8 @@
 // list (src/text/cow.js) — every operation checked against what it stands for, each op written under
 // an owner of its own, versions kept and read back after later edits, untouched.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const R = require('../src/text/rope.js');
 const I = require('../src/text/ids.js');
 const C = require('../src/text/cow.js');
@@ -36,24 +36,26 @@ const check = (root, spans, where) => {
   let s = 0;
   let v = 0;
   let text = '';
-  for (const it of spans) {
-    s += it.len;
-    v += it.vis ? it.len : 0;
-    if (it.vis) text += it.body;
+  for (const item of spans) {
+    s += item.len;
+    v += item.vis ? item.len : 0;
+    if (item.vis) text += item.body;
   }
   assert.deepStrictEqual([root.s, root.v], [s, v], `${where}: measures`);
   assert.strictEqual(R.text(root), text, `${where}: text`);
   let at = 0;
   let before = [0, 0];
-  for (const it of spans) {
-    for (let k = 0; k < it.len; k++) {
+  for (const item of spans) {
+    for (let k = 0; k < item.len; k++) {
       const cursor = R.locate(root, false, at + k);
-      assert.strictEqual(cursor.span, it, `${where}: locate s ${at + k}`);
+      assert.strictEqual(cursor.span, item, `${where}: locate s ${at + k}`);
       assert.deepStrictEqual([cursor.s, cursor.v], before, `${where}: position at s ${at + k}`);
-      if (it.vis) assert.strictEqual(R.spanAt(root, true, before[1] + k).span, it, `${where}: find v ${before[1] + k}`);
+      if (item.vis) {
+        assert.strictEqual(R.spanAt(root, true, before[1] + k).span, item, `${where}: find v ${before[1] + k}`);
+      }
     }
-    at += it.len;
-    before = [before[0] + it.len, before[1] + (it.vis ? it.len : 0)];
+    at += item.len;
+    before = [before[0] + item.len, before[1] + (item.vis ? item.len : 0)];
   }
   assert.strictEqual(R.locate(root, false, s), null, `${where}: past the end`);
   assert.strictEqual(R.spanAt(root, true, v), null, `${where}: past the visible end`);
@@ -83,20 +85,20 @@ const checkPlaces = (holder, spans, where, neighbours = true) => {
   let s = 0;
   let v = 0;
   for (let i = 0; i < spans.length; i++) {
-    const it = spans[i];
-    const at = R.positionOf(holder, it);
+    const item = spans[i];
+    const at = R.positionOf(holder, item);
     assert.deepStrictEqual([at.s, at.v], [s, v], `${where}: positionOf ${i}`);
     if (neighbours) {
-      assert.strictEqual(R.before(holder, it), i > 0 ? spans[i - 1] : null, `${where}: before ${i}`);
-      assert.strictEqual(R.after(holder, it), i + 1 < spans.length ? spans[i + 1] : null, `${where}: after ${i}`);
+      assert.strictEqual(R.before(holder, item), i > 0 ? spans[i - 1] : null, `${where}: before ${i}`);
+      assert.strictEqual(R.after(holder, item), i + 1 < spans.length ? spans[i + 1] : null, `${where}: after ${i}`);
     }
-    s += it.len;
-    v += it.vis ? it.len : 0;
+    s += item.len;
+    v += item.vis ? item.len : 0;
   }
 };
 
-test('the copy-on-write rope with two measures', async (t) => {
-  await t.test('fromSpans, locate, find, the walk and the text agree with the array, at every size', () => {
+describe('the copy-on-write rope with two measures', () => {
+  it('should agree with the array in fromSpans, locate, find, the walk and the text, at every size', () => {
     for (const n of [0, 1, 2, 31, 32, 33, 64, 65, 1000, 1057]) {
       const spans = Array.from({ length: n }, (_, i) => span(i % 3 === 0 ? 0 : 1 + (i % 5), i % 4 !== 1));
       const holder = holderOf(R.fromSpans(spans, owners + 1));
@@ -105,7 +107,7 @@ test('the copy-on-write rope with two measures', async (t) => {
     }
   });
 
-  await t.test('an op copies the path once, versions stay as they were, the head answers the hints (seeded)', () => {
+  it('should copy the path once per op, keep versions as they were and answer the hints at the head (seeded)', () => {
     for (let seed = 1; seed <= 8; seed++) {
       const random = rng(seed);
       let spans = Array.from({ length: 1 + pick(random, 80) }, (_, i) => span(1 + (i % 4), random() < 0.8));
@@ -165,7 +167,7 @@ test('the copy-on-write rope with two measures', async (t) => {
     }
   });
 
-  await t.test('the tree stays shallow, every level within MAX', () => {
+  it('should keep the tree shallow, every level within MAX', () => {
     const spans = [span(1, true)];
     const holder = holderOf(R.fromSpans(spans, owners + 1));
     for (let i = 1; i < 20_000; i++) {
@@ -177,7 +179,7 @@ test('the copy-on-write rope with two measures', async (t) => {
     check(holder.root, spans, 'appended');
   });
 
-  await t.test('a write copies a node once per owner; a version handed on never changes', () => {
+  it('should copy a node once per owner on a write, and never change a version handed on', () => {
     const spans = Array.from({ length: 5000 }, () => span(1, true));
     const first = holderOf(R.fromSpans(spans, owners + 1));
     first.frozen = true;
@@ -193,7 +195,7 @@ test('the copy-on-write rope with two measures', async (t) => {
     assert.strictEqual(second.root.s, 5004);
   });
 
-  await t.test('a fork of an older version sets its hints once; a frozen one never writes a hint', () => {
+  it('should set the hints of a fork of an older version once, and never write a hint into a frozen one', () => {
     const spans = Array.from({ length: 300 }, (_, i) => span(1 + (i % 3), i % 5 !== 0));
     const older = holderOf(R.fromSpans(spans, owners + 1));
     older.frozen = true;
@@ -221,7 +223,7 @@ test('the copy-on-write rope with two measures', async (t) => {
   });
 });
 
-test('the id index', async (t) => {
+describe('the id index', () => {
   // The sorted array of [key, value] an index stands for.
   const checkIndex = (root, sorted, where) => {
     assert.strictEqual(I.sizeOf(root), sorted.length, `${where}: size`);
@@ -248,7 +250,7 @@ test('the id index', async (t) => {
     }
   };
 
-  await t.test('set, remove, get, floor and a walk agree with a sorted array; versions keep theirs (seeded)', () => {
+  it('should agree with a sorted array in set, remove, get, floor and a walk, versions keeping theirs (seeded)', () => {
     for (let seed = 1; seed <= 8; seed++) {
       const random = rng(seed);
       let root = I.EMPTY;
@@ -283,7 +285,7 @@ test('the id index', async (t) => {
     }
   });
 
-  await t.test('built bottom-up from sorted keys, at every size', () => {
+  it('should build bottom-up from sorted keys, at every size', () => {
     for (const n of [0, 1, 31, 32, 33, 1024, 1025, 40_000]) {
       const sorted = Array.from({ length: n }, (_, i) => [i * 3 + 1, { i }]);
       const root = I.fromSorted(
@@ -303,8 +305,8 @@ test('the id index', async (t) => {
   });
 });
 
-test('the copy-on-write hash trie', async (t) => {
-  await t.test('get, set, remove and pairs agree with a Map; versions keep their keys (seeded)', () => {
+describe('the copy-on-write hash trie', () => {
+  it('should agree with a Map in get, set, remove and pairs, versions keeping their keys (seeded)', () => {
     for (let seed = 1; seed <= 6; seed++) {
       const random = rng(seed);
       let map = C.EMPTY;
@@ -338,7 +340,7 @@ test('the copy-on-write hash trie', async (t) => {
     }
   });
 
-  await t.test('a map of strings walks its keys by their hashes, five bits at a time, the lowest first', () => {
+  it('should walk the keys of a map of strings by their hashes, five bits at a time, the lowest first', () => {
     let map = C.EMPTY;
     const keys = [];
     for (let i = 0; i < 5000; i++) keys.push(`${i * 7}:${['A', 'Bee', 'c:d'][i % 3]}`);
@@ -348,10 +350,14 @@ test('the copy-on-write hash trie', async (t) => {
       const h = C.fnv(key);
       return [h & 31, C.walkOrderOf(h)];
     };
+    const compare = (a, b) => {
+      if (a < b) return -1;
+      return a > b ? 1 : 0;
+    };
     const order = [...keys].sort((a, b) => {
       const [x0, x1] = chunks(a);
       const [y0, y1] = chunks(b);
-      return x0 - y0 || x1 - y1 || (a < b ? -1 : a > b ? 1 : 0);
+      return x0 - y0 || x1 - y1 || compare(a, b);
     });
     same(
       C.pairs(map).map((p) => p.key),
@@ -360,7 +366,7 @@ test('the copy-on-write hash trie', async (t) => {
     );
   });
 
-  await t.test('colliding hashes share a bucket and still tell the keys apart', () => {
+  it('should put colliding hashes in one bucket and still tell the keys apart', () => {
     const seen = new Map();
     let a = null;
     let b = null;
@@ -397,7 +403,7 @@ test('the copy-on-write hash trie', async (t) => {
     assert.strictEqual(C.remove(map, a, ++owners), map, 'nothing to remove');
   });
 
-  await t.test('an owner writes its own map in place', () => {
+  it('should let an owner write its own map in place', () => {
     const owner = ++owners;
     const map = C.set(C.EMPTY, 'a', 1, owner);
     assert.strictEqual(C.set(map, 'b', 2, owner), map);
@@ -410,9 +416,17 @@ test('the copy-on-write hash trie', async (t) => {
   });
 });
 
-test('the chunked sorted list', async (t) => {
+describe('the chunked sorted list', () => {
   const entry = (off) => ({ off, id: made++ });
-  const check = (list, entries, where) => {
+  // The entries a step inserts between `low` and `high`: one in the middle, now and then twelve more after it.
+  const freshBetween = (random, low, high) => {
+    const fresh = [entry((low + high) / 2)];
+    if (random() < 0.1) {
+      for (let k = 0; k < 12; k++) fresh.push(entry(fresh[0].off + (high - low) / 2 ** (k + 3)));
+    }
+    return fresh;
+  };
+  const checkList = (list, entries, where) => {
     assert.strictEqual(list.size, entries.length, `${where}: size`);
     same(C.entriesOf(list), entries, `${where}: entries`);
     assert.strictEqual(C.last(list), entries[entries.length - 1], `${where}: last`);
@@ -441,14 +455,14 @@ test('the chunked sorted list', async (t) => {
     }
   };
 
-  await t.test('listOf, find, at and the entries agree with the array, at every size', () => {
+  it('should agree with the array in listOf, find, at and the entries, at every size', () => {
     for (const n of [0, 1, 2, 63, 64, 65, 200, 1000]) {
       const entries = Array.from({ length: n }, (_, i) => entry(i * 3));
-      check(C.listOf(entries), entries, `n=${n}`);
+      checkList(C.listOf(entries), entries, `n=${n}`);
     }
   });
 
-  await t.test('splice copies one chunk, splits it when it overflows, drops it when emptied (seeded)', () => {
+  it('should copy one chunk on splice, split it when it overflows and drop it when emptied (seeded)', () => {
     for (let seed = 1; seed <= 6; seed++) {
       const random = rng(seed);
       let entries = [];
@@ -461,10 +475,7 @@ test('the chunked sorted list', async (t) => {
           const low = i < 0 ? (entries[0]?.off ?? 0) - 2 : entries[i].off;
           const high = i + 1 < entries.length ? entries[i + 1].off : low + 2;
           if (high - low < 2 ** -30) continue;
-          const fresh = [entry((low + high) / 2)];
-          if (random() < 0.1) {
-            for (let k = 0; k < 12; k++) fresh.push(entry(fresh[0].off + (high - low) / 2 ** (k + 3)));
-          }
+          const fresh = freshBetween(random, low, high);
           fresh.sort((x, y) => x.off - y.off);
           if (i < 0) list = C.splice(list, 0, 0, 0, fresh);
           else {
@@ -482,10 +493,10 @@ test('the chunked sorted list', async (t) => {
           list = C.splice(list, found.c, found.i, count, pieces);
           entries = [...entries.slice(0, i), ...pieces, ...entries.slice(i + count)];
         }
-        check(list, entries, `seed ${seed} step ${step}`);
+        checkList(list, entries, `seed ${seed} step ${step}`);
         versions.push([list, entries]);
       }
-      for (const [i, [old, was]] of versions.entries()) check(old, was, `seed ${seed} version ${i}`);
+      for (const [i, [old, was]] of versions.entries()) checkList(old, was, `seed ${seed} version ${i}`);
     }
   });
 });

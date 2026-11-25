@@ -1,22 +1,25 @@
 'use strict';
 
-const test = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const { installMockOpfs } = require('./utils/mock-opfs.js');
 const { runFsiTests } = require('./suites/fsi.js');
 
-test('fsi.browser module (OPFS mock)', async (t) => {
-  const opfs = installMockOpfs();
-  t.after(() => opfs.uninstall());
+describe('fsi.browser module (OPFS mock)', () => {
+  let opfs = null;
+  before(() => {
+    opfs = installMockOpfs();
+  });
+  after(() => opfs.uninstall());
 
   const fsiBrowser = require('../src/fsi.browser.js');
 
-  await runFsiTests(t, fsiBrowser, {
+  runFsiTests(fsiBrowser, {
     getRoot: async () => `vfs-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
     joinPath: (root, ...parts) => [root, ...parts].join('/'),
   });
 
-  await t.test('exists/remove swallow only "not there"', async (t2) => {
-    const assert = require('node:assert');
+  it('should swallow only "not there" in exists/remove', async (t2) => {
+    const assert = require('node:assert/strict');
     const fsi = fsiBrowser;
     await fsi.write('narrow/dir', 'a.txt', 'x');
     assert.strictEqual(await fsi.exists('narrow/dir', 'a.txt'), true);

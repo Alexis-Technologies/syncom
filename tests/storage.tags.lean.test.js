@@ -7,8 +7,8 @@
 // tree, sync, encryption, chain, schema, query; no signing: the node ids are
 // UUIDs).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
 const { versions } = require('../src/versions/versions.js');
@@ -21,11 +21,11 @@ const { schema } = require('../src/schema/schema.js');
 const { query } = require('../src/query/query.js');
 const { runTagTests } = require('./suites/tags.js');
 
-test('Tags (lean core, plugins by hand)', async (t) => {
+describe('Tags (lean core, plugins by hand)', () => {
   const fsi = memory();
   let n = 0;
   const paths = new Map();
-  await runTagTests(t, assert, async (t2, name, options = {}) => {
+  runTagTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `tags-${n++}-${name}`);
     const plugins = [versions, text, tree, sync, encryption, chain, schema, query];

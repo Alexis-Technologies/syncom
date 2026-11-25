@@ -6,8 +6,8 @@
 // through the disabled one otherwise, the write path bracketing its work
 // the same way on or off.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
 const { DISABLED } = require('../src/telemetry/writer.js');
@@ -32,14 +32,14 @@ const createTracer = () => {
   };
 };
 
-test('telemetry as a plugin', async (t) => {
-  await t.test('without the plugin an api or a tracer is PLUGIN_MISSING; a writer is taken as it is', async (t2) => {
+describe('telemetry as a plugin', () => {
+  it('should refuse an api or a tracer without the plugin with PLUGIN_MISSING, and take a writer as it is', async (t2) => {
     const fsi = memory();
     await assert.rejects(
       () => core.createDatabase({ path: 'api', fsi, logger: false, telemetry: { api: { trace: {}, metrics: {} } } }),
       {
-        name: 'TypeError',
-        code: 'PLUGIN_MISSING',
+        name: 'DataError',
+        code: 'ALX_ERR_PLUGIN_MISSING',
         message:
           "createDatabase({ telemetry }) needs the telemetry plugin: createDatabase({ plugins: [telemetry] }) from '@alexify/syncom/telemetry'",
       },
@@ -47,7 +47,7 @@ test('telemetry as a plugin', async (t) => {
     await assert.rejects(
       () => core.createDatabase({ path: 'tracer', fsi, logger: false, telemetry: { tracer: createTracer() } }),
       {
-        code: 'PLUGIN_MISSING',
+        code: 'ALX_ERR_PLUGIN_MISSING',
       },
     );
     // The disabled writer is what a storage without telemetry records through.
@@ -70,7 +70,7 @@ test('telemetry as a plugin', async (t) => {
     );
   });
 
-  await t.test('with the plugin the api and the pre-built instances are adapted, on the lean core', async (t2) => {
+  it('should adapt the api and the pre-built instances with the plugin, on the lean core', async (t2) => {
     const fsi = memory();
     const tracer = createTracer();
     const storage = await core.createDatabase({

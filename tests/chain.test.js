@@ -1,14 +1,14 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const path = require('node:path');
 const { fileExists } = require('../src/utils.js');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
-test('Chain module', async (t) => {
-  await t.test('calculateHash function', () => {
+describe('Chain module', () => {
+  it('should hash data to the same 64-character string with the calculateHash function', () => {
     const data = { test: 'data' };
     const hash1 = syncom.calculateHash(data);
     const hash2 = syncom.calculateHash(data);
@@ -18,7 +18,7 @@ test('Chain module', async (t) => {
     assert.strictEqual(hash1, hash2);
   });
 
-  await t.test('Blockchain constructor and initialization', async () => {
+  it('should initialize a Blockchain in its constructor and write its chain file', async () => {
     const tempDir = await createTemp();
     try {
       const blockchain = await new syncom.Blockchain(tempDir);
@@ -33,7 +33,7 @@ test('Chain module', async (t) => {
     }
   });
 
-  await t.test('Blockchain addBlock and readBlock', async () => {
+  it('should read back with readBlock the block a Blockchain adds with addBlock', async () => {
     const tempDir = await createTemp();
     try {
       const blockchain = await new syncom.Blockchain(tempDir);
@@ -52,7 +52,7 @@ test('Chain module', async (t) => {
     }
   });
 
-  await t.test('Blockchain chain validation', async () => {
+  it('should validate a Blockchain chain whole, by its last blocks, and from an unknown hash', async () => {
     const tempDir = await createTemp();
     try {
       const blockchain = await new syncom.Blockchain(tempDir);
@@ -73,7 +73,7 @@ test('Chain module', async (t) => {
     }
   });
 
-  await t.test('Blockchain writeBlock', async () => {
+  it('should write a block file with Blockchain writeBlock', async () => {
     const tempDir = await createTemp();
     try {
       const blockchain = await new syncom.Blockchain(tempDir);

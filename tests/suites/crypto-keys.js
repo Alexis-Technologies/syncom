@@ -1,12 +1,14 @@
 'use strict';
 
-const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {}) => {
+const { it } = require('node:test');
+
+const runCryptoKeysTests = (assert, cryptoMod, { getKeysBase, fsi } = {}) => {
   if (typeof getKeysBase !== 'function') {
     throw new TypeError('runCryptoKeysTests requires getKeysBase');
   }
   if (!fsi) throw new TypeError('runCryptoKeysTests requires the fsi half the crypto module writes through');
 
-  await t.test('generateKeys function', async () => {
+  it('should generate a PEM key pair with the generateKeys function', async () => {
     const keys = await Promise.resolve(cryptoMod.generateKeys());
     assert.strictEqual(typeof keys.publicKey, 'string');
     assert.strictEqual(typeof keys.privateKey, 'string');
@@ -14,7 +16,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     assert.ok(keys.privateKey.includes('-----BEGIN PRIVATE KEY-----'));
   });
 
-  await t.test('encrypt and decrypt functions', async () => {
+  it('should round-trip data through the encrypt and decrypt functions', async () => {
     const keys = await Promise.resolve(cryptoMod.generateKeys());
     const testData = { message: 'Hello, World!', number: 42 };
 
@@ -26,7 +28,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     assert.deepStrictEqual(decrypted, testData);
   });
 
-  await t.test('encrypt handles payloads far beyond the RSA ceiling, with a fresh key each time', async () => {
+  it('should encrypt payloads far beyond the RSA ceiling, with a fresh key each time', async () => {
     const keys = await Promise.resolve(cryptoMod.generateKeys());
     const big = { blob: 'x'.repeat(200_000), items: Array.from({ length: 1000 }, (_, i) => ({ i })) };
     const a = await Promise.resolve(cryptoMod.encrypt(big, keys.publicKey));
@@ -42,7 +44,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     await assert.rejects(async () => cryptoMod.decrypt(JSON.stringify({ v: 9 }), keys.privateKey), /envelope/);
   });
 
-  await t.test('loadKeys function', async (t2) => {
+  it('should load the same pair twice with the loadKeys function', async (t2) => {
     const base = await getKeysBase(t2);
     const keys1 = await Promise.resolve(cryptoMod.loadKeys(base));
     assert.strictEqual(typeof keys1.publicKey, 'string');
@@ -53,7 +55,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     assert.strictEqual(keys2.privateKey, keys1.privateKey);
   });
 
-  await t.test('generateSigningKeys: an Ed25519 pair whose id is the raw public key', async () => {
+  it('should generate with generateSigningKeys an Ed25519 pair whose id is the raw public key', async () => {
     const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
     assert.ok(keys.publicKey.includes('-----BEGIN PUBLIC KEY-----'));
     assert.ok(keys.privateKey.includes('-----BEGIN PRIVATE KEY-----'));
@@ -62,7 +64,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     assert.notStrictEqual(again.id, keys.id);
   });
 
-  await t.test('sign and verify: a signature checks against the id, and nothing else passes', async () => {
+  it('should sign and verify: a signature checks against the id, and nothing else passes', async () => {
     const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
     const other = await Promise.resolve(cryptoMod.generateSigningKeys());
     const message = JSON.stringify([1, 'A', 7, 'write', 'r', 'ünïcödé — 日本']);
@@ -89,7 +91,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     }
   });
 
-  await t.test("verifyAsync, the engine's verify: the same answers, as a promise, many at once", async () => {
+  it("should give the same answers with verifyAsync, the engine's verify, as a promise, many at once", async () => {
     const keys = await Promise.resolve(cryptoMod.generateSigningKeys());
     const other = await Promise.resolve(cryptoMod.generateSigningKeys());
     const message = JSON.stringify([1, 'A', 7, 'write', 'r', 'ünïcödé']);
@@ -123,7 +125,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     );
   });
 
-  await t.test('loadSigningKeys: sign-public.pem and sign-private.pem, a pair of its own', async (t2) => {
+  it('should keep with loadSigningKeys a pair of its own in sign-public.pem and sign-private.pem', async (t2) => {
     const base = await getKeysBase(t2);
     const keys1 = await Promise.resolve(cryptoMod.loadSigningKeys(base));
     assert.match(keys1.id, /^[A-Za-z0-9_-]{43}$/);
@@ -136,7 +138,7 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     // Each pair is refused as half a pair on its own; the other is untouched.
     await fsi.remove(base, 'sign-private.pem');
     await assert.rejects(() => Promise.resolve(cryptoMod.loadSigningKeys(base)), {
-      code: 'KEYS_INCOMPLETE',
+      code: 'ALX_ERR_KEYS_INCOMPLETE',
       message: /sign-private\.pem is missing/,
     });
     assert.deepStrictEqual(await Promise.resolve(cryptoMod.loadKeys(base)), rsa);
@@ -144,24 +146,24 @@ const runCryptoKeysTests = async (t, assert, cryptoMod, { getKeysBase, fsi } = {
     await fsi.write(base, 'sign-private.pem', keys1.privateKey);
     await assert.rejects(() => Promise.resolve(cryptoMod.loadSigningKeys(base)), /sign-public\.pem is missing/);
     await fsi.remove(base, 'private.pem');
-    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), { code: 'KEYS_INCOMPLETE' });
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), { code: 'ALX_ERR_KEYS_INCOMPLETE' });
   });
 
-  await t.test('loadKeys refuses half a pair instead of minting a new one', async (t2) => {
+  it('should refuse half a pair in loadKeys instead of minting a new one', async (t2) => {
     const base = await getKeysBase(t2);
     const keys1 = await Promise.resolve(cryptoMod.loadKeys(base));
     await fsi.remove(base, 'private.pem');
     // Without private.pem every sealed record is already unreadable; a fresh
     // pair would hide that behind ciphertext that decrypts to nothing.
     await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), {
-      code: 'KEYS_INCOMPLETE',
+      code: 'ALX_ERR_KEYS_INCOMPLETE',
       message: /private\.pem is missing/,
     });
     assert.strictEqual(await fsi.exists(base, 'private.pem'), false, 'nothing was written');
     assert.strictEqual(await fsi.read(base, 'public.pem'), keys1.publicKey, 'the orphan is left for the operator');
     await fsi.remove(base, 'public.pem');
     await fsi.write(base, 'private.pem', keys1.privateKey);
-    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), { code: 'KEYS_INCOMPLETE' });
+    await assert.rejects(() => Promise.resolve(cryptoMod.loadKeys(base)), { code: 'ALX_ERR_KEYS_INCOMPLETE' });
   });
 };
 

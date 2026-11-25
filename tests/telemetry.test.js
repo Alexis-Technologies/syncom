@@ -6,8 +6,8 @@
 // most of the file — that nothing a hostile tracer, meter, span or
 // instrument does can break a write.
 
-const { test } = require('node:test');
-const assert = require('node:assert');
+const { describe, it, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { openLog } = require('./utils/log.js');
 
 const otelApi = require('@opentelemetry/api');
@@ -115,19 +115,19 @@ const assertNoIdentityLabels = (metrics) => {
   }
 };
 
-test('createTelemetry: what enables it', async (t) => {
-  await t.test('nothing, a non-object, or an empty bag is the frozen DISABLED writer', () => {
+describe('createTelemetry: what enables it', () => {
+  it('should give the frozen DISABLED writer for nothing, a non-object, or an empty bag', () => {
     for (const value of [undefined, null, false, 'otel', 42, {}]) {
       assert.strictEqual(createTelemetry(value), DISABLED, String(value));
     }
     assert.ok(Object.isFrozen(DISABLED));
   });
 
-  await t.test('an api module with neither trace nor metrics is disabled', () => {
+  it('should disable an api module with neither trace nor metrics', () => {
     assert.strictEqual(createTelemetry({ api: { trace: {}, metrics: {} } }), DISABLED);
   });
 
-  await t.test('a getter that throws is disabled rather than fatal', () => {
+  it('should disable a getter that throws rather than be fatal', () => {
     const telemetry = {
       get api() {
         throw new Error('exploded while resolving');
@@ -136,14 +136,14 @@ test('createTelemetry: what enables it', async (t) => {
     assert.strictEqual(createTelemetry(telemetry), DISABLED);
   });
 
-  await t.test('a writer is returned as-is, so Storage can hand its own down', () => {
+  it('should return a writer as-is, so Storage can hand its own down', () => {
     const { tracer } = createTracing();
     const writer = createTelemetry({ tracer });
     assert.strictEqual(createTelemetry(writer), writer);
     assert.strictEqual(createTelemetry(DISABLED), DISABLED);
   });
 
-  await t.test('the disabled writer still runs the callback and answers everything', () => {
+  it('should still run the callback and answer everything with the disabled writer', () => {
     let handle = 'untouched';
     const result = DISABLED.withSpan('syncom.commit', {}, (value) => {
       handle = value;
@@ -159,7 +159,7 @@ test('createTelemetry: what enables it', async (t) => {
     });
   });
 
-  await t.test('{ api } derives a tracer and meter with the syncom scope', async () => {
+  it('should derive a tracer and meter with the syncom scope from { api }', async () => {
     const { provider, spans } = createTracing();
     const metrics = createMetrics();
     const api = {
@@ -175,7 +175,7 @@ test('createTelemetry: what enables it', async (t) => {
     assert.strictEqual(commits.descriptor.name, 'syncom.commits');
   });
 
-  await t.test('tracer-only and meter-only are both supported', async () => {
+  it('should support both tracer-only and meter-only', async () => {
     const { tracer, spans } = createTracing();
     const traced = createTelemetry({ tracer });
     assert.strictEqual(traced.enabled, true);
@@ -196,210 +196,204 @@ test('createTelemetry: what enables it', async (t) => {
     assert.strictEqual(sum(await points('syncom.commits')), 1);
   });
 
-  await t.test(
-    'the blocks record their work: the query cache, live changes, plans, bulk rows, pipeline turns, a cleanup sweep, dump pages, named inserts',
-    async (t2) => {
-      const { meter, points, collect } = createMetrics();
-      const { tracer, spans } = createTracing();
-      const schema = { entities: { Post: { index: ['n'] } } };
-      const { storage } = await openTemp(t2, { telemetry: { tracer, meter }, schema });
-      const labelled = async (name, label, value) => {
-        let total = 0;
-        for (const point of await points(name)) if (point.attributes[label] === value) total += point.value;
-        return total;
-      };
-      // Named inserts: one ok, one exists.
-      await storage.Post.insert({ id: 'p1', n: 1 });
-      await assert.rejects(storage.Post.insert({ id: 'p1', n: 2 }), { code: 'EXISTS' });
-      assert.deepStrictEqual(
-        [
-          await labelled('syncom.insert.named', 'syncom.result', 'ok'),
-          await labelled('syncom.insert.named', 'syncom.result', 'exists'),
-        ],
-        [1, 1],
-      );
-      // Bulk rows by verdict.
-      await storage.Post.bulkInsert([
-        { id: 'p2', n: 2 },
-        { id: 'p1', n: 9 },
-        { id: 'p3', n: 3 },
-      ]);
-      assert.deepStrictEqual(
-        [
-          await labelled('syncom.bulk.rows', 'syncom.result', 'success'),
-          await labelled('syncom.bulk.rows', 'syncom.result', 'error'),
-        ],
-        [2, 1],
-      );
-      // A plan by its scan, the cache missed then hit, a live change reduced.
-      const cursor = storage.Post.select({ n: { $gte: 2 } }).order('n');
-      await cursor.fetch();
-      await cursor.fetch();
-      assert.strictEqual(await labelled('syncom.query.plans', 'syncom.scan', 'index'), 1);
-      assert.deepStrictEqual(
-        [
-          await labelled('syncom.query.cache', 'syncom.result', 'miss'),
-          await labelled('syncom.query.cache', 'syncom.result', 'hit'),
-        ],
-        [1, 1],
-      );
-      const stop = cursor.watch(() => {});
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      await storage.Post.update('p2', { n: 5 });
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      stop();
-      assert.strictEqual(await labelled('syncom.query.live', 'syncom.result', 'reduce'), 1);
-      assert.deepStrictEqual(storage.stats().query, { cache: { entries: 1, rows: 2 }, live: 0 });
-      assert.strictEqual(storage.stats().collections, 1);
-      // A pipeline's turns and its lag; a dump's pages; a cleanup sweep's span and counts.
-      const { createPipeline } = require('../src/pipeline/pipeline.js');
-      const pipeline = createPipeline(storage, { name: 'p', source: 'Post', handler: () => {} });
-      await pipeline.start();
-      await pipeline.awaitIdle();
-      await storage.Post.update('p3', { n: 7 });
-      await pipeline.awaitIdle();
-      pipeline.stop();
-      assert.ok((await labelled('syncom.pipeline.turns', 'syncom.result', 'handled')) >= 2);
-      assert.ok((await points('syncom.pipeline.lag')).length > 0);
-      const { exportJSON } = require('../src/dump/dump.js');
-      await exportJSON(storage);
-      assert.ok((await labelled('syncom.dump.pages', 'syncom.kind', 'export')) >= 1);
-      const { cleanup } = require('../src/cleanup/cleanup.js');
-      await storage.Post.delete('p1');
-      const sweeper = cleanup(storage, { minimumDeletedTime: 0, awaitSync: false });
-      assert.deepStrictEqual(await sweeper.run(), { folded: 1, dropped: 0, skipped: 0 });
-      assert.strictEqual(await labelled('syncom.cleanup.tombstones', 'syncom.result', 'folded'), 1);
-      assert.strictEqual(storage.stats().tombstones, 1);
-      const sweep = spans().find((span) => span.name === 'syncom.cleanup.sweep');
-      assert.ok(sweep, 'a span of the sweep');
-      assert.strictEqual(sweep.attributes['syncom.cleanup.folded'], 1);
-      await collect();
-    },
-  );
+  it('should record the work of the blocks: the query cache, live changes, plans, bulk rows, pipeline turns, a cleanup sweep, dump pages, named inserts', async (t2) => {
+    const { meter, points, collect } = createMetrics();
+    const { tracer, spans } = createTracing();
+    const schema = { entities: { Post: { index: ['n'] } } };
+    const { storage } = await openTemp(t2, { telemetry: { tracer, meter }, schema });
+    const countOf = async (name, label, value) => {
+      let total = 0;
+      for (const dataPoint of await points(name)) if (dataPoint.attributes[label] === value) total += dataPoint.value;
+      return total;
+    };
+    // Named inserts: one ok, one exists.
+    await storage.Post.insert({ id: 'p1', n: 1 });
+    await assert.rejects(storage.Post.insert({ id: 'p1', n: 2 }), { code: 'ALX_ERR_EXISTS' });
+    assert.deepStrictEqual(
+      [
+        await countOf('syncom.insert.named', 'syncom.result', 'ok'),
+        await countOf('syncom.insert.named', 'syncom.result', 'exists'),
+      ],
+      [1, 1],
+    );
+    // Bulk rows by verdict.
+    await storage.Post.bulkInsert([
+      { id: 'p2', n: 2 },
+      { id: 'p1', n: 9 },
+      { id: 'p3', n: 3 },
+    ]);
+    assert.deepStrictEqual(
+      [
+        await countOf('syncom.bulk.rows', 'syncom.result', 'success'),
+        await countOf('syncom.bulk.rows', 'syncom.result', 'error'),
+      ],
+      [2, 1],
+    );
+    // A plan by its scan, the cache missed then hit, a live change reduced.
+    const cursor = storage.Post.select({ n: { $gte: 2 } }).order('n');
+    await cursor.fetch();
+    await cursor.fetch();
+    assert.strictEqual(await countOf('syncom.query.plans', 'syncom.scan', 'index'), 1);
+    assert.deepStrictEqual(
+      [
+        await countOf('syncom.query.cache', 'syncom.result', 'miss'),
+        await countOf('syncom.query.cache', 'syncom.result', 'hit'),
+      ],
+      [1, 1],
+    );
+    const stop = cursor.watch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    await storage.Post.update('p2', { n: 5 });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    stop();
+    assert.strictEqual(await countOf('syncom.query.live', 'syncom.result', 'reduce'), 1);
+    assert.deepStrictEqual(storage.stats().query, { cache: { entries: 1, rows: 2 }, live: 0 });
+    assert.strictEqual(storage.stats().collections, 1);
+    // A pipeline's turns and its lag; a dump's pages; a cleanup sweep's span and counts.
+    const { createPipeline } = require('../src/pipeline/pipeline.js');
+    const pipeline = createPipeline(storage, { name: 'p', source: 'Post', handler: () => {} });
+    await pipeline.start();
+    await pipeline.awaitIdle();
+    await storage.Post.update('p3', { n: 7 });
+    await pipeline.awaitIdle();
+    pipeline.stop();
+    assert.ok((await countOf('syncom.pipeline.turns', 'syncom.result', 'handled')) >= 2);
+    assert.ok((await points('syncom.pipeline.lag')).length > 0);
+    const { exportJSON } = require('../src/dump/dump.js');
+    await exportJSON(storage);
+    assert.ok((await countOf('syncom.dump.pages', 'syncom.kind', 'export')) >= 1);
+    const { cleanup } = require('../src/cleanup/cleanup.js');
+    await storage.Post.delete('p1');
+    const sweeper = cleanup(storage, { minimumDeletedTime: 0, awaitSync: false });
+    assert.deepStrictEqual(await sweeper.run(), { folded: 1, dropped: 0, skipped: 0 });
+    assert.strictEqual(await countOf('syncom.cleanup.tombstones', 'syncom.result', 'folded'), 1);
+    assert.strictEqual(storage.stats().tombstones, 1);
+    const sweep = spans().find((span) => span.name === 'syncom.cleanup.sweep');
+    assert.ok(sweep, 'a span of the sweep');
+    assert.strictEqual(sweep.attributes['syncom.cleanup.folded'], 1);
+    await collect();
+  });
 
-  await t.test(
-    "the shared log, a revoke, the reads and the blobs record their work: ops relayed and applied with their lag, entries passed, a refusal by reason, a thin client's query and count, a blob served and fetched, a sweep as a span",
-    async (t2) => {
-      const { meter, points, collect } = createMetrics();
-      const { tracer, spans } = createTracing();
-      const engine = syncom.memoryEngine();
-      const schema = { entities: { Task: {} } };
-      const createStorage = async (t3, name, options = {}) => {
-        const storage = await syncom.createDatabase({
-          engine,
-          path: `${t3.name}/${name}`,
-          logger: false,
-          defer: 0,
-          schema,
-          plugins: [attachments()],
-          ...options,
-        });
-        t3.after(() => storage.close().catch(() => {}));
-        return storage;
-      };
-      const sharedLog = createMemorySharedLog();
-      const hub = { sync: { sharedLog } };
-      // Two hubs over one log; the meter on H1 and C1 (the counters merge; no gauge is read here).
-      const mesh = await createMesh(
-        t2,
-        ['H1', 'H2', 'C1', 'C2'],
-        [
-          ['C1', 'H1'],
-          ['C2', 'H2'],
-        ],
-        createStorage,
-        {
-          nodes: { H1: { ...hub, telemetry: { meter } }, H2: hub, C1: { telemetry: { tracer, meter } } },
-        },
-      );
-      const [h1, h2, c1, c2] = ['H1', 'H2', 'C1', 'C2'].map((name) => mesh.get(name));
-      await waitUntil(() => [c1, c2].every((s) => s.sync.peers()[0]?.subscribed));
-      const first = await c1.insert({ $type: 'Task', title: 'from C1' });
-      await c2.insert({ $type: 'Task', title: 'from C2' });
-      await settle([h1, h2, c1, c2]);
-      assert.deepStrictEqual((await h1.get(first)).title, 'from C1');
-      // H1 relayed C1's op to the topic and applied C2's from it; every entry passed, the lag sampled.
-      assert.ok((await labelled(collect, 'syncom.shared.ops', { 'syncom.result': 'relayed' })) >= 1, 'relayed');
-      assert.ok((await labelled(collect, 'syncom.shared.ops', { 'syncom.result': 'applied' })) >= 1, 'applied');
-      assert.ok((await labelled(collect, 'syncom.shared.entries', { 'syncom.result': 'passed' })) >= 2, 'passed');
-      assert.ok((await points('syncom.shared.lag'))[0].value.count >= 1, 'the lag sampled');
-      // A revoke here, and one folded from the other hub.
-      h1.sync.revoke('nobody', ['x']);
-      h2.sync.revoke('nobody-else', ['y']);
-      await waitUntil(async () => (await labelled(collect, 'syncom.revoke', { 'syncom.via': 'shared' })) === 1);
-      assert.strictEqual(await labelled(collect, 'syncom.revoke', { 'syncom.via': 'local' }), 1);
-      // A thin client's reads, and a $regex refused by reason.
-      const link = new MemoryLink(h1.sync.unit({ access: 'public', query: true }));
-      await link.call('syncom/hello', { node: 'thin', version: 1 });
-      const { rows } = await link.call('syncom/query', { entity: 'Task' });
-      assert.strictEqual(rows.length, 2);
-      assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task' }), { count: 2, capped: false });
-      await assert.rejects(link.call('syncom/query', { entity: 'Task', query: { title: { $regex: 'C' } } }), {
-        code: 400,
+  it("should record the work of the shared log, a revoke, the reads and the blobs: ops relayed and applied with their lag, entries passed, a refusal by reason, a thin client's query and count, a blob served and fetched, a sweep as a span", async (t2) => {
+    const { meter, points, collect } = createMetrics();
+    const { tracer, spans } = createTracing();
+    const engine = syncom.memoryEngine();
+    const schema = { entities: { Task: {} } };
+    const createStorage = async (t3, name, options = {}) => {
+      const storage = await syncom.createDatabase({
+        engine,
+        path: `${t3.name}/${name}`,
+        logger: false,
+        defer: 0,
+        schema,
+        plugins: [attachments()],
+        ...options,
       });
-      assert.strictEqual(
-        await labelled(collect, 'syncom.reads', { 'syncom.procedure': 'query', 'syncom.result': 'ok' }),
-        1,
-      );
-      assert.strictEqual(
-        await labelled(collect, 'syncom.reads', { 'syncom.procedure': 'count', 'syncom.result': 'ok' }),
-        1,
-      );
-      assert.strictEqual(await labelled(collect, 'syncom.reads.rows', { 'syncom.procedure': 'query' }), 2);
-      assert.strictEqual(
-        await labelled(collect, 'syncom.hello.refused', { 'syncom.code': '400', 'syncom.reason': 'REGEX' }),
-        1,
-      );
-      // A blob put on H1, served to the thin client by the record that names it, fetched by C1 on its read.
-      const bytes = new TextEncoder().encode('the bytes of a file');
-      const entry = await h1.attachments.put(first, 'f.txt', bytes, { type: 'text/plain' });
-      await settle([h1, h2, c1, c2]);
-      const served = await link.call('syncom/blob', { digest: entry.digest, id: first, name: 'f.txt' });
-      assert.strictEqual(served.size, bytes.length);
-      const got = await c1.attachments.get(first, 'f.txt');
-      assert.strictEqual(got.length, bytes.length);
-      // Served twice: to the thin client, and to C1's fetch.
-      for (const [direction, expected] of [
-        ['put', 1],
-        ['served', 2],
-        ['fetched', 1],
-        ['get', 1],
-      ]) {
-        const labels = { 'syncom.direction': direction, 'syncom.result': 'ok' };
-        assert.strictEqual(await labelled(collect, 'syncom.blobs', labels), expected, direction);
-        const total = await labelled(collect, 'syncom.blob.bytes', { 'syncom.direction': direction });
-        assert.strictEqual(total, bytes.length * expected, `${direction} bytes`);
-      }
-      // The store's bytes swapped under the register: a mismatch, counted.
-      await c1[DB].blobs.put(entry.digest, new Uint8Array(3));
-      await assert.rejects(c1.attachments.get(first, 'f.txt'), { code: 'BLOB_MISMATCH' });
-      assert.strictEqual(
-        await labelled(collect, 'syncom.blobs', { 'syncom.direction': 'get', 'syncom.result': 'mismatch' }),
-        1,
-      );
-      assert.deepStrictEqual(c1.attachments.stats(), {
-        puts: 0,
-        gets: 1,
-        fetched: 1,
-        mismatches: 1,
-        missing: 0,
-        sweeps: 0,
-        pending: 0,
-      });
-      assert.strictEqual(h1.attachments.stats().puts, 1);
-      // A sweep is a span with its counts.
-      const swept = await c1.attachments.sweep({ dryRun: true });
-      const sweep = spans().find((span) => span.name === 'syncom.attachments.sweep');
-      assert.ok(sweep, 'a span of the sweep');
-      assert.strictEqual(sweep.attributes['syncom.attachments.blobs'], swept.blobs);
-      assert.strictEqual(sweep.attributes['syncom.attachments.marked'], swept.marked);
-      assert.strictEqual(sweep.attributes['syncom.attachments.removed'], 0);
-      assert.strictEqual(c1.attachments.stats().sweeps, 1);
-      assertNoIdentityLabels(await collect());
-    },
-  );
+      t3.after(() => storage.close().catch(() => {}));
+      return storage;
+    };
+    const sharedLog = createMemorySharedLog();
+    const hub = { sync: { sharedLog } };
+    // Two hubs over one log; the meter on H1 and C1 (the counters merge; no gauge is read here).
+    const mesh = await createMesh(
+      t2,
+      ['H1', 'H2', 'C1', 'C2'],
+      [
+        ['C1', 'H1'],
+        ['C2', 'H2'],
+      ],
+      createStorage,
+      {
+        nodes: { H1: { ...hub, telemetry: { meter } }, H2: hub, C1: { telemetry: { tracer, meter } } },
+      },
+    );
+    const [h1, h2, c1, c2] = ['H1', 'H2', 'C1', 'C2'].map((name) => mesh.get(name));
+    await waitUntil(() => [c1, c2].every((s) => s.sync.peers()[0]?.subscribed));
+    const first = await c1.insert({ $type: 'Task', title: 'from C1' });
+    await c2.insert({ $type: 'Task', title: 'from C2' });
+    await settle([h1, h2, c1, c2]);
+    assert.deepStrictEqual((await h1.get(first)).title, 'from C1');
+    // H1 relayed C1's op to the topic and applied C2's from it; every entry passed, the lag sampled.
+    assert.ok((await labelled(collect, 'syncom.shared.ops', { 'syncom.result': 'relayed' })) >= 1, 'relayed');
+    assert.ok((await labelled(collect, 'syncom.shared.ops', { 'syncom.result': 'applied' })) >= 1, 'applied');
+    assert.ok((await labelled(collect, 'syncom.shared.entries', { 'syncom.result': 'passed' })) >= 2, 'passed');
+    assert.ok((await points('syncom.shared.lag'))[0].value.count >= 1, 'the lag sampled');
+    // A revoke here, and one folded from the other hub.
+    h1.sync.revoke('nobody', ['x']);
+    h2.sync.revoke('nobody-else', ['y']);
+    await waitUntil(async () => (await labelled(collect, 'syncom.revoke', { 'syncom.via': 'shared' })) === 1);
+    assert.strictEqual(await labelled(collect, 'syncom.revoke', { 'syncom.via': 'local' }), 1);
+    // A thin client's reads, and a $regex refused by reason.
+    const link = new MemoryLink(h1.sync.unit({ access: 'public', query: true }));
+    await link.call('syncom/hello', { node: 'thin', version: 1 });
+    const { rows } = await link.call('syncom/query', { entity: 'Task' });
+    assert.strictEqual(rows.length, 2);
+    assert.deepStrictEqual(await link.call('syncom/count', { entity: 'Task' }), { count: 2, capped: false });
+    await assert.rejects(link.call('syncom/query', { entity: 'Task', query: { title: { $regex: 'C' } } }), {
+      code: 400,
+    });
+    assert.strictEqual(
+      await labelled(collect, 'syncom.reads', { 'syncom.procedure': 'query', 'syncom.result': 'ok' }),
+      1,
+    );
+    assert.strictEqual(
+      await labelled(collect, 'syncom.reads', { 'syncom.procedure': 'count', 'syncom.result': 'ok' }),
+      1,
+    );
+    assert.strictEqual(await labelled(collect, 'syncom.reads.rows', { 'syncom.procedure': 'query' }), 2);
+    assert.strictEqual(
+      await labelled(collect, 'syncom.hello.refused', { 'syncom.code': '400', 'syncom.reason': 'REGEX' }),
+      1,
+    );
+    // A blob put on H1, served to the thin client by the record that names it, fetched by C1 on its read.
+    const bytes = new TextEncoder().encode('the bytes of a file');
+    const entry = await h1.attachments.put(first, 'f.txt', bytes, { type: 'text/plain' });
+    await settle([h1, h2, c1, c2]);
+    const served = await link.call('syncom/blob', { digest: entry.digest, id: first, name: 'f.txt' });
+    assert.strictEqual(served.size, bytes.length);
+    const got = await c1.attachments.get(first, 'f.txt');
+    assert.strictEqual(got.length, bytes.length);
+    // Served twice: to the thin client, and to C1's fetch.
+    for (const [direction, expected] of [
+      ['put', 1],
+      ['served', 2],
+      ['fetched', 1],
+      ['get', 1],
+    ]) {
+      const labels = { 'syncom.direction': direction, 'syncom.result': 'ok' };
+      assert.strictEqual(await labelled(collect, 'syncom.blobs', labels), expected, direction);
+      const total = await labelled(collect, 'syncom.blob.bytes', { 'syncom.direction': direction });
+      assert.strictEqual(total, bytes.length * expected, `${direction} bytes`);
+    }
+    // The store's bytes swapped under the register: a mismatch, counted.
+    await c1[DB].blobs.put(entry.digest, new Uint8Array(3));
+    await assert.rejects(c1.attachments.get(first, 'f.txt'), { code: 'ALX_ERR_BLOB_MISMATCH' });
+    assert.strictEqual(
+      await labelled(collect, 'syncom.blobs', { 'syncom.direction': 'get', 'syncom.result': 'mismatch' }),
+      1,
+    );
+    assert.deepStrictEqual(c1.attachments.stats(), {
+      puts: 0,
+      gets: 1,
+      fetched: 1,
+      mismatches: 1,
+      missing: 0,
+      sweeps: 0,
+      pending: 0,
+    });
+    assert.strictEqual(h1.attachments.stats().puts, 1);
+    // A sweep is a span with its counts.
+    const swept = await c1.attachments.sweep({ dryRun: true });
+    const sweep = spans().find((span) => span.name === 'syncom.attachments.sweep');
+    assert.ok(sweep, 'a span of the sweep');
+    assert.strictEqual(sweep.attributes['syncom.attachments.blobs'], swept.blobs);
+    assert.strictEqual(sweep.attributes['syncom.attachments.marked'], swept.marked);
+    assert.strictEqual(sweep.attributes['syncom.attachments.removed'], 0);
+    assert.strictEqual(c1.attachments.stats().sweeps, 1);
+    assertNoIdentityLabels(await collect());
+  });
 
-  await t.test('the tabs record their forwards and their changes of role, and stats() counts them', async (t2) => {
+  it('should record the forwards of the tabs and their changes of role, and count them in stats()', async (t2) => {
     const { meter, collect } = createMetrics();
     const engine = syncom.memoryEngine();
     const locks = createFakeLocks();
@@ -464,79 +458,78 @@ test('createTelemetry: what enables it', async (t) => {
     assert.strictEqual(stats.forwarded, 1);
   });
 
-  await t.test(
-    "the connector and the agent's tools record their work: documents pulled and applied, rows pushed, a probe, a row refused and parked, a conflict, a failure; a tool's calls by verb",
-    async (t2) => {
-      const { meter, collect } = createMetrics();
-      const { storage } = await openTemp(t2, { telemetry: { meter }, schema: { entities: { Task: {} } } });
-      const rows = (direction, result) =>
-        labelled(collect, 'syncom.connector.rows', { 'syncom.direction': direction, 'syncom.result': result });
-      const backend = createFakeBackend();
-      backend.write('t1', { title: 'from the backend' });
-      const connect = () => {
-        const replication = replicate(storage, {
-          name: 'main',
-          collection: 'Task',
-          ...backend.handlers(),
-          retryTime: 20,
-        });
-        t2.after(() => replication.cancel().catch(() => {}));
-        return replication;
-      };
-      const replication = connect();
-      await replication.awaitInitialReplication();
-      assert.ok((await rows('pull', 'pulled')) >= 1, 'pulled');
-      assert.ok((await rows('pull', 'applied')) >= 1, 'applied');
-      // The first push fails and is tried again; then a row the backend refuses by name is parked.
-      backend.fail('push', 1);
-      await storage.Task.insert({ id: 't2', title: 'pushed' });
-      await replication.awaitInSync();
-      assert.strictEqual(await rows('push', 'failed'), 1);
-      assert.ok((await rows('push', 'pushed')) >= 1, 'pushed');
-      backend.refuse('bad', new Error('refused by name'));
-      await storage.Task.insert({ id: 'bad', title: 'refused' });
-      await replication.awaitInSync();
-      assert.strictEqual(await rows('push', 'refused'), 1);
-      assert.strictEqual(await rows('push', 'parked'), 1);
-      // The backend moved behind the connector's back: the edit here is a conflict the backend wins.
-      backend.set('t2', { title: 'changed behind' });
-      await storage.Task.update('t2', { title: 'edited here' });
-      await replication.awaitInSync();
-      assert.strictEqual(await rows('push', 'conflict'), 1);
-      const stats = replication.stats();
-      assert.ok(stats.pulled >= 1 && stats.applied >= 1 && stats.pushed >= 1, JSON.stringify(stats));
-      assert.deepStrictEqual([stats.conflicts, stats.refused, stats.parked, stats.probed], [1, 1, 1, 0]);
-      // A restart with an edit made offline: the digest is durable, the text is not — the row goes as a probe.
-      await replication.cancel();
-      await storage.Task.update('t2', { title: 'edited offline' });
-      const again = connect();
-      await again.awaitInitialReplication();
-      await again.awaitInSync();
-      assert.ok(again.stats().probed >= 1, JSON.stringify(again.stats()));
-      assert.ok((await rows('push', 'probed')) >= 1, 'probed');
-      // The agent's tools: a call that ran, one the schema refused, one the collection refused.
-      const tools = createTools(storage);
-      const named = (name) => tools.find((tool) => tool.name === name);
-      await named('Task_query').execute({});
-      await assert.rejects(named('Task_query').execute({ bogus: 1 }), { name: 'TypeError' });
-      await assert.rejects(named('Task_insert').execute({ data: { id: 't1', title: 'again' } }), { code: 'EXISTS' });
-      const calls = (verb, result) =>
-        labelled(collect, 'syncom.mcp.calls', { 'syncom.procedure': verb, 'syncom.result': result });
-      assert.deepStrictEqual(
-        [await calls('query', 'ok'), await calls('query', 'refused'), await calls('insert', 'error')],
-        [1, 1, 1],
-      );
-      assertNoIdentityLabels(await collect());
-    },
-  );
+  it("should record the work of the connector and the agent's tools: documents pulled and applied, rows pushed, a probe, a row refused and parked, a conflict, a failure; a tool's calls by verb", async (t2) => {
+    const { meter, collect } = createMetrics();
+    const { storage } = await openTemp(t2, { telemetry: { meter }, schema: { entities: { Task: {} } } });
+    const rows = (direction, result) =>
+      labelled(collect, 'syncom.connector.rows', { 'syncom.direction': direction, 'syncom.result': result });
+    const backend = createFakeBackend();
+    backend.write('t1', { title: 'from the backend' });
+    const connect = () => {
+      const replication = replicate(storage, {
+        name: 'main',
+        collection: 'Task',
+        ...backend.handlers(),
+        retryTime: 20,
+      });
+      t2.after(() => replication.cancel().catch(() => {}));
+      return replication;
+    };
+    const replication = connect();
+    await replication.awaitInitialReplication();
+    assert.ok((await rows('pull', 'pulled')) >= 1, 'pulled');
+    assert.ok((await rows('pull', 'applied')) >= 1, 'applied');
+    // The first push fails and is tried again; then a row the backend refuses by name is parked.
+    backend.fail('push', 1);
+    await storage.Task.insert({ id: 't2', title: 'pushed' });
+    await replication.awaitInSync();
+    assert.strictEqual(await rows('push', 'failed'), 1);
+    assert.ok((await rows('push', 'pushed')) >= 1, 'pushed');
+    backend.refuse('bad', new Error('refused by name'));
+    await storage.Task.insert({ id: 'bad', title: 'refused' });
+    await replication.awaitInSync();
+    assert.strictEqual(await rows('push', 'refused'), 1);
+    assert.strictEqual(await rows('push', 'parked'), 1);
+    // The backend moved behind the connector's back: the edit here is a conflict the backend wins.
+    backend.set('t2', { title: 'changed behind' });
+    await storage.Task.update('t2', { title: 'edited here' });
+    await replication.awaitInSync();
+    assert.strictEqual(await rows('push', 'conflict'), 1);
+    const stats = replication.stats();
+    assert.ok(stats.pulled >= 1 && stats.applied >= 1 && stats.pushed >= 1, JSON.stringify(stats));
+    assert.deepStrictEqual([stats.conflicts, stats.refused, stats.parked, stats.probed], [1, 1, 1, 0]);
+    // A restart with an edit made offline: the digest is durable, the text is not — the row goes as a probe.
+    await replication.cancel();
+    await storage.Task.update('t2', { title: 'edited offline' });
+    const again = connect();
+    await again.awaitInitialReplication();
+    await again.awaitInSync();
+    assert.ok(again.stats().probed >= 1, JSON.stringify(again.stats()));
+    assert.ok((await rows('push', 'probed')) >= 1, 'probed');
+    // The agent's tools: a call that ran, one the schema refused, one the collection refused.
+    const tools = createTools(storage);
+    const named = (name) => tools.find((tool) => tool.name === name);
+    await named('Task_query').execute({});
+    await assert.rejects(named('Task_query').execute({ bogus: 1 }), { name: 'ArgumentError' });
+    await assert.rejects(named('Task_insert').execute({ data: { id: 't1', title: 'again' } }), {
+      code: 'ALX_ERR_EXISTS',
+    });
+    const calls = (verb, result) =>
+      labelled(collect, 'syncom.mcp.calls', { 'syncom.procedure': verb, 'syncom.result': result });
+    assert.deepStrictEqual(
+      [await calls('query', 'ok'), await calls('query', 'refused'), await calls('insert', 'error')],
+      [1, 1, 1],
+    );
+    assertNoIdentityLabels(await collect());
+  });
 
-  await t.test('a meter missing a factory leaves metrics off, not the writer', () => {
+  it('should leave metrics off, not the writer, for a meter missing a factory', () => {
     const otel = createTelemetry({ meter: { createCounter: () => ({ add() {} }) } });
     assert.strictEqual(otel.enabled, true);
     assert.doesNotThrow(() => otel.recordCommit('write', 'applied', 1));
   });
 
-  await t.test('a meter whose factories throw leaves the writer enabled and silent', () => {
+  it('should leave the writer enabled and silent for a meter whose factories throw', () => {
     const meter = {
       createCounter: () => {
         throw new Error('no instruments today');
@@ -553,8 +546,8 @@ test('createTelemetry: what enables it', async (t) => {
   });
 });
 
-test('spans', async (t) => {
-  await t.test('an error sets status 2 and records the exception', () => {
+describe('spans', () => {
+  it('should set status 2 and record the exception on an error', () => {
     const { tracer, spans } = createTracing();
     const otel = createTelemetry({ tracer });
     const boom = new TypeError('bad field');
@@ -571,7 +564,7 @@ test('spans', async (t) => {
     assert.strictEqual(span.events[0].name, 'exception');
   });
 
-  await t.test('null and undefined end-attributes are skipped', () => {
+  it('should skip null and undefined end-attributes', () => {
     const { tracer, spans } = createTracing();
     const otel = createTelemetry({ tracer });
     otel.withSpan('syncom.apply', {}, (handle) => otel.endSpan(handle, { a: null, b: undefined, c: 0 }));
@@ -579,7 +572,7 @@ test('spans', async (t) => {
     assert.deepStrictEqual(span.attributes, { c: 0 });
   });
 
-  await t.test('identity attributes are stripped when includeIdentity is false', () => {
+  it('should strip identity attributes when includeIdentity is false', () => {
     const { tracer, spans } = createTracing();
     const otel = createTelemetry({ tracer, includeIdentity: false });
     otel.withSpan(
@@ -591,7 +584,7 @@ test('spans', async (t) => {
     assert.deepStrictEqual(span.attributes, { 'syncom.ops.count': 3 });
   });
 
-  await t.test('spans nest through startActiveSpan under a context manager', (t2) => {
+  it('should nest spans through startActiveSpan under a context manager', (t2) => {
     useActiveContext(t2);
     const { provider, tracer, spans } = createTracing();
     const otel = createTelemetry({ tracer });
@@ -606,7 +599,7 @@ test('spans', async (t) => {
   });
 });
 
-test('containment: a hostile tracer never breaks the work', async (t) => {
+describe('containment: a hostile tracer never breaks the work', () => {
   const work = (otel) => {
     let runs = 0;
     const result = otel.withSpan('syncom.commit', {}, (handle) => {
@@ -617,7 +610,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     return { runs, result };
   };
 
-  await t.test('a tracer that throws before invoking the callback', () => {
+  it('should run the work once under a tracer that throws before invoking the callback', () => {
     const tracer = {
       startActiveSpan() {
         throw new Error('tracer down');
@@ -626,12 +619,12 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
   });
 
-  await t.test('a tracer that never invokes the callback still gets the work run once', () => {
+  it('should still run the work once under a tracer that never invokes the callback', () => {
     const tracer = { startActiveSpan: () => 'ignored you' };
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
   });
 
-  await t.test('a tracer that invokes the callback twice runs the work once', () => {
+  it('should run the work once under a tracer that invokes the callback twice', () => {
     const tracer = {
       startActiveSpan(_name, _options, fn) {
         fn({ end() {} });
@@ -641,7 +634,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
   });
 
-  await t.test("the callback's result wins over whatever the tracer returns", () => {
+  it("should let the callback's result win over whatever the tracer returns", () => {
     const tracer = {
       startActiveSpan(_name, _options, fn) {
         fn({ end() {} });
@@ -651,7 +644,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
   });
 
-  await t.test('an error thrown by the work propagates untouched', () => {
+  it('should propagate an error thrown by the work untouched', () => {
     const { tracer } = createTracing();
     const otel = createTelemetry({ tracer });
     const boom = new Error('from the work');
@@ -664,14 +657,14 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     );
   });
 
-  await t.test('a tracer with only startSpan opens a detached span', () => {
+  it('should open a detached span through a tracer with only startSpan', () => {
     let ended = 0;
     const tracer = { startSpan: () => ({ end: () => ended++ }) };
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
     assert.strictEqual(ended, 1);
   });
 
-  await t.test('a tracer whose startSpan throws', () => {
+  it('should run the work once under a tracer whose startSpan throws', () => {
     const tracer = {
       startSpan() {
         throw new Error('no span for you');
@@ -680,12 +673,12 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
   });
 
-  await t.test('a tracer with neither method', () => {
+  it('should run the work once under a tracer with neither method', () => {
     const tracer = { getSpan: () => null };
     assert.deepStrictEqual(work(createTelemetry({ tracer })), { runs: 1, result: 'done' });
   });
 
-  await t.test('a span whose methods throw', () => {
+  it('should return the result of the work under a span whose methods throw', () => {
     const hostile = () => {
       throw new Error('span exploded');
     };
@@ -700,7 +693,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     assert.strictEqual(result, 'done');
   });
 
-  await t.test('an instrument that throws on use', () => {
+  it('should never throw from a recording through an instrument that throws on use', () => {
     const hostile = () => {
       throw new Error('instrument exploded');
     };
@@ -723,7 +716,7 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
     });
   });
 
-  await t.test('recordError and endSpan tolerate a null handle', () => {
+  it('should tolerate a null handle in recordError and endSpan', () => {
     const { tracer } = createTracing();
     const otel = createTelemetry({ tracer });
     assert.doesNotThrow(() => {
@@ -734,8 +727,8 @@ test('containment: a hostile tracer never breaks the work', async (t) => {
   });
 });
 
-test('Storage telemetry', async (t) => {
-  await t.test('a commit span per local write, counted by type and result', async (t2) => {
+describe('Storage telemetry', () => {
+  it('should open a commit span per local write, counted by type and result', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
     const { storage } = await openTemp(t2, { telemetry: { tracer, meter } });
@@ -765,39 +758,36 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(point(await points('syncom.write.duration'), { 'syncom.path': 'commit' }).value.count, 3);
   });
 
-  await t.test(
-    'a tag, a history read, a version read and a patch batch are spanned, with counts and no identity',
-    async (t2) => {
-      const { tracer, named } = createTracing();
-      const { storage } = await openTemp(t2, { telemetry: { tracer } });
-      const id = await storage.insert({ n: 0 });
-      for (let i = 1; i <= 3; i++) await storage.update(id, { n: i });
-      await storage.tag('v1');
-      await storage.untag('v1');
-      const { versions } = await storage.history(id, { limit: 2 });
-      await storage.get(id, { at: versions[1].eventId });
-      await storage.applyPatches(id, [
-        { action: 'put', field: 'n', value: 9 },
-        { action: 'inc', field: 'hits', value: 1 },
-      ]);
-      const [tag] = named('syncom.tag');
-      assert.strictEqual(tag.attributes['syncom.records'], 1);
-      assert.strictEqual(named('syncom.untag').length, 1);
-      const [history] = named('syncom.history');
-      const read = (span, keys) => keys.map((key) => span.attributes[key]);
-      assert.deepStrictEqual(read(history, ['syncom.ops.count', 'syncom.versions', 'syncom.exact']), [4, 2, true]);
-      const [version] = named('syncom.version');
-      assert.strictEqual(version.attributes['syncom.ops.count'], 3, 'the entries inside the cut');
-      const [patches] = named('syncom.patches');
-      assert.deepStrictEqual(read(patches, ['syncom.ops.count', 'syncom.ops.applied']), [2, 2]);
-      assert.strictEqual(named('syncom.commit').length, 6, 'the patch ops are commit spans too');
-      for (const span of [tag, history, version, patches]) {
-        assert.strictEqual('syncom.record.id' in span.attributes, false, `${span.name} carries no identity`);
-      }
-    },
-  );
+  it('should span a tag, a history read, a version read and a patch batch, with counts and no identity', async (t2) => {
+    const { tracer, named } = createTracing();
+    const { storage } = await openTemp(t2, { telemetry: { tracer } });
+    const id = await storage.insert({ n: 0 });
+    for (let i = 1; i <= 3; i++) await storage.update(id, { n: i });
+    await storage.tag('v1');
+    await storage.untag('v1');
+    const { versions } = await storage.history(id, { limit: 2 });
+    await storage.get(id, { at: versions[1].eventId });
+    await storage.applyPatches(id, [
+      { action: 'put', field: 'n', value: 9 },
+      { action: 'inc', field: 'hits', value: 1 },
+    ]);
+    const [tag] = named('syncom.tag');
+    assert.strictEqual(tag.attributes['syncom.records'], 1);
+    assert.strictEqual(named('syncom.untag').length, 1);
+    const [history] = named('syncom.history');
+    const read = (span, keys) => keys.map((key) => span.attributes[key]);
+    assert.deepStrictEqual(read(history, ['syncom.ops.count', 'syncom.versions', 'syncom.exact']), [4, 2, true]);
+    const [version] = named('syncom.version');
+    assert.strictEqual(version.attributes['syncom.ops.count'], 3, 'the entries inside the cut');
+    const [patches] = named('syncom.patches');
+    assert.deepStrictEqual(read(patches, ['syncom.ops.count', 'syncom.ops.applied']), [2, 2]);
+    assert.strictEqual(named('syncom.commit').length, 6, 'the patch ops are commit spans too');
+    for (const span of [tag, history, version, patches]) {
+      assert.strictEqual('syncom.record.id' in span.attributes, false, `${span.name} carries no identity`);
+    }
+  });
 
-  await t.test('a refused local write is an error span and an error sample', async (t2) => {
+  it('should record a refused local write as an error span and an error sample', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
     const { storage } = await openTemp(t2, { telemetry: { tracer, meter } });
@@ -814,7 +804,7 @@ test('Storage telemetry', async (t) => {
     );
   });
 
-  await t.test('a write to an encrypted record stays local: result encrypted, no error', async (t2) => {
+  it('should keep a write to an encrypted record local: result encrypted, no error', async (t2) => {
     const { tracer, named } = createTracing();
     const { storage } = await openTemp(t2, { telemetry: { tracer } });
     await storage.saveData('s1', { secret: 1 }, { encrypted: true });
@@ -826,7 +816,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(span.status.code, 0);
   });
 
-  await t.test('a merge is counted but not spanned; joining what is held already is a noop', async (t2) => {
+  it('should count a merge but not span it; joining what is held already is a noop', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
     const { storage } = await openTemp(t2, { telemetry: { tracer, meter } });
@@ -838,7 +828,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(point(commits, { 'syncom.op.type': 'merge', 'syncom.result': 'noop' }).value, 1);
   });
 
-  await t.test('a push a hosted unit refuses by its limits is counted', async (t2) => {
+  it('should count a push a hosted unit refuses by its limits', async (t2) => {
     const { meter, points } = createMetrics();
     const { packOps } = require('../src/ops.js');
     const { storage } = await openTemp(t2, { telemetry: { meter } });
@@ -852,7 +842,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(point(await points('syncom.ops.limited'), { 'syncom.reason': 'ops' }).value, 1);
   });
 
-  await t.test('a unique key a peer’s op leaves shared is counted', async (t2) => {
+  it('should count a unique key a peer’s op leaves shared', async (t2) => {
     const { meter, points } = createMetrics();
     const schema = { entities: { Post: { unique: ['slug'] } } };
     const { storage } = await openTemp(t2, { telemetry: { meter }, schema });
@@ -862,7 +852,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(point(await points('syncom.conflicts'), { 'syncom.kind': 'unique' }).value, 1);
   });
 
-  await t.test('an apply span counts the batch; ops by outcome, rejections and lag are sampled', async (t2) => {
+  it('should count the batch in an apply span, and sample ops by outcome, rejections and lag', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points, collect } = createMetrics();
     const { storage } = await openTemp(t2, { telemetry: { tracer, meter } });
@@ -914,7 +904,7 @@ test('Storage telemetry', async (t) => {
     assertNoIdentityLabels(await collect());
   });
 
-  await t.test('a replayed tail is spanned on reopen', async (t2) => {
+  it('should span a replayed tail on reopen', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
     // Crash between "logged" and "written": the backend fails the record
@@ -935,7 +925,7 @@ test('Storage telemetry', async (t) => {
     const errors = [];
     first.on('error', (error) => errors.push(error));
     await first.set(id, { n: 1 });
-    assert.strictEqual(errors[0].code, 'UNPERSISTED');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_UNPERSISTED');
     failing = false;
     await first.close();
     const second = await syncom.createDatabase({
@@ -953,7 +943,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(point(await points('syncom.write.duration'), { 'syncom.path': 'replay' }).value.count, 1);
   });
 
-  await t.test('includeIdentity: false keeps the record id off the span', async (t2) => {
+  it('should keep the record id off the span with includeIdentity: false', async (t2) => {
     const { tracer, named } = createTracing();
     const { storage } = await openTemp(t2, { telemetry: { tracer, includeIdentity: false } });
     await storage.insert({ n: 1 });
@@ -962,7 +952,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(span.attributes['syncom.op.type'], 'write');
   });
 
-  await t.test('a commit nests under whatever span is active — a wrpc handler, say', async (t2) => {
+  it('should nest a commit under whatever span is active — a wrpc handler, say', async (t2) => {
     useActiveContext(t2);
     const { provider, tracer, named } = createTracing();
     const { storage } = await openTemp(t2, { telemetry: { tracer } });
@@ -975,7 +965,7 @@ test('Storage telemetry', async (t) => {
     assert.strictEqual(commit.parentSpanContext?.spanId, outer.spanContext().spanId);
   });
 
-  await t.test('nothing is recorded, and nothing is measured, when telemetry is off', async (t2) => {
+  it('should record nothing, and measure nothing, when telemetry is off', async (t2) => {
     const { storage } = await openTemp(t2);
     assert.strictEqual(storage.telemetry, DISABLED);
     assert.strictEqual(storage.sync.storage.telemetry.enabled, false);
@@ -983,7 +973,7 @@ test('Storage telemetry', async (t) => {
   });
 });
 
-test('Sync telemetry', async (t) => {
+describe('Sync telemetry', () => {
   const createStorage =
     (telemetryOf) =>
     async (t2, name, options = {}) => {
@@ -1000,7 +990,7 @@ test('Sync telemetry', async (t) => {
       return storage;
     };
 
-  await t.test('a write, its relay push and the peer apply form one trace', async (t2) => {
+  it('should form one trace of a write, its relay push and the peer apply', async (t2) => {
     useActiveContext(t2);
     const tracing = { A: createTracing(), B: createTracing() };
     const mesh = await createMesh(
@@ -1033,7 +1023,7 @@ test('Sync telemetry', async (t) => {
     assert.strictEqual(apply.attributes['syncom.ops.applied'], 1);
   });
 
-  await t.test('a handshake push, a failed relay and a manual retry each say why', async (t2) => {
+  it('should say why for each of a handshake push, a failed relay and a manual retry', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points, collect } = createMetrics();
     const { storage: b } = await openTemp(t2);
@@ -1078,7 +1068,7 @@ test('Sync telemetry', async (t) => {
     assertNoIdentityLabels(await collect());
   });
 
-  await t.test('a bootstrap is one span; the host rolls its log under spans of its own', async (t2) => {
+  it('should record a bootstrap as one span, the host rolling its log under spans of its own', async (t2) => {
     const tracing = { A: createTracing(), B: createTracing() };
     const metrics = { A: createMetrics(), B: createMetrics() };
     const options = { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } };
@@ -1122,7 +1112,7 @@ test('Sync telemetry', async (t) => {
     assert.ok(tracing.B.named('syncom.commit').every((span) => span.attributes['syncom.op.type'] !== 'merge'));
   });
 
-  await t.test('a failed bootstrap is an error span and an error sample', async (t2) => {
+  it('should record a failed bootstrap as an error span and an error sample', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
     const options = { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } };
@@ -1150,8 +1140,8 @@ test('Sync telemetry', async (t) => {
   });
 });
 
-test('OpLog telemetry', async (t) => {
-  await t.test('a bare log takes the option too', async (t2) => {
+describe('OpLog telemetry', () => {
+  it('should take the option on a bare log too', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const { tracer, named } = createTracing();
@@ -1177,7 +1167,7 @@ test('OpLog telemetry', async (t) => {
     assert.deepStrictEqual([groups.count, groups.sum], [8, 8], 'one op a group, each its own');
   });
 
-  await t.test('an empty append is neither measured nor spanned', async (t2) => {
+  it('should neither measure nor span an empty append', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const { tracer, spans } = createTracing();
@@ -1190,8 +1180,8 @@ test('OpLog telemetry', async (t) => {
   });
 });
 
-test('What the engine adds beyond the write path', async (t) => {
-  await t.test('hook durations, the lock wait, host refusals and the gauges', async (t2) => {
+describe('What the engine adds beyond the write path', () => {
+  it('should record hook durations, the lock wait, host refusals and the gauges', async (t2) => {
     const { meter, points } = createMetrics();
     const { dir, storage } = await openTemp(t2, {
       telemetry: { meter },
@@ -1232,7 +1222,7 @@ test('What the engine adds beyond the write path', async (t) => {
     assert.ok(dir);
   });
 
-  await t.test('a snapshot, a scrub and a catalog rebuild are spans; skipped ops are their own outcome', async (t2) => {
+  it('should span a snapshot, a scrub and a catalog rebuild; skipped ops are their own outcome', async (t2) => {
     const { tracer, named } = createTracing();
     const { meter, points } = createMetrics();
     const { dir, storage } = await openTemp(t2, {
@@ -1269,11 +1259,11 @@ test('What the engine adds beyond the write path', async (t) => {
     assert.strictEqual(rebuild.attributes['syncom.records'], 4, 'every entry with a file, the tombstone included');
   });
 
-  await t.test('includeIdentity: false keeps the scope and the exception text off a span too', async (t2) => {
+  it('should keep the scope and the exception text off a span too with includeIdentity: false', async (t2) => {
     const { tracer, spans } = createTracing();
     const otel = createTelemetry({ tracer, includeIdentity: false });
     otel.withSpan('syncom.commit', { 'syncom.op.type': 'write' }, (handle) => {
-      otel.recordError(handle, Object.assign(new Error('Record r-123 is invalid'), { code: 'OP_INVALID' }));
+      otel.recordError(handle, Object.assign(new Error('Record r-123 is invalid'), { code: 'ALX_ERR_OP_INVALID' }));
       otel.endSpan(handle, { 'syncom.scope': 'tenant-7', 'syncom.result': 'error' });
     });
     const [span] = spans();
@@ -1282,7 +1272,7 @@ test('What the engine adds beyond the write path', async (t) => {
       'syncom.result': 'error',
       'error.type': 'Error',
     });
-    assert.strictEqual(span.status.message, 'OP_INVALID');
+    assert.strictEqual(span.status.message, 'ALX_ERR_OP_INVALID');
     assert.strictEqual(span.events.length, 0, 'no exception event: its message names the record');
     const { storage } = await openTemp(t2, { telemetry: { tracer, includeIdentity: false } });
     await storage.insert({ n: 1 });
@@ -1291,7 +1281,7 @@ test('What the engine adds beyond the write path', async (t) => {
     assert.strictEqual('syncom.record.id' in commit.attributes, false);
   });
 
-  await t.test('a hostile observable gauge is contained; a meter without the factory keeps the rest', async () => {
+  it('should contain a hostile observable gauge; a meter without the factory keeps the rest', async () => {
     const hostile = () => {
       throw new Error('gauge boom');
     };
@@ -1327,7 +1317,12 @@ test('What the engine adds beyond the write path', async (t) => {
   });
 });
 
-test("containment: an application's writer that lacks a method or throws never breaks or holds up a write", async (t) => {
+describe("containment: an application's writer that lacks a method or throws never breaks or holds up a write", () => {
+  // Closed when the whole group is done, as the parent test's teardown did.
+  const opened = [];
+  after(async () => {
+    for (const storage of opened) await storage.close().catch(() => {});
+  });
   const createDatabase = (telemetry) =>
     syncom.createDatabase({ fsi: require('../src/memory/memory.js').memory(), lock: false, defer: 0, telemetry });
   const within = (promise, label) =>
@@ -1336,28 +1331,28 @@ test("containment: an application's writer that lacks a method or throws never b
       new Promise((resolve, reject) => setTimeout(() => reject(new Error(`${label}: still pending`)), 2000).unref()),
     ]);
 
-  await t.test('a writer with only enabled and withSpan', async () => {
+  it('should neither break nor hold up a write through a writer with only enabled and withSpan', async () => {
     const storage = await createDatabase({ enabled: true, withSpan: (_name, _attributes, fn) => fn(null) });
-    t.after(() => storage.close().catch(() => {}));
+    opened.push(storage);
     const id = await within(storage.insert({ n: 1 }), 'insert');
     await within(storage.update(id, { n: 2 }), 'update');
     assert.strictEqual((await storage.get(id)).n, 2);
   });
 
-  await t.test('a writer whose every recording method throws', async () => {
+  it('should neither break nor hold up a write through a writer whose every recording method throws', async () => {
     const thrower = () => {
       throw new Error('writer down');
     };
     const writer = { enabled: true, withSpan: (_name, _attributes, fn) => fn(null) };
     for (const name of require('../src/telemetry/writer.js').METHODS) writer[name] = thrower;
     const storage = await createDatabase(writer);
-    t.after(() => storage.close().catch(() => {}));
+    opened.push(storage);
     const id = await within(storage.insert({ n: 1 }), 'insert');
     await within(storage.flush(), 'flush');
     assert.strictEqual((await storage.get(id)).n, 1);
   });
 
-  await t.test('withSpan that throws, never calls, or calls twice runs the work once and returns its result', () => {
+  it('should run the work once and return its result when withSpan throws, never calls, or calls twice', () => {
     const { writerOf } = require('../src/telemetry/writer.js');
     const run = (withSpan) => {
       let runs = 0;

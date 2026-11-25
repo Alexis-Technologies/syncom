@@ -5,7 +5,8 @@
 // fresh engine; `root()` a path no other test uses; `afterEach(path)` cleans
 // up where the medium outlives the test.
 
-const assert = require('node:assert');
+const { it } = require('node:test');
+const assert = require('node:assert/strict');
 const { isEngine, checkEngineDb } = require('../../src/engine.js');
 const { MAX_STORED_BYTES } = require('../../src/blobs.js');
 
@@ -18,7 +19,7 @@ const stored = (data, meta = { clock: {}, base: 0, deleted: 0 }, extra = {}) => 
   ...extra,
 });
 
-const runEngineTests = async (t, { create, root, afterEach = null }) => {
+const runEngineTests = ({ create, root, afterEach = null }) => {
   const open = async () => {
     const engine = create();
     const path = await root();
@@ -30,7 +31,7 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     return { engine, path, db, done };
   };
 
-  await t.test('an engine has a name, capabilities, open() and remove(); a database every store', async () => {
+  it('should give an engine a name, capabilities, open() and remove(), and a database every store', async () => {
     const engine = create();
     assert.strictEqual(isEngine(engine), true);
     assert.strictEqual(typeof engine.name, 'string');
@@ -50,7 +51,7 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     await done();
   });
 
-  await t.test('kv: get, has, list, put, remove by namespace; a key is its namespace’s alone', async () => {
+  it('should get, has, list, put and remove kv entries by namespace, a key its namespace’s alone', async () => {
     const { db, done } = await open();
     try {
       assert.strictEqual(await db.kv.get('', 'node.json'), null);
@@ -73,7 +74,7 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test('kv.create is exclusive where the engine says so', async () => {
+  it('should make kv.create exclusive where the engine says so', async () => {
     const { engine, db, done } = await open();
     try {
       if (!engine.capabilities.exclusiveCreate) {
@@ -91,46 +92,43 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test(
-    'records: a write set lands records; get, raw, has, getMany and ids read them back in id order',
-    async () => {
-      const { db, done } = await open();
-      try {
-        assert.strictEqual(await db.records.get('a'), null);
-        assert.strictEqual(await db.records.raw('a'), null);
-        assert.strictEqual(await db.records.has('a'), false);
-        const b = stored({ title: 'b' });
-        const a = stored({ title: 'a' }, { clock: {}, base: 0, deleted: 5 });
-        await db.write({
-          records: [
-            { id: 'b', stored: b },
-            { id: 'a', stored: a },
-          ],
-        });
-        assert.deepStrictEqual(await db.records.get('a'), a);
-        assert.deepStrictEqual(JSON.parse(await db.records.raw('b')), b);
-        assert.strictEqual(await db.records.has('b'), true);
-        const many = await db.records.getMany(['b', 'missing', 'a']);
-        assert.deepStrictEqual([...many.keys()], ['b', 'a']);
-        assert.deepStrictEqual(many.get('b'), b);
-        assert.deepStrictEqual(await db.records.ids(), ['a', 'b'], 'id order, tombstones included');
-        assert.deepStrictEqual(await db.records.ids({ after: 'a' }), ['b']);
-        assert.deepStrictEqual(await db.records.ids({ limit: 1 }), ['a']);
-        assert.deepStrictEqual(await db.records.ids({ after: 'b' }), []);
-        // A record written again is replaced; a text given as `text` is stored as given.
-        await db.write({ records: [{ id: 'a', text: JSON.stringify(stored({ title: 'a2' })) }] });
-        assert.deepStrictEqual((await db.records.get('a')).data, { title: 'a2' });
-        // A removal takes the record (a sealed record removed).
-        await db.write({ remove: ['a'] });
-        assert.strictEqual(await db.records.get('a'), null);
-        assert.deepStrictEqual(await db.records.ids(), ['b']);
-      } finally {
-        await done();
-      }
-    },
-  );
+  it('should land records with a write set and read them back with get, raw, has, getMany and ids in id order', async () => {
+    const { db, done } = await open();
+    try {
+      assert.strictEqual(await db.records.get('a'), null);
+      assert.strictEqual(await db.records.raw('a'), null);
+      assert.strictEqual(await db.records.has('a'), false);
+      const b = stored({ title: 'b' });
+      const a = stored({ title: 'a' }, { clock: {}, base: 0, deleted: 5 });
+      await db.write({
+        records: [
+          { id: 'b', stored: b },
+          { id: 'a', stored: a },
+        ],
+      });
+      assert.deepStrictEqual(await db.records.get('a'), a);
+      assert.deepStrictEqual(JSON.parse(await db.records.raw('b')), b);
+      assert.strictEqual(await db.records.has('b'), true);
+      const many = await db.records.getMany(['b', 'missing', 'a']);
+      assert.deepStrictEqual([...many.keys()], ['b', 'a']);
+      assert.deepStrictEqual(many.get('b'), b);
+      assert.deepStrictEqual(await db.records.ids(), ['a', 'b'], 'id order, tombstones included');
+      assert.deepStrictEqual(await db.records.ids({ after: 'a' }), ['b']);
+      assert.deepStrictEqual(await db.records.ids({ limit: 1 }), ['a']);
+      assert.deepStrictEqual(await db.records.ids({ after: 'b' }), []);
+      // A record written again is replaced; a text given as `text` is stored as given.
+      await db.write({ records: [{ id: 'a', text: JSON.stringify(stored({ title: 'a2' })) }] });
+      assert.deepStrictEqual((await db.records.get('a')).data, { title: 'a2' });
+      // A removal takes the record (a sealed record removed).
+      await db.write({ remove: ['a'] });
+      assert.strictEqual(await db.records.get('a'), null);
+      assert.deepStrictEqual(await db.records.ids(), ['b']);
+    } finally {
+      await done();
+    }
+  });
 
-  await t.test('pieces ride with their record: made before it, dropped after it, read by name', async () => {
+  it('should write pieces with their record, made before it and dropped after it, and read them by name', async () => {
     const { db, done } = await open();
     try {
       const meta = {
@@ -173,7 +171,7 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test('pieces.getMany answers the pieces named in one call, the absent left out', async () => {
+  it('should answer the pieces named in one pieces.getMany call, the absent left out', async () => {
     const { db, done } = await open();
     try {
       const made = [];
@@ -194,63 +192,60 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test(
-    'blobs: bytes by digest — put, get as a copy, has, list in digest order, remove; a put again is the same',
-    async () => {
-      const { db, done } = await open();
-      try {
-        if (db.capabilities.blobs !== true) {
-          assert.strictEqual(db.blobs, undefined, 'no blobs store where the capability says none');
-          return;
-        }
-        const a = 'a'.repeat(64);
-        const b = 'b'.repeat(64);
-        assert.strictEqual(await db.blobs.get(a), null);
-        assert.strictEqual(await db.blobs.has(a), false);
-        assert.deepStrictEqual(await db.blobs.list(), []);
-        const bytes = new Uint8Array([1, 2, 3, 250, 0, 7]);
-        await db.blobs.put(b, bytes);
-        await db.blobs.put(a, new Uint8Array(70_000).fill(9));
-        bytes[0] = 99;
-        const got = await db.blobs.get(b);
-        assert.ok(got instanceof Uint8Array);
-        assert.deepStrictEqual([...got], [1, 2, 3, 250, 0, 7], 'a copy: the caller’s later change is not in the store');
-        got[1] = 42;
-        assert.deepStrictEqual([...(await db.blobs.get(b))], [1, 2, 3, 250, 0, 7], 'a copy out too');
-        assert.strictEqual((await db.blobs.get(a)).length, 70_000);
-        assert.strictEqual(await db.blobs.has(a), true);
-        assert.deepStrictEqual(await db.blobs.list(), [a, b]);
-        await db.blobs.put(b, new Uint8Array([1, 2, 3, 250, 0, 7]));
-        assert.deepStrictEqual(await db.blobs.list(), [a, b], 'the same digest once');
-        await db.blobs.remove(a);
-        await db.blobs.remove('c'.repeat(64));
-        assert.deepStrictEqual(await db.blobs.list(), [b]);
-        assert.strictEqual(await db.blobs.get(a), null);
-      } finally {
-        await done();
+  it('should keep blobs as bytes by digest — put, get as a copy, has, list in digest order, remove — a put again the same', async () => {
+    const { db, done } = await open();
+    try {
+      if (db.capabilities.blobs !== true) {
+        assert.strictEqual(db.blobs, undefined, 'no blobs store where the capability says none');
+        return;
       }
-    },
-  );
+      const a = 'a'.repeat(64);
+      const b = 'b'.repeat(64);
+      assert.strictEqual(await db.blobs.get(a), null);
+      assert.strictEqual(await db.blobs.has(a), false);
+      assert.deepStrictEqual(await db.blobs.list(), []);
+      const bytes = new Uint8Array([1, 2, 3, 250, 0, 7]);
+      await db.blobs.put(b, bytes);
+      await db.blobs.put(a, new Uint8Array(70_000).fill(9));
+      bytes[0] = 99;
+      const got = await db.blobs.get(b);
+      assert.ok(got instanceof Uint8Array);
+      assert.deepStrictEqual([...got], [1, 2, 3, 250, 0, 7], 'a copy: the caller’s later change is not in the store');
+      got[1] = 42;
+      assert.deepStrictEqual([...(await db.blobs.get(b))], [1, 2, 3, 250, 0, 7], 'a copy out too');
+      assert.strictEqual((await db.blobs.get(a)).length, 70_000);
+      assert.strictEqual(await db.blobs.has(a), true);
+      assert.deepStrictEqual(await db.blobs.list(), [a, b]);
+      await db.blobs.put(b, new Uint8Array([1, 2, 3, 250, 0, 7]));
+      assert.deepStrictEqual(await db.blobs.list(), [a, b], 'the same digest once');
+      await db.blobs.remove(a);
+      await db.blobs.remove('c'.repeat(64));
+      assert.deepStrictEqual(await db.blobs.list(), [b]);
+      assert.strictEqual(await db.blobs.get(a), null);
+    } finally {
+      await done();
+    }
+  });
 
-  await t.test('blobs: a key that is no digest is a TypeError before the medium sees it', async () => {
+  it('should throw a TypeError for a blobs key that is no digest before the medium sees it', async () => {
     const { db, done } = await open();
     try {
       if (db.capabilities.blobs !== true) return;
       const keys = ['../../../../etc/hosts', 'x', 'A'.repeat(64), 'f'.repeat(63), `${'f'.repeat(63)}/`, 7, null];
       for (const key of keys) {
-        await assert.rejects(() => db.blobs.get(key), { name: 'TypeError', message: /digest/ }, `get ${key}`);
-        await assert.rejects(() => db.blobs.has(key), { name: 'TypeError', message: /digest/ }, `has ${key}`);
-        await assert.rejects(() => db.blobs.put(key, new Uint8Array([1])), { name: 'TypeError' }, `put ${key}`);
-        await assert.rejects(() => db.blobs.remove(key), { name: 'TypeError', message: /digest/ }, `remove ${key}`);
+        await assert.rejects(() => db.blobs.get(key), { name: 'ArgumentError', message: /digest/ }, `get ${key}`);
+        await assert.rejects(() => db.blobs.has(key), { name: 'ArgumentError', message: /digest/ }, `has ${key}`);
+        await assert.rejects(() => db.blobs.put(key, new Uint8Array([1])), { name: 'ArgumentError' }, `put ${key}`);
+        await assert.rejects(() => db.blobs.remove(key), { name: 'ArgumentError', message: /digest/ }, `remove ${key}`);
       }
       const d = 'd'.repeat(64);
-      await assert.rejects(() => db.blobs.put(d, 'text'), { name: 'TypeError', message: /Uint8Array/ });
-      await assert.rejects(() => db.blobs.put(d, [1, 2]), { name: 'TypeError', message: /Uint8Array/ });
+      await assert.rejects(() => db.blobs.put(d, 'text'), { name: 'ArgumentError', message: /Uint8Array/ });
+      await assert.rejects(() => db.blobs.put(d, [1, 2]), { name: 'ArgumentError', message: /Uint8Array/ });
       // The one cap, as a store holds it: a blob past MAX_STORED_BYTES (the plain cap and the at-rest seal's 28 bytes) is
-      // BLOB_TOO_LARGE (a TypeError with the code: the size is data).
+      // ALX_ERR_BLOB_TOO_LARGE (a TypeError with the code: the size is data).
       await assert.rejects(() => db.blobs.put(d, new Uint8Array(MAX_STORED_BYTES + 1)), {
-        name: 'TypeError',
-        code: 'BLOB_TOO_LARGE',
+        name: 'DataError',
+        code: 'ALX_ERR_BLOB_TOO_LARGE',
       });
       assert.deepStrictEqual(await db.blobs.list(), [], 'nothing reached the medium');
     } finally {
@@ -258,7 +253,7 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test('copies: a tag’s copies by id, listed in id order, dropped whole', async () => {
+  it('should keep a tag’s copies by id, list them in id order and drop them whole', async () => {
     const { db, done } = await open();
     try {
       assert.strictEqual(await db.copies.get('v1', 'a'), null);
@@ -290,7 +285,7 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test('a write set carries kv puts and removals with the records', async () => {
+  it('should carry kv puts and removals with the records in a write set', async () => {
     const { db, done } = await open();
     try {
       await db.kv.put('', 'gone.json', '1');
@@ -318,18 +313,22 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test('a record that does not parse is INTEGRITY, unreadable', async () => {
+  it('should reject a record that does not parse with INTEGRITY, unreadable', async () => {
     const { db, done } = await open();
     try {
       await db.write({ records: [{ id: 'torn', text: '{"data":' }] });
-      await assert.rejects(() => db.records.get('torn'), { code: 'INTEGRITY', id: 'torn', reason: 'unreadable' });
+      await assert.rejects(() => db.records.get('torn'), {
+        code: 'ALX_ERR_INTEGRITY',
+        id: 'torn',
+        reason: 'unreadable',
+      });
       assert.strictEqual(await db.records.raw('torn'), '{"data":');
     } finally {
       await done();
     }
   });
 
-  await t.test('ids page in id order: none skipped, none twice', async () => {
+  it('should page ids in id order, none skipped and none twice', async () => {
     const { db, done } = await open();
     try {
       // Ids a listing by file name would misorder (`a-b.json` before `a.json`).
@@ -359,49 +358,46 @@ const runEngineTests = async (t, { create, root, afterEach = null }) => {
     }
   });
 
-  await t.test(
-    'two databases of one engine never share a record; remove(path) takes one and leaves the other',
-    async () => {
-      const engine = create();
-      const one = await root();
-      const two = await root();
-      const a = await engine.open(one, { logger: null });
-      const b = await engine.open(two, { logger: null });
-      try {
-        await a.write({
-          records: [{ id: 'r', stored: stored({ of: 'a' }) }],
-          kv: { put: [['', 'node.json', '{"id":"a"}', undefined]] },
-        });
-        await b.write({
-          records: [{ id: 'r', stored: stored({ of: 'b' }) }],
-          kv: { put: [['', 'node.json', '{"id":"b"}', undefined]] },
-        });
-        await a.copies.put('v1', 'r', '{}');
-        await a.kv.put('', 'tags.json', JSON.stringify({ format: 1, tags: [{ name: 'v1' }] }));
-        await a.kv.put('', 'branch.json', '{"format":1}');
-        await a.kv.put('tags/v1/index', 'catalog.json', '{}');
-        assert.deepStrictEqual((await a.records.get('r')).data, { of: 'a' });
-        assert.deepStrictEqual((await b.records.get('r')).data, { of: 'b' });
-        await a.close();
-        await engine.remove(one);
-        const again = await engine.open(one, { logger: null });
-        assert.strictEqual(await again.records.get('r'), null);
-        assert.strictEqual(await again.kv.get('', 'node.json'), null);
-        assert.strictEqual(await again.kv.get('', 'branch.json'), null, 'branch.json goes last, but goes');
-        assert.strictEqual(await again.copies.get('v1', 'r'), null, 'the tags’ copies go too');
-        assert.deepStrictEqual(await again.kv.list('tags/v1/index'), []);
-        assert.deepStrictEqual(await again.records.ids(), []);
-        await again.close();
-        assert.deepStrictEqual((await b.records.get('r')).data, { of: 'b' }, 'the other database is whole');
-      } finally {
-        await b.close();
-        if (afterEach !== null) {
-          await afterEach(one);
-          await afterEach(two);
-        }
+  it('should never share a record between two databases of one engine, remove(path) taking one and leaving the other', async () => {
+    const engine = create();
+    const one = await root();
+    const two = await root();
+    const a = await engine.open(one, { logger: null });
+    const b = await engine.open(two, { logger: null });
+    try {
+      await a.write({
+        records: [{ id: 'r', stored: stored({ of: 'a' }) }],
+        kv: { put: [['', 'node.json', '{"id":"a"}', undefined]] },
+      });
+      await b.write({
+        records: [{ id: 'r', stored: stored({ of: 'b' }) }],
+        kv: { put: [['', 'node.json', '{"id":"b"}', undefined]] },
+      });
+      await a.copies.put('v1', 'r', '{}');
+      await a.kv.put('', 'tags.json', JSON.stringify({ format: 1, tags: [{ name: 'v1' }] }));
+      await a.kv.put('', 'branch.json', '{"format":1}');
+      await a.kv.put('tags/v1/index', 'catalog.json', '{}');
+      assert.deepStrictEqual((await a.records.get('r')).data, { of: 'a' });
+      assert.deepStrictEqual((await b.records.get('r')).data, { of: 'b' });
+      await a.close();
+      await engine.remove(one);
+      const again = await engine.open(one, { logger: null });
+      assert.strictEqual(await again.records.get('r'), null);
+      assert.strictEqual(await again.kv.get('', 'node.json'), null);
+      assert.strictEqual(await again.kv.get('', 'branch.json'), null, 'branch.json goes last, but goes');
+      assert.strictEqual(await again.copies.get('v1', 'r'), null, 'the tags’ copies go too');
+      assert.deepStrictEqual(await again.kv.list('tags/v1/index'), []);
+      assert.deepStrictEqual(await again.records.ids(), []);
+      await again.close();
+      assert.deepStrictEqual((await b.records.get('r')).data, { of: 'b' }, 'the other database is whole');
+    } finally {
+      await b.close();
+      if (afterEach !== null) {
+        await afterEach(one);
+        await afterEach(two);
       }
-    },
-  );
+    }
+  });
 };
 
 module.exports = { runEngineTests, stored };

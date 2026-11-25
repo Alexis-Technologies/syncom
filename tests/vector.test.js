@@ -1,11 +1,11 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const vector = require('../src/vector.js');
 
-test('vector module', async (t) => {
-  await t.test('compareVectors: behind, ahead, equal, or concurrent', () => {
+describe('vector module', () => {
+  it('should tell behind, ahead, equal or concurrent with compareVectors', () => {
     assert.strictEqual(vector.compareVectors({ a: 1 }, { a: 1 }), 0);
     assert.strictEqual(vector.compareVectors({}, {}), 0);
     assert.strictEqual(vector.compareVectors({ a: 1 }, { a: 2 }), -1);
@@ -15,7 +15,7 @@ test('vector module', async (t) => {
     assert.strictEqual(vector.compareVectors({ a: 1, b: 3 }, { a: 2, b: 2 }), undefined);
   });
 
-  await t.test('compareClock orders by ts, then origin, and treats null as oldest', () => {
+  it('should order by ts, then origin, in compareClock, and treat null as oldest', () => {
     assert.strictEqual(vector.compareClock([1, 'a'], [2, 'a']), -1);
     assert.strictEqual(vector.compareClock([2, 'a'], [1, 'z']), 1);
     assert.strictEqual(vector.compareClock([1, 'a'], [1, 'b']), -1);
@@ -28,14 +28,14 @@ test('vector module', async (t) => {
     assert.deepStrictEqual(vector.maxClock(null, [1, 'b']), [1, 'b']);
   });
 
-  await t.test('vectorMax and vectorHas', () => {
+  it('should join with vectorMax and test an op with vectorHas', () => {
     assert.deepStrictEqual(vector.vectorMax({ a: 2, b: 1 }, { a: 1, c: 3 }), { a: 2, b: 1, c: 3 });
     assert.strictEqual(vector.vectorHas({ a: 3 }, { origin: 'a', seq: 3 }), true);
     assert.strictEqual(vector.vectorHas({ a: 3 }, { origin: 'a', seq: 4 }), false);
     assert.strictEqual(vector.vectorHas({}, { origin: 'a', seq: 1 }), false);
   });
 
-  await t.test('event ids round-trip and reject garbage', () => {
+  it('should round-trip event ids and reject garbage', () => {
     assert.strictEqual(vector.formatEventId('ep', 7), 'ep.7');
     assert.deepStrictEqual(vector.parseEventId('ep.7'), { epoch: 'ep', seq: 7 });
     assert.deepStrictEqual(vector.parseEventId('a.b.7'), { epoch: 'a.b', seq: 7 });
@@ -46,7 +46,7 @@ test('vector module', async (t) => {
     assert.strictEqual(vector.parseEventId(7), null);
   });
 
-  await t.test('Clock is monotonic and never falls behind an observed stamp', () => {
+  it('should keep the Clock monotonic, never behind an observed stamp', () => {
     const clock = new vector.Clock();
     const a = clock.now();
     const b = clock.now();

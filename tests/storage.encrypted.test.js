@@ -3,15 +3,15 @@
 // Encryption at rest through the whole API: a storage opened with
 // `encrypted: true`, per-call overrides, and what stays local.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
-test('encrypted storage', async (t) => {
-  await t.test('every write path encrypts, reads decrypt, nothing becomes an op', async (t2) => {
+describe('encrypted storage', () => {
+  it('should encrypt on every write path and decrypt on reads, and make nothing an op', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const storage = await syncom.createDatabase({
@@ -62,7 +62,7 @@ test('encrypted storage', async (t) => {
     await reopened.close();
   });
 
-  await t.test('per-call overrides go both ways, and a record never changes kind', async (t2) => {
+  it('should take per-call overrides both ways, and never change the kind of a record', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const storage = await syncom.createDatabase({ path: dir, logger: false, encrypted: true });
@@ -71,7 +71,7 @@ test('encrypted storage', async (t) => {
     const shared = await storage.insert({ shared: true }, { encrypted: false });
     assert.strictEqual(ops.length, 1, 'an explicitly replicated record is an op');
     await assert.rejects(() => storage.set(shared, { x: 1 }, { encrypted: true }), {
-      code: 'ENCRYPTED',
+      code: 'ALX_ERR_ENCRYPTED',
       message: /replicated and cannot become encrypted/,
     });
 
@@ -85,7 +85,7 @@ test('encrypted storage', async (t) => {
     await plain.close();
   });
 
-  await t.test("a peer's op on a record sealed here is skipped: logged and relayed, never applied", async (t2) => {
+  it("should skip a peer's op on a record sealed here: logged and relayed, never applied", async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const storage = await syncom.createDatabase({ path: dir, logger: false, encrypted: true });

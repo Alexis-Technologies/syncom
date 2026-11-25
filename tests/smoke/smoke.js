@@ -9,11 +9,17 @@
 // subpath's link converge; the shared facade leads alone; an attachment's bytes
 // are put and read. What fails here is the runtime's, not a test's.
 
-const assert = require('node:assert');
+const assert = require('node:assert/strict');
 const syncom = require('@alexify/syncom/all');
 const { createMesh, settle, memoryEngine } = require('@alexify/syncom/testing');
 const { openShared } = require('@alexify/syncom/shared');
 const { attachments } = require('@alexify/syncom/attachments');
+
+// The runtime this smoke runs on, by name.
+const runtime = () => {
+  if (globalThis.Deno) return 'Deno';
+  return globalThis.Bun ? 'Bun' : 'Node';
+};
 
 const main = async () => {
   const engine = memoryEngine();
@@ -70,7 +76,7 @@ const main = async () => {
   await withBlobs.close();
 
   console.log(
-    `syncom smoke ok on ${globalThis.Deno ? 'Deno' : globalThis.Bun ? 'Bun' : 'Node'} ${globalThis.Deno?.version?.deno ?? globalThis.Bun?.version ?? process.version}`,
+    `syncom smoke ok on ${runtime()} ${globalThis.Deno?.version?.deno ?? globalThis.Bun?.version ?? process.version}`,
   );
 };
 

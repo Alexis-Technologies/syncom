@@ -2,17 +2,21 @@
 
 // Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
 // Before the suite and everything it loads: the shared modules resolve to the browser halves.
 prime();
 const { runBranchTests } = require('./suites/branch.js');
 
-test('Branches (browser halves)', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = requireBrowserAll();
+describe('Branches (browser halves)', () => {
+  let env = null;
+  let browser = null;
+  before(() => {
+    env = installBrowserGlobals();
+    browser = requireBrowserAll();
+  });
+  after(() => env.uninstall());
 
   let n = 0;
   const paths = new Map();
@@ -28,5 +32,5 @@ test('Branches (browser halves)', async (t) => {
     if (!paths.has(key)) paths.set(key, `branch-${n++}-${name}`);
     return paths.get(key);
   };
-  await runBranchTests(t, assert, createStorage, branchPath);
+  runBranchTests(assert, createStorage, branchPath);
 });

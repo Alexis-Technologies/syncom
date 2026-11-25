@@ -5,8 +5,8 @@
 // never by a page silently dropped. Plus the things that keep a push honest:
 // one at a time per peer, a bounded outbox, a vector learned from the feed.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { packOps } = require('../src/ops.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
@@ -47,8 +47,8 @@ const flaky = (unit, control) => {
   return link;
 };
 
-test('A failed push leaves the peer behind, and the next sign of life catches it up', async (t) => {
-  await t.test('a page from the host triggers the recovery', async (t2) => {
+describe('a failed push and the recovery at the next sign of life', () => {
+  it('should trigger the recovery on a page from the host', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const control = {};
@@ -73,7 +73,7 @@ test('A failed push leaves the peer behind, and the next sign of life catches it
     assert.strictEqual(errors.length, 1, 'no second error: the recovery went through');
   });
 
-  await t.test('an op to relay triggers the recovery, and carries what was dropped with it', async (t2) => {
+  it('should trigger the recovery on an op to relay, carrying what was dropped with it', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const control = {};
@@ -102,7 +102,7 @@ test('A failed push leaves the peer behind, and the next sign of life catches it
     assert.strictEqual(dialer.sync.peers()[0].behind, false);
   });
 
-  await t.test('pushes to one peer never overlap: handshake, relay and sync() take turns', async (t2) => {
+  it('should never overlap pushes to one peer: handshake, relay and sync() take turns', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const control = { latency: 15 };
@@ -120,7 +120,7 @@ test('A failed push leaves the peer behind, and the next sign of life catches it
     assert.deepStrictEqual((await host.list()).sort(), ids.sort());
   });
 
-  await t.test('the outbox is bounded: beyond maxOutbox the backlog is dropped and the peer is behind', async (t2) => {
+  it('should bound the outbox: beyond maxOutbox the backlog is dropped and the peer is behind', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const control = {};
@@ -146,8 +146,8 @@ test('A failed push leaves the peer behind, and the next sign of life catches it
   });
 });
 
-test('What a push and a page say about the vector', async (t) => {
-  await t.test("a received page teaches the dialer the host's vector: nothing is relayed back", async (t2) => {
+describe('the vector a push and a page carry', () => {
+  it("should teach the dialer the host's vector from a received page: nothing is relayed back", async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => new MemoryLink(unit) } });
@@ -162,7 +162,7 @@ test('What a push and a page say about the vector', async (t) => {
     assert.strictEqual(pushed, 0, 'the feed said the host has it');
   });
 
-  await t.test('a push answers with the keys it touched; a second snapshot page carries no vector', async (t2) => {
+  it('should answer a push with the keys it touched, and carry no vector on a second snapshot page', async (t2) => {
     const host = await openTemp(t2);
     for (let i = 0; i < 3; i++) await host.insert({ i });
     const unit = host.sync.unit({ access: 'public', pageSize: 2 });
@@ -186,7 +186,7 @@ test('What a push and a page say about the vector', async (t) => {
     );
   });
 
-  await t.test('a host that keeps answering 428 is reported as a loop, not greeted forever', async (t2) => {
+  it('should report a host that keeps answering 428 as a loop, not greet it forever', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const connect = () => {
@@ -205,13 +205,13 @@ test('What a push and a page say about the vector', async (t) => {
     dialer.sync.on('error', (error) => errors.push(error));
     await dialer.sync.addNode({ url: 'mem://host' });
     await dialer.sync.start();
-    await waitUntil(() => errors.some((error) => error.code === 'HANDSHAKE_LOOP'));
+    await waitUntil(() => errors.some((error) => error.code === 'ALX_ERR_HANDSHAKE_LOOP'));
     const [peer] = dialer.sync.peers();
     assert.strictEqual(peer.subscribed, false);
     assert.strictEqual(peer.connected, true, 'the link is up; the host is the problem');
   });
 
-  await t.test('a page of nothing but echoes moves the cursor and announces nothing', async (t2) => {
+  it('should move the cursor on a page of nothing but echoes and announce nothing', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => new MemoryLink(unit) } });
@@ -230,11 +230,13 @@ test('What a push and a page say about the vector', async (t) => {
   });
 });
 
-test('close() refuses writes from the moment it is called', async (t) => {
-  const storage = await openTemp(t);
-  await storage.insert({ n: 1 });
-  const closing = storage.close();
-  await assert.rejects(() => storage.insert({ n: 2 }), /closed/);
-  await closing;
-  await assert.rejects(() => storage.insert({ n: 3 }), /closed/);
+describe('close()', () => {
+  it('should refuse writes from the moment close() is called', async (t) => {
+    const storage = await openTemp(t);
+    await storage.insert({ n: 1 });
+    const closing = storage.close();
+    await assert.rejects(() => storage.insert({ n: 2 }), /closed/);
+    await closing;
+    await assert.rejects(() => storage.insert({ n: 3 }), /closed/);
+  });
 });

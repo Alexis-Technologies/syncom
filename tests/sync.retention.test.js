@@ -5,8 +5,8 @@
 // lacks ones its log no longer holds, and notices when its own directory was
 // rewound under it.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const syncom = require('../src/all/all.js');
 const core = require('../index.js');
@@ -32,18 +32,18 @@ const openAt = async (t, dir, options = {}) => {
 };
 
 // A dialer of `host` that keeps few ops and rolls often, so compaction runs.
-const dialerOptions = (host, sync = {}) => ({
+const dialerOptions = (host, overrides = {}) => ({
   sync: {
     autoStart: false,
     connect: () => new MemoryLink(host.sync.unit({ access: 'public' })),
     retention: { ops: 20 },
     log: { rollAfter: 4 },
-    ...sync,
+    ...overrides,
   },
 });
 
-test('A dialer keeps its own ops until the nodes it syncs with have them', async (t) => {
-  await t.test('written offline past retention, delivered whole once the host is reached', async (t2) => {
+describe("A dialer's own ops, kept until the nodes it syncs with have them", () => {
+  it('should deliver whole the ops written offline past retention once the host is reached', async (t2) => {
     const host = await openAt(t2, await tempDir(t2));
     const dialer = await openAt(t2, await tempDir(t2), dialerOptions(host));
     await dialer.sync.addNode({ url: 'mem://host' });
@@ -61,7 +61,7 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
     assert.ok(dialer.log.floor > 1, 'compacted once acknowledged');
   });
 
-  await t.test('what a node acknowledged survives a restart; a disabled node is not waited for', async (t2) => {
+  it('should keep what a node acknowledged across a restart, and not wait for a disabled node', async (t2) => {
     const host = await openAt(t2, await tempDir(t2));
     const dir = await tempDir(t2);
     const first = await openAt(t2, dir, dialerOptions(host));
@@ -84,7 +84,7 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
     assert.ok(reopened.log.floor > 1);
   });
 
-  await t.test('ops compacted before any node was registered are reported UNDELIVERABLE', async (t2) => {
+  it('should report UNDELIVERABLE the ops compacted before any node was registered', async (t2) => {
     const host = await openAt(t2, await tempDir(t2));
     // defer: 0 — each write lands at once, so every roll seals a few ops and
     // compaction drops whole segments; inside one deferred window the hundred
@@ -99,12 +99,12 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
     await dialer.sync.start();
     await waitUntil(() => errors.length > 0);
     const [error] = errors;
-    assert.strictEqual(error.code, 'UNDELIVERABLE');
+    assert.strictEqual(error.code, 'ALX_ERR_UNDELIVERABLE');
     assert.ok(error instanceof syncom.SyncomError);
     const { host: held, retained } = error.missing[dialer.nodeId];
     assert.strictEqual(held, 0);
     assert.ok(retained > 1);
-    assert.strictEqual(dialer.sync.peers()[0].lastError.code, 'UNDELIVERABLE');
+    assert.strictEqual(dialer.sync.peers()[0].lastError.code, 'ALX_ERR_UNDELIVERABLE');
     // Said once per hello, not once per push.
     await dialer.insert({ late: true });
     await dialer.sync.sync();
@@ -112,8 +112,8 @@ test('A dialer keeps its own ops until the nodes it syncs with have them', async
   });
 });
 
-test('A node restored from an older copy of its directory', async (t) => {
-  await t.test('is told REWOUND, mints past what the host holds and joins the lost state back', async (t2) => {
+describe('A node restored from an older copy of its directory', () => {
+  it('should be told REWOUND, mint past what the host holds and join the lost state back', async (t2) => {
     const host = await openAt(t2, await tempDir(t2));
     const dir = await tempDir(t2);
     const backup = await tempDir(t2);
@@ -146,7 +146,7 @@ test('A node restored from an older copy of its directory', async (t) => {
     node.sync.on('bootstrap', (event) => bootstraps.push(event));
     await node.sync.start();
     await waitUntil(() => bootstraps.length === 1);
-    const rewound = errors.find((error) => error.code === 'REWOUND');
+    const rewound = errors.find((error) => error.code === 'ALX_ERR_REWOUND');
     assert.ok(rewound, 'reported');
     assert.deepStrictEqual(rewound.local, { [own]: 1 });
     assert.deepStrictEqual(rewound.remote, { [own]: 2 });
@@ -163,9 +163,9 @@ test('A node restored from an older copy of its directory', async (t) => {
   });
 
   // The same story without signatures: nothing proves the host's claim, so
-  // the node says REWOUND and leaves its stream where its log has it — unless
+  // the node says ALX_ERR_REWOUND and leaves its stream where its log has it — unless
   // the application opens it with `sync.rewind: 'adopt'`.
-  await t.test('without signing, REWOUND is reported and nothing moves; rewind: adopt moves it', async (t2) => {
+  it('should report REWOUND without signing and move nothing; rewind: adopt moves it', async (t2) => {
     const createDatabase = async (dir, options = {}) => {
       const storage = await core.createDatabase({ path: dir, logger: false, defer: 0, plugins: [sync], ...options });
       t2.after(() => storage.close().catch(() => {}));
@@ -202,8 +202,8 @@ test('A node restored from an older copy of its directory', async (t) => {
     const bootstraps = [];
     node.sync.on('bootstrap', (event) => bootstraps.push(event));
     await node.sync.start();
-    await waitUntil(() => errors.some((error) => error.code === 'REWOUND') && node.sync.peers()[0]?.subscribed);
-    const rewound = errors.find((error) => error.code === 'REWOUND');
+    await waitUntil(() => errors.some((error) => error.code === 'ALX_ERR_REWOUND') && node.sync.peers()[0]?.subscribed);
+    const rewound = errors.find((error) => error.code === 'ALX_ERR_REWOUND');
     assert.deepStrictEqual([rewound.local, rewound.remote, rewound.adopted], [{ [own]: 1 }, { [own]: 2 }, {}]);
     assert.strictEqual(node.vector[own], 1, 'an unproven claim moves nothing');
     assert.strictEqual(bootstraps.length, 0);
@@ -216,15 +216,15 @@ test('A node restored from an older copy of its directory', async (t) => {
     node.sync.on('bootstrap', (event) => bootstraps.push(event));
     await node.sync.start();
     await waitUntil(() => bootstraps.length === 1);
-    assert.deepStrictEqual(adopted.find((error) => error.code === 'REWOUND').adopted, { [own]: 2 });
+    assert.deepStrictEqual(adopted.find((error) => error.code === 'ALX_ERR_REWOUND').adopted, { [own]: 2 });
     assert.ok(node.vector[own] >= 2);
     assert.deepStrictEqual(await node.get(lost), { n: 'after the backup' });
   });
 
-  await t.test('sync.rewind is checked at open()', async () => {
+  it('should check sync.rewind at open()', async () => {
     const fsi = memory();
     await assert.rejects(async () => core.createDatabase({ path: 'x', fsi, logger: false, sync: { rewind: 'yes' } }), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: "createDatabase({ sync }): rewind must be 'report' or 'adopt'",
     });
   });
@@ -241,8 +241,8 @@ const lyingHost = (host, answer) => {
   };
 };
 
-test('A host cannot move the streams of the nodes that dial it', async (t) => {
-  await t.test("a feed host's advance and a joined vector leave this node's own streams alone", async (t2) => {
+describe("A dialer's own streams, which its host cannot move", () => {
+  it("should leave this node's own streams alone on a feed host's advance and a joined vector", async (t2) => {
     const node = await openAt(t2, await tempDir(t2), { defer: 0 });
     const own = node.nodeId;
     await node.insert({ n: 1 });
@@ -265,7 +265,7 @@ test('A host cannot move the streams of the nodes that dial it', async (t) => {
     );
   });
 
-  await t.test('a hello that claims more of them without proof is REWOUND, never adopted', async (t2) => {
+  it('should report a hello that claims more of them without proof as REWOUND, never adopt it', async (t2) => {
     const host = await openAt(t2, await tempDir(t2));
     const peer = await createSigner();
     let lie = null;
@@ -289,8 +289,10 @@ test('A host cannot move the streams of the nodes that dial it', async (t) => {
       errors.length = 0;
       await node.sync.stop();
       await node.sync.start();
-      await waitUntil(() => errors.some((error) => error.code === 'REWOUND') && node.sync.peers()[0]?.subscribed);
-      return errors.find((error) => error.code === 'REWOUND');
+      await waitUntil(
+        () => errors.some((error) => error.code === 'ALX_ERR_REWOUND') && node.sync.peers()[0]?.subscribed,
+      );
+      return errors.find((error) => error.code === 'ALX_ERR_REWOUND');
     };
     // A bare claim; this node's own op, but of another seq; one under another
     // key; one whose check throws — nothing is proven by any of them.

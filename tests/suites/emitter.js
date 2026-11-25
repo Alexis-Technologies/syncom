@@ -2,8 +2,10 @@
 
 // Shared by tests/utils.test.js and tests/utils.browser.test.js — the Emitter
 // is byte-identical in both halves, so the contract is asserted once.
-const runEmitterTests = async (t, assert, Emitter) => {
-  await t.test('a once listener added during an emit is not swept by it: it fires on the next emit', async () => {
+const { it } = require('node:test');
+
+const runEmitterTests = (assert, Emitter) => {
+  it('should not sweep a once listener added during an emit: it fires on the next emit', async () => {
     const emitter = new Emitter();
     const calls = [];
     emitter.once('tick', () => {
@@ -27,7 +29,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.deepStrictEqual(seen, [1, 2]);
   });
 
-  await t.test('emit forwards every argument to every listener', async () => {
+  it('should forward every argument of emit to every listener', async () => {
     const emitter = new Emitter();
     const seen = [];
     emitter.on('update', (data, delta) => void seen.push([data, delta]));
@@ -39,7 +41,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     ]);
   });
 
-  await t.test('emit awaits async listeners', async () => {
+  it('should await async listeners in emit', async () => {
     const emitter = new Emitter();
     let done = false;
     emitter.on('x', async () => {
@@ -50,17 +52,17 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.strictEqual(done, true);
   });
 
-  await t.test('emit on an unknown event resolves', async () => {
+  it('should resolve emit on an unknown event', async () => {
     const emitter = new Emitter();
     assert.strictEqual(await emitter.emit('nobody'), undefined);
   });
 
-  await t.test('emit of unhandled error throws', () => {
+  it('should throw on emit of an unhandled error', () => {
     const emitter = new Emitter();
     assert.throws(() => emitter.emit('error', new Error('boom')), /Unhandled error/);
   });
 
-  await t.test('once fires a single time and is swept', async () => {
+  it('should fire once a single time and sweep it', async () => {
     const emitter = new Emitter();
     let calls = 0;
     emitter.once('tick', () => void calls++);
@@ -70,7 +72,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.deepStrictEqual(emitter.eventNames(), []);
   });
 
-  await t.test('once alongside on keeps the persistent listener', async () => {
+  it('should keep the persistent listener of on alongside once', async () => {
     const emitter = new Emitter();
     const calls = [];
     emitter.on('tick', () => void calls.push('on'));
@@ -81,7 +83,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.strictEqual(emitter.listenerCount('tick'), 1);
   });
 
-  await t.test('off removes one listener, or the whole event', async () => {
+  it('should remove with off one listener, or the whole event', async () => {
     const emitter = new Emitter();
     const listener = () => {};
     emitter.on('a', listener);
@@ -94,7 +96,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     emitter.off('missing');
   });
 
-  await t.test('clear drops one event or all of them', () => {
+  it('should drop with clear one event or all of them', () => {
     const emitter = new Emitter();
     emitter.on('a', () => {});
     emitter.on('b', () => {});
@@ -104,14 +106,14 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.deepStrictEqual(emitter.eventNames(), []);
   });
 
-  await t.test('duplicate listeners are rejected', () => {
+  it('should reject duplicate listeners', () => {
     const emitter = new Emitter();
     const listener = () => {};
     emitter.on('a', listener);
     assert.throws(() => emitter.on('a', listener), /Duplicate listeners/);
   });
 
-  await t.test('maxListeners is enforced', () => {
+  it('should enforce maxListeners', () => {
     const emitter = new Emitter({ maxListeners: 2 });
     emitter.on('a', () => {});
     emitter.on('a', () => {});
@@ -123,14 +125,14 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.strictEqual(emitter.listenerCount('a'), 2);
   });
 
-  await t.test('listeners and listenerCount require an event name', () => {
+  it('should require an event name in listeners and listenerCount', () => {
     const emitter = new Emitter();
     assert.throws(() => emitter.listeners(), /Expected eventName/);
     assert.throws(() => emitter.listenerCount(), /Expected eventName/);
     assert.strictEqual(emitter.listenerCount('nothing'), 0);
   });
 
-  await t.test('dispatch calls every listener at once and hands each failure to onError', async () => {
+  it('should call every listener at once in dispatch and hand each failure to onError', async () => {
     const emitter = new Emitter();
     const seen = [];
     const failures = [];
@@ -155,7 +157,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     emitter.dispatch('nobody', [], () => assert.fail('no listener, no call'));
   });
 
-  await t.test('a listener added or taken off during an emit counts from the next one', async () => {
+  it('should count a listener added or taken off during an emit from the next one', async () => {
     const emitter = new Emitter();
     const seen = [];
     const late = () => void seen.push('late');
@@ -176,7 +178,7 @@ const runEmitterTests = async (t, assert, Emitter) => {
     assert.deepStrictEqual(seen, ['first', 'late']);
   });
 
-  await t.test('toPromise resolves on the next emit', async () => {
+  it('should resolve toPromise on the next emit', async () => {
     const emitter = new Emitter();
     const promise = emitter.toPromise('ready');
     await emitter.emit('ready', 42);

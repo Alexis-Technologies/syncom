@@ -11,7 +11,9 @@ const openGroups = async (fsi, dir) => {
       groups++;
       continue;
     }
-    for (const line of (await fsi.read(dir, name)).split('\n')) if (line !== '') groups++;
+    for (const line of (await fsi.read(dir, name)).split('\n')) {
+      if (line !== '') groups++;
+    }
   }
   return groups;
 };

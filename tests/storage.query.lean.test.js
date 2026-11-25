@@ -6,8 +6,8 @@
 // `query` first, then what the suite's records and peers need (schema,
 // text, tree, sync, encryption; no signing: the node ids are UUIDs).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
 const { query } = require('../src/query/query.js');
@@ -18,11 +18,11 @@ const { sync } = require('../src/sync/sync.js');
 const { encryption } = require('../src/encryption/encryption.js');
 const { runQueryTests } = require('./suites/query.js');
 
-test('Queries (lean core, plugins by hand)', async (t) => {
+describe('Queries (lean core, plugins by hand)', () => {
   const fsi = memory();
   let n = 0;
   const paths = new Map();
-  await runQueryTests(t, assert, async (t2, name, options = {}) => {
+  runQueryTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `query-${n++}-${name}`);
     const plugins = [query, schema, text, tree, sync, encryption];

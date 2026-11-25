@@ -9,8 +9,8 @@
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
 const { readdirSync } = require('node:fs');
-const { test } = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 
 const ROOT = path.join(__dirname, '..', '..');
 const NOTES = 'CLAUDE.md';
@@ -46,18 +46,20 @@ const notesUnder = (dir, out = []) => {
 const files = packed();
 const skip = files === null ? 'npm is not on the PATH' : false;
 
-test('no CLAUDE.md is packed: not the root’s, not a folder’s, and nothing of .claude/', { skip }, () => {
-  // The notes are there to be left out: without them this would hold of anything.
-  assert.ok(notesUnder('src').length > 0, 'src/ holds no CLAUDE.md: this suite checks nothing');
-  const notes = files.filter((file) => path.posix.basename(file).toLowerCase() === NOTES.toLowerCase());
-  assert.deepStrictEqual(notes, [], 'package.json#files must keep every CLAUDE.md out ("!**/CLAUDE.md")');
-  const agent = files.filter((file) => file.split('/').includes('.claude'));
-  assert.deepStrictEqual(agent, [], '.claude/ is never packed');
-});
+describe('the packed tarball', () => {
+  it('should pack no CLAUDE.md: not the root’s, not a folder’s, and nothing of .claude/', { skip }, () => {
+    // The notes are there to be left out: without them this would hold of anything.
+    assert.ok(notesUnder('src').length > 0, 'src/ holds no CLAUDE.md: this suite checks nothing');
+    const notes = files.filter((file) => path.posix.basename(file).toLowerCase() === NOTES.toLowerCase());
+    assert.deepStrictEqual(notes, [], 'package.json#files must keep every CLAUDE.md out ("!**/CLAUDE.md")');
+    const agent = files.filter((file) => file.split('/').includes('.claude'));
+    assert.deepStrictEqual(agent, [], '.claude/ is never packed');
+  });
 
-test('src/ ships code and types alone: every packed file of it is a .js or a .d.ts', { skip }, () => {
-  const source = files.filter((file) => file.startsWith('src/'));
-  assert.ok(source.includes('src/index.js') && source.includes('src/sync/sync.d.ts'), 'src/ is packed');
-  const other = source.filter((file) => !file.endsWith('.js') && !file.endsWith('.d.ts'));
-  assert.deepStrictEqual(other, [], 'a file of src/ that is neither code nor types would ship');
+  it('should ship code and types alone from src/: every packed file of it is a .js or a .d.ts', { skip }, () => {
+    const source = files.filter((file) => file.startsWith('src/'));
+    assert.ok(source.includes('src/index.js') && source.includes('src/sync/sync.d.ts'), 'src/ is packed');
+    const other = source.filter((file) => !file.endsWith('.js') && !file.endsWith('.d.ts'));
+    assert.deepStrictEqual(other, [], 'a file of src/ that is neither code nor types would ship');
+  });
 });

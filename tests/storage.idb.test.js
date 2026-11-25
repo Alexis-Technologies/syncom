@@ -3,20 +3,24 @@
 // Storage over IndexedDB, with the browser halves for everything else: what
 // a browser without OPFS runs.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { IDBFactory } = require('fake-indexeddb');
 const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
 // Before the suite and everything it loads: the shared modules resolve to the browser halves.
 prime();
 const { createIdbFsi } = require('../src/idb/idb.js');
 
-test('Storage over IndexedDB', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = requireBrowserAll();
+describe('Storage over IndexedDB', () => {
+  let env = null;
+  let browser = null;
+  before(() => {
+    env = installBrowserGlobals();
+    browser = requireBrowserAll();
+  });
+  after(() => env.uninstall());
 
-  await t.test('insert, get, replicate-shaped reads, reopen', async () => {
+  it('should serve insert, get, replicate-shaped reads and a reopen', async () => {
     const factory = new IDBFactory();
     const fsi = createIdbFsi({ indexedDB: factory, name: 'app' });
     const storage = await browser.createDatabase({ path: 'store', fsi, logger: false });

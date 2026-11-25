@@ -4,6 +4,7 @@
 // the record left in data/ or log/, nothing later revives it, peers scrub
 // too, a bootstrap carries the purged tombstone, a torn scrub is retried.
 
+const { it } = require('node:test');
 const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
 
 const SECRET = 'SSN-123-45-6789';
@@ -25,8 +26,8 @@ const holdsSecret = async (storage) => {
   return texts.some((text) => text.includes(SECRET));
 };
 
-const runPurgeTests = async (t, assert, createStorage) => {
-  await t.test('after a purge nothing of the record is left, and nothing later revives it', async (t2) => {
+const runPurgeTests = (assert, createStorage) => {
+  it('should leave nothing of the record after a purge, and let nothing later revive it', async (t2) => {
     let storage = await createStorage(t2, 'A', {
       schema: { entities: { Person: {} } },
       sync: { log: { rollAfter: 1 } },
@@ -96,7 +97,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(hooks, []);
   });
 
-  await t.test('an encrypted record is purged too: the file goes, the catalog follows', async (t2) => {
+  it('should purge an encrypted record too: the file goes, the catalog follows', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({ ssn: SECRET }, { encrypted: true });
     assert.deepStrictEqual(await storage.list(), [id]);
@@ -106,58 +107,55 @@ const runPurgeTests = async (t, assert, createStorage) => {
     assert.strictEqual(storage.log.length, 0, 'an encrypted record has no ops');
   });
 
-  await t.test(
-    'a purge reaches every peer, which scrubs its own log; a bootstrap carries the tombstone',
-    async (t2) => {
-      const mesh = await createMesh(
-        t2,
-        ['A', 'B', 'C'],
-        [
-          ['B', 'A'],
-          ['C', 'B'],
-        ],
-        createStorage,
-        { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } },
-      );
-      const [a, b, c] = ['A', 'B', 'C'].map((name) => mesh.get(name));
-      await waitUntil(() => b.sync.peers()[0]?.subscribed && c.sync.peers()[0]?.subscribed);
-      const id = await a.insert({ ssn: SECRET });
-      await a.update(id, { more: SECRET });
-      await settle([a, b, c]);
-      assert.deepStrictEqual(await c.get(id), { ssn: SECRET, more: SECRET });
-      assert.strictEqual(await holdsSecret(c), true);
-      await a.purge(id);
-      await settle([a, b, c]);
-      for (const [name, storage] of [
-        ['A', a],
-        ['B', b],
-        ['C', c],
-      ]) {
-        assert.strictEqual(await storage.get(id), null, name);
-        assert.strictEqual(await holdsSecret(storage), false, `${name} scrubbed`);
-      }
-      // A late write from C (its clock ahead) does not bring it back anywhere.
-      await c.set(id, { ssn: SECRET, late: true });
-      await settle([a, b, c]);
-      for (const storage of [a, b, c]) assert.strictEqual(await storage.get(id), null);
-      assert.strictEqual(await holdsSecret(a), false);
-      // A newcomer that must bootstrap from B gets the tombstone, not the data.
-      for (let i = 0; i < 8; i++) await b.insert({ i });
-      await b.log.flush();
-      const d = await createStorage(t2, 'D', { sync: { autoStart: false, connect: mesh.connect } });
-      const bootstraps = [];
-      d.sync.on('bootstrap', (event) => bootstraps.push(event));
-      await d.sync.addNode({ url: 'mem://B' });
-      await d.sync.start();
-      await waitUntil(() => bootstraps.length > 0);
-      await settle([b, d]);
-      assert.strictEqual(await d.get(id), null);
-      assert.strictEqual(await holdsSecret(d), false);
-      assert.strictEqual((await d.list()).length, 8);
-    },
-  );
+  it('should reach every peer with a purge, each scrubbing its own log; a bootstrap carries the tombstone', async (t2) => {
+    const mesh = await createMesh(
+      t2,
+      ['A', 'B', 'C'],
+      [
+        ['B', 'A'],
+        ['C', 'B'],
+      ],
+      createStorage,
+      { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } },
+    );
+    const [a, b, c] = ['A', 'B', 'C'].map((name) => mesh.get(name));
+    await waitUntil(() => b.sync.peers()[0]?.subscribed && c.sync.peers()[0]?.subscribed);
+    const id = await a.insert({ ssn: SECRET });
+    await a.update(id, { more: SECRET });
+    await settle([a, b, c]);
+    assert.deepStrictEqual(await c.get(id), { ssn: SECRET, more: SECRET });
+    assert.strictEqual(await holdsSecret(c), true);
+    await a.purge(id);
+    await settle([a, b, c]);
+    for (const [name, storage] of [
+      ['A', a],
+      ['B', b],
+      ['C', c],
+    ]) {
+      assert.strictEqual(await storage.get(id), null, name);
+      assert.strictEqual(await holdsSecret(storage), false, `${name} scrubbed`);
+    }
+    // A late write from C (its clock ahead) does not bring it back anywhere.
+    await c.set(id, { ssn: SECRET, late: true });
+    await settle([a, b, c]);
+    for (const storage of [a, b, c]) assert.strictEqual(await storage.get(id), null);
+    assert.strictEqual(await holdsSecret(a), false);
+    // A newcomer that must bootstrap from B gets the tombstone, not the data.
+    for (let i = 0; i < 8; i++) await b.insert({ i });
+    await b.log.flush();
+    const d = await createStorage(t2, 'D', { sync: { autoStart: false, connect: mesh.connect } });
+    const bootstraps = [];
+    d.sync.on('bootstrap', (event) => bootstraps.push(event));
+    await d.sync.addNode({ url: 'mem://B' });
+    await d.sync.start();
+    await waitUntil(() => bootstraps.length > 0);
+    await settle([b, d]);
+    assert.strictEqual(await d.get(id), null);
+    assert.strictEqual(await holdsSecret(d), false);
+    assert.strictEqual((await d.list()).length, 8);
+  });
 
-  await t.test('a scrub that fails mid-way rejects the purge; the next purge finishes it', async (t2) => {
+  it('should reject the purge when a scrub fails mid-way; the next purge finishes it', async (t2) => {
     const { memory } = require('../../src/memory/memory.js');
     const inner = memory();
     let failing = false;
@@ -184,7 +182,7 @@ const runPurgeTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('a snapshot that carries a purge scrubs what the joiner held of the record', async (t2) => {
+  it('should scrub what the joiner held of the record when a snapshot carries a purge', async (t2) => {
     const a = await createStorage(t2, 'A', { sync: { log: { rollAfter: 1 } } });
     const d = await createStorage(t2, 'D', { sync: { log: { rollAfter: 1 } } });
     const id = await a.insert({ ssn: SECRET });

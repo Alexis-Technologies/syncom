@@ -1,7 +1,9 @@
 'use strict';
 
-const runSyncManagerCoreTests = async (t, assert, getSync) => {
-  await t.test('addNode listNodes and removeNode', async (t2) => {
+const { it } = require('node:test');
+
+const runSyncManagerCoreTests = (assert, getSync) => {
+  it('should add, list and remove a node with addNode, listNodes and removeNode', async (t2) => {
     const sync = await getSync(t2);
 
     await sync.addNode({ url: 'wss://peer.example.com/api', token: 't1' });
@@ -18,7 +20,7 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
     assert.strictEqual(sync.listNodes().length, 0);
   });
 
-  await t.test('addNode rejects bad input', async (t2) => {
+  it('should reject bad input to addNode', async (t2) => {
     const sync = await getSync(t2);
 
     await assert.rejects(() => sync.addNode({ token: 'x' }), /URL is required/);
@@ -26,13 +28,13 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
 
     await sync.addNode({ url: 'ws://dup.example.com:80' });
     await assert.rejects(() => sync.addNode({ url: 'ws://dup.example.com:80' }), {
-      code: 'NODE_EXISTS',
+      code: 'ALX_ERR_NODE_EXISTS',
       url: 'ws://dup.example.com:80',
       message: /already exists/,
     });
   });
 
-  await t.test('two peers on one host, or a url without a port, do not collide', async (t2) => {
+  it('should not collide two peers on one host, or a url without a port', async (t2) => {
     const sync = await getSync(t2);
     await sync.addNode({ url: 'ws://host.example.com:9000' });
     await sync.addNode({ url: 'ws://host.example.com:9001' });
@@ -40,15 +42,15 @@ const runSyncManagerCoreTests = async (t, assert, getSync) => {
     assert.strictEqual(sync.listNodes().length, 3);
   });
 
-  await t.test('removeNode throws when unknown', async (t2) => {
+  it('should throw from removeNode when the node is unknown', async (t2) => {
     const sync = await getSync(t2);
     await assert.rejects(() => sync.removeNode('http://nope.example.com:1'), {
-      code: 'NODE_NOT_FOUND',
+      code: 'ALX_ERR_NODE_NOT_FOUND',
       message: /not found/,
     });
   });
 
-  await t.test('the registry survives a reopen', async (t2) => {
+  it('should keep the registry across a reopen', async (t2) => {
     const sync = await getSync(t2);
     await sync.addNode({ url: 'wss://persist.example.com/api', token: 'k', scopes: ['docs'] });
     await sync.storage.close();

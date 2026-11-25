@@ -36,8 +36,11 @@ const installBrowserGlobals = () => {
   }
   const uninstall = () => {
     opfs.uninstall();
-    if (prevCrypto) Object.defineProperty(globalThis, 'crypto', prevCrypto);
-    else delete globalThis.crypto;
+    if (prevCrypto) {
+      Object.defineProperty(globalThis, 'crypto', prevCrypto);
+    } else {
+      delete globalThis.crypto;
+    }
   };
   return { opfs, uninstall };
 };
@@ -52,13 +55,17 @@ const installBrowserGlobals = () => {
 // functions), so `installBrowserGlobals()` may come before or after.
 let primed = false;
 const prime = () => {
-  if (primed) return;
+  if (primed) {
+    return;
+  }
   primed = true;
   for (const [from, to] of Object.entries(pkg.browser)) {
     // Only the split leaves are primed; the barrel itself is required LAST,
     // once every twin is in place — requiring it first would load the whole
     // graph with the node halves before the loop reached them.
-    if (!from.startsWith('./src/') || from === './src/index.js') continue;
+    if (!from.startsWith('./src/') || from === './src/index.js') {
+      continue;
+    }
     const nodePath = path.join(ROOT, from);
     if (require.cache[nodePath]) {
       throw new Error(`browser-env: ${from} was loaded before the priming — call prime() before requiring the suite`);
@@ -99,9 +106,13 @@ const requireBrowserAll = () => {
 const installMockLocks = () => {
   const held = new Map();
   const request = async (name, options, callback) => {
-    if (typeof options === 'function') [options, callback] = [{}, options];
+    if (typeof options === 'function') {
+      [options, callback] = [{}, options];
+    }
     while (held.has(name)) {
-      if (options.ifAvailable) return callback(null);
+      if (options.ifAvailable) {
+        return callback(null);
+      }
       await held.get(name);
     }
     let release = null;
@@ -116,11 +127,15 @@ const installMockLocks = () => {
   globalThis.navigator.locks = { request, held: () => [...held.keys()] };
   // What tells src/lock.js it is in a browser (Node has navigator.locks too).
   const hadSelf = Object.hasOwn(globalThis, 'self');
-  if (!hadSelf) globalThis.self = globalThis;
+  if (!hadSelf) {
+    globalThis.self = globalThis;
+  }
   return {
     uninstall: () => {
       delete globalThis.navigator.locks;
-      if (!hadSelf) delete globalThis.self;
+      if (!hadSelf) {
+        delete globalThis.self;
+      }
     },
   };
 };

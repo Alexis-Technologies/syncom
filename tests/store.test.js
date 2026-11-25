@@ -4,8 +4,8 @@
 // Record, a record through get(), a presence, an emitter — as a store that
 // keeps Svelte's contract and React's useSyncExternalStore's (STORE-1).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createPresence } = require('../src/presence/presence.js');
@@ -40,60 +40,57 @@ const reactLike = (store) => {
   return { renders, stop };
 };
 
-test('stores', async (t) => {
-  await t.test(
-    'a store keeps Svelte’s contract and React’s: a value at once and on every change, a stable snapshot, the source watched from the first subscriber to the last',
-    async (t2) => {
-      const storage = await createDatabase(t2);
-      await storage.Task.insert({ title: 'a', done: false });
-      const cursor = storage.Task.select({ done: false }).order('title');
-      const store = toStore(cursor);
-      assert.strictEqual(store.getSnapshot(), undefined, 'nothing before a subscriber');
-      // Svelte: run is called at once, with what the store holds.
-      const seen = [];
-      const stop = store.subscribe((rows) => seen.push(rows?.map((row) => row.title)));
-      assert.deepStrictEqual(seen, [undefined]);
-      await store.ready;
-      await waitUntil(() => seen.length === 2);
-      assert.deepStrictEqual(seen[1], ['a']);
-      // React: a second subscriber; the snapshot changes only with the rows.
-      const react = reactLike(store);
-      const b = await storage.Task.insert({ title: 'b', done: false });
-      await waitUntil(() => react.renders.length === 2);
-      assert.deepStrictEqual(
-        react.renders[1].map((row) => row.title),
-        ['a', 'b'],
-      );
-      await storage.Task.update(b.id, { done: true });
-      await waitUntil(() => react.renders.length === 3);
-      assert.deepStrictEqual(
-        store.value.map((row) => row.title),
-        ['a'],
-      );
-      // The last subscriber gone: the watch stops, the last value stays.
-      stop();
-      react.stop();
-      const held = store.getSnapshot();
-      await storage.Task.insert({ title: 'c', done: false });
-      await new Promise((resolve) => setTimeout(resolve, 20));
-      assert.strictEqual(store.getSnapshot(), held, 'not watched');
-      // A new subscriber starts it again.
-      const again = [];
-      const off = store.subscribe((rows) => again.push(rows));
-      await waitUntil(() => again.length === 2);
-      assert.deepStrictEqual(
-        again[1].map((row) => row.title),
-        ['a', 'c'],
-      );
-      off();
-      off(); // twice is nothing
-      assert.throws(() => store.subscribe('x'), TypeError);
-      assert.throws(() => toStore({}), TypeError);
-      assert.throws(() => toStore(storage), TypeError, 'a storage needs a record id');
-    },
-  );
+describe('stores', () => {
+  it('should keep Svelte’s store contract and React’s: a value at once and on every change, a stable snapshot, the source watched from the first subscriber to the last', async (t2) => {
+    const storage = await createDatabase(t2);
+    await storage.Task.insert({ title: 'a', done: false });
+    const cursor = storage.Task.select({ done: false }).order('title');
+    const store = toStore(cursor);
+    assert.strictEqual(store.getSnapshot(), undefined, 'nothing before a subscriber');
+    // Svelte: run is called at once, with what the store holds.
+    const seen = [];
+    const stop = store.subscribe((rows) => seen.push(rows?.map((row) => row.title)));
+    assert.deepStrictEqual(seen, [undefined]);
+    await store.ready;
+    await waitUntil(() => seen.length === 2);
+    assert.deepStrictEqual(seen[1], ['a']);
+    // React: a second subscriber; the snapshot changes only with the rows.
+    const react = reactLike(store);
+    const b = await storage.Task.insert({ title: 'b', done: false });
+    await waitUntil(() => react.renders.length === 2);
+    assert.deepStrictEqual(
+      react.renders[1].map((row) => row.title),
+      ['a', 'b'],
+    );
+    await storage.Task.update(b.id, { done: true });
+    await waitUntil(() => react.renders.length === 3);
+    assert.deepStrictEqual(
+      store.value.map((row) => row.title),
+      ['a'],
+    );
+    // The last subscriber gone: the watch stops, the last value stays.
+    stop();
+    react.stop();
+    const held = store.getSnapshot();
+    await storage.Task.insert({ title: 'c', done: false });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.strictEqual(store.getSnapshot(), held, 'not watched');
+    // A new subscriber starts it again.
+    const again = [];
+    const off = store.subscribe((rows) => again.push(rows));
+    await waitUntil(() => again.length === 2);
+    assert.deepStrictEqual(
+      again[1].map((row) => row.title),
+      ['a', 'c'],
+    );
+    off();
+    off(); // twice is nothing
+    assert.throws(() => store.subscribe('x'), TypeError);
+    assert.throws(() => toStore({}), TypeError);
+    assert.throws(() => toStore(storage), TypeError, 'a storage needs a record id');
+  });
 
-  await t.test('a live Record, a record through get() or a field of it, a presence room, any emitter', async (t2) => {
+  it('should make a store of a live Record, a record through get() or a field of it, a presence room, any emitter', async (t2) => {
     const storage = await createDatabase(t2);
     const id = await storage.insert({ title: 'a', profile: { city: 'Lviv' } });
     // A live Record: its data, a new copy per change; null once deleted.
@@ -147,96 +144,93 @@ test('stores', async (t) => {
     assert.throws(() => fromEvents(storage, 'change', () => 1), TypeError);
   });
 
-  await t.test(
-    'a failing source keeps the last value, reports the error and clears it with the next value',
-    async (t2) => {
-      const storage = await createDatabase(t2);
-      const errors = [];
-      let fail = true;
-      const store = fromEvents(
-        storage,
-        ['change'],
-        () => {
-          if (fail) throw new Error('boom');
-          return 'ok';
-        },
-        { initial: 'start', onError: (error) => errors.push(error.message) },
-      );
-      const values = [];
-      const stop = store.subscribe((value) => values.push(value));
-      assert.deepStrictEqual([values, store.error?.message, errors], [['start'], 'boom', ['boom']]);
-      fail = false;
-      await storage.insert({ n: 1 });
-      await waitUntil(() => values.at(-1) === 'ok');
-      assert.strictEqual(store.error, null);
-      stop();
-      // A cursor whose query throws reports through onError too.
-      await storage.Task.insert({ title: 'x', done: false });
-      const broken = toStore(
-        storage.Task.select().filter(() => {
-          throw new Error('a filter that throws');
-        }),
-        { onError: (error) => errors.push(error.message) },
-      );
-      const off = broken.subscribe(() => {});
-      await waitUntil(() => errors.length === 2);
-      assert.ok(broken.error instanceof Error);
-      off();
-      // A read that resolves after its watch stopped is dropped.
-      let resolveLate;
-      const late = fromEvents(storage, ['change'], () => new Promise((resolve) => (resolveLate = resolve)));
-      const offLate = late.subscribe(() => {});
-      offLate();
-      resolveLate('too late');
-      await new Promise((resolve) => setTimeout(resolve, 5));
-      assert.strictEqual(late.getSnapshot(), undefined);
-    },
-  );
-});
+  it('should keep the last value of a failing source, report the error and clear it with the next value', async (t2) => {
+    const storage = await createDatabase(t2);
+    const errors = [];
+    let fail = true;
+    const store = fromEvents(
+      storage,
+      ['change'],
+      () => {
+        if (fail) throw new Error('boom');
+        return 'ok';
+      },
+      { initial: 'start', onError: (error) => errors.push(error.message) },
+    );
+    const values = [];
+    const stop = store.subscribe((value) => values.push(value));
+    assert.deepStrictEqual([values, store.error?.message, errors], [['start'], 'boom', ['boom']]);
+    fail = false;
+    await storage.insert({ n: 1 });
+    await waitUntil(() => values.at(-1) === 'ok');
+    assert.strictEqual(store.error, null);
+    stop();
+    // A cursor whose query throws reports through onError too.
+    await storage.Task.insert({ title: 'x', done: false });
+    const broken = toStore(
+      storage.Task.select().filter(() => {
+        throw new Error('a filter that throws');
+      }),
+      { onError: (error) => errors.push(error.message) },
+    );
+    const off = broken.subscribe(() => {});
+    await waitUntil(() => errors.length === 2);
+    assert.ok(broken.error instanceof Error);
+    off();
+    // A read that resolves after its watch stopped is dropped.
+    let resolveLate;
+    const late = fromEvents(storage, ['change'], () => new Promise((resolve) => (resolveLate = resolve)));
+    const offLate = late.subscribe(() => {});
+    offLate();
+    resolveLate('too late');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert.strictEqual(late.getSnapshot(), undefined);
+  });
 
-test('toObservable() follows the store, as a function or an observer, and unsubscribe() stops it and lets the source go', async (t) => {
-  const storage = await createDatabase(t);
-  await storage.Task.insert({ title: 'a', done: false });
-  const store = toStore(storage.Task.select({ done: false }).order('title'));
-  const observable = toObservable(store);
-  assert.strictEqual(observable['@@observable'](), observable, 'RxJS’s interop key answers the observable itself');
-  assert.ok(Object.isFrozen(observable));
-  const seen = [];
-  const first = observable.subscribe((rows) => seen.push(rows?.map((row) => row.title)));
-  assert.deepStrictEqual(seen, [undefined], 'the first value at once');
-  await waitUntil(() => seen.length === 2);
-  assert.deepStrictEqual(seen[1], ['a']);
-  // An observer object, as Angular's async pipe, toSignal() and RxJS subscribe — `next` called as its method.
-  const calls = [];
-  const observer = {
-    count: 0,
-    next(rows) {
-      this.count++;
-      calls.push(rows?.length);
-    },
-  };
-  const second = observable.subscribe(observer);
-  assert.strictEqual(observer.count, 1);
-  const third = observable.subscribe({ error: () => {} });
-  await storage.Task.insert({ title: 'b', done: false });
-  await waitUntil(() => seen.length === 3 && calls.length === 2);
-  assert.deepStrictEqual(seen[2], ['a', 'b']);
-  assert.strictEqual(calls[1], 2);
-  assert.strictEqual(first.closed, false);
-  first.unsubscribe();
-  second.unsubscribe();
-  third.unsubscribe();
-  first.unsubscribe();
-  assert.strictEqual(first.closed, true);
-  await storage.Task.insert({ title: 'c', done: false });
-  await new Promise((resolve) => setTimeout(resolve, 30));
-  assert.strictEqual(seen.length, 3, 'nothing after unsubscribe');
-  assert.strictEqual(calls.length, 2);
-  assert.strictEqual(
-    store.getSnapshot().length,
-    2,
-    'the source was let go with the last subscriber: the last value stays',
-  );
-  assert.throws(() => toObservable(null), { name: 'TypeError' });
-  assert.throws(() => toObservable({}), { name: 'TypeError' });
+  it('should follow the store with toObservable(), as a function or an observer, unsubscribe() stopping it and letting the source go', async (t) => {
+    const storage = await createDatabase(t);
+    await storage.Task.insert({ title: 'a', done: false });
+    const store = toStore(storage.Task.select({ done: false }).order('title'));
+    const observable = toObservable(store);
+    assert.strictEqual(observable['@@observable'](), observable, 'RxJS’s interop key answers the observable itself');
+    assert.ok(Object.isFrozen(observable));
+    const seen = [];
+    const first = observable.subscribe((rows) => seen.push(rows?.map((row) => row.title)));
+    assert.deepStrictEqual(seen, [undefined], 'the first value at once');
+    await waitUntil(() => seen.length === 2);
+    assert.deepStrictEqual(seen[1], ['a']);
+    // An observer object, as Angular's async pipe, toSignal() and RxJS subscribe — `next` called as its method.
+    const calls = [];
+    const observer = {
+      count: 0,
+      next(rows) {
+        this.count++;
+        calls.push(rows?.length);
+      },
+    };
+    const second = observable.subscribe(observer);
+    assert.strictEqual(observer.count, 1);
+    const third = observable.subscribe({ error: () => {} });
+    await storage.Task.insert({ title: 'b', done: false });
+    await waitUntil(() => seen.length === 3 && calls.length === 2);
+    assert.deepStrictEqual(seen[2], ['a', 'b']);
+    assert.strictEqual(calls[1], 2);
+    assert.strictEqual(first.closed, false);
+    first.unsubscribe();
+    second.unsubscribe();
+    third.unsubscribe();
+    first.unsubscribe();
+    assert.strictEqual(first.closed, true);
+    await storage.Task.insert({ title: 'c', done: false });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.strictEqual(seen.length, 3, 'nothing after unsubscribe');
+    assert.strictEqual(calls.length, 2);
+    assert.strictEqual(
+      store.getSnapshot().length,
+      2,
+      'the source was let go with the last subscriber: the last value stays',
+    );
+    assert.throws(() => toObservable(null), { name: 'ArgumentError' });
+    assert.throws(() => toObservable({}), { name: 'ArgumentError' });
+  });
 });

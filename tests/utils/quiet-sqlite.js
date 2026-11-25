@@ -6,5 +6,7 @@
 
 process.removeAllListeners('warning');
 process.on('warning', (warning) => {
+  // Every other warning is still printed, as Node would have printed it.
+  // oxlint-disable-next-line no-console
   if (warning.name !== 'ExperimentalWarning') console.error(warning.stack);
 });

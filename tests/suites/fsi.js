@@ -1,9 +1,10 @@
 'use strict';
 
-const assert = require('node:assert');
+const { it } = require('node:test');
+const assert = require('node:assert/strict');
 const path = require('node:path');
 
-const runFsiTests = async (t, fsi, options = {}) => {
+const runFsiTests = (fsi, options = {}) => {
   const { getRoot, afterEach } = options;
   const joinPath = options.joinPath ?? ((r, ...p) => path.join(r, ...p));
 
@@ -11,7 +12,7 @@ const runFsiTests = async (t, fsi, options = {}) => {
     if (afterEach) await afterEach(dir);
   };
 
-  await t.test('write read exists and remove', async () => {
+  it('should write, read, check exists and remove a file', async () => {
     const dir = await getRoot();
     try {
       assert.strictEqual(await fsi.exists(dir, 'a.txt'), false);
@@ -25,7 +26,7 @@ const runFsiTests = async (t, fsi, options = {}) => {
     }
   });
 
-  await t.test('write creates nested directories', async () => {
+  it('should create nested directories on write', async () => {
     const root = await getRoot();
     try {
       const nested = joinPath(root, 'x', 'y');
@@ -37,7 +38,7 @@ const runFsiTests = async (t, fsi, options = {}) => {
     }
   });
 
-  await t.test('remove when missing does not throw', async () => {
+  it('should not throw on remove when the file is missing', async () => {
     const dir = await getRoot();
     try {
       await fsi.remove(dir, 'nope.txt');
@@ -47,7 +48,7 @@ const runFsiTests = async (t, fsi, options = {}) => {
     }
   });
 
-  await t.test('list names files only, sorted, and an absent directory is empty', async () => {
+  it('should list file names only, sorted, and an absent directory as empty', async () => {
     const root = await getRoot();
     try {
       assert.deepStrictEqual(await fsi.list(joinPath(root, 'never')), []);
@@ -63,7 +64,7 @@ const runFsiTests = async (t, fsi, options = {}) => {
 
   // The optional append: what the op log's journal writes with.
   if (typeof fsi.append === 'function') {
-    await t.test('append makes the file and its directory, adds in call order, and builds on a write', async () => {
+    it('should make the file and its directory on append, add in call order and build on a write', async () => {
       const root = await getRoot();
       try {
         const nested = joinPath(root, 'j', 'k');
@@ -87,7 +88,7 @@ const runFsiTests = async (t, fsi, options = {}) => {
     });
   }
 
-  await t.test('read when missing rejects', async () => {
+  it('should reject a read when the file is missing', async () => {
     const dir = await getRoot();
     try {
       await assert.rejects(

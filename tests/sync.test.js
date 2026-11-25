@@ -1,15 +1,15 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { runSyncManagerCoreTests } = require('./suites/sync-manager.js');
 
-test('SyncManager', async (t) => {
+describe('SyncManager', () => {
   // `previous` asks for the SAME directory again — the reopen case.
   const dirs = new WeakMap();
-  await runSyncManagerCoreTests(t, assert, async (t2, previous) => {
+  runSyncManagerCoreTests(assert, async (t2, previous) => {
     let tempDir = previous ? dirs.get(previous) : null;
     if (!tempDir) {
       tempDir = await createTemp();

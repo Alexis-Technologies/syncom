@@ -4,23 +4,29 @@
 // by the browser half (Web Crypto) opens with node:crypto and vice versa,
 // with either half's PEM key pair.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { installBrowserGlobals } = require('./utils/browser-env.js');
 const { memory } = require('../src/memory/memory.js');
 const node = { ...require('../src/encryption/rsa.js'), ...require('../src/signing/ed25519.js') };
 
-test('crypto halves interoperate', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = { ...require('../src/encryption/rsa.browser.js'), ...require('../src/signing/ed25519.browser.js') };
+describe('crypto halves interoperate', () => {
+  let env = null;
+  let browser = null;
   const payload = { secret: 'both ways', n: 42, nested: { list: [1, 2, 3] }, long: 'y'.repeat(5000) };
+  // One RSA pair minted by each half, before the tests that use them.
+  const pairs = new Map();
+  before(async () => {
+    env = installBrowserGlobals();
+    browser = { ...require('../src/encryption/rsa.browser.js'), ...require('../src/signing/ed25519.browser.js') };
+    pairs.set('node keys', await node.generateKeys());
+    pairs.set('browser keys', await browser.generateKeys());
+  });
+  after(() => env.uninstall());
 
-  for (const [label, keys] of [
-    ['node keys', await node.generateKeys()],
-    ['browser keys', await browser.generateKeys()],
-  ]) {
-    await t.test(`${label}: browser encrypts, node decrypts, and back`, async () => {
+  for (const label of ['node keys', 'browser keys']) {
+    it(`should let the browser encrypt and node decrypt, and back, with ${label}`, async () => {
+      const keys = pairs.get(label);
       const fromBrowser = await browser.encrypt(payload, keys.publicKey);
       assert.deepStrictEqual(node.decrypt(fromBrowser, keys.privateKey), payload);
       const fromNode = node.encrypt(payload, keys.publicKey);
@@ -29,7 +35,7 @@ test('crypto halves interoperate', async (t) => {
     });
   }
 
-  await t.test('a signature made on one half verifies on the other, with either half’s keys', async () => {
+  it('should verify on one half a signature made on the other, with either half’s keys', async () => {
     const message = JSON.stringify([1, 'origin', 3, 'add', 'r', null, 'digest']);
     for (const [label, keys] of [
       ['node keys', await node.generateSigningKeys()],
@@ -45,14 +51,14 @@ test('crypto halves interoperate', async (t) => {
     }
   });
 
-  await t.test('both halves derive one id from one signing pair on disk', async () => {
+  it('should derive one id on both halves from one signing pair on disk', async () => {
     const fsi = memory();
     const fromNode = await node.loadSigningKeys('keys', { fsi });
     const fromBrowser = await browser.loadSigningKeys('keys', { fsi });
     assert.deepStrictEqual(fromBrowser, fromNode);
   });
 
-  await t.test('url-safe PEMs from the earlier browser half still import', async () => {
+  it('should still import url-safe PEMs from the earlier browser half', async () => {
     const keys = await browser.generateKeys();
     const urlSafe = (pem) => pem.replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
     const sealed = await browser.encrypt(payload, urlSafe(keys.publicKey));

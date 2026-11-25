@@ -4,8 +4,8 @@
 // value is ciphertext — the records, their pieces, the copies, the kv texts,
 // the log's entries and index — read back with the key and refused without it.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { IDBFactory, IDBKeyRange } = require('fake-indexeddb');
 const { createDatabase, memoryEngine, filesEngine } = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
@@ -20,132 +20,123 @@ const PREFIX = 'enc1:';
 let n = 0;
 const vroot = async () => `/sealed-${++n}`;
 
-test('an engine encrypted at rest', async (t) => {
-  await t.test('the contract over the engine in memory', async (t2) => {
-    await runEngineTests(t2, { create: () => atRest(memoryEngine(), { key: KEY }), root: vroot });
+describe('an engine encrypted at rest', () => {
+  describe('the contract over the engine in memory', () => {
+    runEngineTests({ create: () => atRest(memoryEngine(), { key: KEY }), root: vroot });
   });
-  await t.test('the contract over the engine in IndexedDB', async (t2) => {
+  describe('the contract over the engine in IndexedDB', () => {
     const fresh = () => atRest(idbEngine({ indexedDB: new IDBFactory(), IDBKeyRange, channel: null }), { key: KEY });
-    await runEngineTests(t2, { create: fresh, root: vroot });
+    runEngineTests({ create: fresh, root: vroot });
   });
 
-  await t.test(
-    'names and capabilities: the engine’s, without indexes; the files engine is wrapped at its backend',
-    () => {
-      const inner = memoryEngine();
-      const engine = atRest(inner, { key: KEY });
-      assert.strictEqual(engine.name, 'at-rest:memory');
-      assert.strictEqual(engine.capabilities.atomicBatch, inner.capabilities.atomicBatch);
-      assert.strictEqual(engine.capabilities.exclusiveCreate, true);
-      assert.strictEqual(engine.capabilities.indexes, false);
-      assert.throws(() => atRest(filesEngine(memory()), { key: KEY }), {
-        name: 'TypeError',
-        message: /filesEngine\(atRest/,
-      });
-      assert.throws(() => atRest(inner), { name: 'TypeError', message: /key|password/ });
-    },
-  );
+  it('should report the engine’s names and capabilities, without indexes, and wrap the files engine at its backend', () => {
+    const inner = memoryEngine();
+    const engine = atRest(inner, { key: KEY });
+    assert.strictEqual(engine.name, 'at-rest:memory');
+    assert.strictEqual(engine.capabilities.atomicBatch, inner.capabilities.atomicBatch);
+    assert.strictEqual(engine.capabilities.exclusiveCreate, true);
+    assert.strictEqual(engine.capabilities.indexes, false);
+    assert.throws(() => atRest(filesEngine(memory()), { key: KEY }), {
+      name: 'ArgumentError',
+      message: /filesEngine\(atRest/,
+    });
+    assert.throws(() => atRest(inner), { name: 'ArgumentError', message: /key|password/ });
+  });
 
-  await t.test(
-    'a database over atRest(engine) reads nothing from the plain engine and the plain engine nothing of it: every value is enc1',
-    async () => {
-      const inner = memoryEngine();
-      const options = { path: 'vault', logger: false, defer: 0, lock: false };
-      const db = await createDatabase({ ...options, engine: atRest(inner, { key: KEY }) });
-      const id = await db.insert({ title: 'Secret', $type: 'Note' });
-      await db.push(id, 'body', 's'.repeat(3000));
-      await db.tag('v1');
-      await db.update(id, { title: 'Still secret' });
-      await db.flush();
-      assert.strictEqual(await db.validate(), true, 'the chain lives in sealed kv values');
-      await db.close();
-      // Inside: ciphertext everywhere, the keys in the clear.
-      const plain = await inner.open('vault');
-      const sealed = (text) => typeof text === 'string' && text.startsWith(PREFIX) && !text.includes('ecret');
-      assert.ok(sealed(await plain.kv.get('', 'node.json')), 'node.json');
-      assert.ok(sealed(await plain.kv.get('index', 'catalog.json')), 'the catalog');
-      assert.ok(sealed(await plain.records.raw(id)), 'the record');
-      await assert.rejects(() => plain.records.get(id), { code: 'INTEGRITY' }, 'no record to the plain engine');
-      assert.deepStrictEqual(await plain.records.ids(), [id], 'the id in the clear');
-      assert.ok(sealed(await plain.copies.get('v1', id)), 'the tag’s copy');
-      const loaded = await plain.log.load();
-      assert.ok(loaded.entries.length > 0);
-      for (const entry of loaded.entries) {
-        assert.strictEqual(typeof entry.seq, 'number', 'the seq in the clear');
-        assert.ok(sealed(entry.e), 'the entry sealed');
-        assert.strictEqual(entry.op, undefined);
-      }
-      assert.strictEqual(typeof loaded.index.floor, 'number', 'the floor in the clear');
-      assert.ok(sealed(loaded.index.e), 'the index sealed');
-      for (const key of await plain.kv.list('blockchain')) {
-        assert.ok(sealed(await plain.kv.get('blockchain', key)), key);
-      }
-      // The key reads it all back, through another wrapper over the same engine.
-      const again = await createDatabase({ ...options, engine: atRest(inner, { key: KEY }) });
-      assert.strictEqual(again.nodeId, db.nodeId);
-      assert.strictEqual((await again.get(id)).title, 'Still secret');
-      assert.strictEqual((await again.get(id)).body.length, 3000);
-      assert.deepStrictEqual((await again.at('v1').get(id)).title, 'Secret');
-      assert.strictEqual(await again.validate(), true);
-      assert.deepStrictEqual(await again.list(), [id], 'the catalog, rebuilt from sealed records');
-      await again.purge(id);
-      await again.close();
-      // Another key opens nothing; the plain engine opens nothing of it either.
-      await assert.rejects(() => createDatabase({ ...options, engine: atRest(inner, { key: OTHER }) }), {
-        code: 'DECRYPT_FAILED',
-        reason: 'key',
-      });
-      // The plain engine opens nothing of it: the first file it reads (the keys, node.json) is no file of its own.
-      await assert.rejects(() => createDatabase({ ...options, engine: inner }));
-      // And a plain database is refused by the wrapper as not encrypted.
-      const open = await createDatabase({ ...options, path: 'open', engine: inner });
-      await open.insert({ a: 1 });
-      await open.close();
-      await assert.rejects(() => createDatabase({ ...options, path: 'open', engine: atRest(inner, { key: KEY }) }), {
-        code: 'DECRYPT_FAILED',
-        reason: 'plain',
-      });
-    },
-  );
+  it('should let a database over atRest(engine) read nothing from the plain engine and the plain engine nothing of it: every value is enc1', async () => {
+    const inner = memoryEngine();
+    const options = { path: 'vault', logger: false, defer: 0, lock: false };
+    const db = await createDatabase({ ...options, engine: atRest(inner, { key: KEY }) });
+    const id = await db.insert({ title: 'Secret', $type: 'Note' });
+    await db.push(id, 'body', 's'.repeat(3000));
+    await db.tag('v1');
+    await db.update(id, { title: 'Still secret' });
+    await db.flush();
+    assert.strictEqual(await db.validate(), true, 'the chain lives in sealed kv values');
+    await db.close();
+    // Inside: ciphertext everywhere, the keys in the clear.
+    const plain = await inner.open('vault');
+    const sealed = (text) => typeof text === 'string' && text.startsWith(PREFIX) && !text.includes('ecret');
+    assert.ok(sealed(await plain.kv.get('', 'node.json')), 'node.json');
+    assert.ok(sealed(await plain.kv.get('index', 'catalog.json')), 'the catalog');
+    assert.ok(sealed(await plain.records.raw(id)), 'the record');
+    await assert.rejects(() => plain.records.get(id), { code: 'ALX_ERR_INTEGRITY' }, 'no record to the plain engine');
+    assert.deepStrictEqual(await plain.records.ids(), [id], 'the id in the clear');
+    assert.ok(sealed(await plain.copies.get('v1', id)), 'the tag’s copy');
+    const loaded = await plain.log.load();
+    assert.ok(loaded.entries.length > 0);
+    for (const entry of loaded.entries) {
+      assert.strictEqual(typeof entry.seq, 'number', 'the seq in the clear');
+      assert.ok(sealed(entry.e), 'the entry sealed');
+      assert.strictEqual(entry.op, undefined);
+    }
+    assert.strictEqual(typeof loaded.index.floor, 'number', 'the floor in the clear');
+    assert.ok(sealed(loaded.index.e), 'the index sealed');
+    for (const key of await plain.kv.list('blockchain')) {
+      assert.ok(sealed(await plain.kv.get('blockchain', key)), key);
+    }
+    // The key reads it all back, through another wrapper over the same engine.
+    const again = await createDatabase({ ...options, engine: atRest(inner, { key: KEY }) });
+    assert.strictEqual(again.nodeId, db.nodeId);
+    assert.strictEqual((await again.get(id)).title, 'Still secret');
+    assert.strictEqual((await again.get(id)).body.length, 3000);
+    assert.deepStrictEqual((await again.at('v1').get(id)).title, 'Secret');
+    assert.strictEqual(await again.validate(), true);
+    assert.deepStrictEqual(await again.list(), [id], 'the catalog, rebuilt from sealed records');
+    await again.purge(id);
+    await again.close();
+    // Another key opens nothing; the plain engine opens nothing of it either.
+    await assert.rejects(() => createDatabase({ ...options, engine: atRest(inner, { key: OTHER }) }), {
+      code: 'ALX_ERR_DECRYPT_FAILED',
+      reason: 'key',
+    });
+    // The plain engine opens nothing of it: the first file it reads (the keys, node.json) is no file of its own.
+    await assert.rejects(() => createDatabase({ ...options, engine: inner }));
+    // And a plain database is refused by the wrapper as not encrypted.
+    const open = await createDatabase({ ...options, path: 'open', engine: inner });
+    await open.insert({ a: 1 });
+    await open.close();
+    await assert.rejects(() => createDatabase({ ...options, path: 'open', engine: atRest(inner, { key: KEY }) }), {
+      code: 'ALX_ERR_DECRYPT_FAILED',
+      reason: 'plain',
+    });
+  });
 
-  await t.test(
-    'at rest a blob is iv and ciphertext bytes bound to its place: no base64, the size its own; the digest stays a name',
-    async () => {
-      const inner = memoryEngine();
-      const sealed = await atRest(inner, { key: KEY }).open('/blobs', { logger: null });
-      const plain = await inner.open('/blobs');
-      const digest = 'a'.repeat(64);
-      const bytes = new Uint8Array(1000);
-      for (let i = 0; i < bytes.length; i++) bytes[i] = i & 255;
-      await sealed.blobs.put(digest, bytes);
-      const raw = await plain.blobs.get(digest);
-      assert.strictEqual(raw.length, 1000 + 12 + 16, 'the iv, the ciphertext, the tag — and nothing of base64');
-      assert.notStrictEqual(new TextDecoder().decode(raw.subarray(0, 5)), PREFIX);
-      let high = 0;
-      for (let i = 0; i < raw.length; i++) if (raw[i] > 127) high++;
-      assert.ok(high > 0, 'bytes, not text');
-      assert.deepStrictEqual([...(await sealed.blobs.get(digest))], [...bytes]);
-      assert.deepStrictEqual(await sealed.blobs.list(), [digest], 'the digest a name, in the clear');
-      assert.strictEqual(await sealed.blobs.has(digest), true);
-      // The place binds it: the same bytes under another digest, or in another database, do not open; another key
-      // opens nothing; a blob never sealed is not the key's either.
-      await plain.blobs.put('b'.repeat(64), raw);
-      await assert.rejects(() => sealed.blobs.get('b'.repeat(64)), { code: 'DECRYPT_FAILED', reason: 'key' });
-      await (await inner.open('/elsewhere')).blobs.put(digest, raw);
-      const elsewhere = await atRest(inner, { key: KEY }).open('/elsewhere', { logger: null });
-      await assert.rejects(() => elsewhere.blobs.get(digest), { code: 'DECRYPT_FAILED', reason: 'key' });
-      const other = await atRest(inner, { key: OTHER }).open('/blobs', { logger: null });
-      await assert.rejects(() => other.blobs.get(digest), { code: 'DECRYPT_FAILED', reason: 'key' });
-      await plain.blobs.put('c'.repeat(64), new Uint8Array([1, 2, 3]));
-      await assert.rejects(() => sealed.blobs.get('c'.repeat(64)), { code: 'DECRYPT_FAILED', reason: 'key' });
-      await plain.blobs.put('d'.repeat(64), new Uint8Array(0));
-      await assert.rejects(() => sealed.blobs.get('d'.repeat(64)), { code: 'DECRYPT_FAILED', reason: 'key' });
-      await sealed.blobs.remove(digest);
-      assert.strictEqual(await plain.blobs.has(digest), false);
-    },
-  );
+  it('should keep a blob at rest as iv and ciphertext bytes bound to its place: no base64, the size its own, the digest still a name', async () => {
+    const inner = memoryEngine();
+    const sealed = await atRest(inner, { key: KEY }).open('/blobs', { logger: null });
+    const plain = await inner.open('/blobs');
+    const digest = 'a'.repeat(64);
+    const bytes = new Uint8Array(1000);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = i & 255;
+    await sealed.blobs.put(digest, bytes);
+    const raw = await plain.blobs.get(digest);
+    assert.strictEqual(raw.length, 1000 + 12 + 16, 'the iv, the ciphertext, the tag — and nothing of base64');
+    assert.notStrictEqual(new TextDecoder().decode(raw.subarray(0, 5)), PREFIX);
+    let high = 0;
+    for (let i = 0; i < raw.length; i++) if (raw[i] > 127) high++;
+    assert.ok(high > 0, 'bytes, not text');
+    assert.deepStrictEqual([...(await sealed.blobs.get(digest))], [...bytes]);
+    assert.deepStrictEqual(await sealed.blobs.list(), [digest], 'the digest a name, in the clear');
+    assert.strictEqual(await sealed.blobs.has(digest), true);
+    // The place binds it: the same bytes under another digest, or in another database, do not open; another key
+    // opens nothing; a blob never sealed is not the key's either.
+    await plain.blobs.put('b'.repeat(64), raw);
+    await assert.rejects(() => sealed.blobs.get('b'.repeat(64)), { code: 'ALX_ERR_DECRYPT_FAILED', reason: 'key' });
+    await (await inner.open('/elsewhere')).blobs.put(digest, raw);
+    const elsewhere = await atRest(inner, { key: KEY }).open('/elsewhere', { logger: null });
+    await assert.rejects(() => elsewhere.blobs.get(digest), { code: 'ALX_ERR_DECRYPT_FAILED', reason: 'key' });
+    const other = await atRest(inner, { key: OTHER }).open('/blobs', { logger: null });
+    await assert.rejects(() => other.blobs.get(digest), { code: 'ALX_ERR_DECRYPT_FAILED', reason: 'key' });
+    await plain.blobs.put('c'.repeat(64), new Uint8Array([1, 2, 3]));
+    await assert.rejects(() => sealed.blobs.get('c'.repeat(64)), { code: 'ALX_ERR_DECRYPT_FAILED', reason: 'key' });
+    await plain.blobs.put('d'.repeat(64), new Uint8Array(0));
+    await assert.rejects(() => sealed.blobs.get('d'.repeat(64)), { code: 'ALX_ERR_DECRYPT_FAILED', reason: 'key' });
+    await sealed.blobs.remove(digest);
+    assert.strictEqual(await plain.blobs.has(digest), false);
+  });
 
-  await t.test('a ciphertext moved to the same place in another database does not open', async () => {
+  it('should not open a ciphertext moved to the same place in another database', async () => {
     const inner = memoryEngine();
     const engine = atRest(inner, { key: KEY });
     const base = { engine, logger: false, defer: 0, lock: false };
@@ -160,7 +151,7 @@ test('an engine encrypted at rest', async (t) => {
     const rawB = await inner.open('tenant-b');
     await rawB.write({ records: [{ id, text: await rawA.records.raw(id) }] });
     const wrappedB = await engine.open('tenant-b');
-    await assert.rejects(wrappedB.records.get(id), { code: 'DECRYPT_FAILED' });
+    await assert.rejects(wrappedB.records.get(id), { code: 'ALX_ERR_DECRYPT_FAILED' });
     const wrappedA = await engine.open('tenant-a');
     assert.deepStrictEqual((await wrappedA.records.get(id)).data, { owner: 'a', balance: 100 });
     await wrappedA.close();
@@ -169,7 +160,7 @@ test('an engine encrypted at rest', async (t) => {
     await rawB.close();
   });
 
-  await t.test('a scrub rewrites the sealed entries; a reopen replays the unsealed tail', async () => {
+  it('should rewrite the sealed entries on a scrub and replay the unsealed tail on a reopen', async () => {
     const inner = memoryEngine();
     const engine = atRest(inner, { key: KEY });
     const options = {
@@ -205,7 +196,7 @@ test('an engine encrypted at rest', async (t) => {
     await again.close();
   });
 
-  await t.test('a write set that the engine refuses lands nothing, sealed or not', async () => {
+  it('should land nothing of a write set that the engine refuses, sealed or not', async () => {
     const inner = memoryEngine();
     const engine = atRest(inner, { key: KEY });
     const db = await engine.open('/p');

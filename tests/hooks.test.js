@@ -2,33 +2,33 @@
 
 // The hook primitives and the contained event path, in isolation.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { Emitter } = require('../src/utils.js');
 const { HookError, normalizeHooks, runHook, notify } = require('../src/hooks.js');
 
 const ALLOWED = ['beforeWrite', 'afterWrite'];
 
-test('normalizeHooks', async (t) => {
-  await t.test('absent hooks normalize to a map of nulls', () => {
+describe('normalizeHooks', () => {
+  it('should normalize absent hooks to a map of nulls', () => {
     assert.deepStrictEqual(normalizeHooks(undefined, ALLOWED, 'Storage'), { beforeWrite: null, afterWrite: null });
     assert.deepStrictEqual(normalizeHooks(null, ALLOWED, 'Storage'), { beforeWrite: null, afterWrite: null });
     assert.deepStrictEqual(normalizeHooks({}, ALLOWED, 'Storage'), { beforeWrite: null, afterWrite: null });
   });
 
-  await t.test('keeps every allowed name, functions or null', () => {
+  it('should keep every allowed name, functions or null', () => {
     const beforeWrite = () => {};
     const hooks = normalizeHooks({ beforeWrite, afterWrite: undefined }, ALLOWED, 'Storage');
     assert.deepStrictEqual(hooks, { beforeWrite, afterWrite: null });
   });
 
-  await t.test('an unknown name, a non-object or a non-function throws a TypeError naming the label', () => {
+  it('should throw a TypeError naming the label for an unknown name, a non-object or a non-function', () => {
     assert.throws(() => normalizeHooks({ beforeWrtie: () => {} }, ALLOWED, 'Storage'), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: "Storage: unknown hook 'beforeWrtie'",
     });
     assert.throws(() => normalizeHooks({ beforeWrite: 'nope' }, ALLOWED, 'SyncManager'), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'SyncManager: hooks.beforeWrite must be a function',
     });
     assert.throws(() => normalizeHooks('nope', ALLOWED, 'Storage'), /Storage: hooks must be an object/);
@@ -36,12 +36,12 @@ test('normalizeHooks', async (t) => {
   });
 });
 
-test('runHook', async (t) => {
-  await t.test('an absent hook is a no-op that resolves undefined', async () => {
+describe('runHook', () => {
+  it('should treat an absent hook as a no-op that resolves undefined', async () => {
     assert.strictEqual(await runHook({ beforeWrite: null }, 'beforeWrite', 1), undefined);
   });
 
-  await t.test('passes the arguments through and returns what the hook returns', async () => {
+  it('should pass the arguments through and return what the hook returns', async () => {
     const seen = [];
     const hooks = {
       beforeWrite: async (...args) => {
@@ -53,7 +53,7 @@ test('runHook', async (t) => {
     assert.deepStrictEqual(seen, [['a', 2]]);
   });
 
-  await t.test('a throw becomes a HookError naming the hook, with the original as cause', async () => {
+  it('should turn a throw into a HookError naming the hook, with the original as cause', async () => {
     const original = new Error('nope');
     const hooks = { beforeWrite: () => Promise.reject(original) };
     const error = await runHook(hooks, 'beforeWrite').then(
@@ -63,7 +63,7 @@ test('runHook', async (t) => {
     assert.ok(error instanceof HookError);
     assert.ok(error instanceof Error);
     assert.strictEqual(error.name, 'HookError');
-    assert.strictEqual(error.code, 'HOOK_FAILED');
+    assert.strictEqual(error.code, 'ALX_ERR_HOOK_FAILED');
     assert.strictEqual(error.hook, 'beforeWrite');
     assert.strictEqual(error.cause, original);
     assert.strictEqual(error.message, 'The beforeWrite hook failed: nope');
@@ -75,13 +75,13 @@ test('runHook', async (t) => {
   });
 });
 
-test('notify', async (t) => {
+describe('notify', () => {
   const stubLogger = () => {
     const entries = [];
     return { entries, warn: (entry) => entries.push(entry), info() {}, debug() {}, error() {} };
   };
 
-  await t.test('with no listener nothing is emitted — not even error, which the Emitter would throw on', () => {
+  it('should emit nothing with no listener — not even error, which the Emitter would throw on', () => {
     const emitter = new Emitter();
     const logger = stubLogger();
     assert.throws(() => emitter.emit('error', new Error('unheard')), /Unhandled error/);
@@ -90,7 +90,7 @@ test('notify', async (t) => {
     assert.strictEqual(logger.entries.length, 0);
   });
 
-  await t.test('listeners run at once with the arguments, and are not awaited', async () => {
+  it('should run listeners at once with the arguments, without awaiting them', async () => {
     const emitter = new Emitter();
     const seen = [];
     let resolveSlow;
@@ -101,7 +101,7 @@ test('notify', async (t) => {
     resolveSlow();
   });
 
-  await t.test('a throwing or rejecting listener is contained and logged as a warning', async () => {
+  it('should contain a throwing or rejecting listener and log it as a warning', async () => {
     const emitter = new Emitter();
     const logger = stubLogger();
     const seen = [];

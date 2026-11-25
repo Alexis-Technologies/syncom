@@ -6,8 +6,8 @@
 
 const path = require('node:path');
 const { readFileSync, existsSync, readdirSync, statSync } = require('node:fs');
-const { test } = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 
 const ROOT = path.join(__dirname, '..', '..');
 
@@ -29,162 +29,174 @@ const notes = () => {
 // The skills are alexiskills', linked from node_modules (CLAUDE.md, Skills): their paths are other projects'.
 const guides = () => [...notes(), 'CONTRIBUTING.md'];
 
-test('every src/ path the guides name exists', () => {
-  const missing = [];
-  for (const guide of guides()) {
-    const text = readFileSync(path.join(ROOT, guide), 'utf8');
-    for (const match of text.matchAll(/src\/[A-Za-z0-9_./-]+\.(?:js|ts)/g)) {
-      if (match[0].includes('<')) continue;
-      if (!existsSync(path.join(ROOT, match[0]))) missing.push(`${guide}: ${match[0]}`);
-    }
-  }
-  assert.deepStrictEqual(missing, []);
-});
-
-test('what a CLAUDE.md layout line says a file requires, it requires', () => {
-  // A layout entry: a line naming a path at its start, and the indented lines that continue it.
-  const entries = [];
-  let current = null;
-  let lines = [];
-  for (const note of notes()) {
-    const text = readFileSync(path.join(ROOT, note), 'utf8');
-    const start = text.indexOf('## Layout');
-    if (start === -1) continue;
-    const end = text.indexOf('\n## ', start + 1);
-    lines = lines.concat(text.slice(start, end === -1 ? text.length : end).split('\n'), ['']);
-  }
-  for (const line of lines) {
-    if (/^src\/\S+\.js/.test(line)) {
-      if (current !== null) entries.push(current);
-      current = line;
-    } else if (current !== null && /^\s{10,}\S/.test(line)) current += ` ${line.trim()}`;
-    else {
-      if (current !== null) entries.push(current);
-      current = null;
-    }
-  }
-  if (current !== null) entries.push(current);
-  const wrong = [];
-  for (const entry of entries) {
-    const file = entry.match(/^(src\/\S+\.js)/)[1];
-    if (!existsSync(path.join(ROOT, file)) || !statSync(path.join(ROOT, file)).isFile()) continue;
-    const required = [];
-    for (const match of readFileSync(path.join(ROOT, file), 'utf8').matchAll(/require\('(\.[^']+)'\)/g)) {
-      required.push(path.basename(match[1], '.js'));
-    }
-    if (/no requires/.test(entry) && required.length > 0) wrong.push(`${file}: "no requires", requires ${required}`);
-    const only = entry.match(/requires ([^—;()]*?) only/);
-    if (only !== null) {
-      const listed = new Set();
-      for (const name of only[1].matchAll(/([a-z0-9-]+)(?:\.js)?/g)) listed.add(name[1]);
-      for (const name of required) if (!listed.has(name)) wrong.push(`${file}: "${only[0]}", requires ${name} too`);
-    }
-  }
-  assert.deepStrictEqual(wrong, []);
-});
-
-// A module's header says what it requires — "Requires a.js, b.js and c.js only", "No requires beyond ../a.js and
-// ./b.js", "No requires" — and the file does: a require added without its word in the header is caught here, as a
-// layout line's is above. A clause that names no file ("no requires beyond the core's") is prose, not checked.
-test("what a module's header says it requires, it requires", () => {
-  const wrong = [];
-  let checked = 0;
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (full.endsWith('.js')) check(full);
-    }
-  };
-  const check = (full) => {
-    const lines = readFileSync(full, 'utf8').split('\n');
-    const header = [];
-    for (let i = 1; i < lines.length; i++) {
-      if (lines[i].startsWith('//')) header.push(lines[i].slice(2).trim());
-      else if (header.length > 0 || lines[i].trim() !== '') break;
-    }
-    const text = header.join(' ');
-    const only = text.match(/\bRequires ([^.;]*?\.js[^.;]*?) (?:only|alone)\b/);
-    const beyond = text.match(/(?:^|[.;:—] )[Nn]o requires(?: beyond ([^.;:]*))?(?=[.;:]|$)/);
-    let listed = null;
-    if (only !== null) listed = only[1];
-    else if (beyond !== null && (beyond[1] === undefined || /\.js/.test(beyond[1]))) listed = beyond[1] ?? '';
-    if (listed === null) return;
-    checked++;
-    const names = new Set();
-    for (const match of listed.matchAll(/([a-z0-9-]+)\.js/g)) names.add(match[1]);
-    for (const match of readFileSync(full, 'utf8').matchAll(/require\('(\.[^']+)'\)/g)) {
-      const required = path.basename(match[1], '.js');
-      if (!names.has(required)) {
-        const said = (only ?? beyond)[0].trim();
-        wrong.push(`${path.relative(ROOT, full)}: the header says "${said}", requires ${required} too`);
+describe('docs paths', () => {
+  it('should find every src/ path the guides name', () => {
+    const missing = [];
+    for (const guide of guides()) {
+      const text = readFileSync(path.join(ROOT, guide), 'utf8');
+      for (const match of text.matchAll(/src\/[A-Za-z0-9_./-]+\.(?:js|ts)/g)) {
+        if (match[0].includes('<')) continue;
+        if (!existsSync(path.join(ROOT, match[0]))) missing.push(`${guide}: ${match[0]}`);
       }
     }
-  };
-  walk(path.join(ROOT, 'src'));
-  assert.ok(checked >= 20, `${checked} headers checked`);
-  assert.deepStrictEqual(wrong, []);
-});
+    assert.deepStrictEqual(missing, []);
+  });
 
-test('every src/ path a comment in src/ or a declaration file names exists', () => {
-  const missing = [];
-  const check = (full) => {
-    for (const match of readFileSync(full, 'utf8').matchAll(/src\/[A-Za-z0-9_./-]+\.js/g)) {
-      if (!existsSync(path.join(ROOT, match[0]))) missing.push(`${path.relative(ROOT, full)}: ${match[0]}`);
+  it('should require of a file what a CLAUDE.md layout line says it requires', () => {
+    // A layout entry: a line naming a path at its start, and the indented lines that continue it.
+    const entries = [];
+    let current = null;
+    let lines = [];
+    for (const note of notes()) {
+      const text = readFileSync(path.join(ROOT, note), 'utf8');
+      const start = text.indexOf('## Layout');
+      if (start === -1) continue;
+      const end = text.indexOf('\n## ', start + 1);
+      lines = lines.concat(text.slice(start, end === -1 ? text.length : end).split('\n'), ['']);
     }
-  };
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const full = path.join(dir, name);
-      if (statSync(full).isDirectory()) walk(full);
-      else if (full.endsWith('.js') || full.endsWith('.d.ts')) check(full);
+    for (const line of lines) {
+      if (/^src\/\S+\.js/.test(line)) {
+        if (current !== null) entries.push(current);
+        current = line;
+      } else if (current !== null && /^\s{10,}\S/.test(line)) current += ` ${line.trim()}`;
+      else {
+        if (current !== null) entries.push(current);
+        current = null;
+      }
     }
-  };
-  walk(path.join(ROOT, 'src'));
-  for (const name of ['index.d.ts', 'browser.d.ts']) check(path.join(ROOT, name));
-  assert.deepStrictEqual(missing, []);
-});
+    if (current !== null) entries.push(current);
+    const wrong = [];
+    for (const entry of entries) {
+      const file = entry.match(/^(src\/\S+\.js)/)[1];
+      if (!existsSync(path.join(ROOT, file)) || !statSync(path.join(ROOT, file)).isFile()) continue;
+      const required = [];
+      for (const match of readFileSync(path.join(ROOT, file), 'utf8').matchAll(/require\('(\.[^']+)'\)/g)) {
+        required.push(path.basename(match[1], '.js'));
+      }
+      if (/no requires/.test(entry) && required.length > 0) wrong.push(`${file}: "no requires", requires ${required}`);
+      const only = entry.match(/requires ([^—;()]*?) only/);
+      if (only !== null) {
+        const listed = new Set();
+        for (const name of only[1].matchAll(/([a-z0-9-]+)(?:\.js)?/g)) listed.add(name[1]);
+        for (const name of required) if (!listed.has(name)) wrong.push(`${file}: "${only[0]}", requires ${name} too`);
+      }
+    }
+    assert.deepStrictEqual(wrong, []);
+  });
 
-// A matrix cell's `source` is what it was decided from: a path of this
-// repository there exists. A segment that names another package
-// (`@alexify/wrpc@2.0.1 src/…`) is that package's path, not ours.
-test('every path the syncom column of a comparison matrix cites exists', () => {
-  const missing = [];
-  const pattern = /(?<![\w./@-])((?:src|tests|docs|bench|scripts)\/[\w./-]*\w|[\w-]+\.(?:md|json))(?::[\d,-]+)?/g;
-  for (const name of ['comparison', 'comparison-rxdb', 'comparison-crdt']) {
-    const matrix = JSON.parse(readFileSync(path.join(ROOT, 'docs', `${name}.json`), 'utf8'));
-    let syncom = null;
-    for (const library of matrix.libraries) if (library.id === 'syncom') syncom = library;
-    assert.ok(syncom, `${name}.json has a syncom column`);
-    for (const id of Object.keys(syncom.cells)) {
-      const source = syncom.cells[id].source;
-      if (typeof source !== 'string') continue;
+  // A module's header says what it requires — "Requires a.js, b.js and c.js only", "No requires beyond ../a.js and
+  // ./b.js", "No requires" — and the file does: a require added without its word in the header is caught here, as a
+  // layout line's is above. A clause that names no file ("no requires beyond the core's") is prose, not checked.
+  it('should require of a module what its header says it requires', () => {
+    const wrong = [];
+    let checked = 0;
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (full.endsWith('.js')) check(full);
+      }
+    };
+    const check = (full) => {
+      const lines = readFileSync(full, 'utf8').split('\n');
+      const header = [];
+      for (let i = 1; i < lines.length; i++) {
+        if (lines[i].startsWith('//')) header.push(lines[i].slice(2).trim());
+        else if (header.length > 0 || lines[i].trim() !== '') break;
+      }
+      const text = header.join(' ');
+      const only = text.match(/\bRequires ([^.;]*?\.js[^.;]*?) (?:only|alone)\b/);
+      const beyond = text.match(/(?:^|[.;:—] )[Nn]o requires(?: beyond ([^.;:]*))?(?=[.;:]|$)/);
+      let listed = null;
+      if (only !== null) listed = only[1];
+      else if (beyond !== null && (beyond[1] === undefined || /\.js/.test(beyond[1]))) listed = beyond[1] ?? '';
+      if (listed === null) return;
+      checked++;
+      const names = new Set();
+      for (const match of listed.matchAll(/([a-z0-9-]+)\.js/g)) names.add(match[1]);
+      for (const match of readFileSync(full, 'utf8').matchAll(/require\('(\.[^']+)'\)/g)) {
+        const required = path.basename(match[1], '.js');
+        if (!names.has(required)) {
+          const said = (only ?? beyond)[0].trim();
+          wrong.push(`${path.relative(ROOT, full)}: the header says "${said}", requires ${required} too`);
+        }
+      }
+    };
+    walk(path.join(ROOT, 'src'));
+    assert.ok(checked >= 20, `${checked} headers checked`);
+    assert.deepStrictEqual(wrong, []);
+  });
+
+  it('should find every src/ path a comment in src/ or a declaration file names', () => {
+    const missing = [];
+    const check = (full) => {
+      for (const match of readFileSync(full, 'utf8').matchAll(/src\/[A-Za-z0-9_./-]+\.js/g)) {
+        if (!existsSync(path.join(ROOT, match[0]))) missing.push(`${path.relative(ROOT, full)}: ${match[0]}`);
+      }
+    };
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        if (statSync(full).isDirectory()) walk(full);
+        else if (full.endsWith('.js') || full.endsWith('.d.ts')) check(full);
+      }
+    };
+    walk(path.join(ROOT, 'src'));
+    for (const name of ['index.d.ts', 'browser.d.ts']) check(path.join(ROOT, name));
+    assert.deepStrictEqual(missing, []);
+  });
+
+  // A matrix cell's `source` is what it was decided from: a path of this
+  // repository there exists. A segment that names another package
+  // (`@alexify/wrpc@2.0.1 src/…`) is that package's path, not ours.
+  it('should find every path the syncom column of a comparison matrix cites', () => {
+    const missing = [];
+    const pattern = /(?<![\w./@-])((?:src|tests|docs|bench|scripts)\/[\w./-]*\w|[\w-]+\.(?:md|json))(?::[\d,-]+)?/g;
+    // The paths a cell's source cites, the segments of another package left out.
+    const cited = (source) => {
+      const paths = [];
       for (const segment of source.split('; ')) {
         if (segment.startsWith('@')) continue;
-        for (const match of segment.matchAll(pattern)) {
-          if (!existsSync(path.join(ROOT, match[1]))) missing.push(`${name}.json ${id}: ${match[1]}`);
+        for (const match of segment.matchAll(pattern)) paths.push(match[1]);
+      }
+      return paths;
+    };
+    for (const name of ['comparison', 'comparison-rxdb', 'comparison-crdt']) {
+      const matrix = JSON.parse(readFileSync(path.join(ROOT, 'docs', `${name}.json`), 'utf8'));
+      let syncom = null;
+      for (const library of matrix.libraries) if (library.id === 'syncom') syncom = library;
+      assert.ok(syncom, `${name}.json has a syncom column`);
+      for (const id of Object.keys(syncom.cells)) {
+        const source = syncom.cells[id].source;
+        if (typeof source !== 'string') continue;
+        for (const file of cited(source)) {
+          if (!existsSync(path.join(ROOT, file))) missing.push(`${name}.json ${id}: ${file}`);
         }
       }
     }
-  }
-  assert.deepStrictEqual(missing, []);
-});
+    assert.deepStrictEqual(missing, []);
+  });
 
-// The notes are split by folder: the root indexes every nested CLAUDE.md, and
-// none grows past what an agent reads at once (src/CLAUDE.md, the core's, is
-// the one allowed more).
-test('the root CLAUDE.md indexes every nested one, and each stays within its length', () => {
-  const root = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
-  const unlisted = [];
-  const long = [];
-  for (const note of notes()) {
-    const length = readFileSync(path.join(ROOT, note), 'utf8').split('\n').length;
+  // The notes are split by folder: the root indexes every nested CLAUDE.md, and
+  // none grows past what an agent reads at once (src/CLAUDE.md, the core's, is
+  // the one allowed more).
+  it('should index every nested CLAUDE.md in the root one, and keep each within its length', () => {
+    const root = readFileSync(path.join(ROOT, 'CLAUDE.md'), 'utf8');
+    const unlisted = [];
+    const long = [];
     // src/CLAUDE.md: 560 → 600 with the catalog derived from the records and the tombstones (review №6, E1.5; 2026-11-02).
-    const limit = note === 'CLAUDE.md' ? 250 : note === 'src/CLAUDE.md' ? 600 : 300;
-    if (length > limit) long.push(`${note}: ${length} lines, past ${limit}`);
-    if (note !== 'CLAUDE.md' && !root.includes(`](./${note})`)) unlisted.push(note);
-  }
-  assert.ok(notes().length > 5, 'the notes are split');
-  assert.deepStrictEqual(unlisted, []);
-  assert.deepStrictEqual(long, []);
+    const limits = new Map([
+      ['CLAUDE.md', 250],
+      ['src/CLAUDE.md', 600],
+    ]);
+    for (const note of notes()) {
+      const length = readFileSync(path.join(ROOT, note), 'utf8').split('\n').length;
+      const limit = limits.get(note) ?? 300;
+      if (length > limit) long.push(`${note}: ${length} lines, past ${limit}`);
+      if (note !== 'CLAUDE.md' && !root.includes(`](./${note})`)) unlisted.push(note);
+    }
+    assert.ok(notes().length > 5, 'the notes are split');
+    assert.deepStrictEqual(unlisted, []);
+    assert.deepStrictEqual(long, []);
+  });
 });

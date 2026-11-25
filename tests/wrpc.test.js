@@ -4,8 +4,8 @@
 // or without @alexify/wrpc installed; the real thing runs in
 // tests/wrpc.integration.test.js.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { createWrpcLink, isSyncLink, SYNC_INTROSPECTION } = require('../src/wrpc/wrpc.js');
 const { Emitter } = require('../src/utils.js');
 
@@ -63,15 +63,15 @@ class FakeWrpcClient extends Emitter {
   }
 }
 
-test('createWrpcLink', async (t) => {
-  await t.test('refuses anything not shaped like a WrpcClient', () => {
+describe('createWrpcLink', () => {
+  it('should refuse anything not shaped like a WrpcClient', () => {
     assert.throws(() => createWrpcLink({}), /expected a WrpcClient/);
     assert.throws(() => createWrpcLink(null), TypeError);
     assert.strictEqual(isSyncLink(createWrpcLink(new FakeWrpcClient())), true);
     assert.strictEqual(isSyncLink({ call() {} }), false);
   });
 
-  await t.test('scaffolds the unit with use() and routes calls by method name', async () => {
+  it('should scaffold the unit with use() and route calls by method name', async () => {
     const client = new FakeWrpcClient();
     const link = createWrpcLink(client);
     assert.deepStrictEqual(client.used, { syncom: SYNC_INTROSPECTION.syncom });
@@ -80,7 +80,7 @@ test('createWrpcLink', async (t) => {
     assert.strictEqual(link.client, client);
   });
 
-  await t.test('a renamed unit is honoured on calls and subscriptions', async () => {
+  it('should honour a renamed unit on calls and subscriptions', async () => {
     const client = new FakeWrpcClient();
     const link = createWrpcLink(client, { unit: 'replication' });
     await link.call('syncom/push', { ops: [] });
@@ -90,7 +90,7 @@ test('createWrpcLink', async (t) => {
     assert.deepStrictEqual(client.last.args, { scopes: ['*'] });
   });
 
-  await t.test('subscribe passes lastEventId in and labels every value with the current one', () => {
+  it('should pass lastEventId in on subscribe and label every value with the current one', () => {
     const client = new FakeWrpcClient();
     const link = createWrpcLink(client);
     const received = [];
@@ -119,7 +119,7 @@ test('createWrpcLink', async (t) => {
     assert.throws(() => link.subscribe('syncom/push', {}, {}), /not a subscription/);
   });
 
-  await t.test('streams, events and close reach the client', async () => {
+  it('should let streams, events and close reach the client', async () => {
     const client = new FakeWrpcClient();
     client.streams.set(
       's1',

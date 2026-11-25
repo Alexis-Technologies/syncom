@@ -7,8 +7,8 @@
 
 const path = require('node:path');
 const { readFileSync, readdirSync, statSync } = require('node:fs');
-const { test } = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { DIRS, tagDirs } = require('../../src/layout.js');
 const { KV_NAMESPACES } = require('../../src/engine.js');
 
@@ -23,24 +23,26 @@ const files = (dir, out = []) => {
   return out;
 };
 
-test('every kv namespace a module of src/ names as a literal is a directory of the layout', () => {
-  const known = new Set(DIRS);
-  const missing = [];
-  for (const file of files(path.join(ROOT, 'src'))) {
-    const text = readFileSync(file, 'utf8');
-    const seen = new Set();
-    for (const match of text.matchAll(/kvNamespace\(\s*[\w.]+,\s*'([^']*)'/g)) seen.add(match[1]);
-    for (const match of text.matchAll(/\bkv\.(?:get|put|has|list|remove|create)\(\s*'([^']*)'/g)) seen.add(match[1]);
-    for (const ns of seen) if (!known.has(ns)) missing.push(`${path.relative(ROOT, file)}: '${ns}'`);
-  }
-  assert.deepStrictEqual(missing, []);
-});
+describe('the layout of a database’s path', () => {
+  it('should find every kv namespace a module of src/ names as a literal among the directories of the layout', () => {
+    const known = new Set(DIRS);
+    const missing = [];
+    for (const file of files(path.join(ROOT, 'src'))) {
+      const text = readFileSync(file, 'utf8');
+      const seen = new Set();
+      for (const match of text.matchAll(/kvNamespace\(\s*[\w.]+,\s*'([^']*)'/g)) seen.add(match[1]);
+      for (const match of text.matchAll(/\bkv\.(?:get|put|has|list|remove|create)\(\s*'([^']*)'/g)) seen.add(match[1]);
+      for (const ns of seen) if (!known.has(ns)) missing.push(`${path.relative(ROOT, file)}: '${ns}'`);
+    }
+    assert.deepStrictEqual(missing, []);
+  });
 
-test('the layout holds every kv namespace, the files engine’s directories and a tag’s two', () => {
-  for (const ns of KV_NAMESPACES) assert.ok(DIRS.includes(ns), ns);
-  for (const dir of ['data', 'log', 'log/open', 'log/corrupt', 'tags/.pending/data']) {
-    assert.ok(DIRS.includes(dir), dir);
-  }
-  assert.deepStrictEqual(tagDirs('v1'), ['tags/v1/data', 'tags/v1/index']);
-  assert.ok(Object.isFrozen(DIRS));
+  it('should hold every kv namespace, the files engine’s directories and a tag’s two in the layout', () => {
+    for (const ns of KV_NAMESPACES) assert.ok(DIRS.includes(ns), ns);
+    for (const dir of ['data', 'log', 'log/open', 'log/corrupt', 'tags/.pending/data']) {
+      assert.ok(DIRS.includes(dir), dir);
+    }
+    assert.deepStrictEqual(tagDirs('v1'), ['tags/v1/data', 'tags/v1/index']);
+    assert.ok(Object.isFrozen(DIRS));
+  });
 });

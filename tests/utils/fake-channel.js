@@ -12,7 +12,9 @@
 // for every fragment. Not a *.test.js: a helper.
 
 const copyOf = (data) => {
-  if (typeof data === 'string') return data;
+  if (typeof data === 'string') {
+    return data;
+  }
   const view =
     data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
   return view.slice().buffer;
@@ -35,20 +37,28 @@ class FakeChannel extends EventTarget {
   }
 
   send(data) {
-    if (this.readyState !== 'open') throw new Error('RTCDataChannel.send: channel is not open');
+    if (this.readyState !== 'open') {
+      throw new Error('RTCDataChannel.send: channel is not open');
+    }
     this.sent++;
     const copy = copyOf(data);
     const { peer } = this;
     queueMicrotask(() => {
-      if (peer.readyState !== 'open') return;
+      if (peer.readyState !== 'open') {
+        return;
+      }
       peer.dispatchEvent(new MessageEvent('message', { data: copy }));
     });
   }
 
   close() {
-    if (this.readyState !== 'open') return;
+    if (this.readyState !== 'open') {
+      return;
+    }
     const { peer } = this;
-    for (const channel of [this, peer]) channel.readyState = 'closing';
+    for (const channel of [this, peer]) {
+      channel.readyState = 'closing';
+    }
     queueMicrotask(() => {
       for (const channel of [this, peer]) {
         channel.readyState = 'closed';

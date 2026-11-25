@@ -4,6 +4,7 @@
 // cursors against a reference computed the slow way, the covered plan, the
 // unique keys on both write paths, and watch().
 
+const { it } = require('node:test');
 const { memory } = require('../../src/memory/memory.js');
 const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
 
@@ -25,7 +26,14 @@ const counting = (fsi) => {
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
-const runQueryTests = async (t, assert, createStorage) => {
+// -1, 0 or 1 as `a` sorts before, with or after `b`.
+const compare = (a, b) => {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+};
+
+const runQueryTests = (assert, createStorage) => {
   const schema = {
     entities: {
       Project: { index: ['orgId', 'kind'], unique: ['slug', ['orgId', 'name']] },
@@ -33,7 +41,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     },
   };
 
-  await t.test('a cursor answers what list()+get()+sort would, covered or not', async (t2) => {
+  it('should answer through a cursor what list()+get()+sort would, covered or not', async (t2) => {
     const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema, cache: { max: 50 } });
     const orgs = ['o0', 'o1', 'o2', 'o3', 'o4'];
@@ -54,9 +62,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     const reference = all
       .filter((row) => row.orgId === 'o1')
       // The one order a result has: the keys, then the id.
-      .sort((a, b) =>
-        a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1),
-      )
+      .sort((a, b) => compare(a.kind, b.kind) || b.createdAt - a.createdAt || (a.id < b.id ? -1 : 1))
       .slice(5, 15);
     const rows = await storage.Project.select({ orgId: 'o1' })
       .order('kind')
@@ -89,7 +95,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     // what a stable sort of every match would give — equal keys in candidate
     // order, which is id order — for any limit and offset, either way.
     const byKind = (desc) => (a, b) => {
-      const order = a.kind < b.kind ? -1 : a.kind > b.kind ? 1 : 0;
+      const order = compare(a.kind, b.kind);
       return (desc ? -order : order) || (a.id < b.id ? -1 : 1);
     };
     const byId = [...all].sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -142,7 +148,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     const iterated = [];
     for await (const row of storage.Project.select({ orgId: 'o4' }).order('name').limit(3)) iterated.push(row.name);
     assert.strictEqual(iterated.length, 3);
-    assert.throws(() => storage.Project.select({ orgId: { $nope: 1 } }), { name: 'TypeError' });
+    assert.throws(() => storage.Project.select({ orgId: { $nope: 1 } }), { name: 'ArgumentError' });
     // Deleted records are out, and records outside the collection; a sealed record is read whole at the key
     // holder and counted like the rest, the plain rows answered from the index as before.
     await storage.delete(all[0].id);
@@ -152,7 +158,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.Project.count(), 120);
   });
 
-  await t.test('an indexed array field narrows by element — a set, or any array', async (t2) => {
+  it('should narrow an indexed array field by element — a set, or any array', async (t2) => {
     const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema: { entities: { Issue: { index: ['tags'] } } } });
     const ids = [];
@@ -187,7 +193,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.Issue.count({ tags: 't0' }), 0);
   });
 
-  await t.test('unique keys: refused locally, reported when a peer’s op leaves two on one', async (t2) => {
+  it('should refuse unique keys locally, and report them when a peer’s op leaves two on one', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage, {
       nodes: { A: { schema }, B: { schema } },
     });
@@ -206,7 +212,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     const second = await a.Project.insert({ orgId: 'o', name: 'm', slug: 't' });
     await assert.rejects(() => a.Project.update(second.id, { slug: 's' }), {
       name: 'ValidationError',
-      code: 'VALIDATION_FAILED',
+      code: 'ALX_ERR_VALIDATION_FAILED',
     });
     await a.Project.update(first.id, { slug: 's' });
     assert.strictEqual(a.log.length, 3, 'the same key on the same record is fine');
@@ -255,91 +261,85 @@ const runQueryTests = async (t, assert, createStorage) => {
     });
   });
 
-  await t.test(
-    'a live run delivers a row that stayed as the copy it delivered before, and only the changed row anew',
-    async (t2) => {
-      const storage = await createStorage(t2, 'I', { schema });
-      const made = [];
-      for (let i = 0; i < 3; i++) {
-        made.push(await storage.Project.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i }));
-      }
-      const calls = [];
-      const stop = storage.Project.select({ orgId: 'o' })
-        .order('n')
-        .projection(['name', 'n'])
-        .watch((rows) => calls.push(rows));
-      await tick();
-      assert.strictEqual(calls.length, 1);
-      await storage.Project.update(made[1].id, { name: 'changed' });
-      await tick();
-      assert.strictEqual(calls.length, 2);
-      const [before, after] = calls;
-      assert.notStrictEqual(before, after, 'a new array');
-      assert.strictEqual(after[0], before[0], 'a row that stayed: the very object');
-      assert.strictEqual(after[2], before[2]);
-      assert.notStrictEqual(after[1], before[1], 'the row that changed: a new copy');
-      assert.deepStrictEqual(after[1], { id: made[1].id, name: 'changed', n: 1 });
-      // A write that leaves a projected row as it was: no emit; one that moves a row: the same copies, placed again.
-      await storage.Project.update(made[0].id, { note: 'dropped by the projection' });
-      await tick();
-      assert.strictEqual(calls.length, 2);
-      await storage.Project.update(made[2].id, { n: -1 });
-      await tick();
-      const moved = calls[2];
-      assert.deepStrictEqual(
-        moved.map((row) => row.name),
-        ['n2', 'n0', 'changed'],
-      );
-      assert.strictEqual(moved[1], after[0]);
-      assert.strictEqual(moved[2], after[1]);
-      // A late subscriber hears the same copies.
-      const late = [];
-      const stopLate = storage.Project.select({ orgId: 'o' })
-        .order('n')
-        .projection(['name', 'n'])
-        .watch((rows) => late.push(rows));
-      await tick();
-      assert.strictEqual(late[0][0], moved[0]);
-      stop();
-      stopLate();
-    },
-  );
+  it('should deliver in a live run a row that stayed as the copy it delivered before, and only the changed row anew', async (t2) => {
+    const storage = await createStorage(t2, 'I', { schema });
+    const made = [];
+    for (let i = 0; i < 3; i++) {
+      made.push(await storage.Project.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i }));
+    }
+    const calls = [];
+    const stop = storage.Project.select({ orgId: 'o' })
+      .order('n')
+      .projection(['name', 'n'])
+      .watch((rows) => calls.push(rows));
+    await tick();
+    assert.strictEqual(calls.length, 1);
+    await storage.Project.update(made[1].id, { name: 'changed' });
+    await tick();
+    assert.strictEqual(calls.length, 2);
+    const [before, after] = calls;
+    assert.notStrictEqual(before, after, 'a new array');
+    assert.strictEqual(after[0], before[0], 'a row that stayed: the very object');
+    assert.strictEqual(after[2], before[2]);
+    assert.notStrictEqual(after[1], before[1], 'the row that changed: a new copy');
+    assert.deepStrictEqual(after[1], { id: made[1].id, name: 'changed', n: 1 });
+    // A write that leaves a projected row as it was: no emit; one that moves a row: the same copies, placed again.
+    await storage.Project.update(made[0].id, { note: 'dropped by the projection' });
+    await tick();
+    assert.strictEqual(calls.length, 2);
+    await storage.Project.update(made[2].id, { n: -1 });
+    await tick();
+    const moved = calls[2];
+    assert.deepStrictEqual(
+      moved.map((row) => row.name),
+      ['n2', 'n0', 'changed'],
+    );
+    assert.strictEqual(moved[1], after[0]);
+    assert.strictEqual(moved[2], after[1]);
+    // A late subscriber hears the same copies.
+    const late = [];
+    const stopLate = storage.Project.select({ orgId: 'o' })
+      .order('n')
+      .projection(['name', 'n'])
+      .watch((rows) => late.push(rows));
+    await tick();
+    assert.strictEqual(late[0][0], moved[0]);
+    stop();
+    stopLate();
+  });
 
-  await t.test(
-    "an onError that throws and an advisor that throws are contained: logged, never the caller's",
-    async (t2) => {
-      const logged = [];
-      const logger = {
-        warn: (entry) => logged.push([entry.event, entry.name ?? null, entry.err?.message]),
-        info() {},
-        debug() {},
-        error() {},
-      };
-      const storage = await createStorage(t2, 'A', { schema, logger });
-      await storage.Project.insert({ orgId: 'o', name: 'a', slug: 'a', n: 1 });
-      const bad = storage.Project.select({ orgId: 'o' }).filter(() => {
-        throw new Error('bad filter');
-      });
-      const stop = bad.watch(() => {}, {
-        onError: () => {
-          throw new Error('worse');
-        },
-      });
-      await tick();
-      stop();
-      assert.deepStrictEqual(logged, [['watch.error', null, 'worse']]);
-      logged.length = 0;
-      const { SOURCE } = require('../../src/symbols.js');
-      const off = storage[SOURCE].advise(() => {
-        throw new Error('advice');
-      });
-      assert.strictEqual((await storage.Project.select({ orgId: 'o' }).fetch()).length, 1, 'the cursor runs');
-      off();
-      assert.deepStrictEqual(logged, [['listener.error', 'advise', 'advice']]);
-    },
-  );
+  it("should contain an onError that throws and an advisor that throws: logged, never the caller's", async (t2) => {
+    const logged = [];
+    const logger = {
+      warn: (entry) => logged.push([entry.event, entry.name ?? null, entry.err?.message]),
+      info() {},
+      debug() {},
+      error() {},
+    };
+    const storage = await createStorage(t2, 'A', { schema, logger });
+    await storage.Project.insert({ orgId: 'o', name: 'a', slug: 'a', n: 1 });
+    const bad = storage.Project.select({ orgId: 'o' }).filter(() => {
+      throw new Error('bad filter');
+    });
+    const stop = bad.watch(() => {}, {
+      onError: () => {
+        throw new Error('worse');
+      },
+    });
+    await tick();
+    stop();
+    assert.deepStrictEqual(logged, [['watch.error', null, 'worse']]);
+    logged.length = 0;
+    const { SOURCE } = require('../../src/symbols.js');
+    const off = storage[SOURCE].advise(() => {
+      throw new Error('advice');
+    });
+    assert.strictEqual((await storage.Project.select({ orgId: 'o' }).fetch()).length, 1, 'the cursor runs');
+    off();
+    assert.deepStrictEqual(logged, [['listener.error', 'advise', 'advice']]);
+  });
 
-  await t.test('watch(): the rows now, again after each change of the collection, coalesced', async (t2) => {
+  it('should give the rows now through watch(), and again after each change of the collection, coalesced', async (t2) => {
     const storage = await createStorage(t2, 'A', { schema });
     const first = await storage.Project.insert({ orgId: 'o', name: 'a', slug: 'a', n: 1 });
     const calls = [];
@@ -415,101 +415,98 @@ const runQueryTests = async (t, assert, createStorage) => {
     stopThrowing();
   });
 
-  await t.test(
-    'a live result after a change reads as a fresh run and emits only when the rows changed (seeded)',
-    async (t2) => {
-      const fsi = counting(memory());
-      const storage = await createStorage(t2, 'L', { fsi, schema, cache: { max: 1000 } });
-      let seed = 7;
-      const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
-      const ids = [];
-      for (let i = 0; i < 30; i++) {
-        const { id } = await storage.Project.insert({
-          orgId: `o${i % 3}`,
-          name: `n${i}`,
-          slug: `s${i}`,
-          n: i,
-          k: i % 4,
-        });
-        ids.push(id);
+  it('should read a live result after a change as a fresh run, and emit only when the rows changed (seeded)', async (t2) => {
+    const fsi = counting(memory());
+    const storage = await createStorage(t2, 'L', { fsi, schema, cache: { max: 1000 } });
+    let seed = 7;
+    const random = () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646;
+    const ids = [];
+    for (let i = 0; i < 30; i++) {
+      const { id } = await storage.Project.insert({
+        orgId: `o${i % 3}`,
+        name: `n${i}`,
+        slug: `s${i}`,
+        n: i,
+        k: i % 4,
+      });
+      ids.push(id);
+    }
+    // Covered and not, ordered and not, windowed and not, offset or not.
+    const cursors = [
+      storage.Project.select({ orgId: 'o1' }).order('n'),
+      storage.Project.select({ orgId: 'o1' }).order('n').limit(4),
+      storage.Project.select({ k: { $gte: 2 } })
+        .desc('n')
+        .limit(5)
+        .offset(2),
+      storage.Project.select({ orgId: 'o2', k: 1 }).projection(['orgId', 'k']),
+      storage.Project.select({}).order('k').desc('n').limit(6),
+      storage.Project.select({ n: { $lt: 20 } }),
+      storage.Project.select({ orgId: { $in: ['o0', 'o2'] } })
+        .filter((row) => row.n % 2 === 0)
+        .order('n')
+        .limit(3),
+    ];
+    const seen = cursors.map(() => []);
+    const stops = cursors.map((cursor, i) => cursor.watch((rows) => seen[i].push(rows)));
+    await tick();
+    for (let step = 0; step < 120; step++) {
+      const id = ids[Math.floor(random() * ids.length)];
+      const roll = random();
+      try {
+        if (roll < 0.3) await storage.Project.update(id, { n: Math.floor(random() * 40) });
+        else if (roll < 0.45) await storage.Project.update(id, { k: Math.floor(random() * 4) });
+        else if (roll < 0.55) await storage.Project.update(id, { orgId: `o${Math.floor(random() * 3)}` });
+        else if (roll < 0.65) await storage.Project.update(id, { note: step });
+        else if (roll < 0.8) await storage.delete(id);
+        else if (roll < 0.9) {
+          await storage.set(id, {
+            orgId: `o${step % 3}`,
+            name: `r${step}`,
+            slug: `s${id}`,
+            n: step % 40,
+            k: step % 4,
+            $type: 'Project',
+          });
+        } else {
+          const { id: made } = await storage.Project.insert({
+            orgId: `o${step % 3}`,
+            name: `m${step}`,
+            slug: `m${step}`,
+            n: step % 40,
+            k: step % 4,
+          });
+          ids.push(made);
+        }
+      } catch (error) {
+        if (error.code !== 'ALX_ERR_NOT_FOUND') throw error;
       }
-      // Covered and not, ordered and not, windowed and not, offset or not.
-      const cursors = [
-        storage.Project.select({ orgId: 'o1' }).order('n'),
-        storage.Project.select({ orgId: 'o1' }).order('n').limit(4),
-        storage.Project.select({ k: { $gte: 2 } })
-          .desc('n')
-          .limit(5)
-          .offset(2),
-        storage.Project.select({ orgId: 'o2', k: 1 }).projection(['orgId', 'k']),
-        storage.Project.select({}).order('k').desc('n').limit(6),
-        storage.Project.select({ n: { $lt: 20 } }),
-        storage.Project.select({ orgId: { $in: ['o0', 'o2'] } })
-          .filter((row) => row.n % 2 === 0)
-          .order('n')
-          .limit(3),
-      ];
-      const seen = cursors.map(() => []);
-      const stops = cursors.map((cursor, i) => cursor.watch((rows) => seen[i].push(rows)));
       await tick();
-      for (let step = 0; step < 120; step++) {
-        const id = ids[Math.floor(random() * ids.length)];
-        const roll = random();
-        try {
-          if (roll < 0.3) await storage.Project.update(id, { n: Math.floor(random() * 40) });
-          else if (roll < 0.45) await storage.Project.update(id, { k: Math.floor(random() * 4) });
-          else if (roll < 0.55) await storage.Project.update(id, { orgId: `o${Math.floor(random() * 3)}` });
-          else if (roll < 0.65) await storage.Project.update(id, { note: step });
-          else if (roll < 0.8) await storage.delete(id);
-          else if (roll < 0.9) {
-            await storage.set(id, {
-              orgId: `o${step % 3}`,
-              name: `r${step}`,
-              slug: `s${id}`,
-              n: step % 40,
-              k: step % 4,
-              $type: 'Project',
-            });
-          } else {
-            const { id: made } = await storage.Project.insert({
-              orgId: `o${step % 3}`,
-              name: `m${step}`,
-              slug: `m${step}`,
-              n: step % 40,
-              k: step % 4,
-            });
-            ids.push(made);
-          }
-        } catch (error) {
-          if (error.code !== 'NOT_FOUND') throw error;
-        }
-        await tick();
-        for (let i = 0; i < cursors.length; i++) {
-          const fresh = await cursors[i].fetch();
-          assert.deepStrictEqual(seen[i].at(-1), fresh, `step ${step}, cursor ${i}`);
-        }
-      }
-      // Distinct: two emissions in a row are never the same rows.
       for (let i = 0; i < cursors.length; i++) {
-        for (let k = 1; k < seen[i].length; k++) {
-          assert.notDeepStrictEqual(seen[i][k], seen[i][k - 1], `cursor ${i}, emission ${k}`);
-        }
+        const fresh = await cursors[i].fetch();
+        assert.deepStrictEqual(seen[i].at(-1), fresh, `step ${step}, cursor ${i}`);
       }
-      // A change outside the result emits nothing: a record of another collection, one the query does
-      // not match — only the cursor over every record (k first, then n descending) hears the far one.
-      const before = seen.map((list) => list.length);
-      await storage.Tag.insert({ name: 'tag' });
-      await storage.Project.insert({ orgId: 'o5', name: 'far', slug: 'far', n: 99, k: 0 });
-      await tick();
-      assert.deepStrictEqual(
-        seen.map((list) => list.length),
-        before.map((n, i) => (i === 4 ? n + 1 : n)),
-      );
-      for (const stop of stops) stop();
-    },
-  );
+    }
+    // Distinct: two emissions in a row are never the same rows.
+    for (let i = 0; i < cursors.length; i++) {
+      for (let k = 1; k < seen[i].length; k++) {
+        assert.notDeepStrictEqual(seen[i][k], seen[i][k - 1], `cursor ${i}, emission ${k}`);
+      }
+    }
+    // A change outside the result emits nothing: a record of another collection, one the query does
+    // not match — only the cursor over every record (k first, then n descending) hears the far one.
+    const before = seen.map((list) => list.length);
+    await storage.Tag.insert({ name: 'tag' });
+    await storage.Project.insert({ orgId: 'o5', name: 'far', slug: 'far', n: 99, k: 0 });
+    await tick();
+    assert.deepStrictEqual(
+      seen.map((list) => list.length),
+      before.map((n, i) => (i === 4 ? n + 1 : n)),
+    );
+    for (const stop of stops) stop();
+  });
 
-  await t.test('watchCount() moves the count by one per change, without counting again', async (t2) => {
+  it('should move the count of watchCount() by one per change, without counting again', async (t2) => {
     const fsi = counting(memory());
     const storage = await createStorage(t2, 'C', { fsi, schema, cache: { max: 1000 } });
     const ids = [];
@@ -553,7 +550,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(counts, [4, 5, 4, 5], 'silent after stop');
   });
 
-  await t.test('a cached query tells { f: undefined } from {}', async (t2) => {
+  it('should tell { f: undefined } from {} in a cached query', async (t2) => {
     const storage = await createStorage(t2, 'U', { fsi: memory(), schema });
     await storage.Project.insert({ orgId: 'o', name: 'owned', slug: 'a', n: 1, owner: 'x' });
     await storage.Project.insert({ orgId: 'o', name: 'loose', slug: 'b', n: 2 });
@@ -570,118 +567,112 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual((await storage.Project.select({ orgId: 'o' }).fetch()).length, 2);
   });
 
-  await t.test(
-    'equal queries share one live run, and a result the catalog has not moved since is read from the cache',
-    async (t2) => {
-      const fsi = counting(memory());
-      // Two records cached at most: a run that reads records shows as reads of data/.
-      const storage = await createStorage(t2, 'Q', { fsi, schema, cache: { max: 2 } });
-      // Through the database: a Document (a collection's insert hands one out) would pin its entry.
-      for (let i = 0; i < 10; i++) {
-        await storage.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i, $type: 'Project' });
-      }
-      const a = [];
-      const b = [];
-      const stopA = storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
-        .order('n')
-        .limit(4)
-        .watch((rows) => a.push(rows.length));
-      await tick();
-      fsi.reset();
-      // The same query, built again: no run of its own — the rows as they are, at once.
-      const stopB = storage.Project.select({ n: { $gte: 3 }, orgId: 'o' })
-        .order('n')
-        .limit(4)
-        .watch((rows) => b.push(rows.length));
-      await tick();
-      assert.deepStrictEqual([a, b], [[4], [4]]);
-      assert.strictEqual(fsi.dataReads(), 0, 'shared: nothing read for the second');
-      // A fetch of the same key reads nothing while the run keeps its rows.
-      const rows = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
-        .order('n')
-        .limit(4)
-        .fetch();
-      assert.deepStrictEqual(
-        rows.map((row) => row.n),
-        [3, 4, 5, 6],
-      );
-      assert.strictEqual(fsi.dataReads(), 0, 'from the live run');
-      await storage.Project.update(rows[0].id, { n: 30 });
-      await tick();
-      assert.deepStrictEqual(a.at(-1), 4);
-      assert.strictEqual(a.length, b.length, 'both heard it');
-      stopA();
-      await storage.Project.update(rows[1].id, { n: 31 });
-      await tick();
-      assert.strictEqual(b.length, a.length + 1, 'the run goes on for the one left');
-      stopB();
-      // Unobserved: the last rows stay in the cache while the catalog does not move.
-      fsi.reset();
-      const again = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
-        .order('n')
-        .limit(4)
-        .fetch();
-      assert.deepStrictEqual(
-        again.map((row) => row.n),
-        [5, 6, 7, 8],
-      );
-      assert.strictEqual(fsi.dataReads(), 0, 'kept after the run stopped');
-      await storage.Project.update(again[0].id, { note: 'moved' });
-      fsi.reset();
-      const moved = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
-        .order('n')
-        .limit(4)
-        .fetch();
-      assert.strictEqual(moved[0].note, 'moved', 'the catalog moved: read again');
-      assert.ok(fsi.dataReads() > 0, 'read again');
-      // A filter has no key: its own run every time.
-      const filtered = storage.Project.select({ orgId: 'o' }).filter((row) => row.n > 3);
-      await filtered.fetch();
-      fsi.reset();
-      await filtered.fetch();
-      assert.ok(fsi.dataReads() > 0, 'uncached');
-    },
-  );
+  it('should share one live run between equal queries, and read from the cache a result the catalog has not moved since', async (t2) => {
+    const fsi = counting(memory());
+    // Two records cached at most: a run that reads records shows as reads of data/.
+    const storage = await createStorage(t2, 'Q', { fsi, schema, cache: { max: 2 } });
+    // Through the database: a Document (a collection's insert hands one out) would pin its entry.
+    for (let i = 0; i < 10; i++) {
+      await storage.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i, $type: 'Project' });
+    }
+    const a = [];
+    const b = [];
+    const stopA = storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+      .order('n')
+      .limit(4)
+      .watch((rows) => a.push(rows.length));
+    await tick();
+    fsi.reset();
+    // The same query, built again: no run of its own — the rows as they are, at once.
+    const stopB = storage.Project.select({ n: { $gte: 3 }, orgId: 'o' })
+      .order('n')
+      .limit(4)
+      .watch((rows) => b.push(rows.length));
+    await tick();
+    assert.deepStrictEqual([a, b], [[4], [4]]);
+    assert.strictEqual(fsi.dataReads(), 0, 'shared: nothing read for the second');
+    // A fetch of the same key reads nothing while the run keeps its rows.
+    const rows = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+      .order('n')
+      .limit(4)
+      .fetch();
+    assert.deepStrictEqual(
+      rows.map((row) => row.n),
+      [3, 4, 5, 6],
+    );
+    assert.strictEqual(fsi.dataReads(), 0, 'from the live run');
+    await storage.Project.update(rows[0].id, { n: 30 });
+    await tick();
+    assert.deepStrictEqual(a.at(-1), 4);
+    assert.strictEqual(a.length, b.length, 'both heard it');
+    stopA();
+    await storage.Project.update(rows[1].id, { n: 31 });
+    await tick();
+    assert.strictEqual(b.length, a.length + 1, 'the run goes on for the one left');
+    stopB();
+    // Unobserved: the last rows stay in the cache while the catalog does not move.
+    fsi.reset();
+    const again = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+      .order('n')
+      .limit(4)
+      .fetch();
+    assert.deepStrictEqual(
+      again.map((row) => row.n),
+      [5, 6, 7, 8],
+    );
+    assert.strictEqual(fsi.dataReads(), 0, 'kept after the run stopped');
+    await storage.Project.update(again[0].id, { note: 'moved' });
+    fsi.reset();
+    const moved = await storage.Project.select({ orgId: 'o', n: { $gte: 3 } })
+      .order('n')
+      .limit(4)
+      .fetch();
+    assert.strictEqual(moved[0].note, 'moved', 'the catalog moved: read again');
+    assert.ok(fsi.dataReads() > 0, 'read again');
+    // A filter has no key: its own run every time.
+    const filtered = storage.Project.select({ orgId: 'o' }).filter((row) => row.n > 3);
+    await filtered.fetch();
+    fsi.reset();
+    await filtered.fetch();
+    assert.ok(fsi.dataReads() > 0, 'uncached');
+  });
 
-  await t.test(
-    'a cached result stands past a write to another collection, and goes past one of its own that no index saw',
-    async (t2) => {
-      const fsi = counting(memory());
-      const storage = await createStorage(t2, 'G', { fsi, schema, cache: { max: 2 } });
-      for (let i = 0; i < 6; i++) {
-        await storage.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i, $type: 'Project' });
-      }
-      const cursor = storage.Project.select({ orgId: 'o' }).order('n');
-      const first = await cursor.fetch();
-      assert.strictEqual(first.length, 6);
-      // Another collection moved: the result is as current as it was.
-      await storage.insert({ label: 't1', $type: 'Tag' });
-      await storage.Tag.update((await storage.Tag.select().one()).id, { label: 't2' });
-      fsi.reset();
-      const again = await cursor.fetch();
-      assert.deepStrictEqual(
-        again.map((row) => row.n),
-        first.map((row) => row.n),
-      );
-      assert.strictEqual(fsi.dataReads(), 0, 'another collection moved: the result stands');
-      // Its own moved — in a field no index holds, so the row stayed as it was: read again all the same.
-      await storage.Project.update(first[0].id, { note: 'x' });
-      fsi.reset();
-      const moved = await cursor.fetch();
-      assert.strictEqual(moved[0].note, 'x');
-      assert.ok(fsi.dataReads() > 0, 'its own collection moved: read again');
-      // Redefined: current as of the definition.
-      fsi.reset();
-      await cursor.fetch();
-      assert.strictEqual(fsi.dataReads(), 0);
-      storage.removeCollection('Project');
-      await storage.addCollections({ Project: { index: ['n'] } });
-      fsi.reset();
-      assert.strictEqual((await cursor.fetch()).length, 6);
-      assert.ok(fsi.dataReads() > 0, 'defined again: read again');
-    },
-  );
-  await t.test('page() and after() visit every row once under inserts that land between the pages', async (t2) => {
+  it('should keep a cached result past a write to another collection, and drop it past one of its own that no index saw', async (t2) => {
+    const fsi = counting(memory());
+    const storage = await createStorage(t2, 'G', { fsi, schema, cache: { max: 2 } });
+    for (let i = 0; i < 6; i++) {
+      await storage.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i, $type: 'Project' });
+    }
+    const cursor = storage.Project.select({ orgId: 'o' }).order('n');
+    const first = await cursor.fetch();
+    assert.strictEqual(first.length, 6);
+    // Another collection moved: the result is as current as it was.
+    await storage.insert({ label: 't1', $type: 'Tag' });
+    await storage.Tag.update((await storage.Tag.select().one()).id, { label: 't2' });
+    fsi.reset();
+    const again = await cursor.fetch();
+    assert.deepStrictEqual(
+      again.map((row) => row.n),
+      first.map((row) => row.n),
+    );
+    assert.strictEqual(fsi.dataReads(), 0, 'another collection moved: the result stands');
+    // Its own moved — in a field no index holds, so the row stayed as it was: read again all the same.
+    await storage.Project.update(first[0].id, { note: 'x' });
+    fsi.reset();
+    const moved = await cursor.fetch();
+    assert.strictEqual(moved[0].note, 'x');
+    assert.ok(fsi.dataReads() > 0, 'its own collection moved: read again');
+    // Redefined: current as of the definition.
+    fsi.reset();
+    await cursor.fetch();
+    assert.strictEqual(fsi.dataReads(), 0);
+    storage.removeCollection('Project');
+    await storage.addCollections({ Project: { index: ['n'] } });
+    fsi.reset();
+    assert.strictEqual((await cursor.fetch()).length, 6);
+    assert.ok(fsi.dataReads() > 0, 'defined again: read again');
+  });
+  it('should visit every row once through page() and after() under inserts that land between the pages', async (t2) => {
     const storage = await createStorage(t2, 'P', { schema });
     const ids = [];
     for (let i = 0; i < 23; i++) {
@@ -761,197 +752,188 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.throws(() => cursor.after('x'), TypeError);
   });
 
-  await t.test(
-    'distinct() and countBy() group the matches by a field, in the sort order; nearest() ranks by distance',
-    async (t2) => {
-      const fsi = counting(memory());
-      const storage = await createStorage(t2, 'D', { fsi, schema, cache: { max: 2 } });
-      for (let i = 0; i < 12; i++) {
-        await storage.insert({
-          orgId: `o${i % 3}`,
-          kind: i % 2 ? 'lib' : 'app',
-          name: `n${i}`,
-          slug: `s${i}`,
-          n: i % 4,
-          v: [i, 12 - i],
-          $type: 'Project',
-        });
-      }
-      await storage.insert({ orgId: 'o0', name: 'none', slug: 'none', $type: 'Project' });
-      // An indexed field under a covered query: from the catalog, no record read.
-      fsi.reset();
-      assert.deepStrictEqual(
-        await storage.Project.distinct('kind'),
-        [null, 'app', 'lib'],
-        'a record without the field: null',
-      );
-      assert.deepStrictEqual(await storage.Project.distinct('orgId', { kind: 'lib' }), ['o0', 'o1', 'o2']);
-      assert.strictEqual(fsi.dataReads(), 0, 'from the catalog');
-      assert.deepStrictEqual(await storage.Project.countBy('orgId'), [
-        { value: 'o0', count: 5 },
-        { value: 'o1', count: 4 },
-        { value: 'o2', count: 4 },
-      ]);
-      // A field the catalog does not hold: the records read; a record without the field groups under null.
-      assert.deepStrictEqual(await storage.Project.distinct('n'), [null, 0, 1, 2, 3]);
-      assert.deepStrictEqual(await storage.Project.select({ orgId: 'o1' }).countBy('n'), [
-        { value: 0, count: 1 },
-        { value: 1, count: 1 },
-        { value: 2, count: 1 },
-        { value: 3, count: 1 },
-      ]);
-      // An array field groups by the whole array.
-      assert.strictEqual((await storage.Project.distinct('v')).length, 13, 'twelve arrays, and null');
-      await assert.rejects(storage.Project.select().distinct(''), TypeError);
-      // Nearest by cosine, by euclidean, by a function; k best, nearest first; a row without a vector is skipped.
-      await assert.rejects(storage.Project.select().nearest('v', [1, 11], 1001), /k of at most 1000/);
-      await assert.rejects(storage.Project.select().nearest('v', new Array(4097).fill(1), 1), /1 to 4096/);
-      const nearest = await storage.Project.select().nearest('v', [1, 11], 3);
-      assert.deepStrictEqual(
-        nearest.map(({ row }) => row.name),
-        ['n1', 'n0', 'n2'],
-      );
-      assert.ok(nearest[0].distance <= nearest[1].distance && nearest[1].distance <= nearest[2].distance);
-      assert.deepStrictEqual(
-        (await storage.Project.select({ kind: 'app' }).nearest('v', [4.5, 7.5], 2, { distance: 'euclidean' })).map(
-          ({ row }) => row.name,
-        ),
-        ['n4', 'n6'],
-      );
-      const farthest = (a, b) => -Math.abs(a[0] - b[0]);
-      assert.deepStrictEqual(
-        (await storage.Project.select().nearest('v', [0, 0], 1, { distance: farthest }))[0].row.name,
-        'n11',
-      );
-      assert.deepStrictEqual(await storage.Project.select().nearest('v', [1, 2, 3], 2), [], 'no vector of that length');
-      assert.deepStrictEqual((await storage.Project.select().projection(['name']).nearest('v', [0, 12], 1))[0].row, {
-        id: (await storage.Project.select({ name: 'n0' }).one()).id,
-        name: 'n0',
+  it('should group the matches by a field through distinct() and countBy(), in the sort order, and rank by distance through nearest()', async (t2) => {
+    const fsi = counting(memory());
+    const storage = await createStorage(t2, 'D', { fsi, schema, cache: { max: 2 } });
+    for (let i = 0; i < 12; i++) {
+      await storage.insert({
+        orgId: `o${i % 3}`,
+        kind: i % 2 ? 'lib' : 'app',
+        name: `n${i}`,
+        slug: `s${i}`,
+        n: i % 4,
+        v: [i, 12 - i],
+        $type: 'Project',
       });
-      await assert.rejects(storage.Project.select().nearest('v', [1, 'x'], 1), TypeError);
-      await assert.rejects(storage.Project.select().nearest('v', [1], 1, { distance: 'nope' }), TypeError);
-      await assert.rejects(storage.Project.select().nearest('v', [1], -1), TypeError);
-    },
-  );
+    }
+    await storage.insert({ orgId: 'o0', name: 'none', slug: 'none', $type: 'Project' });
+    // An indexed field under a covered query: from the catalog, no record read.
+    fsi.reset();
+    assert.deepStrictEqual(
+      await storage.Project.distinct('kind'),
+      [null, 'app', 'lib'],
+      'a record without the field: null',
+    );
+    assert.deepStrictEqual(await storage.Project.distinct('orgId', { kind: 'lib' }), ['o0', 'o1', 'o2']);
+    assert.strictEqual(fsi.dataReads(), 0, 'from the catalog');
+    assert.deepStrictEqual(await storage.Project.countBy('orgId'), [
+      { value: 'o0', count: 5 },
+      { value: 'o1', count: 4 },
+      { value: 'o2', count: 4 },
+    ]);
+    // A field the catalog does not hold: the records read; a record without the field groups under null.
+    assert.deepStrictEqual(await storage.Project.distinct('n'), [null, 0, 1, 2, 3]);
+    assert.deepStrictEqual(await storage.Project.select({ orgId: 'o1' }).countBy('n'), [
+      { value: 0, count: 1 },
+      { value: 1, count: 1 },
+      { value: 2, count: 1 },
+      { value: 3, count: 1 },
+    ]);
+    // An array field groups by the whole array.
+    assert.strictEqual((await storage.Project.distinct('v')).length, 13, 'twelve arrays, and null');
+    await assert.rejects(storage.Project.select().distinct(''), TypeError);
+    // Nearest by cosine, by euclidean, by a function; k best, nearest first; a row without a vector is skipped.
+    await assert.rejects(storage.Project.select().nearest('v', [1, 11], 1001), /k of at most 1000/);
+    await assert.rejects(storage.Project.select().nearest('v', new Array(4097).fill(1), 1), /1 to 4096/);
+    const nearest = await storage.Project.select().nearest('v', [1, 11], 3);
+    assert.deepStrictEqual(
+      nearest.map(({ row }) => row.name),
+      ['n1', 'n0', 'n2'],
+    );
+    assert.ok(nearest[0].distance <= nearest[1].distance && nearest[1].distance <= nearest[2].distance);
+    assert.deepStrictEqual(
+      (await storage.Project.select({ kind: 'app' }).nearest('v', [4.5, 7.5], 2, { distance: 'euclidean' })).map(
+        ({ row }) => row.name,
+      ),
+      ['n4', 'n6'],
+    );
+    const farthest = (a, b) => -Math.abs(a[0] - b[0]);
+    assert.deepStrictEqual(
+      (await storage.Project.select().nearest('v', [0, 0], 1, { distance: farthest }))[0].row.name,
+      'n11',
+    );
+    assert.deepStrictEqual(await storage.Project.select().nearest('v', [1, 2, 3], 2), [], 'no vector of that length');
+    assert.deepStrictEqual((await storage.Project.select().projection(['name']).nearest('v', [0, 12], 1))[0].row, {
+      id: (await storage.Project.select({ name: 'n0' }).one()).id,
+      name: 'n0',
+    });
+    await assert.rejects(storage.Project.select().nearest('v', [1, 'x'], 1), TypeError);
+    await assert.rejects(storage.Project.select().nearest('v', [1], 1, { distance: 'nope' }), TypeError);
+    await assert.rejects(storage.Project.select().nearest('v', [1], -1), TypeError);
+  });
 
-  await t.test(
-    'an ordered, limited cursor over an index reads offset + limit records and no more; explain() names the index',
-    async (t2) => {
-      const fsi = counting(memory());
-      const compound = { entities: { Task: { index: ['boardId', ['boardId', 'rank'], ['boardId', 'done', 'rank']] } } };
-      const storage = await createStorage(t2, 'X', { fsi, schema: compound, cache: { max: 2 } });
-      const all = [];
-      for (let i = 0; i < 60; i++) {
-        const data = { boardId: `b${i % 3}`, rank: (i * 7) % 60, done: i % 4 === 0, title: `t${i}` };
-        const id = await storage.insert({ ...data, $type: 'Task' });
-        all.push({ id, ...data, $type: 'Task' });
-      }
-      const byRank = (a, b) => a.rank - b.rank || (a.id < b.id ? -1 : 1);
-      const reference = all.filter((row) => row.boardId === 'b1' && row.rank >= 10).sort(byRank);
-      const cursor = storage.Task.select({ boardId: 'b1', rank: { $gte: 10 } })
-        .order('rank')
-        .limit(4)
-        .offset(3);
-      assert.deepStrictEqual(cursor.explain(), {
-        scan: 'index',
-        index: ['boardId', 'rank'],
-        prefix: ['b1'],
-        range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
-        in: null,
-        desc: false,
-        sortedByIndex: true,
-        covered: false,
-        residual: false,
-        narrow: [],
-        estimate: 7,
-        sealed: 0,
-        uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] },
-      });
-      fsi.reset();
-      const rows = await cursor.fetch();
-      assert.deepStrictEqual(rows, reference.slice(3, 7));
-      assert.strictEqual(fsi.dataReads(), 7, 'offset + limit records, not the board');
-      // Backwards, a bounded range, a three-field key.
-      const back = storage.Task.select({ boardId: 'b1', rank: { $gt: 10, $lte: 40 } })
-        .desc('rank')
-        .limit(2);
-      assert.strictEqual(back.explain().desc, true);
-      assert.deepStrictEqual(
-        await back.fetch(),
-        [...reference]
-          .filter((row) => row.rank > 10 && row.rank <= 40)
-          .sort(byRank)
-          .reverse()
-          .slice(0, 2),
-      );
-      const three = storage.Task.select({ boardId: 'b2', done: true }).order('rank');
-      assert.deepStrictEqual(three.explain().index, ['boardId', 'done', 'rank']);
-      assert.deepStrictEqual(
-        (await three.fetch()).map((row) => row.rank),
-        all
-          .filter((row) => row.boardId === 'b2' && row.done)
-          .sort(byRank)
-          .map((row) => row.rank),
-      );
-      // A sort the index cannot serve: read by the prefix, sorted after — the oracle's order still.
-      const resorted = storage.Task.select({ boardId: 'b0' }).order('title').limit(5);
-      const made = resorted.explain();
-      assert.strictEqual(made.scan, 'index');
-      assert.strictEqual(made.sortedByIndex, false);
-      assert.deepStrictEqual(
-        (await resorted.fetch()).map((row) => row.title),
-        all
-          .filter((row) => row.boardId === 'b0')
-          .map((row) => row.title)
-          .sort()
-          .slice(0, 5),
-      );
-      // A field with no index at all: the collection; an equality on an indexed one: the posting lists.
-      assert.strictEqual(storage.Task.select({ title: 't1' }).explain().scan, 'collection');
-      assert.strictEqual(
-        storage.Task.select({ boardId: 'b0', $or: [{ done: true }, { rank: 1 }] }).explain().scan,
-        'index',
-      );
-      // A `$in` on the index's first field: the index, one sub-scan per value.
-      const listed = storage.Task.select({ boardId: { $in: ['b0', 'b1'] } }).explain();
-      assert.strictEqual(listed.scan, 'index');
-      assert.deepStrictEqual(listed.in, { field: 'boardId', values: ['b0', 'b1'] });
-      assert.strictEqual(storage.Task.select({ title: { $in: ['t1', 't2'] } }).explain().scan, 'collection');
-      // A live query over the index stays a fresh run.
-      const seen = [];
-      const stop = cursor.watch((page) => seen.push(page));
-      await tick();
-      await storage.Task.update(reference[4].id, { rank: 11 });
-      await tick();
-      assert.deepStrictEqual(seen.at(-1), await cursor.fetch());
-      stop();
-      // The plan is a copy.
-      const copy = cursor.explain();
-      copy.index.push('x');
-      assert.deepStrictEqual(cursor.explain().index, ['boardId', 'rank']);
-    },
-  );
+  it('should read offset + limit records and no more through an ordered, limited cursor over an index; explain() names the index', async (t2) => {
+    const fsi = counting(memory());
+    const compound = { entities: { Task: { index: ['boardId', ['boardId', 'rank'], ['boardId', 'done', 'rank']] } } };
+    const storage = await createStorage(t2, 'X', { fsi, schema: compound, cache: { max: 2 } });
+    const all = [];
+    for (let i = 0; i < 60; i++) {
+      const data = { boardId: `b${i % 3}`, rank: (i * 7) % 60, done: i % 4 === 0, title: `t${i}` };
+      const id = await storage.insert({ ...data, $type: 'Task' });
+      all.push({ id, ...data, $type: 'Task' });
+    }
+    const byRank = (a, b) => a.rank - b.rank || (a.id < b.id ? -1 : 1);
+    const reference = all.filter((row) => row.boardId === 'b1' && row.rank >= 10).sort(byRank);
+    const cursor = storage.Task.select({ boardId: 'b1', rank: { $gte: 10 } })
+      .order('rank')
+      .limit(4)
+      .offset(3);
+    assert.deepStrictEqual(cursor.explain(), {
+      scan: 'index',
+      index: ['boardId', 'rank'],
+      prefix: ['b1'],
+      range: { field: 'rank', lower: { value: 10, inclusive: true }, upper: null },
+      in: null,
+      desc: false,
+      sortedByIndex: true,
+      covered: false,
+      residual: false,
+      narrow: [],
+      estimate: 7,
+      sealed: 0,
+      uses: { equalities: ['boardId'], ranges: ['rank'], order: ['rank'] },
+    });
+    fsi.reset();
+    const rows = await cursor.fetch();
+    assert.deepStrictEqual(rows, reference.slice(3, 7));
+    assert.strictEqual(fsi.dataReads(), 7, 'offset + limit records, not the board');
+    // Backwards, a bounded range, a three-field key.
+    const back = storage.Task.select({ boardId: 'b1', rank: { $gt: 10, $lte: 40 } })
+      .desc('rank')
+      .limit(2);
+    assert.strictEqual(back.explain().desc, true);
+    assert.deepStrictEqual(
+      await back.fetch(),
+      [...reference]
+        .filter((row) => row.rank > 10 && row.rank <= 40)
+        .sort(byRank)
+        .reverse()
+        .slice(0, 2),
+    );
+    const three = storage.Task.select({ boardId: 'b2', done: true }).order('rank');
+    assert.deepStrictEqual(three.explain().index, ['boardId', 'done', 'rank']);
+    assert.deepStrictEqual(
+      (await three.fetch()).map((row) => row.rank),
+      all
+        .filter((row) => row.boardId === 'b2' && row.done)
+        .sort(byRank)
+        .map((row) => row.rank),
+    );
+    // A sort the index cannot serve: read by the prefix, sorted after — the oracle's order still.
+    const resorted = storage.Task.select({ boardId: 'b0' }).order('title').limit(5);
+    const made = resorted.explain();
+    assert.strictEqual(made.scan, 'index');
+    assert.strictEqual(made.sortedByIndex, false);
+    assert.deepStrictEqual(
+      (await resorted.fetch()).map((row) => row.title),
+      all
+        .filter((row) => row.boardId === 'b0')
+        .map((row) => row.title)
+        .sort()
+        .slice(0, 5),
+    );
+    // A field with no index at all: the collection; an equality on an indexed one: the posting lists.
+    assert.strictEqual(storage.Task.select({ title: 't1' }).explain().scan, 'collection');
+    assert.strictEqual(
+      storage.Task.select({ boardId: 'b0', $or: [{ done: true }, { rank: 1 }] }).explain().scan,
+      'index',
+    );
+    // A `$in` on the index's first field: the index, one sub-scan per value.
+    const listed = storage.Task.select({ boardId: { $in: ['b0', 'b1'] } }).explain();
+    assert.strictEqual(listed.scan, 'index');
+    assert.deepStrictEqual(listed.in, { field: 'boardId', values: ['b0', 'b1'] });
+    assert.strictEqual(storage.Task.select({ title: { $in: ['t1', 't2'] } }).explain().scan, 'collection');
+    // A live query over the index stays a fresh run.
+    const seen = [];
+    const stop = cursor.watch((page) => seen.push(page));
+    await tick();
+    await storage.Task.update(reference[4].id, { rank: 11 });
+    await tick();
+    assert.deepStrictEqual(seen.at(-1), await cursor.fetch());
+    stop();
+    // The plan is a copy.
+    const copy = cursor.explain();
+    copy.index.push('x');
+    assert.deepStrictEqual(cursor.explain().index, ['boardId', 'rank']);
+  });
 
-  await t.test(
-    'an unordered limit over an index range is the first rows by id, as a run of every candidate gives',
-    async (t2) => {
-      const compound = { entities: { Task: { index: [['boardId', 'rank']] } } };
-      const storage = await createStorage(t2, 'W', { fsi: memory(), schema: compound });
-      for (let i = 0; i < 40; i++) await storage.insert({ boardId: `b${i % 2}`, rank: (i * 7) % 40, $type: 'Task' });
-      const cursor = storage.Task.select({ boardId: 'b1', rank: { $gte: 10 } });
-      assert.strictEqual(cursor.explain().sortedByIndex, false, 'a range: not a whole key, so not in id order');
-      const every = await cursor.fetch();
-      const ids = every.map((row) => row.id);
-      assert.deepStrictEqual(ids, ids.slice().sort(), 'the result without keys: by id');
-      assert.deepStrictEqual(await cursor.limit(3).fetch(), every.slice(0, 3));
-      assert.deepStrictEqual(await cursor.offset(2).limit(3).fetch(), every.slice(2, 5));
-      assert.deepStrictEqual(await cursor.one(), every[0]);
-      // A whole-key match comes in id order already.
-      assert.strictEqual(storage.Task.select({ boardId: 'b0', rank: 7 }).explain().sortedByIndex, true);
-    },
-  );
+  it('should give the first rows by id for an unordered limit over an index range, as a run of every candidate gives', async (t2) => {
+    const compound = { entities: { Task: { index: [['boardId', 'rank']] } } };
+    const storage = await createStorage(t2, 'W', { fsi: memory(), schema: compound });
+    for (let i = 0; i < 40; i++) await storage.insert({ boardId: `b${i % 2}`, rank: (i * 7) % 40, $type: 'Task' });
+    const cursor = storage.Task.select({ boardId: 'b1', rank: { $gte: 10 } });
+    assert.strictEqual(cursor.explain().sortedByIndex, false, 'a range: not a whole key, so not in id order');
+    const every = await cursor.fetch();
+    const ids = every.map((row) => row.id);
+    assert.deepStrictEqual(ids, ids.slice().sort(), 'the result without keys: by id');
+    assert.deepStrictEqual(await cursor.limit(3).fetch(), every.slice(0, 3));
+    assert.deepStrictEqual(await cursor.offset(2).limit(3).fetch(), every.slice(2, 5));
+    assert.deepStrictEqual(await cursor.one(), every[0]);
+    // A whole-key match comes in id order already.
+    assert.strictEqual(storage.Task.select({ boardId: 'b0', rank: 7 }).explain().sortedByIndex, true);
+  });
 
-  await t.test('a page after an edge seeks the index: the page’s rows are read and no more', async (t2) => {
+  it('should seek the index for a page after an edge: the page’s rows are read and no more', async (t2) => {
     const fsi = counting(memory());
     const compound = { entities: { Task: { index: [['boardId', 'rank'], 'title'] } } };
     const storage = await createStorage(t2, 'K', { fsi, schema: compound, cache: { max: 2 } });
@@ -1012,7 +994,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.ok(once(fsi.dataReads(), 60), `one run for the stream (${fsi.dataReads()})`);
   });
 
-  await t.test('count() over a sorted index reads no record; a one-sided range holds its kind alone', async (t2) => {
+  it('should read no record for count() over a sorted index; a one-sided range holds its kind alone', async (t2) => {
     const fsi = counting(memory());
     const compound = { entities: { Task: { index: [['boardId', 'rank']] } } };
     const storage = await createStorage(t2, 'N', { fsi, schema: compound, cache: { max: 2 } });
@@ -1074,7 +1056,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     );
   });
 
-  await t.test('an index with fields beyond the order’s keys serves the prefix and sorts after', async (t2) => {
+  it('should serve the prefix from an index with fields beyond the order’s keys, and sort after', async (t2) => {
     const compound = { entities: { Task: { index: [['boardId', 'done', 'rank']] } } };
     const storage = await createStorage(t2, 'Y', { fsi: memory(), schema: compound });
     const all = [];
@@ -1090,60 +1072,63 @@ const runQueryTests = async (t, assert, createStorage) => {
       false,
       'rank lies beyond the order: equal done would come by rank, not by id',
     );
-    const byDone = (a, b) => (a.done === b.done ? (a.id < b.id ? -1 : 1) : a.done ? 1 : -1);
+    const byDone = (a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return a.id < b.id ? -1 : 1;
+    };
     assert.deepStrictEqual(await cursor.fetch(), all.slice().sort(byDone));
     // With the next key in the order too, the index serves the sort whole.
     const full = storage.Task.select({ boardId: 'b' }).order('done').order('rank');
     assert.strictEqual(full.explain().sortedByIndex, true);
-    const byBoth = (a, b) => (a.done !== b.done ? (a.done ? 1 : -1) : a.rank - b.rank || (a.id < b.id ? -1 : 1));
+    const byBoth = (a, b) => {
+      if (a.done !== b.done) return a.done ? 1 : -1;
+      return a.rank - b.rank || (a.id < b.id ? -1 : 1);
+    };
     assert.deepStrictEqual(await full.fetch(), all.slice().sort(byBoth));
   });
 
-  await t.test(
-    'the planner picks the index by estimated rows, narrows the rest through the postings, and explain() says the estimate',
-    async (t2) => {
-      const fsi = counting(memory());
-      const schema = { entities: { Task: { index: ['status', 'owner'] } } };
-      const storage = await createStorage(t2, 'E', { fsi, schema, cache: { max: 2 } });
-      const all = [];
-      for (let i = 0; i < 300; i++) {
-        const data = { status: i < 280 ? 'open' : 'done', owner: `u${i % 30}`, n: i, $type: 'Task' };
-        all.push({ ...data, id: await storage.insert(data) });
-      }
-      // Two indexes serve the two equalities: the one expected to read fewer records wins — owner (10) over status
-      // (280) — and the other narrows through its posting list before any record is read.
-      const cursor = storage.Task.select({ status: 'open', owner: 'u1' });
-      const made = cursor.explain();
-      assert.deepStrictEqual([made.scan, made.index, made.prefix], ['index', ['owner'], ['u1']]);
-      assert.deepStrictEqual(made.narrow, [{ field: 'status', values: ['open'] }]);
-      assert.strictEqual(made.estimate, 10);
-      assert.strictEqual(made.residual, false, 'both equalities decided: the index and the narrowing');
-      fsi.reset();
-      const rows = await cursor.fetch();
-      // Unordered: by id — compared as a set of n.
-      const byN = (a, b) => a - b;
-      assert.deepStrictEqual(
-        rows.map((row) => row.n).sort(byN),
-        all
-          .filter((row) => row.status === 'open' && row.owner === 'u1')
-          .map((row) => row.n)
-          .sort(byN),
-      );
-      assert.ok(fsi.dataReads() <= 10, `the narrowed records alone (${fsi.dataReads()})`);
-      // The other way round where status is the rarer: done (20) under owner u1 (10) — still owner.
-      assert.deepStrictEqual(storage.Task.select({ status: 'done', owner: 'u1' }).explain().index, ['owner']);
-      assert.strictEqual(await storage.Task.select({ status: 'done', owner: 'u1' }).count(), 0);
-      // One equality alone: its index, the estimate its posting list's size; the collection, its size.
-      assert.strictEqual(storage.Task.select({ status: 'done' }).explain().estimate, 20);
-      assert.strictEqual(storage.Task.select({ n: 3 }).explain().estimate, 300);
-      // A narrowing that leaves nothing reads nothing.
-      fsi.reset();
-      assert.deepStrictEqual(await storage.Task.select({ status: 'gone', owner: 'u1' }).fetch(), []);
-      assert.strictEqual(fsi.dataReads(), 0);
-    },
-  );
+  it('should let the planner pick the index by estimated rows and narrow the rest through the postings, explain() saying the estimate', async (t2) => {
+    const fsi = counting(memory());
+    const tasks = { entities: { Task: { index: ['status', 'owner'] } } };
+    const storage = await createStorage(t2, 'E', { fsi, schema: tasks, cache: { max: 2 } });
+    const all = [];
+    for (let i = 0; i < 300; i++) {
+      const data = { status: i < 280 ? 'open' : 'done', owner: `u${i % 30}`, n: i, $type: 'Task' };
+      all.push({ ...data, id: await storage.insert(data) });
+    }
+    // Two indexes serve the two equalities: the one expected to read fewer records wins — owner (10) over status
+    // (280) — and the other narrows through its posting list before any record is read.
+    const cursor = storage.Task.select({ status: 'open', owner: 'u1' });
+    const made = cursor.explain();
+    assert.deepStrictEqual([made.scan, made.index, made.prefix], ['index', ['owner'], ['u1']]);
+    assert.deepStrictEqual(made.narrow, [{ field: 'status', values: ['open'] }]);
+    assert.strictEqual(made.estimate, 10);
+    assert.strictEqual(made.residual, false, 'both equalities decided: the index and the narrowing');
+    fsi.reset();
+    const rows = await cursor.fetch();
+    // Unordered: by id — compared as a set of n.
+    const byN = (a, b) => a - b;
+    assert.deepStrictEqual(
+      rows.map((row) => row.n).sort(byN),
+      all
+        .filter((row) => row.status === 'open' && row.owner === 'u1')
+        .map((row) => row.n)
+        .sort(byN),
+    );
+    assert.ok(fsi.dataReads() <= 10, `the narrowed records alone (${fsi.dataReads()})`);
+    // The other way round where status is the rarer: done (20) under owner u1 (10) — still owner.
+    assert.deepStrictEqual(storage.Task.select({ status: 'done', owner: 'u1' }).explain().index, ['owner']);
+    assert.strictEqual(await storage.Task.select({ status: 'done', owner: 'u1' }).count(), 0);
+    // One equality alone: its index, the estimate its posting list's size; the collection, its size.
+    assert.strictEqual(storage.Task.select({ status: 'done' }).explain().estimate, 20);
+    assert.strictEqual(storage.Task.select({ n: 3 }).explain().estimate, 300);
+    // A narrowing that leaves nothing reads nothing.
+    fsi.reset();
+    assert.deepStrictEqual(await storage.Task.select({ status: 'gone', owner: 'u1' }).fetch(), []);
+    assert.strictEqual(fsi.dataReads(), 0);
+  });
 
-  await t.test('$in on the key after the prefix scans once per value', async (t2) => {
+  it('should scan once per value for $in on the key after the prefix', async (t2) => {
     const fsi = counting(memory());
     const compound = { entities: { Task: { index: [['board', 'rank']] } } };
     const storage = await createStorage(t2, 'I', { fsi, schema: compound, cache: { max: 2 } });
@@ -1196,7 +1181,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual(storage.Task.select({ board: 'b', rank: { $in: [{ x: 1 }] } }).explain().in, null);
   });
 
-  await t.test('a builder hands back a new cursor and leaves the one it was called on as it was', async (t2) => {
+  it('should hand back a new cursor from a builder, and leave the one it was called on as it was', async (t2) => {
     const storage = await createStorage(t2, 'I', { schema });
     for (let i = 0; i < 6; i++) await storage.Project.insert({ orgId: 'o', name: `n${i}`, slug: `s${i}`, n: i });
     const base = storage.Project.select({ orgId: 'o' });
@@ -1242,7 +1227,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.throws(() => base.matches('x'), TypeError);
   });
 
-  await t.test('$type, $size, $mod, $all, $elemMatch and $nor match what a reference filter does', async (t2) => {
+  it('should match through $type, $size, $mod, $all, $elemMatch and $nor what a reference filter does', async (t2) => {
     const storage = await createStorage(t2, 'OP', { schema });
     const all = [];
     for (let i = 0; i < 40; i++) {
@@ -1251,8 +1236,8 @@ const runQueryTests = async (t, assert, createStorage) => {
         name: `n${i}`,
         slug: `s${i}`,
         n: i,
-        v: i % 4 === 0 ? null : i % 4 === 1 ? 's' : i % 4 === 2 ? [i] : { k: i },
-        tags: i % 3 === 0 ? ['a'] : i % 3 === 1 ? ['a', 'b'] : ['b', 'c', 'd'],
+        v: [null, 's', [i], { k: i }][i % 4],
+        tags: [['a'], ['a', 'b'], ['b', 'c', 'd']][i % 3],
         items: [
           { k: i, s: 'x' },
           { k: i + 1, s: 'y' },
@@ -1261,7 +1246,10 @@ const runQueryTests = async (t, assert, createStorage) => {
       const { id } = await storage.Project.insert(data);
       all.push({ id, ...data, $type: 'Project' });
     }
-    const typeOf = (value) => (value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value);
+    const typeOf = (value) => {
+      if (value === null) return 'null';
+      return Array.isArray(value) ? 'array' : typeof value;
+    };
     const cases = [
       [{ v: { $type: 'null' } }, (row) => row.v === null],
       [{ v: { $type: 'string' } }, (row) => typeof row.v === 'string'],
@@ -1275,10 +1263,10 @@ const runQueryTests = async (t, assert, createStorage) => {
       [{ tags: { $all: [] } }, () => true],
       [
         { items: { $elemMatch: { k: { $gte: 10 }, s: 'y' } } },
-        (row) => row.items.some((it) => it.k >= 10 && it.s === 'y'),
+        (row) => row.items.some((item) => item.k >= 10 && item.s === 'y'),
       ],
       [{ tags: { $elemMatch: { $in: ['c', 'z'] } } }, (row) => row.tags.includes('c')],
-      [{ items: { $elemMatch: { k: { $mod: [2, 0] } } } }, (row) => row.items.some((it) => it.k % 2 === 0)],
+      [{ items: { $elemMatch: { k: { $mod: [2, 0] } } } }, (row) => row.items.some((item) => item.k % 2 === 0)],
       [{ $nor: [{ n: { $lt: 10 } }, { tags: 'b' }] }, (row) => !(row.n < 10 || row.tags.includes('b'))],
       [{ $and: [{ $nor: [{ v: null }] }, { n: { $mod: [2, 0] } }] }, (row) => row.v !== null && row.n % 2 === 0],
     ];
@@ -1309,7 +1297,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     }
   });
 
-  await t.test('one() leaves the cursor as it was', async (t2) => {
+  it('should leave the cursor as it was after one()', async (t2) => {
     const storage = await createStorage(t2, 'O', { schema });
     for (const name of ['a', 'b', 'c']) await storage.Project.insert({ orgId: 'o', name, slug: name });
     const cursor = storage.Project.select({ orgId: 'o' }).order('name');
@@ -1323,7 +1311,7 @@ const runQueryTests = async (t, assert, createStorage) => {
     assert.strictEqual(await limited.one(), null, 'a cursor limited to none finds none');
   });
 
-  await t.test('an indexed object matches whatever its key order', async (t2) => {
+  it('should match an indexed object whatever its key order', async (t2) => {
     const shapes = {
       entities: { Place: { index: ['at'], unique: ['code'] } },
     };

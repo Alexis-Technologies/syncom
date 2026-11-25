@@ -51,31 +51,45 @@ const createBroadcastChannels = () => {
     constructor(name) {
       this.#name = name;
       let bus = buses.get(name);
-      if (bus === undefined) buses.set(name, (bus = new Set()));
+      if (bus === undefined) {
+        buses.set(name, (bus = new Set()));
+      }
       bus.add(this);
     }
     get name() {
       return this.#name;
     }
     postMessage(message) {
-      if (this.#closed) throw new Error('closed');
+      if (this.#closed) {
+        throw new Error('closed');
+      }
       const copy = clone(message);
       for (const other of buses.get(this.#name)) {
-        if (other === this || other.#closed) continue;
+        if (other === this || other.#closed) {
+          continue;
+        }
         queueMicrotask(() => other.#deliver(copy));
       }
     }
     #deliver(data) {
-      if (this.#closed) return;
+      if (this.#closed) {
+        return;
+      }
       const event = { data };
       this.onmessage?.(event);
-      for (const listener of this.#listeners) listener(event);
+      for (const listener of this.#listeners) {
+        listener(event);
+      }
     }
     addEventListener(type, listener) {
-      if (type === 'message') this.#listeners.add(listener);
+      if (type === 'message') {
+        this.#listeners.add(listener);
+      }
     }
     removeEventListener(type, listener) {
-      if (type === 'message') this.#listeners.delete(listener);
+      if (type === 'message') {
+        this.#listeners.delete(listener);
+      }
     }
     close() {
       this.#closed = true;

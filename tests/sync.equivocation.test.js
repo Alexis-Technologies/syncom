@@ -4,11 +4,11 @@
 // restored from a backup, a second instance under the same identity, or a
 // key holder that lies. Every op names the fingerprint of the op before it
 // in its stream (`prev`, signed), and a node compares what it holds with
-// what it is handed: two ops at one seq are reported (EQUIVOCATION), and an
+// what it is handed: two ops at one seq are reported (ALX_ERR_EQUIVOCATION), and an
 // op that names a predecessor other than the one held is refused.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
@@ -63,201 +63,189 @@ const errorsOf = (storage) => {
   return errors;
 };
 
-test('Equivocation: two ops of one stream at one seq', async (t) => {
-  await t.test(
-    'hosts that hold two ops of one seq report EQUIVOCATION with both fingerprints; neither takes the other',
-    async (t2) => {
-      const [m1, m2] = await forked(t2);
-      const origin = m1.nodeId;
-      assert.strictEqual(m2.nodeId, origin, 'one identity');
-      await m1.set('doc', { title: 'x' });
-      await m2.set('doc', { title: 'y' });
-      const x = opOf(m1, origin, 1);
-      const y = opOf(m2, origin, 1);
-      const errors = new Map();
-      // The forked writer pushed one op to each host before the hosts met;
-      // then each dials the other.
-      const mesh = await createMesh(
-        t2,
+describe('Equivocation: two ops of one stream at one seq', () => {
+  it('should report EQUIVOCATION with both fingerprints from hosts that hold two ops of one seq, neither taking the other', async (t2) => {
+    const [m1, m2] = await forked(t2);
+    const origin = m1.nodeId;
+    assert.strictEqual(m2.nodeId, origin, 'one identity');
+    await m1.set('doc', { title: 'x' });
+    await m2.set('doc', { title: 'y' });
+    const x = opOf(m1, origin, 1);
+    const y = opOf(m2, origin, 1);
+    const errors = new Map();
+    // The forked writer pushed one op to each host before the hosts met;
+    // then each dials the other.
+    const mesh = await createMesh(
+      t2,
+      ['H1', 'H2'],
+      [
         ['H1', 'H2'],
-        [
-          ['H1', 'H2'],
-          ['H2', 'H1'],
-        ],
-        async (t3, name, options) => {
-          const storage = await createDatabase(t3, { path: `/${name}`, ...options });
-          errors.set(name, errorsOf(storage));
-          const result = await storage.applyRemote([name === 'H1' ? x : y]);
-          assert.strictEqual(result.applied, 1);
-          return storage;
-        },
-      );
-      const h1 = mesh.get('H1');
-      const h2 = mesh.get('H2');
-      const reported = (name) => errors.get(name).filter((error) => error.code === 'EQUIVOCATION');
-      await waitUntil(() => reported('H1').length > 0 && reported('H2').length > 0);
-      const [one] = reported('H1');
-      const [two] = reported('H2');
-      const held1 = entryOf(h1, origin, 1).fp;
-      const held2 = entryOf(h2, origin, 1).fp;
-      assert.match(held1, FINGERPRINT);
-      assert.match(held2, FINGERPRINT);
-      assert.notStrictEqual(held1, held2);
-      // Each names what it holds and what it was handed: the other's.
-      assert.deepStrictEqual(
-        [one.reason, one.origin, one.scope, one.seq, one.held, one.received, one.count],
-        ['seq', origin, null, 1, held1, held2, 1],
-      );
-      assert.deepStrictEqual(
-        [two.reason, two.origin, two.scope, two.seq, two.held, two.received, two.count],
-        ['seq', origin, null, 1, held2, held1, 1],
-      );
-      assert.strictEqual(one.op.data.title, 'y');
-      assert.strictEqual(two.op.data.title, 'x');
-      // The author fingerprints its op as every node does.
-      assert.strictEqual(entryOf(m1, origin, 1).fp, held1);
-      assert.strictEqual(entryOf(m2, origin, 1).fp, held2);
-      // Neither took the other's version: not applied, not logged, not relayed.
-      assert.deepStrictEqual(await h1.get('doc'), { title: 'x' });
-      assert.deepStrictEqual(await h2.get('doc'), { title: 'y' });
-      let theirs = 0;
-      for (const entry of h1.log.scan()) if (entry.op.origin === origin) theirs++;
-      assert.strictEqual(theirs, 1);
-      assert.strictEqual(h1.vector[origin], 1);
-      assert.strictEqual(h2.vector[origin], 1);
-    },
-  );
+        ['H2', 'H1'],
+      ],
+      async (t3, name, options) => {
+        const storage = await createDatabase(t3, { path: `/${name}`, ...options });
+        errors.set(name, errorsOf(storage));
+        const result = await storage.applyRemote([name === 'H1' ? x : y]);
+        assert.strictEqual(result.applied, 1);
+        return storage;
+      },
+    );
+    const h1 = mesh.get('H1');
+    const h2 = mesh.get('H2');
+    const reported = (name) => errors.get(name).filter((error) => error.code === 'ALX_ERR_EQUIVOCATION');
+    await waitUntil(() => reported('H1').length > 0 && reported('H2').length > 0);
+    const [one] = reported('H1');
+    const [two] = reported('H2');
+    const held1 = entryOf(h1, origin, 1).fp;
+    const held2 = entryOf(h2, origin, 1).fp;
+    assert.match(held1, FINGERPRINT);
+    assert.match(held2, FINGERPRINT);
+    assert.notStrictEqual(held1, held2);
+    // Each names what it holds and what it was handed: the other's.
+    assert.deepStrictEqual(
+      [one.reason, one.origin, one.scope, one.seq, one.held, one.received, one.count],
+      ['seq', origin, null, 1, held1, held2, 1],
+    );
+    assert.deepStrictEqual(
+      [two.reason, two.origin, two.scope, two.seq, two.held, two.received, two.count],
+      ['seq', origin, null, 1, held2, held1, 1],
+    );
+    assert.strictEqual(one.op.data.title, 'y');
+    assert.strictEqual(two.op.data.title, 'x');
+    // The author fingerprints its op as every node does.
+    assert.strictEqual(entryOf(m1, origin, 1).fp, held1);
+    assert.strictEqual(entryOf(m2, origin, 1).fp, held2);
+    // Neither took the other's version: not applied, not logged, not relayed.
+    assert.deepStrictEqual(await h1.get('doc'), { title: 'x' });
+    assert.deepStrictEqual(await h2.get('doc'), { title: 'y' });
+    let theirs = 0;
+    for (const entry of h1.log.scan()) if (entry.op.origin === origin) theirs++;
+    assert.strictEqual(theirs, 1);
+    assert.strictEqual(h1.vector[origin], 1);
+    assert.strictEqual(h2.vector[origin], 1);
+  });
 
-  await t.test(
-    'without signatures, two copies that mint one seq are told apart by their headers, not by their payloads',
-    async (t2) => {
-      const [m1, m2] = await forked(t2, core);
-      const origin = m1.nodeId;
-      await m1.set('doc', { title: 'x' });
-      // A stamp of its own: the copies write a millisecond apart at least.
-      await new Promise((resolve) => setTimeout(resolve, 2));
-      await m2.set('doc', { title: 'y' });
-      const x = opOf(m1, origin, 1);
-      const y = opOf(m2, origin, 1);
-      assert.deepStrictEqual([x.sig, x.digest], [undefined, undefined], 'unsigned, no digest');
-      assert.notStrictEqual(x.ts, y.ts);
-      const host = await createDatabase(t2, { path: '/h' }, core);
-      const errors = errorsOf(host);
-      assert.strictEqual((await host.applyRemote([x])).applied, 1);
-      const result = await host.applyRemote([y]);
-      assert.deepStrictEqual([result.applied, result.duplicates, result.equivocations], [0, 0, 1]);
-      assert.deepStrictEqual(
-        [errors[0].code, errors[0].reason, errors[0].held, errors[0].received],
-        ['EQUIVOCATION', 'seq', entryOf(m1, origin, 1).fp, entryOf(m2, origin, 1).fp],
-      );
-      // The same op again is a duplicate, nothing more.
-      assert.deepStrictEqual([(await host.applyRemote([x])).duplicates, errors.length], [1, 1]);
-      assert.deepStrictEqual(await host.get('doc'), { title: 'x' });
-      // The limit: without a digest the fingerprint is the header's alone —
-      // another payload under one header is the same op to it. Signed, the
-      // digest is in the header (the test above).
-      const twin = { ...x, data: { title: 'z' } };
-      assert.deepStrictEqual([(await host.applyRemote([twin])).duplicates, errors.length], [1, 1]);
-    },
-  );
+  it('should tell apart two copies that mint one seq without signatures by their headers, not by their payloads', async (t2) => {
+    const [m1, m2] = await forked(t2, core);
+    const origin = m1.nodeId;
+    await m1.set('doc', { title: 'x' });
+    // A stamp of its own: the copies write a millisecond apart at least.
+    await new Promise((resolve) => setTimeout(resolve, 2));
+    await m2.set('doc', { title: 'y' });
+    const x = opOf(m1, origin, 1);
+    const y = opOf(m2, origin, 1);
+    assert.deepStrictEqual([x.sig, x.digest], [undefined, undefined], 'unsigned, no digest');
+    assert.notStrictEqual(x.ts, y.ts);
+    const host = await createDatabase(t2, { path: '/h' }, core);
+    const errors = errorsOf(host);
+    assert.strictEqual((await host.applyRemote([x])).applied, 1);
+    const result = await host.applyRemote([y]);
+    assert.deepStrictEqual([result.applied, result.duplicates, result.equivocations], [0, 0, 1]);
+    assert.deepStrictEqual(
+      [errors[0].code, errors[0].reason, errors[0].held, errors[0].received],
+      ['ALX_ERR_EQUIVOCATION', 'seq', entryOf(m1, origin, 1).fp, entryOf(m2, origin, 1).fp],
+    );
+    // The same op again is a duplicate, nothing more.
+    assert.deepStrictEqual([(await host.applyRemote([x])).duplicates, errors.length], [1, 1]);
+    assert.deepStrictEqual(await host.get('doc'), { title: 'x' });
+    // The limit: without a digest the fingerprint is the header's alone —
+    // another payload under one header is the same op to it. Signed, the
+    // digest is in the header (the test above).
+    const twin = { ...x, data: { title: 'z' } };
+    assert.deepStrictEqual([(await host.applyRemote([twin])).duplicates, errors.length], [1, 1]);
+  });
 });
 
-test('The per-stream hash chain', async (t) => {
-  await t.test(
-    'the next op of a forked stream is refused as a broken chain where the other branch is held, taken where its own is',
-    async (t2) => {
-      const [m1, m2] = await forked(t2);
-      const origin = m1.nodeId;
-      await m1.set('doc', { title: 'x1' });
-      await m2.set('doc', { title: 'y1' });
-      await m1.set('doc', { title: 'x2' });
-      await m2.set('doc', { title: 'y2' });
-      const [x1, x2] = [opOf(m1, origin, 1), opOf(m1, origin, 2)];
-      const [y1, y2] = [opOf(m2, origin, 1), opOf(m2, origin, 2)];
-      // Seq 1 opens the stream: it names no predecessor. Seq 2 names seq 1.
-      assert.strictEqual(x1.prev, undefined);
-      assert.strictEqual(x2.prev, entryOf(m1, origin, 1).fp);
-      assert.strictEqual(y2.prev, entryOf(m2, origin, 1).fp);
-      const h1 = await createDatabase(t2, { path: '/h1' });
-      const h2 = await createDatabase(t2, { path: '/h2' });
-      const errors1 = errorsOf(h1);
-      const errors2 = errorsOf(h2);
-      assert.strictEqual((await h1.applyRemote([x1])).applied, 1);
-      assert.strictEqual((await h2.applyRemote([y1])).applied, 1);
-      // Each host refuses the op that extends the other branch, never having
-      // seen that branch's seq 1: not logged, not relayed, the vector unmoved…
-      const length = h2.log.length;
-      const refused = await h2.applyRemote([x2]);
-      assert.deepStrictEqual([refused.applied, refused.equivocations, refused.gaps], [0, 1, 0]);
-      assert.deepStrictEqual([h2.log.length, h2.vector[origin]], [length, 1]);
-      assert.strictEqual((await h1.applyRemote([y2])).equivocations, 1);
-      // …and takes the one that extends the branch it holds.
-      assert.strictEqual((await h1.applyRemote([x2])).applied, 1);
-      assert.strictEqual((await h2.applyRemote([y2])).applied, 1);
-      assert.deepStrictEqual(await h1.get('doc'), { title: 'x2' });
-      assert.deepStrictEqual(await h2.get('doc'), { title: 'y2' });
-      // The evidence: the fingerprint held at seq 1 and the one the op names.
-      const chain = errors2.find((error) => error.code === 'EQUIVOCATION');
-      assert.deepStrictEqual(
-        [chain.reason, chain.origin, chain.seq, chain.held, chain.received, chain.op.data.title],
-        ['chain', origin, 2, entryOf(h2, origin, 1).fp, x2.prev, 'x2'],
-      );
-      assert.strictEqual(errors1.find((error) => error.code === 'EQUIVOCATION').received, y2.prev);
-      // A fresh node holds neither: it takes the first op it is handed and
-      // holds the chain to it from there, inside one page too.
-      const h3 = await createDatabase(t2, { path: '/h3' });
-      const page = await h3.applyRemote([y1, x2, y2]);
-      assert.deepStrictEqual([page.applied, page.equivocations], [2, 1]);
-      assert.deepStrictEqual(await h3.get('doc'), { title: 'y2' });
-    },
-  );
+describe('The per-stream hash chain', () => {
+  it('should refuse the next op of a forked stream as a broken chain where the other branch is held, and take it where its own is', async (t2) => {
+    const [m1, m2] = await forked(t2);
+    const origin = m1.nodeId;
+    await m1.set('doc', { title: 'x1' });
+    await m2.set('doc', { title: 'y1' });
+    await m1.set('doc', { title: 'x2' });
+    await m2.set('doc', { title: 'y2' });
+    const [x1, x2] = [opOf(m1, origin, 1), opOf(m1, origin, 2)];
+    const [y1, y2] = [opOf(m2, origin, 1), opOf(m2, origin, 2)];
+    // Seq 1 opens the stream: it names no predecessor. Seq 2 names seq 1.
+    assert.strictEqual(x1.prev, undefined);
+    assert.strictEqual(x2.prev, entryOf(m1, origin, 1).fp);
+    assert.strictEqual(y2.prev, entryOf(m2, origin, 1).fp);
+    const h1 = await createDatabase(t2, { path: '/h1' });
+    const h2 = await createDatabase(t2, { path: '/h2' });
+    const errors1 = errorsOf(h1);
+    const errors2 = errorsOf(h2);
+    assert.strictEqual((await h1.applyRemote([x1])).applied, 1);
+    assert.strictEqual((await h2.applyRemote([y1])).applied, 1);
+    // Each host refuses the op that extends the other branch, never having
+    // seen that branch's seq 1: not logged, not relayed, the vector unmoved…
+    const length = h2.log.length;
+    const refused = await h2.applyRemote([x2]);
+    assert.deepStrictEqual([refused.applied, refused.equivocations, refused.gaps], [0, 1, 0]);
+    assert.deepStrictEqual([h2.log.length, h2.vector[origin]], [length, 1]);
+    assert.strictEqual((await h1.applyRemote([y2])).equivocations, 1);
+    // …and takes the one that extends the branch it holds.
+    assert.strictEqual((await h1.applyRemote([x2])).applied, 1);
+    assert.strictEqual((await h2.applyRemote([y2])).applied, 1);
+    assert.deepStrictEqual(await h1.get('doc'), { title: 'x2' });
+    assert.deepStrictEqual(await h2.get('doc'), { title: 'y2' });
+    // The evidence: the fingerprint held at seq 1 and the one the op names.
+    const chain = errors2.find((error) => error.code === 'ALX_ERR_EQUIVOCATION');
+    assert.deepStrictEqual(
+      [chain.reason, chain.origin, chain.seq, chain.held, chain.received, chain.op.data.title],
+      ['chain', origin, 2, entryOf(h2, origin, 1).fp, x2.prev, 'x2'],
+    );
+    assert.strictEqual(errors1.find((error) => error.code === 'ALX_ERR_EQUIVOCATION').received, y2.prev);
+    // A fresh node holds neither: it takes the first op it is handed and
+    // holds the chain to it from there, inside one page too.
+    const h3 = await createDatabase(t2, { path: '/h3' });
+    const page = await h3.applyRemote([y1, x2, y2]);
+    assert.deepStrictEqual([page.applied, page.equivocations], [2, 1]);
+    assert.deepStrictEqual(await h3.get('doc'), { title: 'y2' });
+  });
 
-  await t.test(
-    'prev is signed: a changed or stripped prev is FORGED, and a signed op that names none is refused where one is held',
-    async (t2) => {
-      const [m1, m2] = await forked(t2);
-      const origin = m1.nodeId;
-      await m1.set('doc', { title: 'x1' });
-      await m2.set('doc', { title: 'y1' });
-      await m1.set('doc', { title: 'x2' });
-      const x2 = opOf(m1, origin, 2);
-      const host = await createDatabase(t2, { path: '/h' });
-      assert.strictEqual((await host.applyRemote([opOf(m2, origin, 1)])).applied, 1);
-      const held = entryOf(host, origin, 1).fp;
-      // Relabelled to pass the chain here: the signature no longer verifies.
-      const relabelled = await host.applyRemote([{ ...x2, prev: held }]);
-      assert.deepStrictEqual([relabelled.forged, relabelled.equivocations], [1, 0]);
-      const stripped = { ...x2 };
-      delete stripped.prev;
-      assert.strictEqual((await host.applyRemote([stripped])).forged, 1);
-      // Signed again by the key holder without a prev: it verifies, and is
-      // refused all the same where the op before it is held.
-      const privateKey = await m1.fsi.read('/m/keys', 'sign-private.pem');
-      const bare = { ...x2 };
-      delete bare.prev;
-      delete bare.sig;
-      const signed = await signOp(bare, privateKey);
-      const unchained = await host.applyRemote([signed]);
-      assert.deepStrictEqual([unchained.forged, unchained.equivocations], [0, 1]);
-      assert.strictEqual(host.vector[origin], 1);
-      // An unsigned op that names no predecessor is a hand-made one, taken as
-      // its stream's next; one that names the wrong one is refused.
-      const plain = (seq, extra) => ({
-        origin: 'n1',
-        seq,
-        ts: Date.now(),
-        type: 'write',
-        id: 'r',
-        data: { seq },
-        ...extra,
-      });
-      assert.strictEqual((await host.applyRemote([plain(1), plain(2)])).applied, 2);
-      const wrong = await host.applyRemote([plain(3, { prev: STRANGER })]);
-      assert.deepStrictEqual([wrong.applied, wrong.equivocations], [0, 1]);
-    },
-  );
+  it('should sign prev: a changed or stripped prev is FORGED, and a signed op that names none is refused where one is held', async (t2) => {
+    const [m1, m2] = await forked(t2);
+    const origin = m1.nodeId;
+    await m1.set('doc', { title: 'x1' });
+    await m2.set('doc', { title: 'y1' });
+    await m1.set('doc', { title: 'x2' });
+    const x2 = opOf(m1, origin, 2);
+    const host = await createDatabase(t2, { path: '/h' });
+    assert.strictEqual((await host.applyRemote([opOf(m2, origin, 1)])).applied, 1);
+    const held = entryOf(host, origin, 1).fp;
+    // Relabelled to pass the chain here: the signature no longer verifies.
+    const relabelled = await host.applyRemote([{ ...x2, prev: held }]);
+    assert.deepStrictEqual([relabelled.forged, relabelled.equivocations], [1, 0]);
+    const stripped = { ...x2 };
+    delete stripped.prev;
+    assert.strictEqual((await host.applyRemote([stripped])).forged, 1);
+    // Signed again by the key holder without a prev: it verifies, and is
+    // refused all the same where the op before it is held.
+    const privateKey = await m1.fsi.read('/m/keys', 'sign-private.pem');
+    const bare = { ...x2 };
+    delete bare.prev;
+    delete bare.sig;
+    const signed = await signOp(bare, privateKey);
+    const unchained = await host.applyRemote([signed]);
+    assert.deepStrictEqual([unchained.forged, unchained.equivocations], [0, 1]);
+    assert.strictEqual(host.vector[origin], 1);
+    // An unsigned op that names no predecessor is a hand-made one, taken as
+    // its stream's next; one that names the wrong one is refused.
+    const plain = (seq, extra) => ({
+      origin: 'n1',
+      seq,
+      ts: Date.now(),
+      type: 'write',
+      id: 'r',
+      data: { seq },
+      ...extra,
+    });
+    assert.strictEqual((await host.applyRemote([plain(1), plain(2)])).applied, 2);
+    const wrong = await host.applyRemote([plain(3, { prev: STRANGER })]);
+    assert.deepStrictEqual([wrong.applied, wrong.equivocations], [0, 1]);
+  });
 
-  await t.test('the chain heads survive a reopen and a roll that compacted the ops they name', async (t2) => {
+  it('should keep the chain heads through a reopen and a roll that compacted the ops they name', async (t2) => {
     const tight = { sync: { log: { rollAfter: 1 }, retention: { ops: 1 } } };
     const mine = memory();
     const theirs = memory();
@@ -294,7 +282,7 @@ test('The per-stream hash chain', async (t) => {
     assert.deepStrictEqual(reader.log.headOf(key), [7, entryOf(writer, key, 7).fp]);
   });
 
-  await t.test('a group that fails takes its chain heads back with its seqs', async (t2) => {
+  it('should take the chain heads of a group that fails back with its seqs', async (t2) => {
     const inner = memory();
     let failing = false;
     const fsi = {
@@ -320,7 +308,7 @@ test('The per-stream hash chain', async (t) => {
     assert.strictEqual(storage.log.fingerprintOf(key, 2), second.fp);
   });
 
-  await t.test('packOps carries prev in slot 19; a row of 18 slots reads it as absent', () => {
+  it('should carry prev in slot 19 of packOps, a row of 18 slots reading it as absent', () => {
     const op = { origin: 'n1', seq: 2, ts: 5, type: 'write', id: 'r', data: { a: 1 }, prev: STRANGER };
     const [row] = packOps([op]);
     // Twenty slots: prev is the 19th, whether the op was scrubbed the 20th (null for an op whole).

@@ -1,14 +1,14 @@
 'use strict';
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { runPatchTests } = require('./suites/patches.js');
 
-test('Patches (node)', async (t) => {
+describe('Patches (node)', () => {
   const dirs = new Map();
-  await runPatchTests(t, assert, async (t2, name, options = {}) => {
+  runPatchTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     let dir = dirs.get(key);
     if (!dir) {

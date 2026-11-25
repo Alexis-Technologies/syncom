@@ -3,14 +3,14 @@
 // The trigram index on its own: normalization, the trigrams, what ranks
 // above what, and the factory.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { createSearch, normalize, trigrams } = require('../src/search/search.js');
 
 const ids = (hits) => hits.map((hit) => hit.id);
 
-test('search: normalize and trigrams', async (t) => {
-  await t.test('normalize: marks off, lower case, letters and digits only, one space between words', () => {
+describe('search: normalize and trigrams', () => {
+  it('should normalize: marks off, lower case, letters and digits only, one space between words', () => {
     assert.strictEqual(normalize('  Crème Brûlée — über-QUICK, fox!  '), 'creme brulee uber quick fox');
     assert.strictEqual(normalize('北京 东京'), '北京 东京');
     assert.strictEqual(normalize('a\tb\n\nc'), 'a b c');
@@ -21,7 +21,7 @@ test('search: normalize and trigrams', async (t) => {
     assert.strictEqual(normalize('---'), '');
   });
 
-  await t.test('trigrams: per word, padded, three wide', () => {
+  it('should cut trigrams per word, padded, three wide', () => {
     assert.deepStrictEqual(trigrams('quick fox'), [' qu', 'qui', 'uic', 'ick', 'ck ', ' fo', 'fox', 'ox ']);
     assert.deepStrictEqual(trigrams('qiuck'), [' qi', 'qiu', 'iuc', 'uck', 'ck ']);
     assert.deepStrictEqual(trigrams('a'), [' a ']);
@@ -32,8 +32,8 @@ test('search: normalize and trigrams', async (t) => {
   });
 });
 
-test('search: the index', async (t) => {
-  await t.test('put, replace, remove, size; a fresh array every query', () => {
+describe('search: the index', () => {
+  it('should put, replace, remove and count by size; a fresh array every query', () => {
     const index = createSearch()('Post');
     assert.strictEqual(index.size, 0);
     index.put('a', 'quick fox');
@@ -57,7 +57,7 @@ test('search: the index', async (t) => {
     assert.deepStrictEqual(index.query('zzz'), []);
   });
 
-  await t.test('ranking: exact over substring, rare over common, short over long, typos tolerated', () => {
+  it('should rank exact over substring, rare over common, short over long, typos tolerated', () => {
     const index = createSearch()('Post');
     index.put('exact', 'fox');
     index.put('longer', 'foxglove');
@@ -94,14 +94,14 @@ test('search: the index', async (t) => {
     assert.ok(one.query('hello')[0].score > 0);
   });
 
-  await t.test('createSearch: a fresh index per call, the option checked', () => {
+  it('should give a fresh index per createSearch call, the option checked', () => {
     const factory = createSearch();
     const posts = factory('Post');
     const tags = factory('Tag');
     posts.put('p', 'alpha');
     assert.deepStrictEqual(tags.query('alpha'), [], 'independent indexes');
     assert.throws(() => createSearch({ minOverlap: 'high' }), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'createSearch({ minOverlap }): minOverlap must be a number between 0 and 1',
     });
     assert.throws(() => createSearch({ minOverlap: 2 }), TypeError);
@@ -110,9 +110,9 @@ test('search: the index', async (t) => {
   });
 });
 
-test('search: the distances a vector field is searched by', async (t) => {
-  const { cosine, euclidean, manhattan, dot, isVector } = require('../src/search/search.js');
-  await t.test('cosine, euclidean, manhattan, dot: smaller is nearer; a zero vector is as far as cosine goes', () => {
+describe('search: the distances a vector field is searched by', () => {
+  it('should measure cosine, euclidean, manhattan, dot: smaller is nearer; a zero vector is as far as cosine goes', () => {
+    const { cosine, euclidean, manhattan, dot, isVector } = require('../src/search/search.js');
     assert.strictEqual(cosine([1, 0], [1, 0]), 0);
     assert.strictEqual(cosine([1, 0], [0, 1]), 1);
     assert.strictEqual(cosine([1, 0], [-1, 0]), 2);

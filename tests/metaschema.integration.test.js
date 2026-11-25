@@ -5,8 +5,8 @@
 // nothing configured. Skips (never fails) when @alexify/metaschema is not
 // installed; nothing under src/ requires it.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { normalizeSchema } = require('../src/schema/define.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
@@ -30,25 +30,32 @@ const openTemp = async (t, options = {}) => {
   return storage;
 };
 
-test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema unavailable' }, async (t) => {
-  const { Model, Schema } = metaschema;
-  const entities = new Map(
-    Object.entries({
-      Project: {
-        Registry: {},
-        orgId: 'string',
-        name: { type: 'string', aliases: ['title'] },
-        slug: { type: 'string', unique: true },
-        'desc?': { type: 'string', default: '' },
-        byOrg: { index: ['orgId'] },
-        byOrgName: { unique: ['orgId', 'name'] },
-      },
-    }),
-  );
-  const model = new Model({}, entities);
-  const Project = model.entities.get('Project');
+describe('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema unavailable' }, () => {
+  let Model = null;
+  let Schema = null;
+  let entities = null;
+  let model = null;
+  let Project = null;
+  before(() => {
+    ({ Model, Schema } = metaschema);
+    entities = new Map(
+      Object.entries({
+        Project: {
+          Registry: {},
+          orgId: 'string',
+          name: { type: 'string', aliases: ['title'] },
+          slug: { type: 'string', unique: true },
+          'desc?': { type: 'string', default: '' },
+          byOrg: { index: ['orgId'] },
+          byOrgName: { unique: ['orgId', 'name'] },
+        },
+      }),
+    );
+    model = new Model({}, entities);
+    Project = model.entities.get('Project');
+  });
 
-  await t.test('an entity of a model validates through ~standard, under its own id key', async (t2) => {
+  it('should validate an entity of a model through ~standard, under its own id key', async (t2) => {
     const storage = await openTemp(t2, { schema: { entities: { Project: { schema: Project } } } });
     const project = await storage.Project.insert({ title: 'Alioth', slug: 'alioth', orgId: 'org1' });
     assert.deepStrictEqual(await storage.get(project.id), {
@@ -94,16 +101,16 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     assert.strictEqual((await storage.get(project.id)).orgId, 'org1');
   });
 
-  await t.test('the id field and the indexes are read off the schema as metaschema lays them out', () => {
-    const { entities } = normalizeSchema({ entities: { Project: { schema: Project } } });
-    const def = entities.get('Project');
+  it('should read the id field and the indexes off the schema as metaschema lays them out', () => {
+    const { entities: definitions } = normalizeSchema({ entities: { Project: { schema: Project } } });
+    const def = definitions.get('Project');
     assert.strictEqual(def.idField, 'projectId');
     assert.strictEqual(def.standard, true);
     assert.deepStrictEqual(def.index, ['orgId']);
     assert.deepStrictEqual(def.unique, [['orgId', 'name'], ['slug']]);
   });
 
-  await t.test('model.toJSON() as the snapshot: the same model hashes the same, another one is drift', async (t2) => {
+  it('should take model.toJSON() as the snapshot: the same model hashes the same, another one is drift', async (t2) => {
     const v2 = new Model({}, new Map([...entities, ['Tag', { Registry: {}, name: 'string' }]]));
     const dirs = new Map();
     const createStorage = async (t3, name, options = {}) => {
@@ -146,7 +153,7 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     assert.strictEqual((await c.get(project.id)).name, 'Alioth', 'ops still flow');
   });
 
-  await t.test('a v2 model reads v1 records through aliases and defaults; migrate() rewrites them', async (t2) => {
+  it('should read v1 records with a v2 model through aliases and defaults; migrate() rewrites them', async (t2) => {
     const { diff, compatibility } = require('@alexify/metaschema/model');
     const v1 = new Model(
       {},
@@ -205,7 +212,7 @@ test('syncom with metaschema', { skip: metaschema ? false : '@alexify/metaschema
     assert.strictEqual(compatibility(diff(v1, model)), 'backward');
   });
 
-  await t.test('a struct is handed no id; an async validator is awaited', async (t2) => {
+  it('should hand a struct no id and await an async validator', async (t2) => {
     const Address = Schema.from({
       Struct: {},
       city: 'string',

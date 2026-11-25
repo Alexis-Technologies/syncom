@@ -8,8 +8,8 @@
 // storage. The same suite as the `/all` wrappers run: the registry changes
 // nothing of what converges.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, before } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { text } = require('../src/text/text.js');
 const { tree } = require('../src/tree/tree.js');
@@ -19,11 +19,14 @@ const { versions } = require('../src/versions/versions.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 const { memory } = require('../src/memory/memory.js');
 
-test('Sync engine (lean core, plugins by hand)', async (t) => {
-  const fsi = memory();
+describe('Sync engine (lean core, plugins by hand)', () => {
+  let fsi = null;
+  before(() => {
+    fsi = memory();
+  });
   let n = 0;
   const paths = new Map();
-  await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {
+  runSyncEngineTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `lean-${n++}-${name}`);
     const storage = await core.createDatabase({

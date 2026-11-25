@@ -1,14 +1,14 @@
 'use strict';
 
 const path = require('node:path');
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { SmartContract } = require('../src/contracts/contracts.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
-test('Integration tests', async (t) => {
-  await t.test('Full workflow: keys -> storage -> contract -> chain', async () => {
+describe('Integration tests', () => {
+  it('should run the full workflow: keys -> storage -> contract -> chain', async () => {
     const tempDir = await createTemp();
     try {
       const storage = await syncom.createDatabase({ path: tempDir });

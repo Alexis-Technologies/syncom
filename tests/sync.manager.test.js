@@ -6,8 +6,8 @@
 // link factory, a host that already dials us, a link that cannot stream, and
 // failures on the way out.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { MemoryLink } = require('./utils/memory-link.js');
@@ -21,8 +21,8 @@ const openTemp = async (t, options = {}) => {
   return storage;
 };
 
-test('SyncManager edges', async (t) => {
-  await t.test('enableNode disconnects and reconnects; sync(url) pushes on demand', async (t2) => {
+describe('SyncManager edges', () => {
+  it('should disconnect and reconnect with enableNode, and push on demand with sync(url)', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const links = [];
@@ -63,7 +63,7 @@ test('SyncManager edges', async (t) => {
     assert.strictEqual(dialer.sync.peers().length, 0);
   });
 
-  await t.test('a connect() that does not yield a link is reported, not thrown', async (t2) => {
+  it('should report a connect() that does not yield a link, not throw', async (t2) => {
     const errors = [];
     const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => ({ call() {} }) } });
     dialer.sync.on('error', (error) => errors.push(error));
@@ -87,7 +87,7 @@ test('SyncManager edges', async (t) => {
     assert.strictEqual(quiet.sync.peers()[0].connected, false);
   });
 
-  await t.test('a dial that failed is dialled again at the next sync()', async (t2) => {
+  it('should dial again at the next sync() after a dial that failed', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     let down = true;
@@ -116,7 +116,7 @@ test('SyncManager edges', async (t) => {
     assert.strictEqual(dialer.sync.peers()[0].connected, true);
   });
 
-  await t.test('a host that already dials us answers duplicate and we hang up', async (t2) => {
+  it('should hang up when a host that already dials us answers duplicate', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     class Duplicate extends MemoryLink {
@@ -147,10 +147,10 @@ test('SyncManager edges', async (t) => {
     await other.sync.start();
     await waitUntil(() => errors.length > 0);
     assert.match(errors[0].message, /Bad hello/);
-    assert.strictEqual(errors[0].code, 'BAD_HELLO');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_BAD_HELLO');
   });
 
-  await t.test('a streamed snapshot needs a link that can read streams', async (t2) => {
+  it('should need a link that can read streams for a streamed snapshot', async (t2) => {
     const host = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
     for (let i = 0; i < 8; i++) await host.insert({ i });
     const unit = host.sync.unit({ access: 'public' });
@@ -169,63 +169,60 @@ test('SyncManager edges', async (t) => {
     await dialer.sync.start();
     await waitUntil(() => errors.length > 0);
     assert.match(errors[0].message, /cannot read streams/);
-    assert.strictEqual(errors[0].code, 'STREAMS_UNSUPPORTED');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_STREAMS_UNSUPPORTED');
   });
 
-  await t.test(
-    'a bootstrap stops with BAD_PAGE on a page without records, a cursor that does not move on, a stream past maxPageBytes',
-    async (t2) => {
-      const host = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
-      for (let i = 0; i < 8; i++) await host.insert({ i });
-      const unit = host.sync.unit({ access: 'public', pageSize: 2 });
-      const reasons = async (Link, sync = {}) => {
-        const errors = [];
-        const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => new Link(unit), ...sync } });
-        dialer.sync.on('error', (error) => errors.push(error));
-        await dialer.sync.addNode({ url: 'mem://host' });
-        await dialer.sync.start();
-        await waitUntil(() => errors.some((error) => error.code === 'BAD_PAGE'));
-        const bad = errors.find((error) => error.code === 'BAD_PAGE');
-        assert.strictEqual(bad.url, 'mem://host');
-        return bad.reason;
-      };
-      // The host's second page comes back with the cursor it was asked from: it would page for ever.
-      class Loop extends MemoryLink {
-        async call(method, args) {
-          const answer = await super.call(method, args);
-          return method === 'syncom/snapshot' && args.cursor !== null ? { ...answer, cursor: args.cursor } : answer;
-        }
+  it('should stop a bootstrap with BAD_PAGE on a page without records, a cursor that does not move on, a stream past maxPageBytes', async (t2) => {
+    const host = await openTemp(t2, { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } });
+    for (let i = 0; i < 8; i++) await host.insert({ i });
+    const unit = host.sync.unit({ access: 'public', pageSize: 2 });
+    const reasons = async (Link, sync = {}) => {
+      const errors = [];
+      const dialer = await openTemp(t2, { sync: { autoStart: false, connect: () => new Link(unit), ...sync } });
+      dialer.sync.on('error', (error) => errors.push(error));
+      await dialer.sync.addNode({ url: 'mem://host' });
+      await dialer.sync.start();
+      await waitUntil(() => errors.some((error) => error.code === 'ALX_ERR_BAD_PAGE'));
+      const bad = errors.find((error) => error.code === 'ALX_ERR_BAD_PAGE');
+      assert.strictEqual(bad.url, 'mem://host');
+      return bad.reason;
+    };
+    // The host's second page comes back with the cursor it was asked from: it would page for ever.
+    class Loop extends MemoryLink {
+      async call(method, args) {
+        const answer = await super.call(method, args);
+        return method === 'syncom/snapshot' && args.cursor !== null ? { ...answer, cursor: args.cursor } : answer;
       }
-      assert.strictEqual(await reasons(Loop), 'cursor');
-      class Bare extends MemoryLink {
-        async call(method, args) {
-          const answer = await super.call(method, args);
-          if (method !== 'syncom/snapshot') return answer;
-          const { records, ...rest } = answer;
-          void records;
-          return rest;
-        }
+    }
+    assert.strictEqual(await reasons(Loop), 'cursor');
+    class Bare extends MemoryLink {
+      async call(method, args) {
+        const answer = await super.call(method, args);
+        if (method !== 'syncom/snapshot') return answer;
+        const { records, ...rest } = answer;
+        void records;
+        return rest;
       }
-      assert.strictEqual(await reasons(Bare), 'shape');
-      // A streamed page that never ends.
-      class Endless extends MemoryLink {
-        async call(method, args) {
-          const answer = await super.call(method, args);
-          return method === 'syncom/snapshot'
-            ? { id: 's1', eventId: answer.eventId, vector: answer.vector, cursor: null }
-            : answer;
-        }
+    }
+    assert.strictEqual(await reasons(Bare), 'shape');
+    // A streamed page that never ends.
+    class Endless extends MemoryLink {
+      async call(method, args) {
+        const answer = await super.call(method, args);
+        return method === 'syncom/snapshot'
+          ? { id: 's1', eventId: answer.eventId, vector: answer.vector, cursor: null }
+          : answer;
+      }
 
-        async *stream() {
-          for (;;) yield `${JSON.stringify({ id: 'x', data: { pad: 'p'.repeat(1000) }, meta: {} })}\n`;
-        }
+      async *stream() {
+        for (;;) yield `${JSON.stringify({ id: 'x', data: { pad: 'p'.repeat(1000) }, meta: {} })}\n`;
       }
-      assert.strictEqual(await reasons(Endless, { maxPageBytes: 64 * 1024 }), 'bytes');
-      await assert.rejects(() => openTemp(t2, { sync: { autoStart: false, maxPageBytes: 0 } }), TypeError);
-    },
-  );
+    }
+    assert.strictEqual(await reasons(Endless, { maxPageBytes: 64 * 1024 }), 'bytes');
+    await assert.rejects(() => openTemp(t2, { sync: { autoStart: false, maxPageBytes: 0 } }), TypeError);
+  });
 
-  await t.test('a push that fails mid-flight is reported and recomputed from the vector', async (t2) => {
+  it('should report a push that fails mid-flight and recompute it from the vector', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     let failing = false;
@@ -256,7 +253,7 @@ test('SyncManager edges', async (t) => {
     assert.deepStrictEqual(await host.get(id), { n: 1 });
   });
 
-  await t.test('a scoped late joiner adopts only the vector keys of its scopes', async (t2) => {
+  it('should adopt only the vector keys of its scopes in a scoped late joiner', async (t2) => {
     const scope = (id, data) => data.$type ?? '*';
     const host = await openTemp(t2, { sync: { scope, log: { rollAfter: 2 }, retention: { ops: 4 } } });
     const doc = await host.insert({ $type: 'Doc', n: 1 });
@@ -276,7 +273,7 @@ test('SyncManager edges', async (t) => {
     assert.ok(!keys.includes(`${host.nodeId}@Other`), 'a scope we did not ask for is not claimed');
   });
 
-  await t.test('a subscription error that is not "hello first" is reported', async (t2) => {
+  it('should report a subscription error that is not "hello first"', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
@@ -299,8 +296,8 @@ test('SyncManager edges', async (t) => {
   });
 });
 
-test('SyncManager: events are contained', async (t) => {
-  await t.test('listeners that throw do not break the handshake or the feed', async (t2) => {
+describe('SyncManager: events are contained', () => {
+  it('should not break the handshake or the feed when listeners throw', async (t2) => {
     const entries = [];
     const logger = { warn: (entry) => entries.push(entry), info() {}, debug() {}, error() {} };
     const host = await openTemp(t2, { logger });
@@ -322,23 +319,25 @@ test('SyncManager: events are contained', async (t) => {
   });
 });
 
-test('a torn registry file is reported and skipped, not fatal to the open', async (t) => {
-  const fs = require('node:fs/promises');
-  const path = require('node:path');
-  const dir = await createTemp();
-  t.after(() => cleanupTemp(dir));
-  const warnings = [];
-  const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
-  const first = await syncom.createDatabase({ defer: 0, path: dir, logger });
-  await first.sync.addNode({ url: 'mem://a' });
-  await first.sync.addNode({ url: 'mem://b' });
-  await first.close();
-  await fs.writeFile(path.join(dir, 'remote', `${encodeURIComponent('mem://a')}.json`), '{torn');
-  const second = await syncom.createDatabase({ defer: 0, path: dir, logger });
-  t.after(() => second.close());
-  assert.deepStrictEqual(
-    second.sync.listNodes().map((node) => node.url),
-    ['mem://b'],
-  );
-  assert.ok(warnings.some((entry) => entry.event === 'sync.node.unreadable'));
+describe('SyncManager: the registry on disk', () => {
+  it('should report and skip a torn registry file, not fatal to the open', async (t) => {
+    const fs = require('node:fs/promises');
+    const path = require('node:path');
+    const dir = await createTemp();
+    t.after(() => cleanupTemp(dir));
+    const warnings = [];
+    const logger = { warn: (entry) => warnings.push(entry), debug() {}, info() {}, error() {} };
+    const first = await syncom.createDatabase({ defer: 0, path: dir, logger });
+    await first.sync.addNode({ url: 'mem://a' });
+    await first.sync.addNode({ url: 'mem://b' });
+    await first.close();
+    await fs.writeFile(path.join(dir, 'remote', `${encodeURIComponent('mem://a')}.json`), '{torn');
+    const second = await syncom.createDatabase({ defer: 0, path: dir, logger });
+    t.after(() => second.close());
+    assert.deepStrictEqual(
+      second.sync.listNodes().map((node) => node.url),
+      ['mem://b'],
+    );
+    assert.ok(warnings.some((entry) => entry.event === 'sync.node.unreadable'));
+  });
 });

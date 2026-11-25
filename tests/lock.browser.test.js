@@ -3,34 +3,38 @@
 // Exclusive open in the browser: the Web Locks API where there is one, the
 // lockfile in OPFS otherwise — without a pid, so staleness is by age.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { installBrowserGlobals, requireBrowserAll, installMockLocks, prime } = require('./utils/browser-env.js');
 // Before the suite and everything it loads: the shared modules resolve to the browser halves.
 prime();
 
-test('Exclusive open (browser halves)', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = requireBrowserAll();
+describe('Exclusive open (browser halves)', () => {
+  let env = null;
+  let browser = null;
+  before(() => {
+    env = installBrowserGlobals();
+    browser = requireBrowserAll();
+  });
+  after(() => env.uninstall());
 
-  await t.test('without Web Locks: a lockfile in OPFS, held while the storage is open', async () => {
+  it('should hold a lockfile in OPFS while the storage is open, without Web Locks', async () => {
     const first = await browser.createDatabase({ path: 'locked', logger: false });
     assert.strictEqual(await browser.exists('locked', 'lock.json'), true);
-    await assert.rejects(() => browser.createDatabase({ path: 'locked', logger: false }), { code: 'LOCKED' });
+    await assert.rejects(() => browser.createDatabase({ path: 'locked', logger: false }), { code: 'ALX_ERR_LOCKED' });
     await first.close();
     assert.strictEqual(await browser.exists('locked', 'lock.json'), false);
     const second = await browser.createDatabase({ path: 'locked', logger: false });
     await second.close();
   });
 
-  await t.test("with Web Locks: 'fail' is refused at once, 'wait' waits, close() releases", async (t2) => {
+  it("should refuse 'fail' at once, make 'wait' wait and release on close(), with Web Locks", async (t2) => {
     const locks = installMockLocks();
     t2.after(() => locks.uninstall());
     const first = await browser.createDatabase({ path: 'web', logger: false });
     assert.deepStrictEqual(globalThis.navigator.locks.held(), ['syncom:web']);
     assert.strictEqual(await browser.exists('web', 'lock.json'), false, 'no lockfile with Web Locks');
-    await assert.rejects(() => browser.createDatabase({ path: 'web', logger: false }), { code: 'LOCKED' });
+    await assert.rejects(() => browser.createDatabase({ path: 'web', logger: false }), { code: 'ALX_ERR_LOCKED' });
     let resolved = false;
     const waiting = browser.createDatabase({ path: 'web', logger: false, lock: 'wait' }).then((s) => {
       resolved = true;

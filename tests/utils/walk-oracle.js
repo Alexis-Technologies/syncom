@@ -234,8 +234,8 @@ const normalizeSeq = (raw, base = null, pendingMax = PENDING_MAX) => {
     const list = [];
     for (const item of raw.ext[key]) {
       if (!Array.isArray(item) || item.length !== 2 || !Number.isInteger(item[0]) || item[0] < 0) continue;
-      const content = present(kind, item[1]) && item[1].length > 0 ? (isText(kind) ? item[1] : [...item[1]]) : null;
-      if (content !== null) list.push([item[0], content]);
+      if (!(present(kind, item[1]) && item[1].length > 0)) continue;
+      list.push([item[0], isText(kind) ? item[1] : [...item[1]]]);
     }
     if (list.length > 0) (seq.ext ??= {})[key] = list;
   }
@@ -322,7 +322,11 @@ const refused = (seq, detail, count, max) => ({ seq, changed: false, reason: 'bo
 
 // ---- the tree and its walk ----------------------------------------------
 
-const byOrigin = (a, b) => (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : a.ts - b.ts);
+const byOrigin = (a, b) => {
+  if (a.origin < b.origin) return -1;
+  if (a.origin > b.origin) return 1;
+  return a.ts - b.ts;
+};
 const CONT = Symbol('continuation');
 
 // What a run's tuple parses to, kept by the tuple: an unchanged run shares
@@ -484,15 +488,14 @@ const buildIndex = (seq, base = null) => {
       }
       if (f.i < f.rights.length) {
         const next = f.rights[f.i++];
-        if (next === CONT) {
-          if (f.rights.length === 1) {
-            // Only the continuation: step in place instead of growing the stack.
-            f.off++;
-            f.phase = 0;
-            f.i = 0;
-            f.rights = null;
-          } else stack.push(frame(f.r, f.off + 1));
-        } else stack.push(frame(next, 0));
+        if (next !== CONT) stack.push(frame(next, 0));
+        else if (f.rights.length === 1) {
+          // Only the continuation: step in place instead of growing the stack.
+          f.off++;
+          f.phase = 0;
+          f.i = 0;
+          f.rights = null;
+        } else stack.push(frame(f.r, f.off + 1));
         continue;
       }
       stack.pop();
@@ -860,57 +863,62 @@ const applySplice = (seq, stamp, payload, base = null, pendingMax = PENDING_MAX)
       }
     }
   }
+  // A new run anchored at `at`: a refusal, or null once it is placed (or was there already).
+  const insertRun = () => {
+    const key = runKey(ts, origin);
+    if (own((next ?? seq).runs, key) !== undefined) return null;
+    const anchor = parseAnchor(at);
+    const parent = anchor.elem === null ? null : own((next ?? seq).runs, anchor.elem.run);
+    const resolved =
+      anchor.elem === null ||
+      (base !== null && compareClock([anchor.elem.ts, anchor.elem.origin], base) < 0) ||
+      (parent !== undefined && anchor.elem.offset < rleLength(parent[1]));
+    if (!resolved) {
+      const stop = full();
+      if (stop !== null) return stop;
+    }
+    const m = mutable();
+    m.runs[key] = [at, isText(m.k) ? [content] : [[...content]]];
+    m.ts = Math.max(m.ts, ts);
+    settle(m, key);
+    changed = true;
+    return null;
+  };
+  // `{ run, from }` extending a run of this origin: a refusal, or null.
+  const extendRun = () => {
+    const target = own((next ?? seq).runs, run);
+    if (target === undefined) return null;
+    const len = rleLength(target[1]);
+    if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
+    if (from === len) {
+      const m = mutable();
+      m.runs[run] =
+        target.length === 3
+          ? [target[0], rleAppend(m.k, target[1], content), target[2]]
+          : [target[0], rleAppend(m.k, target[1], content)];
+      // Nothing waited for this run and nothing was cut: the block differs
+      // from the held one by these items appended, and the index can too.
+      if (!settle(m, run) && cut === undefined) extended = { run, from: len, content };
+      changed = true;
+    } else if (from > len) {
+      const stop = full();
+      if (stop !== null) return stop;
+      const m = mutable();
+      const list = m.ext && own(m.ext, run) ? [...m.ext[run]] : [];
+      if (!list.some(([f]) => f === from)) {
+        list.push([from, isText(m.k) ? content : [...content]]);
+        (m.ext ??= {})[run] = list;
+        changed = true;
+      }
+    }
+    return null;
+  };
   if (inserting) {
     if (content.length > MAX_RUN) return refused(seq, 'run', content.length, MAX_RUN);
     const slots = blockSlots(next ?? seq) + content.length;
     if (slots > MAX_FIELD) return refused(seq, 'field', slots, MAX_FIELD);
-    if (at !== undefined) {
-      const key = runKey(ts, origin);
-      if (own((next ?? seq).runs, key) === undefined) {
-        const anchor = parseAnchor(at);
-        const parent = anchor.elem === null ? null : own((next ?? seq).runs, anchor.elem.run);
-        const resolved =
-          anchor.elem === null ||
-          (base !== null && compareClock([anchor.elem.ts, anchor.elem.origin], base) < 0) ||
-          (parent !== undefined && anchor.elem.offset < rleLength(parent[1]));
-        if (!resolved) {
-          const stop = full();
-          if (stop !== null) return stop;
-        }
-        const m = mutable();
-        m.runs[key] = [at, isText(m.k) ? [content] : [[...content]]];
-        m.ts = Math.max(m.ts, ts);
-        settle(m, key);
-        changed = true;
-      }
-    } else {
-      const target = own((next ?? seq).runs, run);
-      if (target !== undefined) {
-        const len = rleLength(target[1]);
-        if (len + content.length > MAX_RUN) return refused(seq, 'run', len + content.length, MAX_RUN);
-        if (from === len) {
-          const m = mutable();
-          m.runs[run] =
-            target.length === 3
-              ? [target[0], rleAppend(m.k, target[1], content), target[2]]
-              : [target[0], rleAppend(m.k, target[1], content)];
-          // Nothing waited for this run and nothing was cut: the block differs
-          // from the held one by these items appended, and the index can too.
-          if (!settle(m, run) && cut === undefined) extended = { run, from: len, content };
-          changed = true;
-        } else if (from > len) {
-          const stop = full();
-          if (stop !== null) return stop;
-          const m = mutable();
-          const list = m.ext && own(m.ext, run) ? [...m.ext[run]] : [];
-          if (!list.some(([f]) => f === from)) {
-            list.push([from, isText(m.k) ? content : [...content]]);
-            (m.ext ??= {})[run] = list;
-            changed = true;
-          }
-        }
-      }
-    }
+    const stop = at !== undefined ? insertRun() : extendRun();
+    if (stop !== null) return stop;
   }
   if (!changed) return { seq, changed: false, reason: null };
   return { seq: next, changed: true, reason: null, extended };
@@ -932,8 +940,16 @@ const REVERSED = { before: 'before', after: 'after', both: 'none', none: 'both' 
 const markAnchors = (index, start, end, expand) => {
   const [before, after] = EXPANDS[expand];
   const at = (i) => elemAt(index, i);
-  const from = before ? (start === 0 ? HEAD : `>${at(start - 1)}`) : start === index.length ? END : `<${at(start)}`;
-  const to = after ? (end === index.length ? END : `<${at(end)}`) : end === 0 ? HEAD : `>${at(end - 1)}`;
+  const startAnchor = () => {
+    if (before) return start === 0 ? HEAD : `>${at(start - 1)}`;
+    return start === index.length ? END : `<${at(start)}`;
+  };
+  const endAnchor = () => {
+    if (after) return end === index.length ? END : `<${at(end)}`;
+    return end === 0 ? HEAD : `>${at(end - 1)}`;
+  };
+  const from = startAnchor();
+  const to = endAnchor();
   return [from, to];
 };
 
@@ -995,8 +1011,11 @@ const anchorOrdinal = (index, token, base) => {
 
 // Marks by key, then by stamp: the order their values are laid over one
 // another in, so the newest of a key wins.
-const byKeyThenStamp = (x, y) =>
-  x.key < y.key ? -1 : x.key > y.key ? 1 : compareClock([x.ts, x.origin], [y.ts, y.origin]);
+const byKeyThenStamp = (x, y) => {
+  if (x.key < y.key) return -1;
+  if (x.key > y.key) return 1;
+  return compareClock([x.ts, x.origin], [y.ts, y.origin]);
+};
 
 // The style of the marks in force at one point: per key the newest value,
 // none when null; MANY marks list as `{ id, value }`, the ones newer than
@@ -1057,7 +1076,8 @@ const marksIn = (index, seq, base = null) => {
     if (start >= end) continue;
     const before = from === HEAD || from[0] === '>';
     const after = to === END || to[0] === '<';
-    const expand = before ? (after ? 'both' : 'before') : after ? 'after' : 'none';
+    let expand = after ? 'after' : 'none';
+    if (before) expand = after ? 'both' : 'before';
     const { ts, origin } = parseRun(id);
     out.push({ ts, origin, start, end, key, value, expand, many: (flags & MANY) !== 0 });
   }
@@ -1281,8 +1301,8 @@ const join = (a, b) => {
       for (const key of keysOf(side[map])) {
         const theirs = side[map][key];
         const mine = out[map] && own(out[map], key);
-        const newer = mine === undefined || compareClock([theirs[0], theirs[1]], [mine[0], mine[1]]) > 0;
-        if (newer) (out[map] ??= {})[key] = theirs;
+        const wins = mine === undefined || compareClock([theirs[0], theirs[1]], [mine[0], mine[1]]) > 0;
+        if (wins) (out[map] ??= {})[key] = theirs;
       }
     }
     for (const key of keysOf(side.marks)) {

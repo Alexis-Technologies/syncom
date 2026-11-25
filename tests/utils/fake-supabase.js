@@ -7,6 +7,11 @@
 // `channel().on('postgres_changes').subscribe()` told of every write.
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+// -1, 0 or 1 as `a` sorts before, with or after `b`.
+const compare = (a, b) => {
+  if (a < b) return -1;
+  return a > b ? 1 : 0;
+};
 
 // A PostgREST `or` filter as the adapter writes it — `col.gt."v",and(col.eq."v",col.gt."v")` — as a test of a row.
 const OR = /^(\w+)\.gt\."([^"]*)",and\((\w+)\.eq\."([^"]*)",(\w+)\.gt\."([^"]*)"\)$/;
@@ -38,10 +43,12 @@ const createFakeSupabase = ({ primaryKey = 'id', modifiedColumn = 'updated_at', 
   };
   const builder = (table) => {
     const state = { op: 'select', filters: [], orders: [], limit: null, values: null, single: false };
-    const matches = (row) =>
-      state.filters.every(([kind, column, value]) =>
-        kind === 'eq' ? row[column] === value : kind === 'gt' ? row[column] > value : column(row),
-      );
+    const passes = ([kind, column, value], row) => {
+      if (kind === 'eq') return row[column] === value;
+      if (kind === 'gt') return row[column] > value;
+      return column(row);
+    };
+    const matches = (row) => state.filters.every((filter) => passes(filter, row));
     const run = () => {
       const held = rows(table);
       if (state.op === 'insert') {
@@ -76,7 +83,7 @@ const createFakeSupabase = ({ primaryKey = 'id', modifiedColumn = 'updated_at', 
       if (state.orders.length > 0) {
         out.sort((a, b) => {
           for (const { column, ascending } of state.orders) {
-            const result = a[column] < b[column] ? -1 : a[column] > b[column] ? 1 : 0;
+            const result = compare(a[column], b[column]);
             if (result !== 0) return result * (ascending ? 1 : -1);
           }
           return 0;

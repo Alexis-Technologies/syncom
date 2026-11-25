@@ -3,8 +3,8 @@
 // Scopes are a boundary on the hosting side: what hello granted bounds what a
 // peer writes (push) and reads (snapshot, changes), not only what it is sent.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { packOps } = require('../src/ops.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
@@ -22,8 +22,8 @@ const openTemp = async (t, options = {}) => {
 const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date.now() + seq, type, id, ...extra });
 const scope = (id, data) => data.$type ?? '*';
 
-test('Hosting scopes', async (t) => {
-  await t.test('push: an op outside the scopes hello granted is refused, counted and announced', async (t2) => {
+describe('Hosting scopes', () => {
+  it('should refuse, count and announce a push of an op outside the scopes hello granted', async (t2) => {
     const host = await openTemp(t2, { sync: { scope } });
     const refused = [];
     host.sync.on('refused', (event) => refused.push(event));
@@ -51,7 +51,7 @@ test('Hosting scopes', async (t) => {
     assert.deepStrictEqual(await host.get('b2'), { $type: 'B' });
   });
 
-  await t.test('snapshot and changes: what is asked is narrowed to what was granted', async (t2) => {
+  it('should narrow what snapshot and changes ask to what was granted', async (t2) => {
     const host = await openTemp(t2, { sync: { scope } });
     await host.insert({ $type: 'A', n: 1 });
     await host.insert({ $type: 'B', n: 2 });
@@ -94,7 +94,7 @@ test('Hosting scopes', async (t) => {
     assert.deepStrictEqual(types(await admin.call('syncom/snapshot', { scopes: ['B'] })), ['*', '*', 'B', 'B']);
   });
 
-  await t.test("a feed moves past other scopes' ops without sending a page", async (t2) => {
+  it("should move a feed past other scopes' ops without sending a page", async (t2) => {
     const host = await openTemp(t2, { sync: { autoStart: false, scope } });
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
@@ -141,8 +141,8 @@ test('Hosting scopes', async (t) => {
   });
 });
 
-test('Scopes bound the records an op writes', async (t) => {
-  await t.test('an update is minted in the scope of its record, not of its delta', async (t2) => {
+describe('Scopes bound the records an op writes', () => {
+  it('should mint an update in the scope of its record, not of its delta', async (t2) => {
     const node = await openTemp(t2, { sync: { autoStart: false, scope } });
     const id = await node.insert({ $type: 'Doc', title: 'v1' });
     await node.update(id, { title: 'v2' });
@@ -161,7 +161,7 @@ test('Scopes bound the records an op writes', async (t) => {
     assert.strictEqual(node.vector[`${node.nodeId}@Doc`], 5);
   });
 
-  await t.test('the scope is read after validation: a default the validator fills counts', async (t2) => {
+  it('should read the scope after validation: a default the validator fills counts', async (t2) => {
     const tenant = (id, data) => data.tenant ?? '*';
     const node = await openTemp(t2, {
       sync: { autoStart: false, scope: tenant },
@@ -174,58 +174,55 @@ test('Scopes bound the records an op writes', async (t) => {
     assert.strictEqual(node.vector[node.nodeId], undefined, 'nothing went to the global stream');
   });
 
-  await t.test(
-    'a peer that writes a record outside its scopes is refused, whatever the op declares: logged as a withheld scrub, its stream goes on',
-    async (t2) => {
-      const host = await openTemp(t2, { sync: { scope } });
-      const refused = [];
-      host.sync.on('refused', (event) => refused.push(event));
-      const doc = await host.insert({ $type: 'Doc', title: 'secret' });
-      const unit = host.sync.unit({ access: 'public' });
-      const link = new MemoryLink(unit);
-      await link.call('syncom/hello', { node: 'tenant-o', version: 1, scopes: ['Other'] });
-      const push = (op) => link.call('syncom/push', { ops: packOps([op]) });
-      // A set declared global, on a Doc record: what the scope bug let through.
-      const set = await push(remoteOp('o1', 1, 'set', doc, { data: { title: 'stub', owner: 'mallory' } }));
-      // A write declared in its own scope that would move the Doc record there.
-      const move = await push(remoteOp('o2', 1, 'write', doc, { data: { $type: 'Other' }, scope: 'Other' }));
-      // A delete declared global.
-      const gone = await push(remoteOp('o3', 1, 'delete', doc));
-      // A new record declared global whose data puts it in Doc.
-      const planted = await push(remoteOp('o4', 1, 'write', 'planted', { data: { $type: 'Doc', n: 1 } }));
-      const streams = ['o1', 'o2@Other', 'o3', 'o4'];
-      const answers = [set, move, gone, planted];
-      for (let i = 0; i < answers.length; i++) {
-        const answer = answers[i];
-        assert.strictEqual(answer.outOfScope, 1);
-        assert.strictEqual(answer.skipped, 1, 'taken as a refusal leaves it, applied nowhere');
-        assert.deepStrictEqual(answer.vector, { [streams[i]]: 1 }, 'the stream moved past it');
-        // Named for the pusher without the record: what the host holds of it is outside the grant.
-        assert.strictEqual(answer.refused.length, 1);
-        assert.strictEqual(answer.refused[0].reason, 'scope');
-        assert.strictEqual(Object.hasOwn(answer.refused[0], 'current'), false);
-      }
-      assert.deepStrictEqual(await host.get(doc), { $type: 'Doc', title: 'secret' });
-      assert.strictEqual(await host.get('planted'), null);
-      // Logged as a withheld scrub: skipped, no payload, a no-op wherever it is relayed.
-      const [held] = host.log.entriesOf('planted');
-      assert.strictEqual(held.skipped, true);
-      assert.strictEqual(held.scrubbed, true);
-      assert.strictEqual(held.op.withheld, true);
-      assert.strictEqual(held.op.data, undefined);
-      assert.deepStrictEqual(
-        refused.map((event) => event.reason),
-        ['scope', 'scope', 'scope', 'scope'],
-      );
-      // The same stream goes on: the peer's next op of it, in its own scope, lands.
-      const own = await push(remoteOp('o2', 2, 'write', 'mine', { data: { $type: 'Other' }, scope: 'Other' }));
-      assert.strictEqual(own.applied, 1);
-      assert.strictEqual(own.gaps, 0);
-      assert.deepStrictEqual(await host.get('mine'), { $type: 'Other' });
-    },
-  );
+  it('should refuse a peer that writes a record outside its scopes, whatever the op declares: logged as a withheld scrub, its stream goes on', async (t2) => {
+    const host = await openTemp(t2, { sync: { scope } });
+    const refused = [];
+    host.sync.on('refused', (event) => refused.push(event));
+    const doc = await host.insert({ $type: 'Doc', title: 'secret' });
+    const unit = host.sync.unit({ access: 'public' });
+    const link = new MemoryLink(unit);
+    await link.call('syncom/hello', { node: 'tenant-o', version: 1, scopes: ['Other'] });
+    const push = (op) => link.call('syncom/push', { ops: packOps([op]) });
+    // A set declared global, on a Doc record: what the scope bug let through.
+    const set = await push(remoteOp('o1', 1, 'set', doc, { data: { title: 'stub', owner: 'mallory' } }));
+    // A write declared in its own scope that would move the Doc record there.
+    const move = await push(remoteOp('o2', 1, 'write', doc, { data: { $type: 'Other' }, scope: 'Other' }));
+    // A delete declared global.
+    const gone = await push(remoteOp('o3', 1, 'delete', doc));
+    // A new record declared global whose data puts it in Doc.
+    const planted = await push(remoteOp('o4', 1, 'write', 'planted', { data: { $type: 'Doc', n: 1 } }));
+    const streams = ['o1', 'o2@Other', 'o3', 'o4'];
+    const answers = [set, move, gone, planted];
+    for (let i = 0; i < answers.length; i++) {
+      const answer = answers[i];
+      assert.strictEqual(answer.outOfScope, 1);
+      assert.strictEqual(answer.skipped, 1, 'taken as a refusal leaves it, applied nowhere');
+      assert.deepStrictEqual(answer.vector, { [streams[i]]: 1 }, 'the stream moved past it');
+      // Named for the pusher without the record: what the host holds of it is outside the grant.
+      assert.strictEqual(answer.refused.length, 1);
+      assert.strictEqual(answer.refused[0].reason, 'scope');
+      assert.strictEqual(Object.hasOwn(answer.refused[0], 'current'), false);
+    }
+    assert.deepStrictEqual(await host.get(doc), { $type: 'Doc', title: 'secret' });
+    assert.strictEqual(await host.get('planted'), null);
+    // Logged as a withheld scrub: skipped, no payload, a no-op wherever it is relayed.
+    const [held] = host.log.entriesOf('planted');
+    assert.strictEqual(held.skipped, true);
+    assert.strictEqual(held.scrubbed, true);
+    assert.strictEqual(held.op.withheld, true);
+    assert.strictEqual(held.op.data, undefined);
+    assert.deepStrictEqual(
+      refused.map((event) => event.reason),
+      ['scope', 'scope', 'scope', 'scope'],
+    );
+    // The same stream goes on: the peer's next op of it, in its own scope, lands.
+    const own = await push(remoteOp('o2', 2, 'write', 'mine', { data: { $type: 'Other' }, scope: 'Other' }));
+    assert.strictEqual(own.applied, 1);
+    assert.strictEqual(own.gaps, 0);
+    assert.deepStrictEqual(await host.get('mine'), { $type: 'Other' });
+  });
 
-  await t.test('an op held for a newer schema version is bound too', async (t2) => {
+  it('should bind an op held for a newer schema version too', async (t2) => {
     const host = await openTemp(t2, { sync: { scope }, schema: { version: 1, ahead: 'hold', entities: {} } });
     const doc = await host.insert({ $type: 'Doc', title: 'secret' });
     const unit = host.sync.unit({ access: 'public' });
@@ -237,7 +234,7 @@ test('Scopes bound the records an op writes', async (t) => {
     assert.strictEqual(host.log.held().length, 0, 'not kept for later either');
   });
 
-  await t.test('a peer granted everything, and the dialing side, are bound by nothing', async (t2) => {
+  it('should bind a peer granted everything, and the dialing side, by nothing', async (t2) => {
     const host = await openTemp(t2, { sync: { scope } });
     const doc = await host.insert({ $type: 'Doc', title: 'v1' });
     const unit = host.sync.unit({ access: 'public' });
@@ -251,7 +248,7 @@ test('Scopes bound the records an op writes', async (t) => {
     assert.strictEqual((await host.get(doc)).title, 'v3');
   });
 
-  await t.test('a scope function that throws on a peer record refuses the op', async (t2) => {
+  it('should refuse the op when a scope function throws on a peer record', async (t2) => {
     const picky = (id, data) => {
       if (data.boom) throw new Error('no scope for this');
       return data.$type ?? '*';
@@ -265,32 +262,29 @@ test('Scopes bound the records an op writes', async (t) => {
     assert.strictEqual(answer.outOfScope, 1);
   });
 
-  await t.test(
-    'a scope function that throws on a record leaves it out of a snapshot page, not the page',
-    async (t2) => {
-      const warned = [];
-      const logger = { warn: (entry) => warned.push(entry), info() {}, debug() {}, error() {} };
-      const picky = (id, data) => {
-        if (data.boom) throw new Error('no scope for this');
-        return data.$type ?? '*';
-      };
-      // Written under a scope function that read every record; opened again under one that does not.
-      const dir = await createTemp();
-      t2.after(() => cleanupTemp(dir));
-      const before = await syncom.createDatabase({ path: dir, logger: false });
-      const fine = await before.insert({ $type: 'Other', n: 1 });
-      await before.insert({ $type: 'Other', boom: true });
-      await before.close();
-      const host = await syncom.createDatabase({ path: dir, logger, sync: { scope: picky } });
-      t2.after(() => host.close().catch(() => {}));
-      const page = await host.snapshot({ scopes: ['Other'] });
-      assert.deepStrictEqual(
-        page.records.map((record) => record.id),
-        [fine],
-      );
-      assert.ok(warned.some((entry) => entry.event === 'snapshot.skipped' && entry.reason === 'scope'));
-      // A page for every scope asks no record its scope: both are in it.
-      assert.strictEqual((await host.snapshot()).records.length, 2);
-    },
-  );
+  it('should leave a record out of a snapshot page, not the page, when a scope function throws on it', async (t2) => {
+    const warned = [];
+    const logger = { warn: (entry) => warned.push(entry), info() {}, debug() {}, error() {} };
+    const picky = (id, data) => {
+      if (data.boom) throw new Error('no scope for this');
+      return data.$type ?? '*';
+    };
+    // Written under a scope function that read every record; opened again under one that does not.
+    const dir = await createTemp();
+    t2.after(() => cleanupTemp(dir));
+    const before = await syncom.createDatabase({ path: dir, logger: false });
+    const fine = await before.insert({ $type: 'Other', n: 1 });
+    await before.insert({ $type: 'Other', boom: true });
+    await before.close();
+    const host = await syncom.createDatabase({ path: dir, logger, sync: { scope: picky } });
+    t2.after(() => host.close().catch(() => {}));
+    const page = await host.snapshot({ scopes: ['Other'] });
+    assert.deepStrictEqual(
+      page.records.map((record) => record.id),
+      [fine],
+    );
+    assert.ok(warned.some((entry) => entry.event === 'snapshot.skipped' && entry.reason === 'scope'));
+    // A page for every scope asks no record its scope: both are in it.
+    assert.strictEqual((await host.snapshot()).records.length, 2);
+  });
 });

@@ -3,8 +3,8 @@
 // The query compiler and the row order in isolation: every operator, the
 // array rule, dotted paths, what is refused at compile time.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { compileQuery, compareRows, fieldsOf, Cursor } = require('../src/query/cursor.js');
 
 const rows = [
@@ -15,8 +15,8 @@ const rows = [
 ];
 const ids = (query) => rows.filter(compileQuery(query)).map((row) => row.id);
 
-test('compileQuery', async (t) => {
-  await t.test('equality: bare values, dotted paths, arrays as sets of elements or as values', () => {
+describe('compileQuery', () => {
+  it('should match equality on bare values, dotted paths, and arrays as sets of elements or as values', () => {
     assert.deepStrictEqual(ids({ n: 2 }), ['b']);
     assert.deepStrictEqual(ids({ s: 'apple', b: true }), ['a']);
     assert.deepStrictEqual(ids({ 'meta.kind': 'k1' }), ['a', 'd']);
@@ -31,7 +31,7 @@ test('compileQuery', async (t) => {
     assert.deepStrictEqual(ids(undefined), ['a', 'b', 'c', 'd']);
   });
 
-  await t.test('operators', () => {
+  it('should match the field operators: $eq, $ne, $in, $nin, $gt, $gte, $lt, $lte, $exists, $regex', () => {
     assert.deepStrictEqual(ids({ n: { $eq: 1 } }), ['a']);
     assert.deepStrictEqual(ids({ n: { $ne: 1 } }), ['b', 'c', 'd']);
     assert.deepStrictEqual(ids({ n: { $in: [1, 3, 9] } }), ['a', 'c']);
@@ -53,7 +53,7 @@ test('compileQuery', async (t) => {
     assert.deepStrictEqual(ids({ n: { $regex: '1' } }), [], 'only strings match a regex');
   });
 
-  await t.test('$and, $or, $not nest', () => {
+  it('should nest $and, $or and $not', () => {
     assert.deepStrictEqual(ids({ $or: [{ n: 1 }, { n: 3 }] }), ['a', 'c']);
     assert.deepStrictEqual(ids({ $and: [{ b: true }, { 'meta.kind': 'k1' }] }), ['a']);
     assert.deepStrictEqual(ids({ $not: { b: true } }), ['b', 'd']);
@@ -67,7 +67,7 @@ test('compileQuery', async (t) => {
     );
   });
 
-  await t.test('$text: a string at the top level, no predicate of its own, no field', () => {
+  it('should take $text as a string at the top level, with no predicate of its own and no field', () => {
     assert.deepStrictEqual(ids({ $text: 'apple' }), ['a', 'b', 'c', 'd'], 'the catalog answers it, not the predicate');
     assert.deepStrictEqual(ids({ $text: 'apple', n: 1 }), ['a']);
     assert.throws(() => compileQuery({ $text: 1 }), /\$text takes a string/);
@@ -78,7 +78,7 @@ test('compileQuery', async (t) => {
     assert.deepStrictEqual([...fieldsOf({ $text: 'x', a: 1, $and: [{ b: 2 }] })], ['a', 'b']);
   });
 
-  await t.test('a malformed query is a TypeError at compile time', () => {
+  it('should throw a TypeError at compile time for a malformed query', () => {
     // A query nests 32 levels at most: deeper is a TypeError, never a RangeError.
     const nest = (depth) => {
       let query = { n: 1 };
@@ -90,7 +90,8 @@ test('compileQuery', async (t) => {
     let elem = { n: 1 };
     for (let i = 0; i < 40; i++) elem = { tags: { $elemMatch: elem } };
     assert.throws(() => compileQuery(elem), /nests deeper than 32 levels/);
-    const bad = (query, pattern) => assert.throws(() => compileQuery(query), { name: 'TypeError', message: pattern });
+    const bad = (query, pattern) =>
+      assert.throws(() => compileQuery(query), { name: 'ArgumentError', message: pattern });
     bad('n', /takes a query object/);
     bad([], /takes a query object/);
     bad({ $nope: 1 }, /unknown operator \$nope/);
@@ -108,8 +109,8 @@ test('compileQuery', async (t) => {
   });
 });
 
-test('compareRows', async (t) => {
-  await t.test('orders by kind, then value; several keys; desc per key; stable', () => {
+describe('compareRows', () => {
+  it('should order by kind, then value, over several keys with desc per key, and keep the order stable', () => {
     const sorted = (keys) => [...rows].sort(compareRows(keys)).map((row) => row.id);
     assert.deepStrictEqual(sorted([{ field: 'n', desc: false }]), ['a', 'b', 'c', 'd'], 'numbers before strings');
     assert.deepStrictEqual(sorted([{ field: 'n', desc: true }]), ['d', 'c', 'b', 'a']);
@@ -130,7 +131,7 @@ test('compareRows', async (t) => {
   });
 });
 
-test('Cursor over a fake source', async (t) => {
+describe('Cursor over a fake source', () => {
   const source = (records, indexed = []) => {
     const calls = { load: 0 };
     const rowsOf = () =>
@@ -156,7 +157,7 @@ test('Cursor over a fake source', async (t) => {
     };
   };
 
-  await t.test('builders are checked; a covered cursor never loads; one() limits to one', async () => {
+  it('should check the builders, never load for a covered cursor, and limit one() to one', async () => {
     const src = source({ a: { n: 1 }, b: { n: 2 } }, ['n']);
     const cursor = new Cursor(src, 'T', { n: { $gte: 1 } });
     assert.throws(() => cursor.order(1), /order\(\) takes a field name/);
@@ -181,122 +182,122 @@ test('Cursor over a fake source', async (t) => {
     assert.deepStrictEqual(seen, ['a', 'b']);
   });
 
-  await t.test(
-    '$text: refused where nothing searches; rank order kept unless ordered; limit reads little',
-    async () => {
-      const plain = source({ a: { n: 1 } });
-      assert.throws(() => new Cursor(plain, 'T', { $text: 'x' }), /\$text needs search fields on T/);
-      const src = source({ a: { n: 1, s: 'x' }, b: { n: 2, s: 'y' }, c: { n: 3, s: 'z' } }, ['n']);
-      src.searches = () => true;
-      src.candidates = (entity, query) => (query.$text === undefined ? null : new Set(['c', 'a']));
-      const ranked = new Cursor(src, 'T', { $text: 'words' });
-      assert.deepStrictEqual(
-        (await ranked.fetch()).map((row) => row.id),
-        ['c', 'a'],
-        'the index order, as it came',
-      );
-      assert.strictEqual(await ranked.count(), 2);
-      assert.deepStrictEqual(
-        (await new Cursor(src, 'T', { $text: 'w' }).order('n').fetch()).map((r) => r.id),
-        ['a', 'c'],
-      );
-      src.calls.load = 0;
-      assert.deepStrictEqual(
-        (await new Cursor(src, 'T', { $text: 'w' }).limit(1).fetch()).map((r) => r.id),
-        ['c'],
-      );
-      assert.strictEqual(src.calls.load, 1, 'an unordered limit reads one record');
-      src.calls.load = 0;
-      const covered = await new Cursor(src, 'T', { $text: 'w' }).projection(['n']).fetch();
-      assert.deepStrictEqual(covered, [
-        { id: 'c', n: 3 },
-        { id: 'a', n: 1 },
-      ]);
-      assert.strictEqual(src.calls.load, 0, 'covered: $text reads no field of its own');
-      assert.deepStrictEqual(
-        (await new Cursor(src, 'T', { $text: 'w', n: 1 }).fetch()).map((r) => r.id),
-        ['a'],
-      );
-    },
-  );
-});
-
-test('safeRegex refuses nested quantifiers, backreferences and lookarounds, takes the rest', () => {
-  const { safeRegex } = require('../src/query/safe-regex.js');
-  // The shape of the pattern is judged, never its meaning: a quantified group with a quantifier inside, a
-  // backreference, a lookaround is refused; the rest passes — an overlapping alternation under a quantifier
-  // (`(a|aa)*`) among it, which is why `regex: true` stays a trusted peer's and 'safe' is a door, not a proof.
-  for (const source of [
-    '^al.*a$',
-    'a+b*c?',
-    '(ab)+c',
-    '(a|b)*',
-    '(a|aa)*',
-    '[a+]+',
-    '\\(+\\)',
-    'a{2,3}b{1,}',
-    '(a+)b+',
-    '(?:ab)+',
-    '(?<n>ab)+',
-    'a(?:b)?',
-    '^T-[12]$',
-    'x{',
-    '(a+)(b+)',
-    '(a+)',
-  ]) {
-    assert.strictEqual(safeRegex(source), true, source);
-  }
-  for (const source of [
-    '^(a+)+$',
-    '^(\\w+\\s?)+$',
-    '(a*)*',
-    '(a+){2,}',
-    '(?:a+)+',
-    '(?<n>a+)+',
-    '(a)\\1',
-    '(?<n>a)\\k<n>',
-    'a(?=b)',
-    'a(?!b)',
-    '(?<=a)b',
-    '(?<!a)b',
-    '((a+)b)+',
-    'a\\',
-    '(a+)+?',
-  ]) {
-    assert.strictEqual(safeRegex(source), false, source);
-  }
-  assert.strictEqual(safeRegex(7), false);
-});
-
-test('query guards: a pattern the size of a document, a projection of __proto__', () => {
-  const { compileQuery, Cursor } = require('../src/query/cursor.js');
-  assert.throws(() => compileQuery({ key: { $regex: 'a'.repeat(1001) } }), /longer than 1000/);
-  assert.doesNotThrow(() => compileQuery({ key: { $regex: 'a'.repeat(1000) } }));
-  const source = { logger: null, candidates: () => null, ids: () => [], row: () => null, indexed: () => new Set() };
-  assert.throws(() => new Cursor(source, 'T').projection(['__proto__']), TypeError);
-});
-
-test('QueryCache holds at most maxRows rows of idle results, never one past it alone, and counts no live run', () => {
-  const { QueryCache } = require('../src/query/cache.js');
-  const cache = new QueryCache({ max: 10, maxRows: 5 });
-  cache.keep('a', 1, [1, 2, 3]);
-  cache.keep('b', 1, [4, 5]);
-  assert.deepStrictEqual([cache.size, cache.held], [2, 5]);
-  // Past five rows: the least recently used result goes.
-  cache.keep('c', 1, [6]);
-  assert.deepStrictEqual([cache.size, cache.held, cache.rows('a', 1), cache.rows('b', 1)], [2, 3, null, [4, 5]]);
-  // Past five rows alone: not kept.
-  cache.keep('d', 1, [1, 2, 3, 4, 5, 6]);
-  assert.deepStrictEqual([cache.size, cache.rows('d', 1)], [2, null]);
-  // The same key again: its rows replaced, counted once.
-  cache.keep('b', 2, [4, 5, 6]);
-  assert.deepStrictEqual([cache.size, cache.held], [2, 4]);
-  // A live run's rows are not counted; released, they are, and the idle results make room.
-  cache.live('e', (entry) => {
-    entry.rows = [7, 8, 9, 10];
-    return {};
+  it('should refuse $text where nothing searches, keep the rank order unless ordered, and read little under a limit', async () => {
+    const plain = source({ a: { n: 1 } });
+    assert.throws(() => new Cursor(plain, 'T', { $text: 'x' }), /\$text needs search fields on T/);
+    const src = source({ a: { n: 1, s: 'x' }, b: { n: 2, s: 'y' }, c: { n: 3, s: 'z' } }, ['n']);
+    src.searches = () => true;
+    src.candidates = (entity, query) => (query.$text === undefined ? null : new Set(['c', 'a']));
+    const ranked = new Cursor(src, 'T', { $text: 'words' });
+    assert.deepStrictEqual(
+      (await ranked.fetch()).map((row) => row.id),
+      ['c', 'a'],
+      'the index order, as it came',
+    );
+    assert.strictEqual(await ranked.count(), 2);
+    assert.deepStrictEqual(
+      (await new Cursor(src, 'T', { $text: 'w' }).order('n').fetch()).map((r) => r.id),
+      ['a', 'c'],
+    );
+    src.calls.load = 0;
+    assert.deepStrictEqual(
+      (await new Cursor(src, 'T', { $text: 'w' }).limit(1).fetch()).map((r) => r.id),
+      ['c'],
+    );
+    assert.strictEqual(src.calls.load, 1, 'an unordered limit reads one record');
+    src.calls.load = 0;
+    const covered = await new Cursor(src, 'T', { $text: 'w' }).projection(['n']).fetch();
+    assert.deepStrictEqual(covered, [
+      { id: 'c', n: 3 },
+      { id: 'a', n: 1 },
+    ]);
+    assert.strictEqual(src.calls.load, 0, 'covered: $text reads no field of its own');
+    assert.deepStrictEqual(
+      (await new Cursor(src, 'T', { $text: 'w', n: 1 }).fetch()).map((r) => r.id),
+      ['a'],
+    );
   });
-  assert.deepStrictEqual([cache.size, cache.held], [3, 4]);
-  cache.release('e');
-  assert.deepStrictEqual([cache.size, cache.held, cache.rows('e', -1)], [1, 4, [7, 8, 9, 10]]);
+});
+
+describe('query guards', () => {
+  it('should refuse nested quantifiers, backreferences and lookarounds in safeRegex, and take the rest', () => {
+    const { safeRegex } = require('../src/query/safe-regex.js');
+    // The shape of the pattern is judged, never its meaning: a quantified group with a quantifier inside, a
+    // backreference, a lookaround is refused; the rest passes — an overlapping alternation under a quantifier
+    // (`(a|aa)*`) among it, which is why `regex: true` stays a trusted peer's and 'safe' is a door, not a proof.
+    for (const source of [
+      '^al.*a$',
+      'a+b*c?',
+      '(ab)+c',
+      '(a|b)*',
+      '(a|aa)*',
+      '[a+]+',
+      '\\(+\\)',
+      'a{2,3}b{1,}',
+      '(a+)b+',
+      '(?:ab)+',
+      '(?<n>ab)+',
+      'a(?:b)?',
+      '^T-[12]$',
+      'x{',
+      '(a+)(b+)',
+      '(a+)',
+    ]) {
+      assert.strictEqual(safeRegex(source), true, source);
+    }
+    for (const source of [
+      '^(a+)+$',
+      '^(\\w+\\s?)+$',
+      '(a*)*',
+      '(a+){2,}',
+      '(?:a+)+',
+      '(?<n>a+)+',
+      '(a)\\1',
+      '(?<n>a)\\k<n>',
+      'a(?=b)',
+      'a(?!b)',
+      '(?<=a)b',
+      '(?<!a)b',
+      '((a+)b)+',
+      'a\\',
+      '(a+)+?',
+    ]) {
+      assert.strictEqual(safeRegex(source), false, source);
+    }
+    assert.strictEqual(safeRegex(7), false);
+  });
+
+  it('should refuse a pattern the size of a document and a projection of __proto__', () => {
+    assert.throws(() => compileQuery({ key: { $regex: 'a'.repeat(1001) } }), /longer than 1000/);
+    assert.doesNotThrow(() => compileQuery({ key: { $regex: 'a'.repeat(1000) } }));
+    const source = { logger: null, candidates: () => null, ids: () => [], row: () => null, indexed: () => new Set() };
+    assert.throws(() => new Cursor(source, 'T').projection(['__proto__']), TypeError);
+  });
+});
+
+describe('QueryCache', () => {
+  it('should hold at most maxRows rows of idle results in QueryCache, never one past it alone, and count no live run', () => {
+    const { QueryCache } = require('../src/query/cache.js');
+    const cache = new QueryCache({ max: 10, maxRows: 5 });
+    cache.keep('a', 1, [1, 2, 3]);
+    cache.keep('b', 1, [4, 5]);
+    assert.deepStrictEqual([cache.size, cache.held], [2, 5]);
+    // Past five rows: the least recently used result goes.
+    cache.keep('c', 1, [6]);
+    assert.deepStrictEqual([cache.size, cache.held, cache.rows('a', 1), cache.rows('b', 1)], [2, 3, null, [4, 5]]);
+    // Past five rows alone: not kept.
+    cache.keep('d', 1, [1, 2, 3, 4, 5, 6]);
+    assert.deepStrictEqual([cache.size, cache.rows('d', 1)], [2, null]);
+    // The same key again: its rows replaced, counted once.
+    cache.keep('b', 2, [4, 5, 6]);
+    assert.deepStrictEqual([cache.size, cache.held], [2, 4]);
+    // A live run's rows are not counted; released, they are, and the idle results make room.
+    cache.live('e', (entry) => {
+      entry.rows = [7, 8, 9, 10];
+      return {};
+    });
+    assert.deepStrictEqual([cache.size, cache.held], [3, 4]);
+    cache.release('e');
+    assert.deepStrictEqual([cache.size, cache.held, cache.rows('e', -1)], [1, 4, [7, 8, 9, 10]]);
+  });
 });

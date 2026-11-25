@@ -3,8 +3,8 @@
 // The update operators as a pure expansion (src/operators.js): every operator
 // against the calls it means over a record, by the kind of each field.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { isOperators, expand } = require('../src/operators.js');
 
 const kinds = {
@@ -19,8 +19,8 @@ const kinds = {
 const kindAt = (field) => kinds[field];
 const view = { hits: 3, tags: ['a'], list: [1, 2, 3], body: 'ab', arr: [1, 2], n: 5, s: 'm', nested: { a: 1 } };
 
-test('update operators', async (t) => {
-  await t.test('isOperators(): every key an operator, or none; mixed is a TypeError', () => {
+describe('update operators', () => {
+  it('should answer isOperators() for every key an operator or none, mixed being a TypeError', () => {
     assert.strictEqual(isOperators({ $set: { a: 1 }, $inc: { b: 1 } }), true);
     assert.strictEqual(isOperators({ a: 1, 'b/c': 2 }), false);
     assert.strictEqual(isOperators({}), false);
@@ -28,7 +28,7 @@ test('update operators', async (t) => {
     assert.throws(() => expand({ $nope: {} }, view, kindAt), /unknown operator/);
   });
 
-  await t.test('each operator goes by the kind of its field, and the rest is a rewrite of a register', () => {
+  it('should apply each operator by the kind of its field, the rest a rewrite of a register', () => {
     assert.deepStrictEqual(expand({ $inc: { hits: 2, fresh: 1 } }, view, kindAt), [
       ['inc', 'hits', 2],
       ['inc', 'fresh', 1],

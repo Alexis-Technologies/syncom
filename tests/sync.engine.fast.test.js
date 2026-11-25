@@ -7,8 +7,8 @@
 // land files at once (`defer: 0`) and sign, which keeps both off. The same
 // suite: the fast path changes nothing of what converges.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, before } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { text } = require('../src/text/text.js');
 const { tree } = require('../src/tree/tree.js');
@@ -18,11 +18,14 @@ const { versions } = require('../src/versions/versions.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 const { memory } = require('../src/memory/memory.js');
 
-test('Sync engine (the fast path on: deferred files, nothing signed)', async (t) => {
-  const fsi = memory();
+describe('Sync engine (the fast path on: deferred files, nothing signed)', () => {
+  let fsi = null;
+  before(() => {
+    fsi = memory();
+  });
   let n = 0;
   const paths = new Map();
-  await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {
+  runSyncEngineTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `fast-${n++}-${name}`);
     // The compaction test counts the segments its rolls seal — with the window on, a roll seals whatever landed

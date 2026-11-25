@@ -5,8 +5,8 @@
 // sync, chain, encryption; no signing: the node ids are UUIDs) — the way an
 // application that picks its blocks opens a storage.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
 const { schema } = require('../src/schema/schema.js');
@@ -17,11 +17,11 @@ const { chain } = require('../src/chain/chain.js');
 const { encryption } = require('../src/encryption/encryption.js');
 const { runSchemaTests } = require('./suites/schema.js');
 
-test('Schema (lean core, plugins by hand)', async (t) => {
+describe('Schema (lean core, plugins by hand)', () => {
   const fsi = memory();
   let n = 0;
   const paths = new Map();
-  await runSchemaTests(t, assert, async (t2, name, options = {}) => {
+  runSchemaTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `schema-${n++}-${name}`);
     const plugins = [schema, text, tree, sync, chain, encryption];

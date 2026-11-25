@@ -5,8 +5,8 @@
 // The replication half of Storage: ops, counters, tombstones, the change
 // event, applying a peer's ops, snapshots, and what survives a reopen.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const syncom = require('../src/all/all.js');
@@ -22,8 +22,8 @@ const openTemp = async (t, options = {}) => {
 
 const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date.now() + seq, type, id, ...extra });
 
-test('Storage replication model', async (t) => {
-  await t.test('every local write is an op with this node as origin', async (t2) => {
+describe('Storage replication model', () => {
+  it('should make every local write an op with this node as origin', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op, via) => ops.push({ op, via }));
@@ -61,71 +61,65 @@ test('Storage replication model', async (t) => {
     );
   });
 
-  await t.test(
-    'every op this node mints is signed: a snapshot’s merges, the advance, a validated write',
-    async (t2) => {
-      const { verifyOp } = require('../src/signing/sign.js');
-      const { storage: a } = await openTemp(t2);
-      const id = await a.insert({ n: 1 });
-      await a.inc(id, 'hits', 2);
-      const Post = (data) => ({ ...data, status: data.status ?? 'draft' });
-      const { storage: b } = await openTemp(t2, { schema: { entities: { Post: { schema: Post } } } });
-      const ops = [];
-      b.on('change', (op) => ops.push(op));
-      await b.mergeSnapshot((await a.snapshot()).records, { via: 'L', from: a.nodeId });
-      await b.adoptVector(a.vector, { from: a.nodeId });
-      // The validator's default is in the op the peers receive, and so under the digest.
-      await b.Post.insert({ title: 'x' });
-      assert.deepStrictEqual(
-        ops.map((op) => [op.type, op.origin === b.nodeId, op.from ?? null]),
-        [
-          ['merge', true, a.nodeId],
-          ['advance', true, a.nodeId],
-          ['write', true, null],
-        ],
-      );
-      assert.deepStrictEqual(ops[2].data, { title: 'x', status: 'draft', $type: 'Post' });
-      for (const op of ops) {
-        assert.strictEqual(await verifyOp(op, 'require'), 'ok', op.type);
-        assert.ok(op.digest && op.nonce, `${op.type} carries a payload`);
-      }
-      assert.ok(b.log.since(undefined).every((entry) => typeof entry.op.sig === 'string'));
-    },
-  );
+  it('should sign every op this node mints: a snapshot’s merges, the advance, a validated write', async (t2) => {
+    const { verifyOp } = require('../src/signing/sign.js');
+    const { storage: a } = await openTemp(t2);
+    const id = await a.insert({ n: 1 });
+    await a.inc(id, 'hits', 2);
+    const Post = (data) => ({ ...data, status: data.status ?? 'draft' });
+    const { storage: b } = await openTemp(t2, { schema: { entities: { Post: { schema: Post } } } });
+    const ops = [];
+    b.on('change', (op) => ops.push(op));
+    await b.mergeSnapshot((await a.snapshot()).records, { via: 'L', from: a.nodeId });
+    await b.adoptVector(a.vector, { from: a.nodeId });
+    // The validator's default is in the op the peers receive, and so under the digest.
+    await b.Post.insert({ title: 'x' });
+    assert.deepStrictEqual(
+      ops.map((op) => [op.type, op.origin === b.nodeId, op.from ?? null]),
+      [
+        ['merge', true, a.nodeId],
+        ['advance', true, a.nodeId],
+        ['write', true, null],
+      ],
+    );
+    assert.deepStrictEqual(ops[2].data, { title: 'x', status: 'draft', $type: 'Post' });
+    for (const op of ops) {
+      assert.strictEqual(await verifyOp(op, 'require'), 'ok', op.type);
+      assert.ok(op.digest && op.nonce, `${op.type} carries a payload`);
+    }
+    assert.ok(b.log.since(undefined).every((entry) => typeof entry.op.sig === 'string'));
+  });
 
-  await t.test(
-    'an inc past a counter’s range is refused here, and from a peer, and a reopen reads the same',
-    async (t2) => {
-      const { dir, storage } = await openTemp(t2);
-      const id = await storage.insert({ title: 'doc' });
-      await storage.inc(id, 'n', Number.MAX_SAFE_INTEGER - 1);
-      const seq = storage.log.lastSeq;
-      await assert.rejects(() => storage.inc(id, 'n', 2), {
-        code: 'FIELD_KIND',
-        field: 'n',
-        kind: 'bound',
-        detail: 'counter',
-        max: Number.MAX_SAFE_INTEGER,
-      });
-      assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
-      // A peer's sum past the range: refused as a bound, logged as a no-op, the field as it was.
-      const errors = [];
-      storage.on('error', (error) => errors.push(error));
-      await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'n', value: 1e308 })]);
-      assert.deepStrictEqual(
-        errors.map((error) => [error.code, error.rejected?.[0]?.detail]),
-        [['OP_REFUSED', 'counter']],
-      );
-      await storage.inc(id, 'n', 1);
-      assert.strictEqual((await storage.get(id)).n, Number.MAX_SAFE_INTEGER);
-      await storage.close();
-      const again = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
-      t2.after(() => again.close());
-      assert.strictEqual((await again.get(id)).n, Number.MAX_SAFE_INTEGER, 'a reopen reads the same');
-    },
-  );
+  it('should refuse an inc past a counter’s range here and from a peer, and read the same after a reopen', async (t2) => {
+    const { dir, storage } = await openTemp(t2);
+    const id = await storage.insert({ title: 'doc' });
+    await storage.inc(id, 'n', Number.MAX_SAFE_INTEGER - 1);
+    const seq = storage.log.lastSeq;
+    await assert.rejects(() => storage.inc(id, 'n', 2), {
+      code: 'ALX_ERR_FIELD_KIND',
+      field: 'n',
+      kind: 'bound',
+      detail: 'counter',
+      max: Number.MAX_SAFE_INTEGER,
+    });
+    assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
+    // A peer's sum past the range: refused as a bound, logged as a no-op, the field as it was.
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    await storage.applyRemote([remoteOp('peer', 1, 'inc', id, { key: 'n', value: 1e308 })]);
+    assert.deepStrictEqual(
+      errors.map((error) => [error.code, error.rejected?.[0]?.detail]),
+      [['ALX_ERR_OP_REFUSED', 'counter']],
+    );
+    await storage.inc(id, 'n', 1);
+    assert.strictEqual((await storage.get(id)).n, Number.MAX_SAFE_INTEGER);
+    await storage.close();
+    const again = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
+    t2.after(() => again.close());
+    assert.strictEqual((await again.get(id)).n, Number.MAX_SAFE_INTEGER, 'a reopen reads the same');
+  });
 
-  await t.test('inc is a counter; a field is a register or a counter, never both', async (t2) => {
+  it('should keep inc a counter, and a field a register or a counter, never both', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ name: 'Ada' });
     await storage.inc(id, 'hits', 2);
@@ -146,7 +140,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(await storage.get(id), { name: 'Ada' });
   });
 
-  await t.test('add and remove keep an observed-remove set; a field is one kind only', async (t2) => {
+  it('should keep an observed-remove set with add and remove, a field one kind only', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -204,7 +198,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('splice and push keep a list or a text; a field is one kind only', async (t2) => {
+  it('should keep a list or a text with splice and push, a field one kind only', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -240,19 +234,19 @@ test('Storage replication model', async (t) => {
     // Out of range is a coded error, decided inside the queue.
     await assert.rejects(() => storage.splice(id, 'body', 6, 0, 'x'), {
       name: 'SyncomError',
-      code: 'OUT_OF_RANGE',
+      code: 'ALX_ERR_OUT_OF_RANGE',
       field: 'body',
       index: 6,
       count: 0,
       length: 5,
     });
     await assert.rejects(() => storage.splice(id, 'body', 4, 2), {
-      code: 'OUT_OF_RANGE',
+      code: 'ALX_ERR_OUT_OF_RANGE',
       index: 4,
       count: 2,
       length: 5,
     });
-    await assert.rejects(() => storage.splice(id, 'nope', 0, 1), { code: 'OUT_OF_RANGE', length: 0 });
+    await assert.rejects(() => storage.splice(id, 'nope', 0, 1), { code: 'ALX_ERR_OUT_OF_RANGE', length: 0 });
     // The kind rule, with a hint at the right call.
     await assert.rejects(
       () => storage.update(id, { body: 'plain' }),
@@ -299,7 +293,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('updateText diffs the field inside the queue and sends one splice per hunk', async (t2) => {
+  it('should diff the field inside the queue in updateText and send one splice per hunk', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -321,7 +315,7 @@ test('Storage replication model', async (t) => {
     await assert.rejects(() => storage.updateText(id, 'items', 'x'), /list; use splice\(\), push/);
     await assert.rejects(() => storage.updateText(id, 7, 'x'), TypeError);
     await assert.rejects(() => storage.updateText(id, 'body', 5), TypeError);
-    await assert.rejects(() => storage.updateText('bad id!', 'body', 'x'), { code: 'INVALID_ID' });
+    await assert.rejects(() => storage.updateText('bad id!', 'body', 'x'), { code: 'ALX_ERR_INVALID_ID' });
     // Through a live Record; a reset frees the field as for any kind.
     const record = await storage.document(id);
     assert.strictEqual(await record.updateText('body', 'hello'), 1);
@@ -332,7 +326,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('mark, unmark and spans: styles grow as their expand rule says, stack when many', async (t2) => {
+  it('should grow styles with mark, unmark and spans as their expand rule says, and stack them when many', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'hello world');
@@ -381,7 +375,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual((await storage.get(id)).body, '>hello! world?', 'the field reads as the plain string');
     // Errors and arguments; spans of what is not a text.
     await assert.rejects(() => storage.mark(id, 'body', 0, 99, 'bold', true), {
-      code: 'OUT_OF_RANGE',
+      code: 'ALX_ERR_OUT_OF_RANGE',
       index: 0,
       count: 99,
     });
@@ -407,7 +401,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('a plain mark and a stacking mark of one name mix in stamp order, never throwing', async (t2) => {
+  it('should mix a plain mark and a stacking mark of one name in stamp order, never throwing', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ title: 'doc' });
     await storage.updateText(id, 'body', 'hello world');
@@ -435,159 +429,159 @@ test('Storage replication model', async (t) => {
     ]);
   });
 
-  await t.test(
-    'embeds and blocks: a slot with its marker, told apart by spans, by block, set and joined; a slot enters with its marker alone',
-    async (t2) => {
-      const { storage } = await openTemp(t2);
-      const E = '\uFFFC';
-      const events = [];
-      storage.on('commit', (event) => events.push(event));
-      const id = await storage.insert({ title: 'doc' });
-      await storage.updateText(id, 'body', 'hello world');
-      await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
-      await storage.splitBlock(id, 'body', 6, { type: 'paragraph', parents: ['blockquote'] });
-      await storage.insertEmbed(id, 'body', 3, { type: 'image', attrs: { src: 'a.png' } });
-      await storage.mark(id, 'body', 1, 5, 'bold', true);
-      const heading = { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false };
-      const paragraph = { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false };
-      const image = { type: 'image', parents: [], attrs: { src: 'a.png' }, isEmbed: true };
-      assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo${E} world`, 'the slots read as the character');
-      assert.deepStrictEqual(await storage.spans(id, 'body'), [
-        { type: 'block', value: heading },
-        { type: 'text', text: 'he', marks: { bold: true } },
-        { type: 'embed', value: image, marks: { bold: true } },
-        { type: 'text', text: 'l', marks: { bold: true } },
-        { type: 'text', text: 'lo', marks: {} },
-        { type: 'block', value: paragraph },
-        { type: 'text', text: ' world', marks: {} },
-      ]);
-      assert.deepStrictEqual(await storage.blocks(id, 'body'), [
-        {
-          index: 0,
-          type: 'heading',
-          parents: [],
-          attrs: { level: 1 },
-          spans: [
-            { type: 'text', text: 'he', marks: { bold: true } },
-            { type: 'embed', value: image, marks: { bold: true } },
-            { type: 'text', text: 'l', marks: { bold: true } },
-            { type: 'text', text: 'lo', marks: {} },
-          ],
-        },
-        {
-          index: 7,
-          type: 'paragraph',
-          parents: ['blockquote'],
-          attrs: {},
-          spans: [{ type: 'text', text: ' world', marks: {} }],
-        },
-      ]);
-      assert.deepStrictEqual(await storage.block(id, 'body', 0), heading);
-      assert.deepStrictEqual(await storage.block(id, 'body', 3), image);
-      assert.strictEqual(await storage.block(id, 'body', 1), null, 'a character is no marker');
-      assert.strictEqual(await storage.block(id, 'body', 99), null);
-      assert.strictEqual(await storage.block(id, 'title', 0), null);
-      assert.strictEqual(await storage.blocks(id, 'title'), null);
-      // The ops: a splice carrying its marker, an assign for a change.
-      const types = events.map((event) => event.op.type);
-      assert.deepStrictEqual(types.slice(2, 5), ['splice', 'splice', 'splice']);
-      assert.deepStrictEqual(events[2].op.value.vals, [[0, heading]]);
-      assert.deepStrictEqual(events[4].embeds, {
-        before: {
-          body: [
-            [0, heading],
-            [6, paragraph],
-          ],
-        },
-        after: {
-          body: [
-            [0, heading],
-            [3, image],
-            [7, paragraph],
-          ],
-        },
-      });
-      assert.strictEqual(events[1].embeds, undefined, 'no slot, no embeds on the event');
-      // A marker changed: last writer wins; through setAt on a text too; null is a slot without one.
-      await storage.updateBlock(id, 'body', 7, { type: 'paragraph' });
-      assert.deepStrictEqual(await storage.block(id, 'body', 7), { ...paragraph, parents: [] });
-      assert.strictEqual(events.at(-1).op.type, 'assign');
-      await storage.setAt(id, 'body', 3, { type: 'image', attrs: { src: 'b.png' }, isEmbed: true });
-      assert.deepStrictEqual((await storage.block(id, 'body', 3)).attrs, { src: 'b.png' });
-      await storage.setAt(id, 'body', 3, null);
-      assert.strictEqual(await storage.block(id, 'body', 3), null);
-      assert.deepStrictEqual((await storage.spans(id, 'body'))[2], {
-        type: 'embed',
-        value: null,
-        marks: { bold: true },
-      });
-      // Joined: the block's text joins the one before; a plain character is no marker to join or set.
-      await storage.joinBlock(id, 'body', 7);
-      assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo world`);
-      await assert.rejects(() => storage.joinBlock(id, 'body', 1), { code: 'NOT_FOUND', id, field: 'body', index: 1 });
-      await assert.rejects(() => storage.updateBlock(id, 'body', 1, { type: 'p' }), { code: 'NOT_FOUND' });
-      await assert.rejects(() => storage.setAt(id, 'body', 1, { type: 'p' }), { code: 'NOT_FOUND' });
-      await assert.rejects(() => storage.joinBlock(id, 'body', 99), { code: 'OUT_OF_RANGE' });
-      await assert.rejects(() => storage.splitBlock(id, 'body', 99, { type: 'p' }), { code: 'OUT_OF_RANGE' });
-      await assert.rejects(() => storage.insertEmbed(id, 'title', 0, { type: 'p' }), { code: 'FIELD_KIND' });
-      // A slot enters with its marker alone: not through splice, push or updateText — which keeps the ones it keeps.
-      await assert.rejects(() => storage.splice(id, 'body', 0, 0, E), /insertEmbed\(\) or splitBlock\(\)/);
-      await assert.rejects(() => storage.push(id, 'body', `x${E}`), TypeError);
-      await assert.rejects(() => storage.updateText(id, 'body', `${E}${E}hello`), TypeError);
-      const body = (await storage.get(id)).body;
-      await storage.updateText(id, 'body', body.replace('world', 'there'));
-      assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo there`);
-      assert.deepStrictEqual(await storage.block(id, 'body', 0), heading);
-      await storage.splice(id, 'body', 3, 1);
-      assert.strictEqual((await storage.get(id)).body, `${E}hello there`, 'a cut takes a slot like a character');
-      // Arguments.
-      for (const bad of [
-        null,
-        'p',
-        { type: '' },
-        { type: 'p', parents: [1] },
-        { type: 'p', attrs: [] },
-        { type: 'p', isEmbed: 1 },
-      ]) {
-        await assert.rejects(() => storage.splitBlock(id, 'body', 0, bad), TypeError, JSON.stringify(bad));
-      }
-      await assert.rejects(() => storage.joinBlock(id, 'body', -1), TypeError);
-      await assert.rejects(() => storage.updateBlock(id, 7, 0, { type: 'p' }), TypeError);
-      await assert.rejects(() => storage.block(id, 'body', 1.5), TypeError);
-      // Compacted and restored, the markers stay with the slots; a hand-made slot without a marker reads as an embed of none.
-      await storage.splitBlock(id, 'body', 6, { type: 'paragraph' });
-      const spans = await storage.spans(id, 'body');
-      const { versions } = await storage.history(id);
-      assert.ok((await storage.compact(id)) >= 2);
-      assert.deepStrictEqual(await storage.spans(id, 'body'), spans);
-      const at = versions[1].eventId;
-      const back = await storage.diff(id, undefined, at);
-      assert.ok(
-        back.some((patch) => patch.action === 'splice' && patch.count === 1),
-        JSON.stringify(back),
-      );
-      await storage.restore(id, at);
-      assert.strictEqual((await storage.get(id)).body, `${E}hello there`);
-      // A stamp above the clock, which ran ahead of the wall under the ops above.
-      const ts = Date.now() + 5000;
-      await storage.applyRemote([
-        remoteOp('peer', 1, 'splice', id, { key: 'body', value: { at: '^', content: E }, ts }),
-      ]);
-      assert.ok((await storage.spans(id, 'body')).some((span) => span.type === 'embed' && span.value === null));
-      // Through a live Record.
-      const record = await storage.document(id);
-      await record.splitBlock('body', 0, { type: 'title' });
-      assert.deepStrictEqual((await record.block('body', 0)).type, 'title');
-      assert.strictEqual((await record.blocks('body')).length, 2, 'the bare slot is an embed inside the heading block');
-      await record.updateBlock('body', 0, { type: 'h1' });
-      await record.insertEmbed('body', 1, { type: 'img' });
-      await record.joinBlock('body', 0);
-      assert.deepStrictEqual((await record.block('body', 0)).type, 'img');
-      assert.strictEqual(await storage.validate(), true);
-    },
-  );
+  it('should keep embeds and blocks as a slot with its marker, told apart by spans, by block, set and joined; a slot enters with its marker alone', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const E = '\uFFFC';
+    const events = [];
+    storage.on('commit', (event) => events.push(event));
+    const id = await storage.insert({ title: 'doc' });
+    await storage.updateText(id, 'body', 'hello world');
+    await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+    await storage.splitBlock(id, 'body', 6, { type: 'paragraph', parents: ['blockquote'] });
+    await storage.insertEmbed(id, 'body', 3, { type: 'image', attrs: { src: 'a.png' } });
+    await storage.mark(id, 'body', 1, 5, 'bold', true);
+    const heading = { type: 'heading', parents: [], attrs: { level: 1 }, isEmbed: false };
+    const paragraph = { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false };
+    const image = { type: 'image', parents: [], attrs: { src: 'a.png' }, isEmbed: true };
+    assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo${E} world`, 'the slots read as the character');
+    assert.deepStrictEqual(await storage.spans(id, 'body'), [
+      { type: 'block', value: heading },
+      { type: 'text', text: 'he', marks: { bold: true } },
+      { type: 'embed', value: image, marks: { bold: true } },
+      { type: 'text', text: 'l', marks: { bold: true } },
+      { type: 'text', text: 'lo', marks: {} },
+      { type: 'block', value: paragraph },
+      { type: 'text', text: ' world', marks: {} },
+    ]);
+    assert.deepStrictEqual(await storage.blocks(id, 'body'), [
+      {
+        index: 0,
+        type: 'heading',
+        parents: [],
+        attrs: { level: 1 },
+        spans: [
+          { type: 'text', text: 'he', marks: { bold: true } },
+          { type: 'embed', value: image, marks: { bold: true } },
+          { type: 'text', text: 'l', marks: { bold: true } },
+          { type: 'text', text: 'lo', marks: {} },
+        ],
+      },
+      {
+        index: 7,
+        type: 'paragraph',
+        parents: ['blockquote'],
+        attrs: {},
+        spans: [{ type: 'text', text: ' world', marks: {} }],
+      },
+    ]);
+    assert.deepStrictEqual(await storage.block(id, 'body', 0), heading);
+    assert.deepStrictEqual(await storage.block(id, 'body', 3), image);
+    assert.strictEqual(await storage.block(id, 'body', 1), null, 'a character is no marker');
+    assert.strictEqual(await storage.block(id, 'body', 99), null);
+    assert.strictEqual(await storage.block(id, 'title', 0), null);
+    assert.strictEqual(await storage.blocks(id, 'title'), null);
+    // The ops: a splice carrying its marker, an assign for a change.
+    const types = events.map((event) => event.op.type);
+    assert.deepStrictEqual(types.slice(2, 5), ['splice', 'splice', 'splice']);
+    assert.deepStrictEqual(events[2].op.value.vals, [[0, heading]]);
+    assert.deepStrictEqual(events[4].embeds, {
+      before: {
+        body: [
+          [0, heading],
+          [6, paragraph],
+        ],
+      },
+      after: {
+        body: [
+          [0, heading],
+          [3, image],
+          [7, paragraph],
+        ],
+      },
+    });
+    assert.strictEqual(events[1].embeds, undefined, 'no slot, no embeds on the event');
+    // A marker changed: last writer wins; through setAt on a text too; null is a slot without one.
+    await storage.updateBlock(id, 'body', 7, { type: 'paragraph' });
+    assert.deepStrictEqual(await storage.block(id, 'body', 7), { ...paragraph, parents: [] });
+    assert.strictEqual(events.at(-1).op.type, 'assign');
+    await storage.setAt(id, 'body', 3, { type: 'image', attrs: { src: 'b.png' }, isEmbed: true });
+    assert.deepStrictEqual((await storage.block(id, 'body', 3)).attrs, { src: 'b.png' });
+    await storage.setAt(id, 'body', 3, null);
+    assert.strictEqual(await storage.block(id, 'body', 3), null);
+    assert.deepStrictEqual((await storage.spans(id, 'body'))[2], {
+      type: 'embed',
+      value: null,
+      marks: { bold: true },
+    });
+    // Joined: the block's text joins the one before; a plain character is no marker to join or set.
+    await storage.joinBlock(id, 'body', 7);
+    assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo world`);
+    await assert.rejects(() => storage.joinBlock(id, 'body', 1), {
+      code: 'ALX_ERR_NOT_FOUND',
+      id,
+      field: 'body',
+      index: 1,
+    });
+    await assert.rejects(() => storage.updateBlock(id, 'body', 1, { type: 'p' }), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.setAt(id, 'body', 1, { type: 'p' }), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.joinBlock(id, 'body', 99), { code: 'ALX_ERR_OUT_OF_RANGE' });
+    await assert.rejects(() => storage.splitBlock(id, 'body', 99, { type: 'p' }), { code: 'ALX_ERR_OUT_OF_RANGE' });
+    await assert.rejects(() => storage.insertEmbed(id, 'title', 0, { type: 'p' }), { code: 'ALX_ERR_FIELD_KIND' });
+    // A slot enters with its marker alone: not through splice, push or updateText — which keeps the ones it keeps.
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, E), /insertEmbed\(\) or splitBlock\(\)/);
+    await assert.rejects(() => storage.push(id, 'body', `x${E}`), TypeError);
+    await assert.rejects(() => storage.updateText(id, 'body', `${E}${E}hello`), TypeError);
+    const body = (await storage.get(id)).body;
+    await storage.updateText(id, 'body', body.replace('world', 'there'));
+    assert.strictEqual((await storage.get(id)).body, `${E}he${E}llo there`);
+    assert.deepStrictEqual(await storage.block(id, 'body', 0), heading);
+    await storage.splice(id, 'body', 3, 1);
+    assert.strictEqual((await storage.get(id)).body, `${E}hello there`, 'a cut takes a slot like a character');
+    // Arguments.
+    for (const bad of [
+      null,
+      'p',
+      { type: '' },
+      { type: 'p', parents: [1] },
+      { type: 'p', attrs: [] },
+      { type: 'p', isEmbed: 1 },
+    ]) {
+      await assert.rejects(() => storage.splitBlock(id, 'body', 0, bad), TypeError, JSON.stringify(bad));
+    }
+    await assert.rejects(() => storage.joinBlock(id, 'body', -1), TypeError);
+    await assert.rejects(() => storage.updateBlock(id, 7, 0, { type: 'p' }), TypeError);
+    await assert.rejects(() => storage.block(id, 'body', 1.5), TypeError);
+    // Compacted and restored, the markers stay with the slots; a hand-made slot without a marker reads as an embed of none.
+    await storage.splitBlock(id, 'body', 6, { type: 'paragraph' });
+    const spans = await storage.spans(id, 'body');
+    const { versions } = await storage.history(id);
+    assert.ok((await storage.compact(id)) >= 2);
+    assert.deepStrictEqual(await storage.spans(id, 'body'), spans);
+    const at = versions[1].eventId;
+    const back = await storage.diff(id, undefined, at);
+    assert.ok(
+      back.some((patch) => patch.action === 'splice' && patch.count === 1),
+      JSON.stringify(back),
+    );
+    await storage.restore(id, at);
+    assert.strictEqual((await storage.get(id)).body, `${E}hello there`);
+    // A stamp above the clock, which ran ahead of the wall under the ops above.
+    const ts = Date.now() + 5000;
+    await storage.applyRemote([remoteOp('peer', 1, 'splice', id, { key: 'body', value: { at: '^', content: E }, ts })]);
+    assert.ok((await storage.spans(id, 'body')).some((span) => span.type === 'embed' && span.value === null));
+    // Through a live Record.
+    const record = await storage.document(id);
+    await record.splitBlock('body', 0, { type: 'title' });
+    assert.deepStrictEqual((await record.block('body', 0)).type, 'title');
+    assert.strictEqual((await record.blocks('body')).length, 2, 'the bare slot is an embed inside the heading block');
+    await record.updateBlock('body', 0, { type: 'h1' });
+    await record.insertEmbed('body', 1, { type: 'img' });
+    await record.joinBlock('body', 0);
+    assert.deepStrictEqual((await record.block('body', 0)).type, 'img');
+    assert.strictEqual(await storage.validate(), true);
+  });
 
-  await t.test('a cursor names a place that survives the edits around it', async (t2) => {
+  it('should name with a cursor a place that survives the edits around it', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'hello world');
@@ -629,7 +623,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await record.index('body', c), 1);
   });
 
-  await t.test('treeMove and treeRemove keep a movable tree; a cycle is refused inside the queue', async (t2) => {
+  it('should keep a movable tree with treeMove and treeRemove, and refuse a cycle inside the queue', async (t2) => {
     const { dir, storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -675,19 +669,21 @@ test('Storage replication model', async (t) => {
     // A cycle, an unknown sibling: coded errors, decided inside the queue.
     await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'c1'), {
       name: 'SyncomError',
-      code: 'CYCLE',
+      code: 'ALX_ERR_CYCLE',
       id,
       field: 'outline',
       node: 'a',
       parent: 'c1',
     });
     await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { after: 'nope' }), {
-      code: 'NOT_FOUND',
+      code: 'ALX_ERR_NOT_FOUND',
       id,
       field: 'outline',
       node: 'nope',
     });
-    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { before: 'c1' }), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'a', 'root', { before: 'c1' }), {
+      code: 'ALX_ERR_NOT_FOUND',
+    });
     // A removal takes the subtree; twice is nothing; a move brings it back whole.
     await storage.treeRemove(id, 'outline', 'a');
     assert.deepStrictEqual((await storage.get(id)).outline, [{ id: 'root', children: [leaf('b')] }]);
@@ -746,7 +742,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual((await again.get(id)).outline, outline, 'replayed from the log');
   });
 
-  await t.test('setAt and move keep an element’s name; a move names where it shows', async (t2) => {
+  it('should keep an element’s name through setAt and move, a move naming where it shows', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -779,12 +775,16 @@ test('Storage replication model', async (t) => {
     await storage.setAt(id, 'items', 0, 'A');
     assert.deepStrictEqual((await storage.get(id)).items, ['A', 'B', 'c']);
     // Out of range, the kind rule, arguments.
-    await assert.rejects(() => storage.setAt(id, 'items', 3, 'x'), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
-    await assert.rejects(() => storage.move(id, 'items', 0, 3), { code: 'OUT_OF_RANGE', index: 3, length: 3 });
-    await assert.rejects(() => storage.move(id, 'items', 5, 0), { code: 'OUT_OF_RANGE', index: 5, length: 3 });
+    await assert.rejects(() => storage.setAt(id, 'items', 3, 'x'), {
+      code: 'ALX_ERR_OUT_OF_RANGE',
+      index: 3,
+      length: 3,
+    });
+    await assert.rejects(() => storage.move(id, 'items', 0, 3), { code: 'ALX_ERR_OUT_OF_RANGE', index: 3, length: 3 });
+    await assert.rejects(() => storage.move(id, 'items', 5, 0), { code: 'ALX_ERR_OUT_OF_RANGE', index: 5, length: 3 });
     await storage.splice(id, 'body', 0, 0, 'text');
-    // On a text, setAt lands on an embed slot alone: a character is NOT_FOUND, a move is of a list.
-    await assert.rejects(() => storage.setAt(id, 'body', 0, 'x'), { code: 'NOT_FOUND', index: 0 });
+    // On a text, setAt lands on an embed slot alone: a character is ALX_ERR_NOT_FOUND, a move is of a list.
+    await assert.rejects(() => storage.setAt(id, 'body', 0, 'x'), { code: 'ALX_ERR_NOT_FOUND', index: 0 });
     await assert.rejects(
       () => storage.move(id, 'body', 0, 1),
       /text; use splice\(\), push\(\), updateText\(\) or mark\(\)/,
@@ -792,7 +792,7 @@ test('Storage replication model', async (t) => {
     await storage.move(id, 'name', 0, 0); // from === to is nothing, even on a register
     await assert.rejects(() => storage.move(id, 'name', 0, 1), /register; use update\(\)/);
     await assert.rejects(() => storage.setAt(id, 'name', 0, 'x'), /register; use update\(\)/);
-    await assert.rejects(() => storage.setAt(id, 'nope', 0, 'x'), { code: 'OUT_OF_RANGE', length: 0 });
+    await assert.rejects(() => storage.setAt(id, 'nope', 0, 'x'), { code: 'ALX_ERR_OUT_OF_RANGE', length: 0 });
     await assert.rejects(() => storage.setAt(id, 7, 0, 'x'), TypeError);
     await assert.rejects(() => storage.setAt(id, 'items', -1, 'x'), TypeError);
     await assert.rejects(() => storage.setAt(id, 'items', 0, undefined), TypeError);
@@ -806,35 +806,32 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test(
-    'a peer’s set ops land in any order; a write on a set field takes it, as the register outranks the set',
-    async (t2) => {
-      const { storage } = await openTemp(t2);
-      const errors = [];
-      storage.on('error', (error) => errors.push(error));
-      const t0 = Date.now();
-      // The remove arrives before the add it observed: that add is dead on arrival.
-      const tags = [['x', { p1: t0 + 1 }]];
-      await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
-      assert.deepStrictEqual(await storage.get('r'), { tags: [] });
-      await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
-      assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
-      // A local write of another kind is refused before it is stamped.
-      await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'FIELD_KIND', kind: 'set' });
-      // A peer's set on the field: the register outranks the set and takes the
-      // field — here as on the peer, whatever the order.
-      const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
-      assert.strictEqual(result.applied, 1);
-      assert.deepStrictEqual(await storage.get('r'), { tags: ['z'], note: 'n' });
-      assert.deepStrictEqual(errors, []);
-      // The field is a register now: a local add is refused, an update lands.
-      await assert.rejects(() => storage.add('r', 'tags', ['local']), { code: 'FIELD_KIND', kind: 'register' });
-      await storage.update('r', { tags: ['local'] });
-      assert.deepStrictEqual((await storage.get('r')).tags, ['local']);
-    },
-  );
+  it('should land a peer’s set ops in any order, and let a write on a set field take it, as the register outranks the set', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    const t0 = Date.now();
+    // The remove arrives before the add it observed: that add is dead on arrival.
+    const tags = [['x', { p1: t0 + 1 }]];
+    await storage.applyRemote([remoteOp('p2', 1, 'remove', 'r', { key: 'tags', value: tags, ts: t0 + 5 })]);
+    assert.deepStrictEqual(await storage.get('r'), { tags: [] });
+    await storage.applyRemote([remoteOp('p1', 1, 'add', 'r', { key: 'tags', value: ['x', 'y'], ts: t0 + 1 })]);
+    assert.deepStrictEqual(await storage.get('r'), { tags: ['y'] });
+    // A local write of another kind is refused before it is stamped.
+    await assert.rejects(() => storage.update('r', { tags: [] }), { code: 'ALX_ERR_FIELD_KIND', kind: 'set' });
+    // A peer's set on the field: the register outranks the set and takes the
+    // field — here as on the peer, whatever the order.
+    const result = await storage.applyRemote([remoteOp('p3', 1, 'set', 'r', { data: { tags: ['z'], note: 'n' } })]);
+    assert.strictEqual(result.applied, 1);
+    assert.deepStrictEqual(await storage.get('r'), { tags: ['z'], note: 'n' });
+    assert.deepStrictEqual(errors, []);
+    // The field is a register now: a local add is refused, an update lands.
+    await assert.rejects(() => storage.add('r', 'tags', ['local']), { code: 'ALX_ERR_FIELD_KIND', kind: 'register' });
+    await storage.update('r', { tags: ['local'] });
+    assert.deepStrictEqual((await storage.get('r')).tags, ['local']);
+  });
 
-  await t.test('delete leaves a tombstone: hidden from get/has/list, kept on disk', async (t2) => {
+  it('should leave a tombstone on delete: hidden from get/has/list, kept on disk', async (t2) => {
     const { dir, storage } = await openTemp(t2);
     const keep = await storage.insert({ n: 1 });
     const gone = await storage.insert({ n: 2 });
@@ -853,28 +850,28 @@ test('Storage replication model', async (t) => {
     // update() on a dead record is "not found" — and so is every field op (delete wins: only a whole-record
     // write brings a deleted record back), a plugin's kind included.
     await storage.delete(gone);
-    await assert.rejects(() => storage.update(gone, { n: 4 }), { code: 'NOT_FOUND', message: /not found/ });
-    await assert.rejects(() => storage.inc(gone, 'hits', 1), { code: 'NOT_FOUND', id: gone });
-    await assert.rejects(() => storage.add(gone, 'tags', ['a']), { code: 'NOT_FOUND' });
-    await assert.rejects(() => storage.remove(gone, 'tags', ['a']), { code: 'NOT_FOUND' });
-    await assert.rejects(() => storage.unset(gone, 'n'), { code: 'NOT_FOUND' });
-    await assert.rejects(() => storage.push(gone, 'items', [1]), { code: 'NOT_FOUND' });
-    await assert.rejects(() => storage.updateText(gone, 'body', 'hi'), { code: 'NOT_FOUND' });
-    await assert.rejects(() => storage.treeMove(gone, 'outline', 'n1'), { code: 'NOT_FOUND' });
-    await assert.rejects(() => storage.transact((tx) => tx.inc(gone, 'hits', 1)), { code: 'NOT_FOUND' });
+    await assert.rejects(() => storage.update(gone, { n: 4 }), { code: 'ALX_ERR_NOT_FOUND', message: /not found/ });
+    await assert.rejects(() => storage.inc(gone, 'hits', 1), { code: 'ALX_ERR_NOT_FOUND', id: gone });
+    await assert.rejects(() => storage.add(gone, 'tags', ['a']), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.remove(gone, 'tags', ['a']), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.unset(gone, 'n'), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.push(gone, 'items', [1]), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.updateText(gone, 'body', 'hi'), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.treeMove(gone, 'outline', 'n1'), { code: 'ALX_ERR_NOT_FOUND' });
+    await assert.rejects(() => storage.transact((tx) => tx.inc(gone, 'hits', 1)), { code: 'ALX_ERR_NOT_FOUND' });
     assert.strictEqual(await storage.get(gone), null);
     // An absent record is still made by its first field op.
     await storage.inc('fresh', 'hits', 1);
     assert.deepStrictEqual(await storage.get('fresh'), { hits: 1 });
   });
 
-  await t.test('applyRemote: in order per origin, duplicates and gaps skipped', async (t2) => {
+  it('should apply in order per origin in applyRemote, duplicates and gaps skipped', async (t2) => {
     const { storage } = await openTemp(t2);
     const changes = [];
     storage.on('change', (op, via) => changes.push({ op, via }));
 
     // The same op again is a duplicate: one made anew at its seq, with
-    // another stamp, would be another op there (EQUIVOCATION).
+    // another stamp, would be another op there (ALX_ERR_EQUIVOCATION).
     const written = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } });
     const first = await storage.applyRemote([written], { via: 'L' });
     assert.deepStrictEqual(first, {
@@ -937,7 +934,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await storage.validate(), true);
   });
 
-  await t.test('a refused remote op surfaces as an error event, not a throw', async (t2) => {
+  it('should surface a refused remote op as an error event, not a throw', async (t2) => {
     const { storage } = await openTemp(t2);
     const errors = [];
     storage.on('error', (error) => errors.push(error));
@@ -949,7 +946,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(await storage.get(id), { hits: 'text' });
   });
 
-  await t.test('a live Record follows remote changes and keeps unsaved edits', async (t2) => {
+  it('should make a live Record follow remote changes and keep unsaved edits', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ title: 'Draft', views: 0 });
     const record = await storage.document(id);
@@ -972,7 +969,7 @@ test('Storage replication model', async (t) => {
     assert.strictEqual(await record.data(), null);
   });
 
-  await t.test('snapshot pages every entry, tombstones included; mergeSnapshot joins them', async (t2) => {
+  it('should page every entry in snapshot, tombstones included, and join them in mergeSnapshot', async (t2) => {
     const { storage: a } = await openTemp(t2);
     const { storage: b } = await openTemp(t2);
     const ids = [];
@@ -1007,7 +1004,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(await b.get(ids[0]), { i: 0, hits: 3 });
   });
 
-  await t.test('scopes ride on ops and filter snapshots', async (t2) => {
+  it('should carry scopes on ops and filter snapshots by them', async (t2) => {
     const { storage } = await openTemp(t2, { sync: { scope: (id, data) => data.$type ?? '*' } });
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -1024,7 +1021,7 @@ test('Storage replication model', async (t) => {
     );
   });
 
-  await t.test('an inc counts in the record’s stream: after a move to another scope it still lands', async (t2) => {
+  it('should count an inc in the record’s stream: after a move to another scope it still lands', async (t2) => {
     const { storage } = await openTemp(t2, { sync: { scope: (id, data) => data.room ?? '*' } });
     const id = await storage.insert({ room: 'a' });
     for (let i = 0; i < 5; i++) await storage.inc(id, 'hits', 1);
@@ -1051,7 +1048,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(await storage.editorsOf(id), [storage.nodeId]);
   });
 
-  await t.test('identity, seq and vector survive a reopen; what was logged but not written is replayed', async (t2) => {
+  it('should keep identity, seq and vector across a reopen, and replay what was logged but not written', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     // A backend whose record writes fail on demand: the op is in the log, the
@@ -1078,7 +1075,7 @@ test('Storage replication model', async (t) => {
     failing = 'lost';
     // Logged is committed: the write stands, held in memory, and says so.
     await first.set('lost', { p: 1 });
-    assert.strictEqual(errors[0].code, 'UNPERSISTED');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_UNPERSISTED');
     assert.match(errors[0].cause.message, /ENOSPC/);
     assert.deepStrictEqual(await first.get('lost'), { p: 1 });
     failing = null;
@@ -1109,7 +1106,7 @@ test('Storage replication model', async (t) => {
     await third.close();
   });
 
-  await t.test('a record this node cannot read does not stop a page: its op is skipped and reported', async (t2) => {
+  it('should not stop a page at a record this node cannot read: its op is skipped and reported', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const first = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
@@ -1136,7 +1133,7 @@ test('Storage replication model', async (t) => {
       equivocations: 0,
     });
     assert.strictEqual(errors.length, 1);
-    assert.strictEqual(errors[0].code, 'OP_UNREADABLE');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_OP_UNREADABLE');
     assert.strictEqual(errors[0].op.id, bad);
     assert.ok(errors[0].cause instanceof Error);
     assert.deepStrictEqual(await storage.get('fine'), { n: 3 });
@@ -1144,10 +1141,10 @@ test('Storage replication model', async (t) => {
     const logged = storage.log.since(undefined).find((entry) => entry.op.origin === 'peer' && entry.op.id === bad);
     assert.strictEqual(logged.skipped, true, 'logged and flagged, so a replay leaves it alone too');
     // The torn file is evidence, reported with a code, never a bare SyntaxError.
-    await assert.rejects(() => storage.get(bad), { code: 'INTEGRITY', id: bad });
+    await assert.rejects(() => storage.get(bad), { code: 'ALX_ERR_INTEGRITY', id: bad });
   });
 
-  await t.test('a local write outranks a snapshot joined from a peer whose clock is ahead', async (t2) => {
+  it('should rank a local write above a snapshot joined from a peer whose clock is ahead', async (t2) => {
     const { storage } = await openTemp(t2);
     const ahead = Date.now() + 3_600_000;
     const meta = (clock, extra = {}) => ({ clock, base: null, deleted: null, counters: {}, ...extra });
@@ -1172,7 +1169,7 @@ test('Storage replication model', async (t) => {
     assert.deepStrictEqual(await storage.get('reg'), { title: 'local' });
   });
 
-  await t.test('the clock survives a reopen: a node never stamps below what it already holds', async (t2) => {
+  it('should keep the clock across a reopen: a node never stamps below what it already holds', async (t2) => {
     const dir = await createTemp();
     t2.after(() => cleanupTemp(dir));
     const ahead = Date.now() + 3_600_000;
@@ -1196,7 +1193,7 @@ test('Storage replication model', async (t) => {
     assert.ok(ops[1].ts > ops[0].ts);
   });
 
-  await t.test('encrypted records stay local', async (t2) => {
+  it('should keep encrypted records local', async (t2) => {
     const { storage } = await openTemp(t2);
     const ops = [];
     storage.on('change', (op) => ops.push(op));
@@ -1217,8 +1214,8 @@ test('Storage replication model', async (t) => {
   });
 });
 
-test('Storage: the seams telemetry shares', async (t) => {
-  await t.test('a refused op with no error listener is still logged and answered', async (t2) => {
+describe('Storage: the seams telemetry shares', () => {
+  it('should still log and answer a refused op with no error listener', async (t2) => {
     // Emitter throws on an unheard `error`; before the guard, that throw
     // failed the whole push and the peer offered the same page forever.
     const { storage } = await openTemp(t2);
@@ -1229,7 +1226,7 @@ test('Storage: the seams telemetry shares', async (t) => {
     assert.deepStrictEqual(await storage.get(id), { hits: 'text' });
   });
 
-  await t.test('the storage logger reaches the op log', async (t2) => {
+  it('should reach the op log with the storage logger', async (t2) => {
     const events = [];
     const logger = { warn: (entry) => events.push(entry), error: (entry) => events.push(entry) };
     const { dir, storage } = await openTemp(t2, { logger, sync: { log: { rollAfter: 1 } } });
@@ -1248,22 +1245,24 @@ test('Storage: the seams telemetry shares', async (t) => {
   });
 });
 
-test('Storage announces close', async (t) => {
-  const { storage } = await openTemp(t);
-  const closed = [];
-  storage.on('close', () => closed.push(true));
-  await storage.close();
-  await storage.close();
-  assert.deepStrictEqual(closed, [true], 'once, and not again for a second close()');
+describe('Storage close', () => {
+  it('should announce close once, not again for a second close()', async (t) => {
+    const { storage } = await openTemp(t);
+    const closed = [];
+    storage.on('close', () => closed.push(true));
+    await storage.close();
+    await storage.close();
+    assert.deepStrictEqual(closed, [true], 'once, and not again for a second close()');
+  });
 });
 
-test('Storage: events are contained', async (t) => {
+describe('Storage: contained events', () => {
   const collect = () => {
     const entries = [];
     return { entries, logger: { warn: (entry) => entries.push(entry), info() {}, debug() {}, error() {} } };
   };
 
-  await t.test('a change listener that throws does not fail the write it observed', async (t2) => {
+  it('should not fail the write it observed when a change listener throws', async (t2) => {
     const { entries, logger } = collect();
     const { storage } = await openTemp(t2, { logger });
     const seen = [];
@@ -1283,7 +1282,7 @@ test('Storage: events are contained', async (t) => {
     assert.strictEqual(logged[0].err.message, 'listener boom');
   });
 
-  await t.test('a change listener that writes back queues behind the write instead of deadlocking', async (t2) => {
+  it('should queue a change listener that writes back behind the write instead of deadlocking', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ n: 0 });
     let echoed = null;
@@ -1295,7 +1294,7 @@ test('Storage: events are contained', async (t) => {
     assert.deepStrictEqual(await storage.get(id), { n: 1, echoed: true });
   });
 
-  await t.test('a record update listener that throws does not break the setter or the refresh', async (t2) => {
+  it('should not break the setter or the refresh when a record update listener throws', async (t2) => {
     const { entries, logger } = collect();
     const { storage } = await openTemp(t2, { logger });
     const id = await storage.insert({ title: 'a' });
@@ -1318,8 +1317,8 @@ test('Storage: events are contained', async (t) => {
   });
 });
 
-test("Storage: what a peer's op must look like", async (t) => {
-  await t.test('an op the engine cannot index by is malformed: counted, never logged', async (t2) => {
+describe("Storage: what a peer's op must look like", () => {
+  it('should count an op the engine cannot index by as malformed, never log it', async (t2) => {
     const { storage } = await openTemp(t2);
     const ok = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 } });
     const bad = [
@@ -1368,7 +1367,7 @@ test("Storage: what a peer's op must look like", async (t) => {
     assert.strictEqual(next.applied, 1);
   });
 
-  await t.test('a stamp beyond maxSkew is refused and never observed into the clock', async (t2) => {
+  it('should refuse a stamp beyond maxSkew and never observe it into the clock', async (t2) => {
     const { storage } = await openTemp(t2, { sync: { maxSkew: 60_000 } });
     const errors = [];
     storage.on('error', (error) => errors.push(error));
@@ -1387,7 +1386,7 @@ test("Storage: what a peer's op must look like", async (t) => {
       equivocations: 0,
     });
     assert.strictEqual(errors.length, 1);
-    assert.strictEqual(errors[0].code, 'SKEW');
+    assert.strictEqual(errors[0].code, 'ALX_ERR_SKEW');
     assert.strictEqual(errors[0].op.seq, 1);
     assert.deepStrictEqual(await storage.get(id), { f: 1 });
     const ops = [];
@@ -1420,7 +1419,7 @@ test("Storage: what a peer's op must look like", async (t) => {
     await assert.rejects(() => openTemp(t2, { sync: { maxSkew: 0 } }), TypeError);
   });
 
-  await t.test('a stamp a record holds beyond maxSkew is never observed into the clock', async (t2) => {
+  it('should never observe into the clock a stamp a record holds beyond maxSkew', async (t2) => {
     // A record that took a far stamp while the check was off — maxSkew
     // Infinity, or a node from before merge metas were checked — reopened
     // under the default: a write to it does not carry the clock along.
@@ -1451,7 +1450,7 @@ test("Storage: what a peer's op must look like", async (t) => {
     assert.deepStrictEqual(await storage.get('shared'), { title: 'theirs', tags: ['x'] });
   });
 
-  await t.test('error events carry a code', async (t2) => {
+  it('should carry a code on error events', async (t2) => {
     const valid = (data) => !('secret' in data) && !(Array.isArray(data.tags) && data.tags.length > 1);
     const schema = { entities: { Post: { schema: valid } } };
     const { storage } = await openTemp(t2, { schema });
@@ -1463,14 +1462,14 @@ test("Storage: what a peer's op must look like", async (t) => {
     // A set op is validated against the record it leaves, like an inc.
     await storage.applyRemote([remoteOp('peer', 3, 'write', 'p2', { data: { $type: 'Post' } })]);
     await storage.applyRemote([remoteOp('peer', 4, 'add', 'p2', { key: 'tags', value: ['a', 'b'] })]);
-    assert.deepStrictEqual(errors, ['OP_REFUSED', 'OP_INVALID', 'OP_INVALID']);
+    assert.deepStrictEqual(errors, ['ALX_ERR_OP_REFUSED', 'ALX_ERR_OP_INVALID', 'ALX_ERR_OP_INVALID']);
     assert.deepStrictEqual(await storage.get('p2'), { $type: 'Post' });
     await assert.rejects(() => storage.add('p2', 'tags', ['a', 'b']), { name: 'ValidationError' });
     await storage.add('p2', 'tags', ['a']);
     assert.deepStrictEqual(await storage.get('p2'), { $type: 'Post', tags: ['a'] });
   });
 
-  await t.test('a snapshot record with an invalid id or shape is left out', async (t2) => {
+  it('should leave out a snapshot record with an invalid id or shape', async (t2) => {
     const { storage } = await openTemp(t2);
     const meta = { clock: { a: [1, 'peer'] }, base: null, deleted: null, counters: {} };
     await storage.mergeSnapshot([
@@ -1482,7 +1481,7 @@ test("Storage: what a peer's op must look like", async (t) => {
     assert.strictEqual(await storage.fsi.exists(storage.path, 'evil.json'), false);
   });
 
-  await t.test("an advance moves the vector only when it is the feed host's own", async (t2) => {
+  it("should move the vector on an advance only when it is the feed host's own", async (t2) => {
     const { storage } = await openTemp(t2);
     const advance = (origin, seq, vector) => ({ origin, seq, ts: Date.now(), type: 'advance', vector });
     // Pushed by a peer (no adoptFrom): logged and passed on, nothing adopted.
@@ -1505,8 +1504,8 @@ test("Storage: what a peer's op must look like", async (t) => {
   });
 });
 
-test('a snapshot page is joined as one batch', async (t) => {
-  await t.test('one log append, one block, every record announced', async (t2) => {
+describe('a snapshot page joined as one batch', () => {
+  it('should make one log append and one block, and announce every record', async (t2) => {
     const { storage: a } = await openTemp(t2);
     const { storage: b } = await openTemp(t2);
     const ids = [];
@@ -1547,7 +1546,7 @@ test('a snapshot page is joined as one batch', async (t) => {
     assert.strictEqual(c.log.length, 6);
   });
 
-  await t.test('a record sealed here is left alone; the rest of the page lands', async (t2) => {
+  it('should leave a record sealed here alone and land the rest of the page', async (t2) => {
     const { storage } = await openTemp(t2, { logger: { warn: () => {}, debug() {}, info() {}, error() {} } });
     await storage.saveData('sealed', { mine: true }, { encrypted: true });
     const meta = { clock: { a: [1, 'peer'] }, base: null, deleted: null, counters: {} };
@@ -1560,273 +1559,257 @@ test('a snapshot page is joined as one batch', async (t) => {
     assert.strictEqual(storage.log.length, 1);
   });
 
-  await t.test(
-    'snapshot pages over the catalog: no listing, and a record this node cannot read is left out',
-    async (t2) => {
-      const dir = await createTemp();
-      t2.after(() => cleanupTemp(dir));
-      const first = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
-      const ids = [];
-      for (let i = 0; i < 4; i++) ids.push(await first.insert({ i }));
-      await first.close();
-      await fs.writeFile(path.join(dir, 'data', `${ids[1]}.json`), '{not json');
-      const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
-      t2.after(() => storage.close().catch(() => {}));
-      const page = await storage.snapshot({ limit: 10 });
-      assert.deepStrictEqual(
-        page.records.map((r) => r.id).sort(),
-        [ids[0], ids[2], ids[3]].sort(),
-        'the unreadable record is left out of the page, not a failure of it',
-      );
-      // Paging: the cursor is an id, the next page starts above it, and a page
-      // that filled up hands back a cursor whether or not more follows.
-      const paged = [];
-      let cursor = null;
-      let pages = 0;
-      do {
-        const next = await storage.snapshot({ cursor, limit: 1 });
-        paged.push(...next.records.map((r) => r.id));
-        cursor = next.cursor;
-        pages++;
-      } while (cursor !== null);
-      assert.deepStrictEqual(paged, [ids[0], ids[2], ids[3]].sort());
-      assert.ok(pages >= 3 && pages <= 5, `${pages} pages`);
-    },
-  );
+  it('should page a snapshot over the catalog: no listing, and a record this node cannot read is left out', async (t2) => {
+    const dir = await createTemp();
+    t2.after(() => cleanupTemp(dir));
+    const first = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
+    const ids = [];
+    for (let i = 0; i < 4; i++) ids.push(await first.insert({ i }));
+    await first.close();
+    await fs.writeFile(path.join(dir, 'data', `${ids[1]}.json`), '{not json');
+    const storage = await syncom.createDatabase({ defer: 0, path: dir, logger: false });
+    t2.after(() => storage.close().catch(() => {}));
+    const page = await storage.snapshot({ limit: 10 });
+    assert.deepStrictEqual(
+      page.records.map((r) => r.id).sort(),
+      [ids[0], ids[2], ids[3]].sort(),
+      'the unreadable record is left out of the page, not a failure of it',
+    );
+    // Paging: the cursor is an id, the next page starts above it, and a page
+    // that filled up hands back a cursor whether or not more follows.
+    const paged = [];
+    let cursor = null;
+    let pages = 0;
+    do {
+      const next = await storage.snapshot({ cursor, limit: 1 });
+      paged.push(...next.records.map((r) => r.id));
+      cursor = next.cursor;
+      pages++;
+    } while (cursor !== null);
+    assert.deepStrictEqual(paged, [ids[0], ids[2], ids[3]].sort());
+    assert.ok(pages >= 3 && pages <= 5, `${pages} pages`);
+  });
 });
 
-test('Storage: the bounds of the sequence and tree engines', async (t) => {
-  await t.test(
-    'open({ sync: { pendingMax } }) bounds a peer’s pending work; a refusal is reported with its count',
-    async (t2) => {
-      const { storage } = await openTemp(t2, { sync: { pendingMax: 2 } });
-      const errors = [];
-      storage.on('error', (error) => errors.push(error));
-      const id = await storage.insert({ title: 'doc' });
-      await storage.splice(id, 'body', 0, 0, 'ab');
-      // The runs the cuts wait for are stamped after the record's insert: a
-      // cut of a run below the reset watermark is moot and pruned at once.
-      const soon = Date.now() + 1000;
-      const waiting = (seq, origin) =>
-        remoteOp('peer', seq, 'splice', id, {
-          ts: soon + 1000 + seq,
-          key: 'body',
-          value: { cut: [[`${soon}:${origin}`, 0, 1]], content: '' },
-        });
-      const result = await storage.applyRemote([waiting(1, 'Z'), waiting(2, 'Y'), waiting(3, 'X')]);
-      assert.strictEqual(result.applied, 3, 'a refused op is accepted into the log, like a kind clash');
-      assert.deepStrictEqual(
-        errors.map((error) => [error.code, error.rejected]),
-        [['OP_REFUSED', [{ field: 'body', reason: 'bound', detail: 'pending', count: 2, max: 2 }]]],
-      );
-      assert.strictEqual((await storage.get(id)).body, 'ab');
-      const bad = (pendingMax) =>
-        syncom.createDatabase({ defer: 0, path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
-      assert.throws(() => bad(0), TypeError);
-      assert.throws(() => bad('many'), TypeError);
-    },
-  );
-
-  await t.test(
-    'treeMove refuses a node that would read below MAX_DEPTH levels, and a place with no room between its neighbours',
-    async (t2) => {
-      const { MAX_DEPTH, MAX_FI } = require('../src/tree/moves.js');
-      const { storage } = await openTemp(t2);
-      const id = await storage.insert({});
-      let parent = null;
-      for (let i = 1; i <= MAX_DEPTH; i++) {
-        await storage.treeMove(id, 'outline', `n${i}`, parent);
-        parent = `n${i}`;
-      }
-      const deeper = { code: 'OUT_OF_RANGE', depth: MAX_DEPTH + 1, max: MAX_DEPTH };
-      await assert.rejects(() => storage.treeMove(id, 'outline', 'deep', parent), deeper);
-      // A subtree counts whole: two levels fit under the level before the last but one, not under the last but one.
-      await storage.treeMove(id, 'outline', 'pair');
-      await storage.treeMove(id, 'outline', 'child', 'pair');
-      await assert.rejects(() => storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 1}`), {
-        code: 'OUT_OF_RANGE',
+describe('Storage: the bounds of the sequence and tree engines', () => {
+  it('should bound a peer’s pending work by open({ sync: { pendingMax } }) and report a refusal with its count', async (t2) => {
+    const { storage } = await openTemp(t2, { sync: { pendingMax: 2 } });
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    const id = await storage.insert({ title: 'doc' });
+    await storage.splice(id, 'body', 0, 0, 'ab');
+    // The runs the cuts wait for are stamped after the record's insert: a
+    // cut of a run below the reset watermark is moot and pruned at once.
+    const soon = Date.now() + 1000;
+    const waiting = (seq, origin) =>
+      remoteOp('peer', seq, 'splice', id, {
+        ts: soon + 1000 + seq,
+        key: 'body',
+        value: { cut: [[`${soon}:${origin}`, 0, 1]], content: '' },
       });
-      await storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 2}`);
-      // A peer's place with no room after it: the next local place would need an index longer than MAX_FI.
-      const edge = { key: 'outline', value: { node: 'edge', parent: null, fi: `${'z'.repeat(MAX_FI - 1)}V` } };
-      await storage.applyRemote([remoteOp('peer', 1, 'tree', id, edge)]);
-      const noRoom = { code: 'OUT_OF_RANGE', reason: 'fi', max: MAX_FI };
-      await assert.rejects(() => storage.treeMove(id, 'outline', 'next', null, { after: 'edge' }), noRoom);
-      await storage.treeMove(id, 'outline', 'next', null, { before: 'edge' });
-      const roots = (await storage.get(id)).outline.map((node) => node.id);
-      assert.deepStrictEqual(roots.slice(-2), ['next', 'edge']);
-    },
-  );
+    const result = await storage.applyRemote([waiting(1, 'Z'), waiting(2, 'Y'), waiting(3, 'X')]);
+    assert.strictEqual(result.applied, 3, 'a refused op is accepted into the log, like a kind clash');
+    assert.deepStrictEqual(
+      errors.map((error) => [error.code, error.rejected]),
+      [['ALX_ERR_OP_REFUSED', [{ field: 'body', reason: 'bound', detail: 'pending', count: 2, max: 2 }]]],
+    );
+    assert.strictEqual((await storage.get(id)).body, 'ab');
+    const bad = (pendingMax) =>
+      syncom.createDatabase({ defer: 0, path: `${storage.path}-bad`, logger: false, sync: { pendingMax } });
+    assert.throws(() => bad(0), TypeError);
+    assert.throws(() => bad('many'), TypeError);
+  });
 
-  await t.test(
-    'a tree field holds MAX_MOVES moves: one more is bound here and from a peer, a snapshot past it is not taken',
-    async (t2) => {
-      const { MAX_MOVES } = require('../src/tree/moves.js');
-      const { storage } = await openTemp(t2);
-      const errors = [];
-      storage.on('error', (error) => errors.push(error));
-      const moves = {};
-      for (let i = 0; i < MAX_MOVES; i++) moves[`m${i}`] = [[i + 1, 'peer', null, 'V']];
-      const meta = (extra) => ({ clock: {}, base: null, deleted: null, counters: {}, ...extra });
-      const block = (more = {}) => ({ k: 'tree', ts: MAX_MOVES + 1, moves: { ...moves, ...more } });
-      await storage.mergeSnapshot([
-        { id: 'full', data: {}, meta: meta({ blocks: { outline: block() } }) },
-        {
-          id: 'past',
-          data: {},
-          meta: meta({
-            clock: { n: [1, 'peer'] },
-            blocks: { outline: block({ x: [[MAX_MOVES + 1, 'peer', null, 'V']] }) },
-          }),
-        },
-      ]);
-      assert.strictEqual((await storage.get('full')).outline.length, MAX_MOVES);
-      assert.strictEqual((await storage.get('past')).outline, undefined, 'a block past the bound is not taken');
-      const seq = storage.log.lastSeq;
-      const bound = { field: 'outline', kind: 'bound', detail: 'moves', count: MAX_MOVES + 1, max: MAX_MOVES };
-      await assert.rejects(() => storage.treeMove('full', 'outline', 'x'), { code: 'FIELD_KIND', ...bound });
-      assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
-      const value = { node: 'y', parent: null, fi: 'V' };
-      await storage.applyRemote([remoteOp('peer', 1, 'tree', 'full', { key: 'outline', value })]);
-      assert.deepStrictEqual(
-        errors.map((error) => [error.code, error.rejected]),
+  it('should refuse in treeMove a node that would read below MAX_DEPTH levels, and a place with no room between its neighbours', async (t2) => {
+    const { MAX_DEPTH, MAX_FI } = require('../src/tree/moves.js');
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({});
+    let parent = null;
+    for (let i = 1; i <= MAX_DEPTH; i++) {
+      await storage.treeMove(id, 'outline', `n${i}`, parent);
+      parent = `n${i}`;
+    }
+    const deeper = { code: 'ALX_ERR_OUT_OF_RANGE', depth: MAX_DEPTH + 1, max: MAX_DEPTH };
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'deep', parent), deeper);
+    // A subtree counts whole: two levels fit under the level before the last but one, not under the last but one.
+    await storage.treeMove(id, 'outline', 'pair');
+    await storage.treeMove(id, 'outline', 'child', 'pair');
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 1}`), {
+      code: 'ALX_ERR_OUT_OF_RANGE',
+    });
+    await storage.treeMove(id, 'outline', 'pair', `n${MAX_DEPTH - 2}`);
+    // A peer's place with no room after it: the next local place would need an index longer than MAX_FI.
+    const edge = { key: 'outline', value: { node: 'edge', parent: null, fi: `${'z'.repeat(MAX_FI - 1)}V` } };
+    await storage.applyRemote([remoteOp('peer', 1, 'tree', id, edge)]);
+    const noRoom = { code: 'ALX_ERR_OUT_OF_RANGE', reason: 'fi', max: MAX_FI };
+    await assert.rejects(() => storage.treeMove(id, 'outline', 'next', null, { after: 'edge' }), noRoom);
+    await storage.treeMove(id, 'outline', 'next', null, { before: 'edge' });
+    const roots = (await storage.get(id)).outline.map((node) => node.id);
+    assert.deepStrictEqual(roots.slice(-2), ['next', 'edge']);
+  });
+
+  it('should hold MAX_MOVES moves in a tree field: one more is bound here and from a peer, a snapshot past it is not taken', async (t2) => {
+    const { MAX_MOVES } = require('../src/tree/moves.js');
+    const { storage } = await openTemp(t2);
+    const errors = [];
+    storage.on('error', (error) => errors.push(error));
+    const moves = {};
+    for (let i = 0; i < MAX_MOVES; i++) moves[`m${i}`] = [[i + 1, 'peer', null, 'V']];
+    const meta = (extra) => ({ clock: {}, base: null, deleted: null, counters: {}, ...extra });
+    const block = (more = {}) => ({ k: 'tree', ts: MAX_MOVES + 1, moves: { ...moves, ...more } });
+    await storage.mergeSnapshot([
+      { id: 'full', data: {}, meta: meta({ blocks: { outline: block() } }) },
+      {
+        id: 'past',
+        data: {},
+        meta: meta({
+          clock: { n: [1, 'peer'] },
+          blocks: { outline: block({ x: [[MAX_MOVES + 1, 'peer', null, 'V']] }) },
+        }),
+      },
+    ]);
+    assert.strictEqual((await storage.get('full')).outline.length, MAX_MOVES);
+    assert.strictEqual((await storage.get('past')).outline, undefined, 'a block past the bound is not taken');
+    const seq = storage.log.lastSeq;
+    const bound = { field: 'outline', kind: 'bound', detail: 'moves', count: MAX_MOVES + 1, max: MAX_MOVES };
+    await assert.rejects(() => storage.treeMove('full', 'outline', 'x'), { code: 'ALX_ERR_FIELD_KIND', ...bound });
+    assert.strictEqual(storage.log.lastSeq, seq, 'nothing logged');
+    const value = { node: 'y', parent: null, fi: 'V' };
+    await storage.applyRemote([remoteOp('peer', 1, 'tree', 'full', { key: 'outline', value })]);
+    assert.deepStrictEqual(
+      errors.map((error) => [error.code, error.rejected]),
+      [
         [
-          [
-            'OP_REFUSED',
-            [{ field: 'outline', reason: 'bound', detail: 'moves', count: MAX_MOVES + 1, max: MAX_MOVES }],
-          ],
+          'ALX_ERR_OP_REFUSED',
+          [{ field: 'outline', reason: 'bound', detail: 'moves', count: MAX_MOVES + 1, max: MAX_MOVES }],
         ],
-      );
-      assert.strictEqual((await storage.get('full')).outline.length, MAX_MOVES, 'the field as it was');
-    },
-  );
+      ],
+    );
+    assert.strictEqual((await storage.get('full')).outline.length, MAX_MOVES, 'the field as it was');
+  });
 });
 
-test('Storage: a sequence op on a field of another kind is refused before any index is read', async (t) => {
-  await t.test(
-    'splice, setAt, move, mark and treeMove on the wrong kind are FIELD_KIND whatever the index',
-    async (t2) => {
-      const { storage } = await openTemp(t2);
-      const id = await storage.insert({ title: 'doc', n: 1 });
-      await storage.treeMove(id, 'outline', 'r');
-      await storage.inc(id, 'hits', 1);
-      for (const index of [0, 3]) {
-        await assert.rejects(() => storage.splice(id, 'outline', index, 0, 'x'), { code: 'FIELD_KIND', kind: 'tree' });
-      }
-      await assert.rejects(() => storage.setAt(id, 'title', 7, 'x'), { code: 'FIELD_KIND', kind: 'register' });
-      await assert.rejects(() => storage.move(id, 'hits', 5, 0), { code: 'FIELD_KIND', kind: 'counter' });
-      await assert.rejects(() => storage.mark(id, 'title', 0, 99, 'bold', true), {
-        code: 'FIELD_KIND',
-        kind: 'register',
+describe('Storage: a sequence op on a field of another kind, refused before any index is read', () => {
+  it('should refuse splice, setAt, move, mark and treeMove on the wrong kind as FIELD_KIND whatever the index', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ title: 'doc', n: 1 });
+    await storage.treeMove(id, 'outline', 'r');
+    await storage.inc(id, 'hits', 1);
+    for (const index of [0, 3]) {
+      await assert.rejects(() => storage.splice(id, 'outline', index, 0, 'x'), {
+        code: 'ALX_ERR_FIELD_KIND',
+        kind: 'tree',
       });
-      await assert.rejects(() => storage.treeMove(id, 'title', 'n'), { code: 'FIELD_KIND', kind: 'register' });
-      await assert.rejects(() => storage.treeMove(id, 'n', 'x'), { code: 'FIELD_KIND', kind: 'register' });
-      const outline = [{ id: 'r', children: [] }];
-      assert.deepStrictEqual(await storage.get(id), { title: 'doc', n: 1, outline, hits: 1 });
-    },
-  );
+    }
+    await assert.rejects(() => storage.setAt(id, 'title', 7, 'x'), { code: 'ALX_ERR_FIELD_KIND', kind: 'register' });
+    await assert.rejects(() => storage.move(id, 'hits', 5, 0), { code: 'ALX_ERR_FIELD_KIND', kind: 'counter' });
+    await assert.rejects(() => storage.mark(id, 'title', 0, 99, 'bold', true), {
+      code: 'ALX_ERR_FIELD_KIND',
+      kind: 'register',
+    });
+    await assert.rejects(() => storage.treeMove(id, 'title', 'n'), { code: 'ALX_ERR_FIELD_KIND', kind: 'register' });
+    await assert.rejects(() => storage.treeMove(id, 'n', 'x'), { code: 'ALX_ERR_FIELD_KIND', kind: 'register' });
+    const outline = [{ id: 'r', children: [] }];
+    assert.deepStrictEqual(await storage.get(id), { title: 'doc', n: 1, outline, hits: 1 });
+  });
 
-  await t.test(
-    'an array spliced into a text, or a string into a list, is FIELD_KIND and leaves the field whole',
-    async (t2) => {
-      const { storage } = await openTemp(t2);
-      const id = await storage.insert({ title: 'doc' });
-      await storage.push(id, 'body', 'Hello world');
-      await storage.push(id, 'items', [1, 2]);
-      const seq = storage.log.lastSeq;
-      for (const call of [
-        () => storage.push(id, 'body', [1]),
-        () => storage.splice(id, 'body', 5, 0, ['!']),
-        () => storage.splice(id, 'body', 0, 1, []),
-      ]) {
-        await assert.rejects(call, {
-          code: 'FIELD_KIND',
-          field: 'body',
-          kind: 'text',
-          message: /a string, not an array/,
-        });
-      }
-      for (const call of [() => storage.push(id, 'items', 'x'), () => storage.splice(id, 'items', 0, 1, 'y')]) {
-        await assert.rejects(call, {
-          code: 'FIELD_KIND',
-          field: 'items',
-          kind: 'list',
-          message: /an array, not a string/,
-        });
-      }
-      assert.strictEqual(storage.log.lastSeq, seq, 'nothing was stamped or logged');
-      assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'Hello world', items: [1, 2] });
-      await storage.splice(id, 'body', 0, 6);
-      await storage.splice(id, 'items', 0, 1);
-      assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'world', items: [2] });
-    },
-  );
+  it('should refuse an array spliced into a text, or a string into a list, as FIELD_KIND and leave the field whole', async (t2) => {
+    const { storage } = await openTemp(t2);
+    const id = await storage.insert({ title: 'doc' });
+    await storage.push(id, 'body', 'Hello world');
+    await storage.push(id, 'items', [1, 2]);
+    const seq = storage.log.lastSeq;
+    for (const call of [
+      () => storage.push(id, 'body', [1]),
+      () => storage.splice(id, 'body', 5, 0, ['!']),
+      () => storage.splice(id, 'body', 0, 1, []),
+    ]) {
+      await assert.rejects(call, {
+        code: 'ALX_ERR_FIELD_KIND',
+        field: 'body',
+        kind: 'text',
+        message: /a string, not an array/,
+      });
+    }
+    for (const call of [() => storage.push(id, 'items', 'x'), () => storage.splice(id, 'items', 0, 1, 'y')]) {
+      await assert.rejects(call, {
+        code: 'ALX_ERR_FIELD_KIND',
+        field: 'items',
+        kind: 'list',
+        message: /an array, not a string/,
+      });
+    }
+    assert.strictEqual(storage.log.lastSeq, seq, 'nothing was stamped or logged');
+    assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'Hello world', items: [1, 2] });
+    await storage.splice(id, 'body', 0, 6);
+    await storage.splice(id, 'items', 0, 1);
+    assert.deepStrictEqual(await storage.get(id), { title: 'doc', body: 'world', items: [2] });
+  });
 });
 
-test('unset() removes fields of any kind', async (t) => {
-  await t.test(
-    'through the storage, a collection, a Record and a patch; nothing it does not hold is an op',
-    async (t2) => {
-      const { storage } = await openTemp(t2, { schema: { entities: { Post: {} } } });
-      const id = await storage.insert({ $type: 'Post', title: 'a', n: 1 });
-      await storage.inc(id, 'hits', 2);
-      await storage.add(id, 'tags', ['x']);
-      await storage.push(id, 'body', 'hi');
-      const commits = [];
-      storage.on('commit', ({ op }) => commits.push(op.type));
-      await storage.unset(id, 'n');
-      assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', hits: 2, tags: ['x'], body: 'hi' });
-      await storage.unset(id, ['hits', 'tags']);
-      assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', body: 'hi' });
-      await storage.Post.unset(id, 'body');
-      const record = await storage.document(id);
-      await record.unset(['title', 'nope']);
-      assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
-      await storage.unset(id, 'nope');
-      assert.deepStrictEqual(commits, ['unset', 'unset', 'unset', 'unset'], 'an unset of nothing held is no op');
-      assert.strictEqual(
-        await storage.applyPatches(id, [
-          { action: 'put', field: 'z', value: 1 },
-          { action: 'unset', field: 'z' },
-        ]),
-        2,
-      );
-      assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
-      await assert.rejects(() => storage.unset(id, []), TypeError);
-      await assert.rejects(() => storage.unset(id, ['__proto__']), TypeError);
-      await assert.rejects(() => storage.applyPatches(id, [{ action: 'unset', field: '' }]), TypeError);
-    },
-  );
+describe('unset() over fields of any kind', () => {
+  it('should remove fields through the storage, a collection, a Record and a patch; nothing it does not hold is an op', async (t2) => {
+    const { storage } = await openTemp(t2, { schema: { entities: { Post: {} } } });
+    const id = await storage.insert({ $type: 'Post', title: 'a', n: 1 });
+    await storage.inc(id, 'hits', 2);
+    await storage.add(id, 'tags', ['x']);
+    await storage.push(id, 'body', 'hi');
+    const commits = [];
+    storage.on('commit', ({ op }) => commits.push(op.type));
+    await storage.unset(id, 'n');
+    assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', hits: 2, tags: ['x'], body: 'hi' });
+    await storage.unset(id, ['hits', 'tags']);
+    assert.deepStrictEqual(await storage.get(id), { $type: 'Post', title: 'a', body: 'hi' });
+    await storage.Post.unset(id, 'body');
+    const record = await storage.document(id);
+    await record.unset(['title', 'nope']);
+    assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
+    await storage.unset(id, 'nope');
+    assert.deepStrictEqual(commits, ['unset', 'unset', 'unset', 'unset'], 'an unset of nothing held is no op');
+    assert.strictEqual(
+      await storage.applyPatches(id, [
+        { action: 'put', field: 'z', value: 1 },
+        { action: 'unset', field: 'z' },
+      ]),
+      2,
+    );
+    assert.deepStrictEqual(await storage.get(id), { $type: 'Post' });
+    await assert.rejects(() => storage.unset(id, []), TypeError);
+    await assert.rejects(() => storage.unset(id, ['__proto__']), TypeError);
+    await assert.rejects(() => storage.applyPatches(id, [{ action: 'unset', field: '' }]), TypeError);
+  });
 });
 
-test('a surrogate pair is never split: splice, mark and cursor refuse an index inside it, updateText goes around it, a lone half is refused', async (t) => {
-  const { storage } = await openTemp(t);
-  const id = await storage.insert({});
-  await storage.push(id, 'body', 'a😀b');
-  const inside = { code: 'SURROGATE', id, field: 'body', index: 2 };
-  await assert.rejects(() => storage.splice(id, 'body', 2, 0, 'x'), inside);
-  await assert.rejects(() => storage.splice(id, 'body', 0, 2), inside, 'a cut ending inside the pair');
-  await assert.rejects(() => storage.mark(id, 'body', 0, 2, 'bold', true), inside);
-  await assert.rejects(() => storage.unmark(id, 'body', 2, 3, 'bold'), inside);
-  await assert.rejects(() => storage.cursor(id, 'body', 2), inside);
-  await assert.rejects(() => storage.push(id, 'body', '\uD83D'), TypeError, 'a lone high half');
-  await assert.rejects(() => storage.splice(id, 'body', 0, 0, '\uDE00x'), TypeError, 'a lone low half');
-  await assert.rejects(
-    () => storage.applyPatches(id, [{ action: 'splice', field: 'body', index: 0, count: 0, content: '\uD83D' }]),
-    TypeError,
-  );
-  // Around the pair everything goes; the diff keeps it whole.
-  await storage.splice(id, 'body', 1, 2, '😁');
-  assert.deepStrictEqual(await storage.get(id), { body: 'a😁b' });
-  await storage.updateText(id, 'body', 'a😂😁 b');
-  assert.deepStrictEqual(await storage.get(id), { body: 'a😂😁 b' });
-  await storage.updateText(id, 'body', 'ab');
-  assert.deepStrictEqual(await storage.get(id), { body: 'ab' });
-  assert.strictEqual(typeof (await storage.cursor(id, 'body', 1)), 'string');
+describe('surrogate pairs', () => {
+  it('should never split a surrogate pair: splice, mark and cursor refuse an index inside it, updateText goes around it, a lone half is refused', async (t) => {
+    const { storage } = await openTemp(t);
+    const id = await storage.insert({});
+    await storage.push(id, 'body', 'a😀b');
+    const inside = { code: 'ALX_ERR_SURROGATE', id, field: 'body', index: 2 };
+    await assert.rejects(() => storage.splice(id, 'body', 2, 0, 'x'), inside);
+    await assert.rejects(() => storage.splice(id, 'body', 0, 2), inside, 'a cut ending inside the pair');
+    await assert.rejects(() => storage.mark(id, 'body', 0, 2, 'bold', true), inside);
+    await assert.rejects(() => storage.unmark(id, 'body', 2, 3, 'bold'), inside);
+    await assert.rejects(() => storage.cursor(id, 'body', 2), inside);
+    await assert.rejects(() => storage.push(id, 'body', '\uD83D'), TypeError, 'a lone high half');
+    await assert.rejects(() => storage.splice(id, 'body', 0, 0, '\uDE00x'), TypeError, 'a lone low half');
+    await assert.rejects(
+      () => storage.applyPatches(id, [{ action: 'splice', field: 'body', index: 0, count: 0, content: '\uD83D' }]),
+      TypeError,
+    );
+    // Around the pair everything goes; the diff keeps it whole.
+    await storage.splice(id, 'body', 1, 2, '😁');
+    assert.deepStrictEqual(await storage.get(id), { body: 'a😁b' });
+    await storage.updateText(id, 'body', 'a😂😁 b');
+    assert.deepStrictEqual(await storage.get(id), { body: 'a😂😁 b' });
+    await storage.updateText(id, 'body', 'ab');
+    assert.deepStrictEqual(await storage.get(id), { body: 'ab' });
+    assert.strictEqual(typeof (await storage.cursor(id, 'body', 1)), 'string');
+  });
 });
 
-test('paths: a field may be a path of stable segments, read composed', async (t) => {
-  await t.test('children of a prefix merge, a whole-object write resets them, a read composes', async (t2) => {
+describe('paths: a field as a path of stable segments, read composed', () => {
+  it('should merge the children of a prefix, reset them on a whole-object write, and compose them on a read', async (t2) => {
     const { storage } = await openTemp(t2, { schema: { entities: { User: { index: ['profile.city'] } } } });
     const id = await storage.insert({ $type: 'User', name: 'ada', profile: { zip: 1 } });
     await storage.update(id, { 'profile/city': 'Kyiv' });
@@ -1853,18 +1836,18 @@ test('paths: a field may be a path of stable segments, read composed', async (t)
     // A prefix a counter holds refuses what is under it, before anything is stamped.
     await storage.inc(id, 'hits', 1);
     await assert.rejects(() => storage.update(id, { 'hits/today': 1 }), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       field: 'hits/today',
       kind: 'counter',
       prefix: 'hits',
     });
-    await assert.rejects(() => storage.push(id, 'hits/log', 'x'), { code: 'FIELD_KIND', prefix: 'hits' });
+    await assert.rejects(() => storage.push(id, 'hits/log', 'x'), { code: 'ALX_ERR_FIELD_KIND', prefix: 'hits' });
     await assert.rejects(() => storage.update(id, { 'a//b': 1 }), TypeError);
     await assert.rejects(() => storage.inc(id, '__proto__/x', 1), TypeError);
     await assert.rejects(() => storage.applyPatches(id, [{ action: 'put', field: 'a/', value: 1 }]), TypeError);
   });
 
-  await t.test('a validator sees the paths composed and a set under a path keeps its siblings', async (t2) => {
+  it('should show a validator the paths composed, and keep the siblings on a set under a path', async (t2) => {
     // A Standard Schema that fills a default inside the object at `profile`.
     const schema = {
       '~standard': {
@@ -1882,7 +1865,7 @@ test('paths: a field may be a path of stable segments, read composed', async (t)
     assert.deepStrictEqual(ops.at(-1).data, { 'profile/city': 'Kyiv' }, 'the set carries the path alone');
   });
 
-  await t.test('a diff and an undo see paths as fields', async (t2) => {
+  it('should show a diff and an undo the paths as fields', async (t2) => {
     const { createUndo } = require('../src/undo/undo.js');
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ profile: { zip: 1 } });
@@ -1904,8 +1887,8 @@ test('paths: a field may be a path of stable segments, read composed', async (t)
   });
 });
 
-test('children of list elements and tree nodes: composed, reachable, named', async (t) => {
-  await t.test('a list element carries fields, read inside it; a removed element’s go unreachable', async (t2) => {
+describe('children of list elements and tree nodes: composed, reachable, named', () => {
+  it('should carry fields on a list element, read inside it, and make a removed element’s unreachable', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({ title: 'doc' });
     await storage.push(id, 'items', [{ kind: 'note' }, 'plain']);
@@ -1925,7 +1908,7 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
     assert.strictEqual(await record.elementAt('items', 0), first);
     // A path under an element that is not there is refused before the stamp.
     await assert.rejects(() => storage.update(id, { 'items/9:9:Z/body': 'nope' }), {
-      code: 'NOT_FOUND',
+      code: 'ALX_ERR_NOT_FOUND',
       id,
       field: 'items',
       elem: '9:9:Z',
@@ -1940,7 +1923,7 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
     assert.strictEqual((await storage.get(id)).items[1].body, 'x');
     // The text inside the first element is a text: edited by position, not by a put.
     await assert.rejects(() => storage.update(id, { [`items/${first}/body`]: 'bye' }), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       kind: 'text',
     });
     // The second element removed: its field is unreachable — not read, dropped by compact.
@@ -1965,12 +1948,12 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
     ]);
     // Under a text nothing hangs.
     await assert.rejects(() => storage.update(id, { [`items/${renamed}/body/1:0:A/x`]: 1 }), {
-      code: 'FIELD_KIND',
+      code: 'ALX_ERR_FIELD_KIND',
       kind: 'text',
     });
   });
 
-  await t.test('a tree node carries data, read as its data', async (t2) => {
+  it('should carry data on a tree node, read as its data', async (t2) => {
     const { storage } = await openTemp(t2);
     const id = await storage.insert({});
     await storage.treeMove(id, 'outline', 'r');
@@ -1985,7 +1968,7 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
       },
     ]);
     await assert.rejects(() => storage.update(id, { 'outline/zz/title': 'nope' }), {
-      code: 'NOT_FOUND',
+      code: 'ALX_ERR_NOT_FOUND',
       field: 'outline',
       elem: 'zz',
     });
@@ -1995,20 +1978,22 @@ test('children of list elements and tree nodes: composed, reachable, named', asy
   });
 });
 
-test('a peer’s actor or from past MAX_ACTOR is malformed: never hashed, logged or relayed; a local one is a TypeError', async (t) => {
-  const { MAX_ACTOR } = require('../src/shape.js');
-  const { storage } = await openTemp(t);
-  const long = 'a'.repeat(MAX_ACTOR + 1);
-  const ok = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 }, actor: 'a'.repeat(MAX_ACTOR) });
-  const badActor = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, actor: long });
-  const badFrom = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, from: long });
-  const next = storage.log.next;
-  const result = await storage.applyRemote([ok, badActor, badFrom], { via: 'L' });
-  assert.strictEqual(result.applied, 1, 'an actor at the bound is taken');
-  assert.strictEqual(result.malformed, 2, 'one past it, as actor or as from, is malformed');
-  assert.strictEqual(storage.log.next, next + 1, 'the malformed ones were not logged');
-  assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
-  await assert.rejects(storage.set('local', { n: 1 }, { actor: long }), TypeError);
-  await storage.set('local', { n: 1 }, { actor: 'a'.repeat(MAX_ACTOR) });
-  assert.deepStrictEqual(await storage.get('local'), { n: 1 });
+describe("a peer's actor and from", () => {
+  it('should treat a peer’s actor or from past MAX_ACTOR as malformed: never hashed, logged or relayed; a local one is a TypeError', async (t) => {
+    const { MAX_ACTOR } = require('../src/shape.js');
+    const { storage } = await openTemp(t);
+    const long = 'a'.repeat(MAX_ACTOR + 1);
+    const ok = remoteOp('peer', 1, 'write', 'r1', { data: { a: 1 }, actor: 'a'.repeat(MAX_ACTOR) });
+    const badActor = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, actor: long });
+    const badFrom = remoteOp('peer', 2, 'set', 'r1', { data: { b: 2 }, from: long });
+    const next = storage.log.next;
+    const result = await storage.applyRemote([ok, badActor, badFrom], { via: 'L' });
+    assert.strictEqual(result.applied, 1, 'an actor at the bound is taken');
+    assert.strictEqual(result.malformed, 2, 'one past it, as actor or as from, is malformed');
+    assert.strictEqual(storage.log.next, next + 1, 'the malformed ones were not logged');
+    assert.deepStrictEqual(await storage.get('r1'), { a: 1 });
+    await assert.rejects(storage.set('local', { n: 1 }, { actor: long }), TypeError);
+    await storage.set('local', { n: 1 }, { actor: 'a'.repeat(MAX_ACTOR) });
+    assert.deepStrictEqual(await storage.get('local'), { n: 1 });
+  });
 });

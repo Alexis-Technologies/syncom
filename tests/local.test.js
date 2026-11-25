@@ -4,8 +4,8 @@
 // catalog, a snapshot or at a peer; the store, the collection's prefix, the
 // event, observe(), toStore().
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { toStore } = require('../src/store/store.js');
@@ -13,8 +13,8 @@ const { createMesh, settle } = require('./utils/mesh.js');
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
-test('local documents', async (t) => {
-  await t.test('a local document is never an op: not in the log, the catalog, a snapshot, or at a peer', async (t2) => {
+describe('local documents', () => {
+  it('should never make a local document an op: not in the log, the catalog, a snapshot, or at a peer', async (t2) => {
     const fsi = memory();
     const schema = { entities: { Post: {} } };
     const createStorage = async (t3, name, options = {}) => {
@@ -86,9 +86,9 @@ test('local documents', async (t) => {
     assert.strictEqual(await a.local.get('n'), 4);
     stopThrowing();
     stopHearing();
-    // A document that does not parse is CORRUPT, with its key.
+    // A document that does not parse is ALX_ERR_CORRUPT, with its key.
     await fsi.write('/A/local', 'bad', '{oops');
-    await assert.rejects(a.local.get('bad'), { code: 'CORRUPT', key: 'bad' });
+    await assert.rejects(a.local.get('bad'), { code: 'ALX_ERR_CORRUPT', key: 'bad' });
     // Kept across a reopen; swept by drop().
     await a.close();
     const again = await syncom.createDatabase({ path: '/A', fsi, defer: 0, logger: false, schema, lock: false });
@@ -110,20 +110,20 @@ test('local documents', async (t) => {
     assert.throws(() => b.local.scoped('a/b'), TypeError);
   });
 
-  await t.test('a local write after close() is CLOSED, as a write through the queue is', async () => {
+  it('should refuse a local write after close() with CLOSED, as a write through the queue is', async () => {
     const db = await syncom.createDatabase({ path: '/closed', fsi: memory(), defer: 0, logger: false });
     await db.local.set('k', 1);
     const scoped = db.local.scoped('Post');
     await db.close();
-    await assert.rejects(db.local.set('k', 2), { code: 'CLOSED' });
-    await assert.rejects(db.local.delete('k'), { code: 'CLOSED' });
-    await assert.rejects(scoped.set('k', 2), { code: 'CLOSED' });
+    await assert.rejects(db.local.set('k', 2), { code: 'ALX_ERR_CLOSED' });
+    await assert.rejects(db.local.delete('k'), { code: 'ALX_ERR_CLOSED' });
+    await assert.rejects(scoped.set('k', 2), { code: 'ALX_ERR_CLOSED' });
   });
 
-  await t.test('without the plugin, db.local is PLUGIN_MISSING', async (t2) => {
+  it('should throw PLUGIN_MISSING from db.local without the plugin', async (t2) => {
     const core = require('../index.js');
     const db = await core.createDatabase({ fsi: memory(), path: '/c', logger: false, defer: 0 });
     t2.after(() => db.close());
-    assert.throws(() => db.local, { code: 'PLUGIN_MISSING' });
+    assert.throws(() => db.local, { code: 'ALX_ERR_PLUGIN_MISSING' });
   });
 });

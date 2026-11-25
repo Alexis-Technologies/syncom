@@ -45,7 +45,9 @@ class MockDirectoryHandle {
   }
 
   async *keys() {
-    for (const name of Array.from(this.#entries.keys())) yield name;
+    for (const name of Array.from(this.#entries.keys())) {
+      yield name;
+    }
   }
 
   async getDirectoryHandle(name, { create } = {}) {

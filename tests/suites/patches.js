@@ -5,12 +5,13 @@
 // as the version and merges like any write, a remove of exactly the tags an
 // undo names, one turn of the queue, what a commit listener is handed.
 
+const { it } = require('node:test');
 const { createMesh, settle } = require('../utils/mesh.js');
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 
-const runPatchTests = async (t, assert, createStorage) => {
-  await t.test('diff() names what turns one version into another, per field by kind', async (t2) => {
+const runPatchTests = (assert, createStorage) => {
+  it('should name in diff() what turns one version into another, per field by kind', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({ title: 'a', n: 1 });
     await storage.inc(id, 'hits', 3);
@@ -111,14 +112,14 @@ const runPatchTests = async (t, assert, createStorage) => {
     await storage.purge(purged);
     assert.deepStrictEqual(await storage.diff(purged, { tag: 'v2' }), [{ action: 'purge' }]);
     // A copy, raw, no hooks; errors as get(id, { at }) raises them.
-    await assert.rejects(() => storage.diff(id, { tag: 'nope' }), { code: 'TAG_NOT_FOUND' });
-    await assert.rejects(() => storage.diff(id, true), { code: 'INVALID_VERSION' });
-    await assert.rejects(() => storage.diff('bad id!', { tag: 'v1' }), { code: 'INVALID_ID' });
+    await assert.rejects(() => storage.diff(id, { tag: 'nope' }), { code: 'ALX_ERR_TAG_NOT_FOUND' });
+    await assert.rejects(() => storage.diff(id, true), { code: 'ALX_ERR_INVALID_VERSION' });
+    await assert.rejects(() => storage.diff('bad id!', { tag: 'v1' }), { code: 'ALX_ERR_INVALID_ID' });
     const sealed = await storage.insert({ pin: '1' }, { encrypted: true });
-    await assert.rejects(() => storage.diff(sealed), { code: 'ENCRYPTED' });
+    await assert.rejects(() => storage.diff(sealed), { code: 'ALX_ERR_ENCRYPTED' });
   });
 
-  await t.test('restore() reads as the version, through every kind, and merges like any write', async (t2) => {
+  it('should make restore() read as the version, through every kind, and merge like any write', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
     const b = mesh.get('B');
@@ -158,7 +159,7 @@ const runPatchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await a.get(id), { title: 'a', n: 1 });
     assert.ok((await a.history(id, { limit: Infinity })).versions.length > before);
     await assert.rejects(() => a.restore(id), TypeError);
-    await assert.rejects(() => a.restore(id, { tag: 'nope' }), { code: 'TAG_NOT_FOUND' });
+    await assert.rejects(() => a.restore(id, { tag: 'nope' }), { code: 'ALX_ERR_TAG_NOT_FOUND' });
     assert.strictEqual(await a.restore(id, a.log.lastEventId), 0, 'nothing to do');
   });
 
@@ -173,132 +174,123 @@ const runPatchTests = async (t, assert, createStorage) => {
     return [kind, storage.getCachedData(id)[field]];
   };
 
-  await t.test(
-    'applyPatches(diff) brings a field back as the kind it was, whatever kind it is now: every pair of kinds',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const make = {
-        absent: async () => {},
-        register: (id) => storage.update(id, { f: 'plain' }),
-        counter: (id) => storage.inc(id, 'f', 3),
-        set: (id) => storage.add(id, 'f', ['a', 'b']),
-        list: (id) => storage.push(id, 'f', [1, 2]),
-        text: (id) => storage.splice(id, 'f', 0, 0, 'hello'),
-        tree: async (id) => {
-          await storage.treeMove(id, 'f', 'r');
-          await storage.treeMove(id, 'f', 'c', 'r');
-        },
-      };
-      const kinds = Object.keys(make);
-      let pairs = 0;
-      for (const a of kinds) {
-        for (const b of kinds) {
-          if (a === b) continue;
-          // The field is `a` at the first version and `b` at the second.
-          const id = await storage.insert({ title: `${a}, then ${b}` });
-          await make[a](id);
-          const first = storage.log.lastEventId;
-          const wasA = await fieldOf(storage, id);
-          assert.strictEqual(wasA[0], a);
-          if (a !== 'absent') await storage.unset(id, 'f');
-          await make[b](id);
-          const second = storage.log.lastEventId;
-          const wasB = await fieldOf(storage, id);
-          assert.strictEqual(wasB[0], b);
-          // Back to the first, forward to the second: diff() names the way, applyPatches() lands it — the kind
-          // and the value, each time.
-          const back = await storage.diff(id, undefined, first);
-          await storage.applyPatches(id, back);
-          assert.deepStrictEqual(await fieldOf(storage, id), wasA, `${b} back to ${a}`);
-          assert.deepStrictEqual(await storage.diff(id, undefined, first), [], `${b} back to ${a}: nothing left to do`);
-          await storage.applyPatches(id, await storage.diff(id, undefined, second));
-          assert.deepStrictEqual(await fieldOf(storage, id), wasB, `${a} forward to ${b}`);
-          // A register comes back by its value, after the unset that frees the name: an unset alone left it unwritten.
-          if (a === 'register' && b !== 'absent') {
-            assert.deepStrictEqual(back, [
-              { action: 'unset', field: 'f' },
-              { action: 'put', field: 'f', value: 'plain' },
-            ]);
-          }
-          pairs++;
+  it('should bring a field back with applyPatches(diff) as the kind it was, whatever kind it is now: every pair of kinds', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const make = {
+      absent: async () => {},
+      register: (id) => storage.update(id, { f: 'plain' }),
+      counter: (id) => storage.inc(id, 'f', 3),
+      set: (id) => storage.add(id, 'f', ['a', 'b']),
+      list: (id) => storage.push(id, 'f', [1, 2]),
+      text: (id) => storage.splice(id, 'f', 0, 0, 'hello'),
+      tree: async (id) => {
+        await storage.treeMove(id, 'f', 'r');
+        await storage.treeMove(id, 'f', 'c', 'r');
+      },
+    };
+    const kinds = Object.keys(make);
+    let pairs = 0;
+    for (const a of kinds) {
+      for (const b of kinds) {
+        if (a === b) continue;
+        // The field is `a` at the first version and `b` at the second.
+        const id = await storage.insert({ title: `${a}, then ${b}` });
+        await make[a](id);
+        const first = storage.log.lastEventId;
+        const wasA = await fieldOf(storage, id);
+        assert.strictEqual(wasA[0], a);
+        if (a !== 'absent') await storage.unset(id, 'f');
+        await make[b](id);
+        const second = storage.log.lastEventId;
+        const wasB = await fieldOf(storage, id);
+        assert.strictEqual(wasB[0], b);
+        // Back to the first, forward to the second: diff() names the way, applyPatches() lands it — the kind
+        // and the value, each time.
+        const back = await storage.diff(id, undefined, first);
+        await storage.applyPatches(id, back);
+        assert.deepStrictEqual(await fieldOf(storage, id), wasA, `${b} back to ${a}`);
+        assert.deepStrictEqual(await storage.diff(id, undefined, first), [], `${b} back to ${a}: nothing left to do`);
+        await storage.applyPatches(id, await storage.diff(id, undefined, second));
+        assert.deepStrictEqual(await fieldOf(storage, id), wasB, `${a} forward to ${b}`);
+        // A register comes back by its value, after the unset that frees the name: an unset alone left it unwritten.
+        if (a === 'register' && b !== 'absent') {
+          assert.deepStrictEqual(back, [
+            { action: 'unset', field: 'f' },
+            { action: 'put', field: 'f', value: 'plain' },
+          ]);
         }
+        pairs++;
       }
-      assert.strictEqual(pairs, 42);
-    },
-  );
+    }
+    assert.strictEqual(pairs, 42);
+  });
 
-  await t.test(
-    'restore() to a version where a field was a register writes its value, a falsy one too; a counter that read 0 comes back a counter',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      for (const value of ['plain', 0, '', false, null, { nested: [1] }]) {
-        const id = await storage.insert({ title: 't', f: value });
-        const version = storage.log.lastEventId;
-        await storage.unset(id, 'f');
-        await storage.splice(id, 'f', 0, 0, 'a text now');
-        assert.strictEqual(await storage.restore(id, version), 2, 'the unset, then the put');
-        assert.deepStrictEqual(await fieldOf(storage, id), ['register', value]);
-        assert.deepStrictEqual(await storage.get(id), { title: 't', f: value });
-        // A register again: an update lands, the text's op is refused.
-        await storage.update(id, { f: 'written' });
-        await assert.rejects(() => storage.splice(id, 'f', 0, 0, 'x'), { code: 'FIELD_KIND' });
-      }
-      // A counter made by an inc of 0 reads 0 and is a counter: restored where the field is gone, or a register.
-      const id = await storage.insert({ title: 't' });
-      await storage.inc(id, 'f', 0);
-      const zero = storage.log.lastEventId;
-      await storage.unset(id, 'f');
-      assert.deepStrictEqual(await storage.diff(id, undefined, zero), [{ action: 'inc', field: 'f', value: 0 }]);
-      await storage.restore(id, zero);
-      assert.deepStrictEqual(await fieldOf(storage, id), ['counter', 0]);
-      await storage.unset(id, 'f');
-      await storage.update(id, { f: 'a register now' });
-      await storage.restore(id, zero);
-      assert.deepStrictEqual(await fieldOf(storage, id), ['counter', 0]);
-    },
-  );
-
-  await t.test(
-    'a diff removes before it makes: a kind at a prefix against the paths under it, either way',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      // Registers under `profile` at the version; a text at `profile` now.
-      const under = await storage.insert({ title: 't' });
-      await storage.update(under, { 'profile/city': 'Kyiv', 'profile/zip': 1 });
-      const paths = storage.log.lastEventId;
-      await storage.unset(under, 'profile');
-      await storage.splice(under, 'profile', 0, 0, 'a text');
-      const text = storage.log.lastEventId;
-      // The text goes first: a path put under it while it stood was FIELD_KIND, and the whole restore refused.
-      assert.deepStrictEqual(await storage.diff(under, undefined, paths), [
-        { action: 'unset', field: 'profile' },
-        { action: 'put', field: 'profile/city', value: 'Kyiv' },
-        { action: 'put', field: 'profile/zip', value: 1 },
-      ]);
-      await storage.restore(under, paths);
-      assert.deepStrictEqual(await storage.get(under), { title: 't', profile: { city: 'Kyiv', zip: 1 } });
-      assert.strictEqual(
-        (await fieldOf(storage, under, 'profile'))[0],
-        'absent',
-        'no field at the prefix: two paths under it',
-      );
-      // And back to the text: the paths go, the text is laid.
-      await storage.restore(under, text);
-      assert.deepStrictEqual(await fieldOf(storage, under, 'profile'), ['text', 'a text']);
-      assert.deepStrictEqual(await storage.get(under), { title: 't', profile: 'a text' });
-      // A counter at a path, a register object at a prefix.
-      const id = await storage.insert({ title: 't', profile: { city: 'Kyiv' }, 'stats/n': 'many' });
+  it('should write its value, a falsy one too, on restore() to a version where a field was a register; a counter that read 0 comes back a counter', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    for (const value of ['plain', 0, '', false, null, { nested: [1] }]) {
+      const id = await storage.insert({ title: 't', f: value });
       const version = storage.log.lastEventId;
-      await storage.unset(id, ['profile', 'stats/n']);
-      await storage.inc(id, 'profile', 1);
-      await storage.inc(id, 'stats/n', 2);
-      await storage.restore(id, version);
-      assert.deepStrictEqual(await storage.get(id), { title: 't', profile: { city: 'Kyiv' }, stats: { n: 'many' } });
-      assert.deepStrictEqual(await fieldOf(storage, id, 'stats/n'), ['register', 'many']);
-    },
-  );
+      await storage.unset(id, 'f');
+      await storage.splice(id, 'f', 0, 0, 'a text now');
+      assert.strictEqual(await storage.restore(id, version), 2, 'the unset, then the put');
+      assert.deepStrictEqual(await fieldOf(storage, id), ['register', value]);
+      assert.deepStrictEqual(await storage.get(id), { title: 't', f: value });
+      // A register again: an update lands, the text's op is refused.
+      await storage.update(id, { f: 'written' });
+      await assert.rejects(() => storage.splice(id, 'f', 0, 0, 'x'), { code: 'ALX_ERR_FIELD_KIND' });
+    }
+    // A counter made by an inc of 0 reads 0 and is a counter: restored where the field is gone, or a register.
+    const id = await storage.insert({ title: 't' });
+    await storage.inc(id, 'f', 0);
+    const zero = storage.log.lastEventId;
+    await storage.unset(id, 'f');
+    assert.deepStrictEqual(await storage.diff(id, undefined, zero), [{ action: 'inc', field: 'f', value: 0 }]);
+    await storage.restore(id, zero);
+    assert.deepStrictEqual(await fieldOf(storage, id), ['counter', 0]);
+    await storage.unset(id, 'f');
+    await storage.update(id, { f: 'a register now' });
+    await storage.restore(id, zero);
+    assert.deepStrictEqual(await fieldOf(storage, id), ['counter', 0]);
+  });
 
-  await t.test('a remove of exactly the named tags revokes one add and leaves a concurrent one', async (t2) => {
+  it('should remove before it makes in a diff: a kind at a prefix against the paths under it, either way', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    // Registers under `profile` at the version; a text at `profile` now.
+    const under = await storage.insert({ title: 't' });
+    await storage.update(under, { 'profile/city': 'Kyiv', 'profile/zip': 1 });
+    const paths = storage.log.lastEventId;
+    await storage.unset(under, 'profile');
+    await storage.splice(under, 'profile', 0, 0, 'a text');
+    const text = storage.log.lastEventId;
+    // The text goes first: a path put under it while it stood was ALX_ERR_FIELD_KIND, and the whole restore refused.
+    assert.deepStrictEqual(await storage.diff(under, undefined, paths), [
+      { action: 'unset', field: 'profile' },
+      { action: 'put', field: 'profile/city', value: 'Kyiv' },
+      { action: 'put', field: 'profile/zip', value: 1 },
+    ]);
+    await storage.restore(under, paths);
+    assert.deepStrictEqual(await storage.get(under), { title: 't', profile: { city: 'Kyiv', zip: 1 } });
+    assert.strictEqual(
+      (await fieldOf(storage, under, 'profile'))[0],
+      'absent',
+      'no field at the prefix: two paths under it',
+    );
+    // And back to the text: the paths go, the text is laid.
+    await storage.restore(under, text);
+    assert.deepStrictEqual(await fieldOf(storage, under, 'profile'), ['text', 'a text']);
+    assert.deepStrictEqual(await storage.get(under), { title: 't', profile: 'a text' });
+    // A counter at a path, a register object at a prefix.
+    const id = await storage.insert({ title: 't', profile: { city: 'Kyiv' }, 'stats/n': 'many' });
+    const version = storage.log.lastEventId;
+    await storage.unset(id, ['profile', 'stats/n']);
+    await storage.inc(id, 'profile', 1);
+    await storage.inc(id, 'stats/n', 2);
+    await storage.restore(id, version);
+    assert.deepStrictEqual(await storage.get(id), { title: 't', profile: { city: 'Kyiv' }, stats: { n: 'many' } });
+    assert.deepStrictEqual(await fieldOf(storage, id, 'stats/n'), ['register', 'many']);
+  });
+
+  it('should revoke one add and leave a concurrent one on a remove of exactly the named tags', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
     const b = mesh.get('B');
@@ -341,81 +333,78 @@ const runPatchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual((await b.get(id)).tags, []);
   });
 
-  await t.test(
-    'applyPatches() is one turn of the queue, every action realized; a bad patch writes nothing',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({ n: 1 });
-      const ops = [];
-      storage.on('change', (op) => ops.push(op));
-      // Queued behind the patches: the update lands after every op of theirs.
-      const patches = storage.applyPatches(id, [
-        { action: 'put', field: 'n', value: 2 },
-        { action: 'inc', field: 'hits', value: 5 },
-        { action: 'add', field: 'tags', elements: ['a', 'b'] },
-        { action: 'remove', field: 'tags', elements: ['a'] },
-        { action: 'splice', field: 'body', index: 0, count: 0, content: 'hi' },
-        { action: 'splice', field: 'body', index: 0, count: 1 },
-        { action: 'splice', field: 'items', index: 0, content: [1, 2] },
-        { action: 'treeMove', field: 'outline', node: 'r' },
-        { action: 'treeMove', field: 'outline', node: 'a', parent: 'r' },
-        { action: 'treeMove', field: 'outline', node: 'b', parent: 'r', before: 'a' },
-        { action: 'treeRemove', field: 'outline', node: 'a' },
-      ]);
-      const update = storage.update(id, { n: 3 });
-      assert.strictEqual(await patches, 11);
-      await update;
-      assert.deepStrictEqual(
-        ops.map((op) => op.type),
-        ['set', 'inc', 'add', 'remove', 'splice', 'splice', 'splice', 'tree', 'tree', 'tree', 'tree', 'set'],
-      );
-      assert.deepStrictEqual(await storage.get(id), {
-        n: 3,
-        hits: 5,
-        tags: ['b'],
-        body: 'i',
-        items: [1, 2],
-        outline: [{ id: 'r', children: [{ id: 'b', children: [] }] }],
-      });
-      // A whole-record write, a delete, a purge.
-      assert.strictEqual(await storage.applyPatches(id, [{ action: 'write', data: { n: 9 } }]), 1);
-      assert.deepStrictEqual(await storage.get(id), { n: 9 });
-      assert.strictEqual(await storage.applyPatches(id, [{ action: 'delete' }]), 1);
-      assert.strictEqual(await storage.get(id), null);
-      assert.strictEqual(await storage.applyPatches(id, [{ action: 'purge' }]), 1);
-      assert.strictEqual(await storage.history(id).then((h) => h.versions[0].type), 'purge');
-      assert.strictEqual(
-        storage.log.entriesOf(id).every((entry) => entry.scrubbed),
-        true,
-        'the purge scrubbed',
-      );
-      // Shapes are checked before anything is written.
-      const other = await storage.insert({ n: 1 });
-      const count = ops.length;
-      for (const bad of [
-        'nope',
-        [{ action: 'nope' }],
-        [{ action: 'put', field: 'n' }],
-        [{ action: 'inc', field: 'n', value: 'x' }],
-        [{ action: 'add', field: 'n' }],
-        [{ action: 'remove', field: 'n' }],
-        [{ action: 'splice', field: 'n', index: -1 }],
-        [{ action: 'write' }],
-        [{ action: 'put', value: 1 }],
-        [{ action: 'put', field: 'n', value: 1 }, null],
-      ]) {
-        await assert.rejects(() => storage.applyPatches(other, bad), TypeError, JSON.stringify(bad));
-      }
-      assert.strictEqual(ops.length, count, 'nothing written');
-      await assert.rejects(() => storage.applyPatches('bad id!', []), { code: 'INVALID_ID' });
-      // The kind rule still holds inside a patch.
-      await assert.rejects(() => storage.applyPatches(other, [{ action: 'inc', field: 'n', value: 1 }]), {
-        code: 'FIELD_KIND',
-      });
-    },
-  );
+  it('should make applyPatches() one turn of the queue, every action realized; a bad patch writes nothing', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ n: 1 });
+    const ops = [];
+    storage.on('change', (op) => ops.push(op));
+    // Queued behind the patches: the update lands after every op of theirs.
+    const patches = storage.applyPatches(id, [
+      { action: 'put', field: 'n', value: 2 },
+      { action: 'inc', field: 'hits', value: 5 },
+      { action: 'add', field: 'tags', elements: ['a', 'b'] },
+      { action: 'remove', field: 'tags', elements: ['a'] },
+      { action: 'splice', field: 'body', index: 0, count: 0, content: 'hi' },
+      { action: 'splice', field: 'body', index: 0, count: 1 },
+      { action: 'splice', field: 'items', index: 0, content: [1, 2] },
+      { action: 'treeMove', field: 'outline', node: 'r' },
+      { action: 'treeMove', field: 'outline', node: 'a', parent: 'r' },
+      { action: 'treeMove', field: 'outline', node: 'b', parent: 'r', before: 'a' },
+      { action: 'treeRemove', field: 'outline', node: 'a' },
+    ]);
+    const update = storage.update(id, { n: 3 });
+    assert.strictEqual(await patches, 11);
+    await update;
+    assert.deepStrictEqual(
+      ops.map((op) => op.type),
+      ['set', 'inc', 'add', 'remove', 'splice', 'splice', 'splice', 'tree', 'tree', 'tree', 'tree', 'set'],
+    );
+    assert.deepStrictEqual(await storage.get(id), {
+      n: 3,
+      hits: 5,
+      tags: ['b'],
+      body: 'i',
+      items: [1, 2],
+      outline: [{ id: 'r', children: [{ id: 'b', children: [] }] }],
+    });
+    // A whole-record write, a delete, a purge.
+    assert.strictEqual(await storage.applyPatches(id, [{ action: 'write', data: { n: 9 } }]), 1);
+    assert.deepStrictEqual(await storage.get(id), { n: 9 });
+    assert.strictEqual(await storage.applyPatches(id, [{ action: 'delete' }]), 1);
+    assert.strictEqual(await storage.get(id), null);
+    assert.strictEqual(await storage.applyPatches(id, [{ action: 'purge' }]), 1);
+    assert.strictEqual(await storage.history(id).then((h) => h.versions[0].type), 'purge');
+    assert.strictEqual(
+      storage.log.entriesOf(id).every((entry) => entry.scrubbed),
+      true,
+      'the purge scrubbed',
+    );
+    // Shapes are checked before anything is written.
+    const other = await storage.insert({ n: 1 });
+    const count = ops.length;
+    for (const bad of [
+      'nope',
+      [{ action: 'nope' }],
+      [{ action: 'put', field: 'n' }],
+      [{ action: 'inc', field: 'n', value: 'x' }],
+      [{ action: 'add', field: 'n' }],
+      [{ action: 'remove', field: 'n' }],
+      [{ action: 'splice', field: 'n', index: -1 }],
+      [{ action: 'write' }],
+      [{ action: 'put', value: 1 }],
+      [{ action: 'put', field: 'n', value: 1 }, null],
+    ]) {
+      await assert.rejects(() => storage.applyPatches(other, bad), TypeError, JSON.stringify(bad));
+    }
+    assert.strictEqual(ops.length, count, 'nothing written');
+    await assert.rejects(() => storage.applyPatches('bad id!', []), { code: 'ALX_ERR_INVALID_ID' });
+    // The kind rule still holds inside a patch.
+    await assert.rejects(() => storage.applyPatches(other, [{ action: 'inc', field: 'n', value: 1 }]), {
+      code: 'ALX_ERR_FIELD_KIND',
+    });
+  });
 
-  await t.test('the commit event hands a listener the op, its seq, before, after and the kinds', async (t2) => {
+  it('should hand a listener of the commit event the op, its seq, before, after and the kinds', async (t2) => {
     const storage = await createStorage(t2, 'A', { actor: 'ada' });
     const events = [];
     const id = await storage.insert({ n: 1 });
@@ -475,161 +464,149 @@ const runPatchTests = async (t, assert, createStorage) => {
     assert.strictEqual(events.length, count);
   });
 
-  await t.test(
-    'applyPatches() is all or nothing before the first append: a patch out of range leaves the record as it was',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({ title: 'a' });
-      await storage.splice(id, 'body', 0, 0, 'hello');
-      const next = storage.log.next;
-      const bad = [
-        { action: 'put', field: 'title', value: 'changed' },
-        { action: 'splice', field: 'body', index: 999, count: 1 },
-      ];
-      await assert.rejects(() => storage.applyPatches(id, bad), { code: 'OUT_OF_RANGE' });
-      assert.deepStrictEqual(await storage.get(id), { title: 'a', body: 'hello' }, 'the put did not land');
-      assert.strictEqual(storage.log.next, next, 'nothing appended');
-      // A kind clash and a cycle refuse the same way, before any op.
-      await storage.treeMove(id, 'outline', 'r');
-      await storage.treeMove(id, 'outline', 'x', 'r');
-      const clash = [
-        { action: 'inc', field: 'hits', value: 1 },
-        { action: 'splice', field: 'title', index: 0, count: 0, content: 'x' },
-      ];
-      await assert.rejects(() => storage.applyPatches(id, clash), { code: 'FIELD_KIND', kind: 'register' });
-      const cycle = [
-        { action: 'inc', field: 'hits', value: 1 },
-        { action: 'treeMove', field: 'outline', node: 'r', parent: 'x' },
-      ];
-      await assert.rejects(() => storage.applyPatches(id, cycle), { code: 'CYCLE' });
-      assert.strictEqual((await storage.get(id)).hits, undefined, 'the inc before the refused patch did not land');
-      // Later patches see the earlier ones: the second splice indexes the text the first one made.
-      const count = await storage.applyPatches(id, [
-        { action: 'splice', field: 'body', index: 5, count: 0, content: ' big' },
-        { action: 'splice', field: 'body', index: 9, count: 0, content: ' world' },
-      ]);
-      assert.strictEqual(count, 2);
-      assert.strictEqual((await storage.get(id)).body, 'hello big world');
-    },
-  );
+  it('should make applyPatches() all or nothing before the first append: a patch out of range leaves the record as it was', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ title: 'a' });
+    await storage.splice(id, 'body', 0, 0, 'hello');
+    const next = storage.log.next;
+    const bad = [
+      { action: 'put', field: 'title', value: 'changed' },
+      { action: 'splice', field: 'body', index: 999, count: 1 },
+    ];
+    await assert.rejects(() => storage.applyPatches(id, bad), { code: 'ALX_ERR_OUT_OF_RANGE' });
+    assert.deepStrictEqual(await storage.get(id), { title: 'a', body: 'hello' }, 'the put did not land');
+    assert.strictEqual(storage.log.next, next, 'nothing appended');
+    // A kind clash and a cycle refuse the same way, before any op.
+    await storage.treeMove(id, 'outline', 'r');
+    await storage.treeMove(id, 'outline', 'x', 'r');
+    const clash = [
+      { action: 'inc', field: 'hits', value: 1 },
+      { action: 'splice', field: 'title', index: 0, count: 0, content: 'x' },
+    ];
+    await assert.rejects(() => storage.applyPatches(id, clash), { code: 'ALX_ERR_FIELD_KIND', kind: 'register' });
+    const cycle = [
+      { action: 'inc', field: 'hits', value: 1 },
+      { action: 'treeMove', field: 'outline', node: 'r', parent: 'x' },
+    ];
+    await assert.rejects(() => storage.applyPatches(id, cycle), { code: 'ALX_ERR_CYCLE' });
+    assert.strictEqual((await storage.get(id)).hits, undefined, 'the inc before the refused patch did not land');
+    // Later patches see the earlier ones: the second splice indexes the text the first one made.
+    const count = await storage.applyPatches(id, [
+      { action: 'splice', field: 'body', index: 5, count: 0, content: ' big' },
+      { action: 'splice', field: 'body', index: 9, count: 0, content: ' world' },
+    ]);
+    assert.strictEqual(count, 2);
+    assert.strictEqual((await storage.get(id)).body, 'hello big world');
+  });
 
-  await t.test(
-    'a patch is checked as the method of its name checks its arguments; removals are copied, not kept by reference',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({ title: 'a' });
-      const bad = [
-        [{ action: 'splice', field: 'body', index: 0, count: 0, content: 5 }, /string for a text or an array/],
-        [{ action: 'splice', field: 'body', index: 0, count: 0 }, /count to remove or content to insert/],
-        [{ action: 'treeMove', field: 'outline', node: 5 }, /node id/],
-        [{ action: 'treeMove', field: 'outline', node: '__proto__' }, /node id/],
-        [{ action: 'treeMove', field: 'outline', node: 'a', after: 'b', before: 'c' }, /after or before, not both/],
-        [{ action: 'treeRemove', field: 'outline', node: 123 }, /node id/],
-        [{ action: 'put', field: 'f', value: () => 1 }, /JSON value/],
-        [{ action: 'write', data: [1, 2] }, /plain object/],
-        [{ action: 'add', field: 'tags', elements: [] }, /non-empty array/],
-        [{ action: 'remove', field: 'tags', removals: [['x', { A: -1 }]] }, /removals as/],
-        [{ action: 'remove', field: 'tags', removals: 'nope' }, /removals as/],
-      ];
-      const next = storage.log.next;
-      for (const [patch, message] of bad) {
-        const expected = { name: 'TypeError', message };
-        await assert.rejects(() => storage.applyPatches(id, [patch]), expected, JSON.stringify(patch));
-      }
-      assert.strictEqual(storage.log.next, next, 'nothing minted');
-      assert.deepStrictEqual(await storage.get(id), { title: 'a' });
-      // `removals` the caller keeps: the log holds a copy.
-      await storage.add(id, 'tags', ['x']);
-      const added = storage.log.entriesOf(id).at(-1).op;
-      const removals = [['x', { [added.origin]: added.ts }]];
-      await storage.applyPatches(id, [{ action: 'remove', field: 'tags', removals }]);
-      assert.deepStrictEqual((await storage.get(id)).tags, []);
-      removals[0][0] = 'MUTATED';
-      removals[0][1].INJECTED = 999;
-      assert.deepStrictEqual(storage.log.entriesOf(id).at(-1).op.value, [['x', { [added.origin]: added.ts }]]);
-    },
-  );
+  it('should check a patch as the method of its name checks its arguments, and copy removals, not keep them by reference', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ title: 'a' });
+    const bad = [
+      [{ action: 'splice', field: 'body', index: 0, count: 0, content: 5 }, /string for a text or an array/],
+      [{ action: 'splice', field: 'body', index: 0, count: 0 }, /count to remove or content to insert/],
+      [{ action: 'treeMove', field: 'outline', node: 5 }, /node id/],
+      [{ action: 'treeMove', field: 'outline', node: '__proto__' }, /node id/],
+      [{ action: 'treeMove', field: 'outline', node: 'a', after: 'b', before: 'c' }, /after or before, not both/],
+      [{ action: 'treeRemove', field: 'outline', node: 123 }, /node id/],
+      [{ action: 'put', field: 'f', value: () => 1 }, /JSON value/],
+      [{ action: 'write', data: [1, 2] }, /plain object/],
+      [{ action: 'add', field: 'tags', elements: [] }, /non-empty array/],
+      [{ action: 'remove', field: 'tags', removals: [['x', { A: -1 }]] }, /removals as/],
+      [{ action: 'remove', field: 'tags', removals: 'nope' }, /removals as/],
+    ];
+    const next = storage.log.next;
+    for (const [patch, message] of bad) {
+      const expected = { name: 'ArgumentError', message };
+      await assert.rejects(() => storage.applyPatches(id, [patch]), expected, JSON.stringify(patch));
+    }
+    assert.strictEqual(storage.log.next, next, 'nothing minted');
+    assert.deepStrictEqual(await storage.get(id), { title: 'a' });
+    // `removals` the caller keeps: the log holds a copy.
+    await storage.add(id, 'tags', ['x']);
+    const added = storage.log.entriesOf(id).at(-1).op;
+    const removals = [['x', { [added.origin]: added.ts }]];
+    await storage.applyPatches(id, [{ action: 'remove', field: 'tags', removals }]);
+    assert.deepStrictEqual((await storage.get(id)).tags, []);
+    removals[0][0] = 'MUTATED';
+    removals[0][1].INJECTED = 999;
+    assert.deepStrictEqual(storage.log.entriesOf(id).at(-1).op.value, [['x', { [added.origin]: added.ts }]]);
+  });
 
-  await t.test(
-    'compact() rewrites a record as one op per field: a text of many runs is one, a tree one move per node, the reading the same',
-    async (t2) => {
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
-      const a = mesh.get('A');
-      const b = mesh.get('B');
-      const id = await a.insert({ title: 'doc', n: 1 });
-      await a.inc(id, 'hits', 3);
-      await a.add(id, 'tags', ['x', 'y']);
-      for (const ch of 'hello') await a.splice(id, 'body', 0, 0, ch); // prepends: a run each
-      await a.treeMove(id, 'outline', 'r');
-      for (let i = 0; i < 5; i++) await a.treeMove(id, 'outline', `n${i}`, 'r');
-      // Each move takes the node to the end: twenty real moves in the log.
-      for (let i = 0; i < 20; i++) await a.treeMove(id, 'outline', `n${i % 5}`, 'r');
-      await settle([a, b]);
-      const before = await a.get(id);
-      const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta;
-      const was = await blocks(a);
-      assert.strictEqual(Object.keys(was.blocks.body.runs).length, 5);
-      assert.ok(Object.values(was.blocks.outline.moves).flat().length > 20, 'a move log worth compacting');
-      const ops = await a.compact(id);
-      assert.strictEqual(ops, 10, 'a write, an inc, an add, a splice, six moves');
-      assert.deepStrictEqual(await a.get(id), before, 'reads the same');
-      const now = await blocks(a);
-      assert.strictEqual(Object.keys(now.blocks.body.runs).length, 1, 'one run');
-      assert.strictEqual(Object.values(now.blocks.outline.moves).flat().length, 6, 'one move per node');
-      assert.strictEqual(Object.keys(now.counters.hits).length, 1, 'one slot: the sum as this node’s');
-      await settle([a, b]);
-      assert.deepStrictEqual(await b.get(id), before, 'the peer reads the same');
-      assert.deepStrictEqual(await blocks(b), now, 'and holds the same blocks');
-      assert.strictEqual((await a.history(id, { limit: 1 })).exact, true);
-      assert.strictEqual(await a.compact('nope'), 0, 'a record that is not there');
-    },
-  );
+  it('should rewrite a record as one op per field with compact(): a text of many runs is one, a tree one move per node, the reading the same', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const id = await a.insert({ title: 'doc', n: 1 });
+    await a.inc(id, 'hits', 3);
+    await a.add(id, 'tags', ['x', 'y']);
+    for (const ch of 'hello') await a.splice(id, 'body', 0, 0, ch); // prepends: a run each
+    await a.treeMove(id, 'outline', 'r');
+    for (let i = 0; i < 5; i++) await a.treeMove(id, 'outline', `n${i}`, 'r');
+    // Each move takes the node to the end: twenty real moves in the log.
+    for (let i = 0; i < 20; i++) await a.treeMove(id, 'outline', `n${i % 5}`, 'r');
+    await settle([a, b]);
+    const before = await a.get(id);
+    const blocks = async (storage) => (await storage.snapshot()).records.find((r) => r.id === id).meta;
+    const was = await blocks(a);
+    assert.strictEqual(Object.keys(was.blocks.body.runs).length, 5);
+    assert.ok(Object.values(was.blocks.outline.moves).flat().length > 20, 'a move log worth compacting');
+    const ops = await a.compact(id);
+    assert.strictEqual(ops, 10, 'a write, an inc, an add, a splice, six moves');
+    assert.deepStrictEqual(await a.get(id), before, 'reads the same');
+    const now = await blocks(a);
+    assert.strictEqual(Object.keys(now.blocks.body.runs).length, 1, 'one run');
+    assert.strictEqual(Object.values(now.blocks.outline.moves).flat().length, 6, 'one move per node');
+    assert.strictEqual(Object.keys(now.counters.hits).length, 1, 'one slot: the sum as this node’s');
+    await settle([a, b]);
+    assert.deepStrictEqual(await b.get(id), before, 'the peer reads the same');
+    assert.deepStrictEqual(await blocks(b), now, 'and holds the same blocks');
+    assert.strictEqual((await a.history(id, { limit: 1 })).exact, true);
+    assert.strictEqual(await a.compact('nope'), 0, 'a record that is not there');
+  });
 
-  await t.test(
-    'compact() lays a text’s marks again, keeps a counter at 0, and lays a field longer than a run in several',
-    async (t2) => {
-      const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
-      const a = mesh.get('A');
-      const b = mesh.get('B');
-      const id = await a.insert({ title: 'doc' });
-      await a.updateText(id, 'body', 'hello brave new world');
-      await a.mark(id, 'body', 0, 5, 'bold', true);
-      await a.mark(id, 'body', 6, 11, 'link', 'https://x', { expand: 'none' });
-      await a.mark(id, 'body', 3, 9, 'comment', { by: 'ada' }, { many: true });
-      await a.unmark(id, 'body', 1, 2, 'bold');
-      await a.splice(id, 'body', 0, 0, '> ');
-      await a.splice(id, 'body', 8, 6);
-      await a.inc(id, 'hits', 2);
-      await a.inc(id, 'hits', -2);
-      // A stacking mark is named anew by the rewrite; the rest reads the same.
-      const plain = (spans) => JSON.parse(JSON.stringify(spans).replaceAll(/"id":"[^"]+"/g, '"id":"m"'));
-      const before = { data: await a.get(id), spans: plain(await a.spans(id, 'body')) };
-      assert.strictEqual(before.data.hits, 0);
-      await settle([a, b]);
-      await a.compact(id);
-      await settle([a, b]);
-      for (const node of [a, b]) {
-        assert.deepStrictEqual({ data: await node.get(id), spans: plain(await node.spans(id, 'body')) }, before);
-      }
-      // The expand rules came through: typed at the edge of the link (none) stays plain,
-      // typed at the end of the bold run (after) is bold.
-      await a.splice(id, 'body', 3, 0, 'Z');
-      assert.deepStrictEqual((await a.spans(id, 'body')).slice(0, 3), [
-        { type: 'text', text: '> ', marks: {} },
-        { type: 'text', text: 'hZ', marks: { bold: true } },
-        { type: 'text', text: 'e', marks: {} },
-      ]);
-      // A text longer than one run: two pushes of 600 000, compacted into two runs.
-      const big = await a.insert({ title: 'big' });
-      const half = 'ab'.repeat(300_000);
-      await a.push(big, 'body', half);
-      await a.push(big, 'body', half);
-      const text = (await a.get(big)).body;
-      assert.strictEqual(text.length, 1_200_000);
-      assert.strictEqual(await a.compact(big), 3, 'a write and two runs');
-      assert.strictEqual((await a.get(big)).body, text);
-    },
-  );
+  it('should lay a text’s marks again with compact(), keep a counter at 0, and lay a field longer than a run in several', async (t2) => {
+    const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
+    const a = mesh.get('A');
+    const b = mesh.get('B');
+    const id = await a.insert({ title: 'doc' });
+    await a.updateText(id, 'body', 'hello brave new world');
+    await a.mark(id, 'body', 0, 5, 'bold', true);
+    await a.mark(id, 'body', 6, 11, 'link', 'https://x', { expand: 'none' });
+    await a.mark(id, 'body', 3, 9, 'comment', { by: 'ada' }, { many: true });
+    await a.unmark(id, 'body', 1, 2, 'bold');
+    await a.splice(id, 'body', 0, 0, '> ');
+    await a.splice(id, 'body', 8, 6);
+    await a.inc(id, 'hits', 2);
+    await a.inc(id, 'hits', -2);
+    // A stacking mark is named anew by the rewrite; the rest reads the same.
+    const plain = (spans) => JSON.parse(JSON.stringify(spans).replaceAll(/"id":"[^"]+"/g, '"id":"m"'));
+    const before = { data: await a.get(id), spans: plain(await a.spans(id, 'body')) };
+    assert.strictEqual(before.data.hits, 0);
+    await settle([a, b]);
+    await a.compact(id);
+    await settle([a, b]);
+    for (const node of [a, b]) {
+      assert.deepStrictEqual({ data: await node.get(id), spans: plain(await node.spans(id, 'body')) }, before);
+    }
+    // The expand rules came through: typed at the edge of the link (none) stays plain,
+    // typed at the end of the bold run (after) is bold.
+    await a.splice(id, 'body', 3, 0, 'Z');
+    assert.deepStrictEqual((await a.spans(id, 'body')).slice(0, 3), [
+      { type: 'text', text: '> ', marks: {} },
+      { type: 'text', text: 'hZ', marks: { bold: true } },
+      { type: 'text', text: 'e', marks: {} },
+    ]);
+    // A text longer than one run: two pushes of 600 000, compacted into two runs.
+    const big = await a.insert({ title: 'big' });
+    const half = 'ab'.repeat(300_000);
+    await a.push(big, 'body', half);
+    await a.push(big, 'body', half);
+    const text = (await a.get(big)).body;
+    assert.strictEqual(text.length, 1_200_000);
+    assert.strictEqual(await a.compact(big), 3, 'a write and two runs');
+    assert.strictEqual((await a.get(big)).body, text);
+  });
 };
 
 module.exports = { runPatchTests };

@@ -4,8 +4,8 @@
 // validator shapes reduced to one, ids and indexes read off a schema object,
 // and the projection a validator sees / the fold of what it returns.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { ValidationError } = require('../src/errors.js');
 const {
   normalizeSchema,
@@ -18,17 +18,17 @@ const { createLens } = require('../src/schema/lens.js');
 const { project, unproject, foldSet } = require('../src/schema/entity.js');
 
 const standard = (validate) => ({ '~standard': { version: 1, vendor: 'test', validate } });
-const typeError = (message) => ({ name: 'TypeError', message });
+const typeError = (message) => ({ name: 'ArgumentError', message });
 
-test('ValidationError', async (t) => {
-  await t.test('names the entity and the first issue, counts the rest', () => {
+describe('ValidationError', () => {
+  it('should name the entity and the first issue, and count the rest', () => {
     const error = new ValidationError('Post', [
       { path: ['title'], message: 'is required', code: 'required' },
       { path: [], message: 'too big' },
     ]);
     assert.ok(error instanceof Error);
     assert.strictEqual(error.name, 'ValidationError');
-    assert.strictEqual(error.code, 'VALIDATION_FAILED');
+    assert.strictEqual(error.code, 'ALX_ERR_VALIDATION_FAILED');
     assert.strictEqual(error.entity, 'Post');
     assert.strictEqual(error.message, 'Post failed validation at title: is required (+1 more)');
     assert.strictEqual(error.issues.length, 2);
@@ -40,8 +40,8 @@ test('ValidationError', async (t) => {
   });
 });
 
-test('normalizeSchema', async (t) => {
-  await t.test('no schema is one version and no entities', () => {
+describe('normalizeSchema', () => {
+  it('should read no schema as one version and no entities', () => {
     for (const schema of [undefined, null]) {
       const { version, entities } = normalizeSchema(schema);
       assert.strictEqual(version, 1);
@@ -49,7 +49,7 @@ test('normalizeSchema', async (t) => {
     }
   });
 
-  await t.test('a bare entity: no validator, id under `id`, no indexes', () => {
+  it('should give a bare entity no validator, its id under `id` and no indexes', () => {
     const { version, entities } = normalizeSchema({ version: 3, entities: { Post: {} } });
     assert.strictEqual(version, 3);
     assert.deepStrictEqual(entities.get('Post'), {
@@ -70,7 +70,7 @@ test('normalizeSchema', async (t) => {
     });
   });
 
-  await t.test('search fields are explicit, deduplicated, and checked', () => {
+  it('should keep search fields explicit, deduplicated and checked', () => {
     const { entities } = normalizeSchema({ entities: { Post: { search: ['title', 'body', 'title'] } } });
     assert.deepStrictEqual(entities.get('Post').search, ['title', 'body']);
     assert.throws(
@@ -87,13 +87,13 @@ test('normalizeSchema', async (t) => {
     );
   });
 
-  await t.test('entities may be a Map, and keep `fields` as given', () => {
+  it('should take entities as a Map, and keep `fields` as given', () => {
     const fields = { title: 'string' };
     const { entities } = normalizeSchema({ entities: new Map([['Post', { fields }]]) });
     assert.strictEqual(entities.get('Post').fields, fields);
   });
 
-  await t.test('the shape is checked at open, with TypeErrors that name the problem', () => {
+  it('should check the shape at open, with TypeErrors that name the problem', () => {
     assert.throws(() => normalizeSchema('nope'), typeError('createDatabase({ schema }): schema must be an object'));
     assert.throws(() => normalizeSchema({ lenses: {} }), typeError("createDatabase({ schema }): unknown key 'lenses'"));
     for (const version of [0, -1, 1.5, '2', null]) {
@@ -139,7 +139,7 @@ test('normalizeSchema', async (t) => {
     assert.throws(() => normalizeSchema({}, { validator: 'ajv' }), /validator must have a compile\(\) method/);
   });
 
-  await t.test('explicit indexes: deduplicated, unique keys as field lists', () => {
+  it('should deduplicate explicit indexes and keep unique keys as field lists', () => {
     const { entities } = normalizeSchema({
       entities: { Post: { index: ['orgId', 'orgId', 'kind'], unique: ['slug', ['orgId', 'name'], 'slug'] } },
     });
@@ -147,7 +147,7 @@ test('normalizeSchema', async (t) => {
     assert.deepStrictEqual(entities.get('Post').unique, [['slug'], ['orgId', 'name']]);
   });
 
-  await t.test('indexes come off a metaschema-shaped schema when not given', () => {
+  it('should take the indexes off a metaschema-shaped schema when not given', () => {
     const schema = {
       fields: {
         orgId: { type: 'string' },
@@ -186,7 +186,7 @@ test('normalizeSchema', async (t) => {
     assert.deepStrictEqual(derivedIndexes('nope'), { index: [], indexes: [], unique: [] });
   });
 
-  await t.test('a schema object without ~standard needs validator.compile, or validate: false', () => {
+  it('should need validator.compile, or validate: false, for a schema object without ~standard', () => {
     const json = { type: 'object' };
     assert.throws(
       () => normalizeSchema({ entities: { Post: { schema: json } } }),
@@ -219,7 +219,7 @@ test('normalizeSchema', async (t) => {
     );
   });
 
-  await t.test('a ~standard property must carry validate()', () => {
+  it('should refuse a ~standard property that carries no validate()', () => {
     assert.throws(
       () => normalizeSchema({ entities: { Post: { schema: { '~standard': { version: 1 } } } } }),
       typeError('createDatabase({ schema }): entity Post: ~standard has no validate()'),
@@ -230,11 +230,11 @@ test('normalizeSchema', async (t) => {
   });
 });
 
-test('createLens', async (t) => {
+describe('createLens', () => {
   const quiet = { debug() {} };
   const lensOf = (schema, logger = quiet) => createLens(normalizeSchema(schema), logger);
 
-  await t.test('runs the up-chain from the record’s version, per entity or storage-wide, in order', async () => {
+  it('should run the up-chain from the record’s version, per entity or storage-wide, in order', async () => {
     const calls = [];
     const lens = lensOf({
       version: 4,
@@ -271,12 +271,12 @@ test('createLens', async (t) => {
     assert.deepStrictEqual(await lens('x', { n: 1 }, 1), { n: 1, two: true }, 'no $type: the storage-wide step only');
     assert.deepStrictEqual(await lens('x', { n: 1, $type: 'Nope' }, 3), { n: 1, $type: 'Nope' });
     await assert.rejects(() => lensOf({ version: 2, migrations: { 2: { up: () => null } } })('x', { n: 1 }, 1), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'createDatabase({ schema }): migrations[2] must return an object (x)',
     });
   });
 
-  await t.test('then the entity’s Standard Schema validator; its issues leave the migrated data', async () => {
+  it('should then run the entity’s Standard Schema validator, whose issues leave the migrated data', async () => {
     const debug = [];
     const Post = standard((value) =>
       value.slug === undefined
@@ -315,7 +315,7 @@ test('createLens', async (t) => {
     assert.deepStrictEqual(await none('p', { $type: 'Post', slug: 's' }, 1), { slug: 's', $type: 'Post' });
   });
 
-  await t.test('normalizeSchema reads migrations, ahead and lens', () => {
+  it('should read migrations, ahead and lens in normalizeSchema', () => {
     const up = () => ({});
     const { migrations, ahead, lens } = normalizeSchema({
       version: 3,
@@ -332,31 +332,28 @@ test('createLens', async (t) => {
   });
 });
 
-test('deriveIdField', async (t) => {
-  await t.test(
-    '`id` when the schema has it, `<entity>Id` when it has that, else false; `id` when it shows nothing',
-    () => {
-      assert.strictEqual(deriveIdField({ fields: { id: {}, title: {} } }, 'Post'), 'id');
-      assert.strictEqual(deriveIdField({ fields: { postId: {}, title: {} } }, 'Post'), 'postId');
-      assert.strictEqual(deriveIdField({ fields: { title: {} } }, 'Post'), false);
-      assert.strictEqual(deriveIdField({ shape: { id: {} } }, 'Post'), 'id', 'zod');
-      assert.strictEqual(deriveIdField({ entries: { postId: {} } }, 'Post'), 'postId', 'valibot');
-      assert.strictEqual(deriveIdField({ fields: { uRLShortenerId: {} } }, 'URLShortener'), 'uRLShortenerId');
-      assert.strictEqual(
-        deriveIdField(() => true, 'Post'),
-        'id',
-      );
-      assert.strictEqual(deriveIdField({ type: 'object' }, 'Post'), 'id');
-      assert.strictEqual(deriveIdField(undefined, 'Post'), 'id');
-      assert.strictEqual(deriveIdField({ fields: 'nope', shape: null }, 'Post'), 'id');
-    },
-  );
+describe('deriveIdField', () => {
+  it('should derive `id` when the schema has it, `<entity>Id` when it has that, else false, and `id` when it shows nothing', () => {
+    assert.strictEqual(deriveIdField({ fields: { id: {}, title: {} } }, 'Post'), 'id');
+    assert.strictEqual(deriveIdField({ fields: { postId: {}, title: {} } }, 'Post'), 'postId');
+    assert.strictEqual(deriveIdField({ fields: { title: {} } }, 'Post'), false);
+    assert.strictEqual(deriveIdField({ shape: { id: {} } }, 'Post'), 'id', 'zod');
+    assert.strictEqual(deriveIdField({ entries: { postId: {} } }, 'Post'), 'postId', 'valibot');
+    assert.strictEqual(deriveIdField({ fields: { uRLShortenerId: {} } }, 'URLShortener'), 'uRLShortenerId');
+    assert.strictEqual(
+      deriveIdField(() => true, 'Post'),
+      'id',
+    );
+    assert.strictEqual(deriveIdField({ type: 'object' }, 'Post'), 'id');
+    assert.strictEqual(deriveIdField(undefined, 'Post'), 'id');
+    assert.strictEqual(deriveIdField({ fields: 'nope', shape: null }, 'Post'), 'id');
+  });
 });
 
-test('normalizeValidator', async (t) => {
+describe('normalizeValidator', () => {
   const invalid = (entity, issues) => ({ name: 'ValidationError', entity, issues });
 
-  await t.test('Standard Schema: { value } passes through, { issues } throws, sync or async', async () => {
+  it('should pass a Standard Schema’s { value } through and throw its { issues }, sync or async', async () => {
     const sync = normalizeValidator(
       standard((v) => (v.ok ? { value: { ...v, seen: true } } : { issues: [{ message: 'not ok', path: ['ok'] }] })),
       'Post',
@@ -371,7 +368,7 @@ test('normalizeValidator', async (t) => {
     await assert.rejects(() => async({ ok: false }), invalid('Post', [{ path: [], message: 'later' }]));
   });
 
-  await t.test('issues are normalized: { key } segments, symbols, codes, odd shapes', async () => {
+  it('should normalize issues: { key } segments, symbols, codes, odd shapes', async () => {
     const validate = normalizeValidator(
       standard(() => ({
         issues: [
@@ -404,7 +401,7 @@ test('normalizeValidator', async (t) => {
     );
   });
 
-  await t.test('a validate that returns no result, or throws, is a ValidationError too', async () => {
+  it('should make a validate that returns no result, or throws, a ValidationError too', async () => {
     await assert.rejects(
       () =>
         normalizeValidator(
@@ -433,7 +430,7 @@ test('normalizeValidator', async (t) => {
     assert.deepStrictEqual(text.issues, [{ path: [], message: 'text' }]);
   });
 
-  await t.test('a function: ajv-style false + errors, assertions, transformers, async rejections', async () => {
+  it('should take a function: ajv-style false + errors, assertions, transformers, async rejections', async () => {
     const ajv = (data) => {
       if (data.ok) return true;
       ajv.errors = [{ instancePath: '/a/0/x~1y', message: 'must be ok', keyword: 'const' }, { message: 'other' }];
@@ -477,16 +474,16 @@ test('normalizeValidator', async (t) => {
   });
 });
 
-test('project, unproject, foldSet', async (t) => {
+describe('project, unproject, foldSet', () => {
   const def = { name: 'Post', idField: 'postId' };
 
-  await t.test('the validator sees the record under its id field and without $type', () => {
+  it('should show the validator the record under its id field and without $type', () => {
     assert.deepStrictEqual(project(def, 'p1', { $type: 'Post', title: 'a' }), { postId: 'p1', title: 'a' });
     assert.deepStrictEqual(project(def, null, { title: 'a' }), { title: 'a' });
     assert.deepStrictEqual(project({ idField: false }, 'p1', { title: 'a' }), { title: 'a' });
   });
 
-  await t.test('what it returns comes back without the id field, with $type, as JSON', () => {
+  it('should bring what it returns back without the id field, with $type, as JSON', () => {
     const when = new Date(0);
     assert.deepStrictEqual(unproject(def, { postId: 'p1', $type: 'Nope', title: 'a', when, gone: undefined }, 'Post'), {
       title: 'a',
@@ -497,7 +494,7 @@ test('project, unproject, foldSet', async (t) => {
     assert.throws(() => unproject(def, null, 'Post'), TypeError);
   });
 
-  await t.test('a set keeps the delta’s keys as validated plus the keys the record lacked', () => {
+  it('should keep in a set the delta’s keys as validated plus the keys the record lacked', () => {
     const projected = { postId: 'p1', name: 'old', status: 'draft', extra: 1 };
     const validated = { name: 'old', status: 'published', createdAt: 't', $type: 'Post' };
     // `status` is in the delta (validated form), `createdAt` is new (a

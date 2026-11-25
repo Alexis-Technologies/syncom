@@ -6,18 +6,22 @@
 // encryption. The shared storage.js is loaded through tests/utils/browser-env.js
 // so its nested requires resolve the way package.json#browser says they would.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
 // Before the suite and everything it loads: the shared modules resolve to the browser halves.
 prime();
 
-test('Storage on the browser halves', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = requireBrowserAll();
+describe('Storage on the browser halves', () => {
+  let env = null;
+  let browser = null;
+  before(() => {
+    env = installBrowserGlobals();
+    browser = requireBrowserAll();
+  });
+  after(() => env.uninstall());
 
-  await t.test('the shared modules see the browser crypto and fsi', async () => {
+  it('should let the shared modules see the browser crypto and fsi', async () => {
     assert.ok(browser.calculateHash({ a: 1 }) instanceof Promise);
     const storage = await browser.createDatabase({ defer: 0, path: 'store-basic' });
     const id = await storage.insert({ title: 'Draft', hits: 0 });
@@ -27,7 +31,7 @@ test('Storage on the browser halves', async (t) => {
     assert.strictEqual(await browser.exists('store-basic/data', `${id}.json`), true);
   });
 
-  await t.test('the node id is the signing key here too, derived by Web Crypto', async () => {
+  it('should make the node id the signing key here too, derived by Web Crypto', async () => {
     const storage = await browser.createDatabase({ defer: 0, path: 'store-identity' });
     assert.match(storage.nodeId, /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/);
     assert.strictEqual(storage.nodeId, (await browser.loadSigningKeys('store-identity/keys')).id);
@@ -41,7 +45,7 @@ test('Storage on the browser halves', async (t) => {
     await reopened.close();
   });
 
-  await t.test('encryption at rest awaits the async Web Crypto', async () => {
+  it('should await the async Web Crypto for encryption at rest', async () => {
     const storage = await browser.createDatabase({ defer: 0, path: 'store-encrypted' });
     const secret = { ssn: '123-45-6789' };
     await storage.saveData('s1', secret, { encrypted: true });
@@ -59,13 +63,19 @@ test('Storage on the browser halves', async (t) => {
   });
 });
 
-test('Storage telemetry on the browser halves', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = requireBrowserAll();
-  const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = require('@opentelemetry/sdk-trace-base');
+describe('Storage telemetry on the browser halves', () => {
+  let env = null;
+  let browser = null;
+  let otel = null;
+  before(() => {
+    env = installBrowserGlobals();
+    browser = requireBrowserAll();
+    otel = require('@opentelemetry/sdk-trace-base');
+  });
+  after(() => env.uninstall());
 
-  await t.test('a commit is spanned with nothing but the injected tracer', async () => {
+  it('should span a commit with nothing but the injected tracer', async () => {
+    const { BasicTracerProvider, InMemorySpanExporter, SimpleSpanProcessor } = otel;
     const exporter = new InMemorySpanExporter();
     const provider = new BasicTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
     const storage = await browser.createDatabase({

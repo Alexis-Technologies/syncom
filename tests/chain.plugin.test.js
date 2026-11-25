@@ -6,41 +6,38 @@
 // and nothing is checked on a cold read; with it, as it was — and
 // `createDatabase({ chain: false })` keeps it off with the plugin registered.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const all = require('../src/all/all.js');
 const { chain } = require('../src/chain/chain.js');
 const { memory } = require('../src/memory/memory.js');
 
-test('chain as a plugin', async (t) => {
-  await t.test(
-    'without the plugin no block is written, stats().chain is null and validate() names the plugin',
-    async (t2) => {
-      const fsi = memory();
-      const storage = await core.createDatabase({ defer: 0, path: 'bare', fsi, logger: false });
-      t2.after(() => storage.close().catch(() => {}));
-      const id = await storage.insert({ a: 1 });
-      assert.strictEqual(JSON.parse(await fsi.read('bare/data', `${id}.json`)).block, null);
-      assert.strictEqual(await fsi.exists('bare/blockchain', '.blockchain.json'), false);
-      assert.strictEqual((await storage.stats()).chain, null);
-      await assert.rejects(() => storage.validate(), {
-        name: 'TypeError',
-        code: 'NO_CHAIN',
-        message:
-          /the chain plugin is not registered \(createDatabase\(\{ plugins: \[chain\] \}\) from '@alexify\/syncom\/chain'\)/,
-      });
-      // Asking for the chain in so many words is refused, not ignored.
-      await assert.rejects(() => core.createDatabase({ defer: 0, path: 'asked', fsi, logger: false, chain: true }), {
-        name: 'TypeError',
-        code: 'PLUGIN_MISSING',
-        message:
-          "createDatabase({ chain: true }) needs the chain plugin: createDatabase({ plugins: [chain] }) from '@alexify/syncom/chain'",
-      });
-    },
-  );
+describe('chain as a plugin', () => {
+  it('should write no block without the plugin, with stats().chain null and validate() naming the plugin', async (t2) => {
+    const fsi = memory();
+    const storage = await core.createDatabase({ defer: 0, path: 'bare', fsi, logger: false });
+    t2.after(() => storage.close().catch(() => {}));
+    const id = await storage.insert({ a: 1 });
+    assert.strictEqual(JSON.parse(await fsi.read('bare/data', `${id}.json`)).block, null);
+    assert.strictEqual(await fsi.exists('bare/blockchain', '.blockchain.json'), false);
+    assert.strictEqual((await storage.stats()).chain, null);
+    await assert.rejects(() => storage.validate(), {
+      name: 'DataError',
+      code: 'ALX_ERR_NO_CHAIN',
+      message:
+        /the chain plugin is not registered \(createDatabase\(\{ plugins: \[chain\] \}\) from '@alexify\/syncom\/chain'\)/,
+    });
+    // Asking for the chain in so many words is refused, not ignored.
+    await assert.rejects(() => core.createDatabase({ defer: 0, path: 'asked', fsi, logger: false, chain: true }), {
+      name: 'DataError',
+      code: 'ALX_ERR_PLUGIN_MISSING',
+      message:
+        "createDatabase({ chain: true }) needs the chain plugin: createDatabase({ plugins: [chain] }) from '@alexify/syncom/chain'",
+    });
+  });
 
-  await t.test('the records of one batch are verified against their block parsed and hashed once', async (t2) => {
+  it('should verify the records of one batch against their block parsed and hashed once', async (t2) => {
     const fsi = memory();
     const blockReads = [];
     const counted = {
@@ -73,7 +70,7 @@ test('chain as a plugin', async (t) => {
     blockReads.length = 0;
     for (let i = 0; i < ids.length; i++) assert.strictEqual((await reopened.get(ids[i])).i, i);
     assert.strictEqual(blockReads.length, 1, `the block read ${blockReads.length} times`);
-    // A record edited under the block is still INTEGRITY, however many of its batch read well.
+    // A record edited under the block is still ALX_ERR_INTEGRITY, however many of its batch read well.
     await reopened.close();
     const file = JSON.parse(await fsi.read('batch/data', `${ids[7]}.json`));
     file.data.i = -1;
@@ -81,37 +78,37 @@ test('chain as a plugin', async (t) => {
     const again = await all.createDatabase(options);
     t2.after(() => again.close().catch(() => {}));
     assert.strictEqual((await again.get(ids[0])).i, 0);
-    await assert.rejects(() => again.get(ids[7]), { code: 'INTEGRITY' });
+    await assert.rejects(() => again.get(ids[7]), { code: 'ALX_ERR_INTEGRITY' });
   });
 
-  await t.test(
-    'with the plugin every write has its block and validate() walks them; chain: false keeps it off',
-    async (t2) => {
-      const fsi = memory();
-      const storage = await core.createDatabase({ defer: 0, path: 'chained', fsi, logger: false, plugins: [chain] });
-      t2.after(() => storage.close().catch(() => {}));
-      assert.deepStrictEqual([storage.plugins, storage.kinds], [['chain'], []]);
-      const id = await storage.insert({ a: 1 });
-      await storage.inc(id, 'hits', 2);
-      assert.match(JSON.parse(await fsi.read('chained/data', `${id}.json`)).block, /^[0-9a-f]{64}$/);
-      assert.strictEqual(await fsi.exists('chained/blockchain', '.blockchain.json'), true);
-      assert.strictEqual(await storage.validate(), true);
-      assert.match((await storage.stats()).chain.tail, /^[0-9a-f]{64}$/);
-      // Verified on a cold read: the file edited under its block is INTEGRITY.
-      await storage.close();
-      const file = JSON.parse(await fsi.read('chained/data', `${id}.json`));
-      file.data.a = 2;
-      await fsi.write('chained/data', `${id}.json`, JSON.stringify(file));
-      const reopened = await core.createDatabase({ defer: 0, path: 'chained', fsi, logger: false, plugins: [chain] });
-      t2.after(() => reopened.close().catch(() => {}));
-      await assert.rejects(() => reopened.get(id), { code: 'INTEGRITY' });
-      // /all registers it; chain: false is the opt-out it always was.
-      const off = await all.createDatabase({ defer: 0, path: 'off', fsi, logger: false, chain: false });
-      t2.after(() => off.close().catch(() => {}));
-      const other = await off.insert({ b: 1 });
-      assert.strictEqual(JSON.parse(await fsi.read('off/data', `${other}.json`)).block, null);
-      assert.strictEqual((await off.stats()).chain, null);
-      await assert.rejects(() => off.validate(), { code: 'NO_CHAIN', message: /createDatabase\(\{ chain: false \}\)/ });
-    },
-  );
+  it('should give every write its block with the plugin and walk them in validate(); chain: false keeps it off', async (t2) => {
+    const fsi = memory();
+    const storage = await core.createDatabase({ defer: 0, path: 'chained', fsi, logger: false, plugins: [chain] });
+    t2.after(() => storage.close().catch(() => {}));
+    assert.deepStrictEqual([storage.plugins, storage.kinds], [['chain'], []]);
+    const id = await storage.insert({ a: 1 });
+    await storage.inc(id, 'hits', 2);
+    assert.match(JSON.parse(await fsi.read('chained/data', `${id}.json`)).block, /^[0-9a-f]{64}$/);
+    assert.strictEqual(await fsi.exists('chained/blockchain', '.blockchain.json'), true);
+    assert.strictEqual(await storage.validate(), true);
+    assert.match((await storage.stats()).chain.tail, /^[0-9a-f]{64}$/);
+    // Verified on a cold read: the file edited under its block is ALX_ERR_INTEGRITY.
+    await storage.close();
+    const file = JSON.parse(await fsi.read('chained/data', `${id}.json`));
+    file.data.a = 2;
+    await fsi.write('chained/data', `${id}.json`, JSON.stringify(file));
+    const reopened = await core.createDatabase({ defer: 0, path: 'chained', fsi, logger: false, plugins: [chain] });
+    t2.after(() => reopened.close().catch(() => {}));
+    await assert.rejects(() => reopened.get(id), { code: 'ALX_ERR_INTEGRITY' });
+    // /all registers it; chain: false is the opt-out it always was.
+    const off = await all.createDatabase({ defer: 0, path: 'off', fsi, logger: false, chain: false });
+    t2.after(() => off.close().catch(() => {}));
+    const other = await off.insert({ b: 1 });
+    assert.strictEqual(JSON.parse(await fsi.read('off/data', `${other}.json`)).block, null);
+    assert.strictEqual((await off.stats()).chain, null);
+    await assert.rejects(() => off.validate(), {
+      code: 'ALX_ERR_NO_CHAIN',
+      message: /createDatabase\(\{ chain: false \}\)/,
+    });
+  });
 });

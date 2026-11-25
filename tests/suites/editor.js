@@ -8,6 +8,7 @@
 // the diff between two readings, spans and blocks, transforms, selections as
 // tokens, a presence room's cursors.
 
+const { it } = require('node:test');
 const { createMesh, settle, waitUntil, prng } = require('../utils/mesh.js');
 const { createPresence } = require('../../src/presence/presence.js');
 const E = require('../../src/editor/editor.js');
@@ -65,101 +66,95 @@ const randomEdit = (editor, random, tag) => {
   }
 };
 
-const runEditorTests = async (t, assert, createStorage) => {
-  await t.test(
-    'a bound editor loads the field, sends its edits and takes the storage’s, embeds and marks included',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({ title: 'x' });
-      await storage.updateText(id, 'body', 'hello world');
-      await storage.mark(id, 'body', 0, 5, 'bold', true);
-      await storage.insertEmbed(id, 'body', 6, { type: 'image', attrs: { src: 'a.png' } });
-      const editor = createEditor();
-      const binding = E.createTextBinding(storage, id, 'body', editor);
-      t2.after(() => binding.stop());
-      await binding.ready;
-      assert.deepStrictEqual(canon(editor.getContents()), await reading(storage, id));
-      assert.strictEqual(binding.shadow, `hello ${E.EMBED}world`);
-      // Local edits, one transaction each, land as the editor holds them.
-      editor.type(5, ',');
-      editor.erase(0, 1);
-      editor.format(0, 4, { italic: true });
-      assert.strictEqual(binding.pending, true);
-      await binding.flush();
-      assert.strictEqual(binding.pending, false);
-      assert.strictEqual((await storage.get(id)).body, `ello, ${E.EMBED}world`);
-      assert.deepStrictEqual(canon(editor.getContents()), await reading(storage, id));
-      assert.strictEqual(binding.shadow, editor.text());
-      // The storage's own edits — a peer's, as far as the binding knows — reach the editor.
-      await storage.splice(id, 'body', 0, 0, 'H');
-      await storage.unmark(id, 'body', 0, 5, 'italic');
-      await storage.updateBlock(id, 'body', 7, { type: 'image', attrs: { src: 'b.png' }, isEmbed: true });
-      await waitUntil(async () => editor.text() === `Hello, ${E.EMBED}world` && binding.shadow === editor.text());
-      await tick();
-      assert.deepStrictEqual(canon(editor.getContents()), await reading(storage, id));
-      assert.deepStrictEqual(
-        E.deltaToSpans(editor.getContents()).find((span) => span.type === 'embed'),
-        {
-          type: 'embed',
-          value: { type: 'image', parents: [], attrs: { src: 'b.png' }, isEmbed: true },
-          marks: {},
-        },
-      );
-      // Stopped: nothing more crosses either way.
-      binding.stop();
-      editor.type(0, 'zzz');
-      await storage.splice(id, 'body', 0, 1);
-      await tick();
-      assert.strictEqual((await storage.get(id)).body, `ello, ${E.EMBED}world`);
-      assert.strictEqual(editor.text(), `zzzHello, ${E.EMBED}world`);
-      // Arguments.
-      assert.throws(() => E.createTextBinding(storage, id, 'body', {}), TypeError);
-      assert.throws(() => E.createTextBinding({}, id, 'body', editor), TypeError);
-      assert.throws(() => E.createTextBinding(storage, 5, 'body', editor), TypeError);
-    },
-  );
+const runEditorTests = (assert, createStorage) => {
+  it('should load the field into a bound editor, send its edits and take the storage’s, embeds and marks included', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({ title: 'x' });
+    await storage.updateText(id, 'body', 'hello world');
+    await storage.mark(id, 'body', 0, 5, 'bold', true);
+    await storage.insertEmbed(id, 'body', 6, { type: 'image', attrs: { src: 'a.png' } });
+    const editor = createEditor();
+    const binding = E.createTextBinding(storage, id, 'body', editor);
+    t2.after(() => binding.stop());
+    await binding.ready;
+    assert.deepStrictEqual(canon(editor.getContents()), await reading(storage, id));
+    assert.strictEqual(binding.shadow, `hello ${E.EMBED}world`);
+    // Local edits, one transaction each, land as the editor holds them.
+    editor.type(5, ',');
+    editor.erase(0, 1);
+    editor.format(0, 4, { italic: true });
+    assert.strictEqual(binding.pending, true);
+    await binding.flush();
+    assert.strictEqual(binding.pending, false);
+    assert.strictEqual((await storage.get(id)).body, `ello, ${E.EMBED}world`);
+    assert.deepStrictEqual(canon(editor.getContents()), await reading(storage, id));
+    assert.strictEqual(binding.shadow, editor.text());
+    // The storage's own edits — a peer's, as far as the binding knows — reach the editor.
+    await storage.splice(id, 'body', 0, 0, 'H');
+    await storage.unmark(id, 'body', 0, 5, 'italic');
+    await storage.updateBlock(id, 'body', 7, { type: 'image', attrs: { src: 'b.png' }, isEmbed: true });
+    await waitUntil(async () => editor.text() === `Hello, ${E.EMBED}world` && binding.shadow === editor.text());
+    await tick();
+    assert.deepStrictEqual(canon(editor.getContents()), await reading(storage, id));
+    assert.deepStrictEqual(
+      E.deltaToSpans(editor.getContents()).find((span) => span.type === 'embed'),
+      {
+        type: 'embed',
+        value: { type: 'image', parents: [], attrs: { src: 'b.png' }, isEmbed: true },
+        marks: {},
+      },
+    );
+    // Stopped: nothing more crosses either way.
+    binding.stop();
+    editor.type(0, 'zzz');
+    await storage.splice(id, 'body', 0, 1);
+    await tick();
+    assert.strictEqual((await storage.get(id)).body, `ello, ${E.EMBED}world`);
+    assert.strictEqual(editor.text(), `zzzHello, ${E.EMBED}world`);
+    // Arguments.
+    assert.throws(() => E.createTextBinding(storage, id, 'body', {}), TypeError);
+    assert.throws(() => E.createTextBinding({}, id, 'body', editor), TypeError);
+    assert.throws(() => E.createTextBinding(storage, 5, 'body', editor), TypeError);
+  });
 
-  await t.test(
-    'two editors on one storage converge: each edits its own reading at once, both reach the field, nothing lost',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      const a = createEditor();
-      const b = createEditor();
-      const resets = [];
-      const ba = E.createTextBinding(storage, id, 'body', a, { onReset: () => resets.push('a') });
-      const bb = E.createTextBinding(storage, id, 'body', b, { onReset: () => resets.push('b') });
-      t2.after(() => ba.stop());
-      t2.after(() => bb.stop());
-      await Promise.all([ba.ready, bb.ready]);
-      // Both type at one spot at once, each over its own reading: both words land whole, in the engine's order.
-      a.type(0, 'abc');
-      b.type(0, 'xyz');
-      await Promise.all([ba.flush(), bb.flush()]);
-      await waitUntil(async () => a.text() === b.text() && a.text() === (await storage.get(id)).body);
-      assert.ok(['abcxyz', 'xyzabc'].includes(a.text()), a.text());
-      assert.deepStrictEqual([ba.shadow, bb.shadow], [a.text(), a.text()]);
-      // A storm from both, interleaved without a wait, converges on the field.
-      for (const seed of [1, 2, 3]) {
-        const random = prng(seed);
-        for (let i = 0; i < 40; i++) {
-          randomEdit(random() < 0.5 ? a : b, random, random() < 0.5 ? 'A' : 'B');
-          if (random() < 0.2) await tick();
-        }
-        await Promise.all([ba.flush(), bb.flush()]);
-        await waitUntil(async () => {
-          const text = (await storage.get(id)).body;
-          return a.text() === text && b.text() === text && ba.shadow === text && bb.shadow === text;
-        });
-        const expected = await reading(storage, id);
-        assert.deepStrictEqual(canon(a.getContents()), expected, `seed ${seed}: a`);
-        assert.deepStrictEqual(canon(b.getContents()), expected, `seed ${seed}: b`);
+  it('should converge two editors on one storage: each edits its own reading at once, both reach the field, nothing lost', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    const a = createEditor();
+    const b = createEditor();
+    const resets = [];
+    const ba = E.createTextBinding(storage, id, 'body', a, { onReset: () => resets.push('a') });
+    const bb = E.createTextBinding(storage, id, 'body', b, { onReset: () => resets.push('b') });
+    t2.after(() => ba.stop());
+    t2.after(() => bb.stop());
+    await Promise.all([ba.ready, bb.ready]);
+    // Both type at one spot at once, each over its own reading: both words land whole, in the engine's order.
+    a.type(0, 'abc');
+    b.type(0, 'xyz');
+    await Promise.all([ba.flush(), bb.flush()]);
+    await waitUntil(async () => a.text() === b.text() && a.text() === (await storage.get(id)).body);
+    assert.ok(['abcxyz', 'xyzabc'].includes(a.text()), a.text());
+    assert.deepStrictEqual([ba.shadow, bb.shadow], [a.text(), a.text()]);
+    // A storm from both, interleaved without a wait, converges on the field.
+    for (const seed of [1, 2, 3]) {
+      const random = prng(seed);
+      for (let i = 0; i < 40; i++) {
+        randomEdit(random() < 0.5 ? a : b, random, random() < 0.5 ? 'A' : 'B');
+        if (random() < 0.2) await tick();
       }
-      assert.deepStrictEqual(resets, []);
-    },
-  );
+      await Promise.all([ba.flush(), bb.flush()]);
+      await waitUntil(async () => {
+        const text = (await storage.get(id)).body;
+        return a.text() === text && b.text() === text && ba.shadow === text && bb.shadow === text;
+      });
+      const expected = await reading(storage, id);
+      assert.deepStrictEqual(canon(a.getContents()), expected, `seed ${seed}: a`);
+      assert.deepStrictEqual(canon(b.getContents()), expected, `seed ${seed}: b`);
+    }
+    assert.deepStrictEqual(resets, []);
+  });
 
-  await t.test('two editors on two nodes converge once the nodes have', async (t2) => {
+  it('should converge two editors on two nodes once the nodes have', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const [sa, sb] = ['A', 'B'].map((name) => mesh.get(name));
     const id = await sa.insert({ title: 'doc' });
@@ -188,7 +183,7 @@ const runEditorTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(canon(b.getContents()), expected);
   });
 
-  await t.test('a reset reloads the editor and drops what was not sent; the record gone empties it', async (t2) => {
+  it('should reload the editor on a reset and drop what was not sent; the record gone empties it', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'before');
@@ -211,7 +206,7 @@ const runEditorTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual([resets[1], editor.text(), binding.shadow], ['', '', '']);
   });
 
-  await t.test('a flush that keeps failing reloads the editor each time and stops after five in a row', async (t2) => {
+  it('should reload the editor each time a flush keeps failing, and stop after five in a row', async (t2) => {
     // Every write to the field refused, as a hook might.
     const hooks = {
       beforeWrite: (ctx) => {
@@ -239,12 +234,18 @@ const runEditorTests = async (t, assert, createStorage) => {
     editor.type(0, 'x');
     await waitUntil(() => errors.length === 5, { timeout: 3000 });
     await binding.flush();
-    assert.deepStrictEqual(errors, ['UNLOGGED', 'UNLOGGED', 'UNLOGGED', 'UNLOGGED', 'UNLOGGED']);
+    assert.deepStrictEqual(errors, [
+      'ALX_ERR_UNLOGGED',
+      'ALX_ERR_UNLOGGED',
+      'ALX_ERR_UNLOGGED',
+      'ALX_ERR_UNLOGGED',
+      'ALX_ERR_UNLOGGED',
+    ]);
     assert.deepStrictEqual(resets, ['', '', '', '', ''], 'a reload after each, what was typed dropped');
     assert.strictEqual(editor.text(), 'x', 'typed after the last reload, never logged');
     assert.strictEqual((await storage.get(id)).body, undefined);
     assert.strictEqual(binding.stopped, true);
-    assert.deepStrictEqual(stops, ['UNLOGGED'], 'onStop hears the last failure, once');
+    assert.deepStrictEqual(stops, ['ALX_ERR_UNLOGGED'], 'onStop hears the last failure, once');
     editor.type(0, 'y');
     // A stopped binding answers flush() at once, whatever was typed after it.
     await Promise.race([
@@ -255,42 +256,39 @@ const runEditorTests = async (t, assert, createStorage) => {
     await new Promise((resolve) => setTimeout(resolve, 100));
     assert.strictEqual(errors.length, 5, 'nothing after the stop');
   });
-  await t.test(
-    'an editor that throws on a peer’s change is loaded from the field again, never left apart',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      await storage.updateText(id, 'body', 'base');
-      const editor = createEditor();
-      let throwNext = false;
-      const update = editor.updateContents;
-      editor.updateContents = (delta) => {
-        if (throwNext) {
-          throwNext = false;
-          throw new Error('the view is busy');
-        }
-        update(delta);
-      };
-      const errors = [];
-      const resets = [];
-      const binding = E.createTextBinding(storage, id, 'body', editor, {
-        onError: (error) => errors.push(error.message),
-        onReset: () => resets.push(editor.text()),
-      });
-      t2.after(() => binding.stop());
-      await binding.ready;
-      throwNext = true;
-      await storage.splice(id, 'body', 4, 0, '!');
-      await waitUntil(() => resets.length === 1, { timeout: 2000 });
-      assert.deepStrictEqual(errors, ['the view is busy']);
-      assert.strictEqual(editor.text(), 'base!', 'the editor holds the field');
-      editor.type(0, '>');
-      await binding.flush();
-      assert.strictEqual((await storage.get(id)).body, '>base!', 'and edits it as before');
-    },
-  );
+  it('should load an editor that throws on a peer’s change from the field again, never leave it apart', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'base');
+    const editor = createEditor();
+    let throwNext = false;
+    const update = editor.updateContents;
+    editor.updateContents = (delta) => {
+      if (throwNext) {
+        throwNext = false;
+        throw new Error('the view is busy');
+      }
+      update(delta);
+    };
+    const errors = [];
+    const resets = [];
+    const binding = E.createTextBinding(storage, id, 'body', editor, {
+      onError: (error) => errors.push(error.message),
+      onReset: () => resets.push(editor.text()),
+    });
+    t2.after(() => binding.stop());
+    await binding.ready;
+    throwNext = true;
+    await storage.splice(id, 'body', 4, 0, '!');
+    await waitUntil(() => resets.length === 1, { timeout: 2000 });
+    assert.deepStrictEqual(errors, ['the view is busy']);
+    assert.strictEqual(editor.text(), 'base!', 'the editor holds the field');
+    editor.type(0, '>');
+    await binding.flush();
+    assert.strictEqual((await storage.get(id)).body, '>base!', 'and edits it as before');
+  });
 
-  await t.test('a first load the editor refuses stops the binding: ready rejects, onStop hears why', async (t2) => {
+  it('should stop the binding on a first load the editor refuses: ready rejects, onStop hears why', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'base');
@@ -309,7 +307,7 @@ const runEditorTests = async (t, assert, createStorage) => {
     await binding.flush();
   });
 
-  await t.test('an edit the handle refuses — an editor apart from it — reads the editor again', async (t2) => {
+  it('should read the editor again on an edit the handle refuses — an editor apart from it', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'base');
@@ -324,13 +322,13 @@ const runEditorTests = async (t, assert, createStorage) => {
     await binding.ready;
     // An editor that reports an edit past its end: the handle refuses it, and the editor is read again.
     editor.edit([{ retain: 10 }, { insert: 'x' }]);
-    assert.deepStrictEqual([errors, resets], [['OUT_OF_RANGE'], ['base']]);
+    assert.deepStrictEqual([errors, resets], [['ALX_ERR_OUT_OF_RANGE'], ['base']]);
     editor.type(4, '!');
     await binding.flush();
     assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base!', 'base!']);
   });
 
-  await t.test('what is typed before the field is read is over contents the load replaces: dropped', async (t2) => {
+  it('should drop what is typed before the field is read: it is over contents the load replaces', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({});
     await storage.updateText(id, 'body', 'before');
@@ -349,7 +347,7 @@ const runEditorTests = async (t, assert, createStorage) => {
     await binding.flush();
     assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['before!', 'before!']);
   });
-  await t.test('a flush that failed drops what was typed on top of it and reads the editor again', async (t2) => {
+  it('should drop what was typed on top of a flush that failed, and read the editor again', async (t2) => {
     let refuse = false;
     const hooks = {
       beforeWrite: (ctx) => {
@@ -379,160 +377,154 @@ const runEditorTests = async (t, assert, createStorage) => {
     assert.strictEqual(binding.pending, true);
     await flushing;
     await waitUntil(() => resets.length === 1);
-    assert.deepStrictEqual(errors, ['UNLOGGED']);
+    assert.deepStrictEqual(errors, ['ALX_ERR_UNLOGGED']);
     await binding.flush();
     assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base', 'base']);
     editor.type(4, '!');
     await binding.flush();
     assert.deepStrictEqual([editor.text(), (await storage.get(id)).body], ['base!', 'base!']);
   });
-  await t.test(
-    'diffSpans and diffBlocks give the delta between two readings; spans, blocks and deltas round-trip; transforms agree with the storage’s order',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      await storage.updateText(id, 'body', 'Title\nFirst paragraph.');
-      await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
-      await storage.splitBlock(id, 'body', 7, { type: 'paragraph' });
-      await storage.insertEmbed(id, 'body', 14, { type: 'image', attrs: { src: 'a.png' } });
-      await storage.mark(id, 'body', 1, 6, 'bold', true);
-      const before = await storage.spans(id, 'body');
-      // Round trips.
-      assert.deepStrictEqual(E.blocksToSpans(E.spansToBlocks(before)), before);
-      assert.deepStrictEqual(E.spansToBlocks(before), await storage.blocks(id, 'body'));
-      assert.deepStrictEqual(E.deltaToSpans(E.spansToDelta(before)), canonSpans(before));
-      assert.deepStrictEqual(E.spansToBlocks([{ type: 'text', text: 'ab', marks: {} }])[0], {
-        index: null,
-        type: null,
-        parents: [],
-        attrs: {},
-        spans: [{ type: 'text', text: 'ab', marks: {} }],
-      });
-      assert.throws(() => E.deltaToSpans([{ retain: 1 }]), TypeError);
-      // A new reading: the heading's level, a word, the image gone, a mark off, a paragraph under a quote.
-      const after = E.spansToBlocks(before);
-      after[0].attrs = { level: 2 };
-      after[0].spans = [{ type: 'text', text: 'Title!\n', marks: {} }];
-      after[1].parents = ['blockquote'];
-      after[1].spans = [{ type: 'text', text: 'First paragraph.', marks: {} }];
-      const delta = E.diffBlocks(E.spansToBlocks(before), after);
-      assert.deepStrictEqual(delta, [
-        { retain: 1, attributes: { embed: { type: 'heading', parents: [], attrs: { level: 2 }, isEmbed: false } } },
-        { retain: 5, attributes: { bold: null } },
-        { insert: '!' },
-        { retain: 1 },
-        { retain: 1, attributes: { embed: { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false } } },
-        { retain: 6 },
-        { delete: 1 },
-      ]);
-      await storage.applyDelta(id, 'body', delta);
-      // The paragraph's marker moved one along with the inserted `!`: the indices read again.
-      assert.deepStrictEqual(await storage.blocks(id, 'body'), E.spansToBlocks(E.blocksToSpans(after)));
-      assert.deepStrictEqual(E.diffSpans(await storage.spans(id, 'body'), E.blocksToSpans(after)), []);
-      // Nothing to nothing, something to nothing.
-      assert.deepStrictEqual(E.diffSpans([], []), []);
-      assert.deepStrictEqual(E.diffSpans(before, []), [{ delete: textOf(before).length }]);
-      // Transforms: the storage lands a before b; both orders of applying read the same.
-      const base = 'hello';
-      const a = [{ retain: 5 }, { insert: ' world' }];
-      const b = [{ delete: 1 }, { insert: 'J' }, { retain: 4, attributes: { bold: true } }];
-      const ab = E.applyToText(E.applyToText(base, a), E.transform(a, b, true));
-      const ba = E.applyToText(E.applyToText(base, b), E.transform(b, a, false));
-      assert.deepStrictEqual([ab, ba], ['Jello world', 'Jello world']);
-      assert.deepStrictEqual(E.transform([{ insert: 'x' }], [{ insert: 'y' }], true), [{ retain: 1 }, { insert: 'y' }]);
-      assert.deepStrictEqual(E.transform([{ insert: 'x' }], [{ insert: 'y' }], false), [{ insert: 'y' }]);
-      assert.deepStrictEqual(E.compose([{ insert: 'ab' }], [{ retain: 1 }, { delete: 1 }, { insert: 'c' }]), [
-        { insert: 'ac' },
-      ]);
-      // Over a retain a null still takes the mark off, as Quill keeps it.
-      assert.deepStrictEqual(
-        E.compose([{ retain: 2, attributes: { bold: true } }], [{ retain: 2, attributes: { bold: null } }]),
-        [{ retain: 2, attributes: { bold: null } }],
-      );
-      assert.deepStrictEqual(
-        E.compose([{ insert: 'ab', attributes: { bold: true } }], [{ retain: 2, attributes: { bold: null } }]),
-        [{ insert: 'ab' }],
-      );
-      assert.strictEqual(E.transformIndex(3, [{ insert: 'ab' }]), 5);
-      assert.strictEqual(E.transformIndex(3, [{ retain: 3 }, { insert: 'ab' }]), 5);
-      assert.strictEqual(E.transformIndex(3, [{ retain: 3 }, { insert: 'ab' }], true), 3);
-      assert.strictEqual(E.transformIndex(3, [{ retain: 1 }, { delete: 5 }]), 1);
-      assert.strictEqual(
-        E.applyToText('abc', [{ retain: 1 }, { insert: { embed: null } }, { delete: 1 }]),
-        `a${E.EMBED}c`,
-      );
-      assert.throws(() => E.transform([{ retain: 0 }], []), TypeError);
-      assert.throws(() => E.transformIndex(-1, []), TypeError);
-      assert.throws(() => E.applyToText(5, []), TypeError);
-    },
-  );
+  it('should give the delta between two readings through diffSpans and diffBlocks; spans, blocks and deltas round-trip; transforms agree with the storage’s order', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'Title\nFirst paragraph.');
+    await storage.splitBlock(id, 'body', 0, { type: 'heading', attrs: { level: 1 } });
+    await storage.splitBlock(id, 'body', 7, { type: 'paragraph' });
+    await storage.insertEmbed(id, 'body', 14, { type: 'image', attrs: { src: 'a.png' } });
+    await storage.mark(id, 'body', 1, 6, 'bold', true);
+    const before = await storage.spans(id, 'body');
+    // Round trips.
+    assert.deepStrictEqual(E.blocksToSpans(E.spansToBlocks(before)), before);
+    assert.deepStrictEqual(E.spansToBlocks(before), await storage.blocks(id, 'body'));
+    assert.deepStrictEqual(E.deltaToSpans(E.spansToDelta(before)), canonSpans(before));
+    assert.deepStrictEqual(E.spansToBlocks([{ type: 'text', text: 'ab', marks: {} }])[0], {
+      index: null,
+      type: null,
+      parents: [],
+      attrs: {},
+      spans: [{ type: 'text', text: 'ab', marks: {} }],
+    });
+    assert.throws(() => E.deltaToSpans([{ retain: 1 }]), TypeError);
+    // A new reading: the heading's level, a word, the image gone, a mark off, a paragraph under a quote.
+    const after = E.spansToBlocks(before);
+    after[0].attrs = { level: 2 };
+    after[0].spans = [{ type: 'text', text: 'Title!\n', marks: {} }];
+    after[1].parents = ['blockquote'];
+    after[1].spans = [{ type: 'text', text: 'First paragraph.', marks: {} }];
+    const delta = E.diffBlocks(E.spansToBlocks(before), after);
+    assert.deepStrictEqual(delta, [
+      { retain: 1, attributes: { embed: { type: 'heading', parents: [], attrs: { level: 2 }, isEmbed: false } } },
+      { retain: 5, attributes: { bold: null } },
+      { insert: '!' },
+      { retain: 1 },
+      { retain: 1, attributes: { embed: { type: 'paragraph', parents: ['blockquote'], attrs: {}, isEmbed: false } } },
+      { retain: 6 },
+      { delete: 1 },
+    ]);
+    await storage.applyDelta(id, 'body', delta);
+    // The paragraph's marker moved one along with the inserted `!`: the indices read again.
+    assert.deepStrictEqual(await storage.blocks(id, 'body'), E.spansToBlocks(E.blocksToSpans(after)));
+    assert.deepStrictEqual(E.diffSpans(await storage.spans(id, 'body'), E.blocksToSpans(after)), []);
+    // Nothing to nothing, something to nothing.
+    assert.deepStrictEqual(E.diffSpans([], []), []);
+    assert.deepStrictEqual(E.diffSpans(before, []), [{ delete: textOf(before).length }]);
+    // Transforms: the storage lands a before b; both orders of applying read the same.
+    const base = 'hello';
+    const a = [{ retain: 5 }, { insert: ' world' }];
+    const b = [{ delete: 1 }, { insert: 'J' }, { retain: 4, attributes: { bold: true } }];
+    const ab = E.applyToText(E.applyToText(base, a), E.transform(a, b, true));
+    const ba = E.applyToText(E.applyToText(base, b), E.transform(b, a, false));
+    assert.deepStrictEqual([ab, ba], ['Jello world', 'Jello world']);
+    assert.deepStrictEqual(E.transform([{ insert: 'x' }], [{ insert: 'y' }], true), [{ retain: 1 }, { insert: 'y' }]);
+    assert.deepStrictEqual(E.transform([{ insert: 'x' }], [{ insert: 'y' }], false), [{ insert: 'y' }]);
+    assert.deepStrictEqual(E.compose([{ insert: 'ab' }], [{ retain: 1 }, { delete: 1 }, { insert: 'c' }]), [
+      { insert: 'ac' },
+    ]);
+    // Over a retain a null still takes the mark off, as Quill keeps it.
+    assert.deepStrictEqual(
+      E.compose([{ retain: 2, attributes: { bold: true } }], [{ retain: 2, attributes: { bold: null } }]),
+      [{ retain: 2, attributes: { bold: null } }],
+    );
+    assert.deepStrictEqual(
+      E.compose([{ insert: 'ab', attributes: { bold: true } }], [{ retain: 2, attributes: { bold: null } }]),
+      [{ insert: 'ab' }],
+    );
+    assert.strictEqual(E.transformIndex(3, [{ insert: 'ab' }]), 5);
+    assert.strictEqual(E.transformIndex(3, [{ retain: 3 }, { insert: 'ab' }]), 5);
+    assert.strictEqual(E.transformIndex(3, [{ retain: 3 }, { insert: 'ab' }], true), 3);
+    assert.strictEqual(E.transformIndex(3, [{ retain: 1 }, { delete: 5 }]), 1);
+    assert.strictEqual(
+      E.applyToText('abc', [{ retain: 1 }, { insert: { embed: null } }, { delete: 1 }]),
+      `a${E.EMBED}c`,
+    );
+    assert.throws(() => E.transform([{ retain: 0 }], []), TypeError);
+    assert.throws(() => E.transformIndex(-1, []), TypeError);
+    assert.throws(() => E.applyToText(5, []), TypeError);
+  });
 
-  await t.test(
-    'a selection travels as tokens that survive the edits around it, and a presence room’s cursors resolve to indices',
-    async (t2) => {
-      const storage = await createStorage(t2, 'A');
-      const id = await storage.insert({});
-      await storage.updateText(id, 'body', 'hello world');
-      const tokens = await E.selectionToTokens(storage, id, 'body', { anchor: 6, head: 11 });
-      assert.deepStrictEqual(
-        [tokens.id, tokens.field, typeof tokens.anchor, typeof tokens.head],
-        [id, 'body', 'string', 'string'],
-      );
-      await storage.splice(id, 'body', 0, 0, 'well, ');
-      assert.deepStrictEqual(await E.tokensToSelection(storage, tokens), { anchor: 12, head: 17 });
-      const caret = await E.selectionToTokens(storage, id, 'body', { anchor: 3 });
-      assert.strictEqual(caret.anchor, caret.head);
-      assert.strictEqual(await E.selectionToTokens(storage, id, 'nope', { anchor: 0 }), null);
-      await storage.splice(id, 'body', 12, 5);
-      assert.deepStrictEqual(
-        await E.tokensToSelection(storage, tokens),
-        { anchor: 12, head: 12 },
-        'a cut keeps the place',
-      );
-      const gone = await E.selectionToTokens(storage, id, 'body', { anchor: 2 });
-      await storage.set(id, { title: 'reset' });
-      assert.strictEqual(await E.tokensToSelection(storage, gone), null, 'the field is gone');
-      await storage.updateText(id, 'body', 'well, hello ');
-      // A caret made in the field as it is now: the one before the reset has no place.
-      const fresh = await E.selectionToTokens(storage, id, 'body', { anchor: 3 });
-      const presence = createPresence(storage, { timeout: 1000 });
-      t2.after(() => presence.destroy());
-      await presence.set({ name: 'ada', cursor: fresh });
-      await presence.apply({
-        p: 1,
-        scope: '*',
-        s: [['someone', 1, Date.now(), { cursor: { id, field: 'body', anchor: tokens.anchor } }]],
-      });
-      await presence.apply({
-        p: 1,
-        scope: '*',
-        s: [['other', 1, Date.now(), { cursor: { id: 'x', field: 'body', anchor: tokens.anchor } }]],
-      });
-      // A peer whose token this field cannot read: its cursor alone is left out.
-      await presence.apply({
-        p: 1,
-        scope: '*',
-        s: [['broken', 1, Date.now(), { cursor: { id, field: 'body', anchor: 'x' } }]],
-      });
-      await presence.apply({
-        p: 1,
-        scope: '*',
-        s: [['odd', 1, Date.now(), { cursor: { id, field: 'body', anchor: fresh.anchor, head: 7 } }]],
-      });
-      const cursors = await E.presenceCursors(presence, storage, id, 'body');
-      assert.deepStrictEqual(
-        cursors.map(({ node, anchor, head }) => [node, anchor, head]),
-        [[storage.nodeId, 3, 3]],
-        'this node’s caret; the other’s place is gone, the third is on another record, the broken tokens left out',
-      );
-      assert.strictEqual(cursors[0].state.name, 'ada');
-      await assert.rejects(() => E.tokensToSelection(storage, { id }), TypeError);
-      await assert.rejects(() => E.selectionToTokens(storage, id, 'body', {}), TypeError);
-      await assert.rejects(() => E.presenceCursors({}, storage, id, 'body'), TypeError);
-    },
-  );
+  it('should carry a selection as tokens that survive the edits around it, and resolve a presence room’s cursors to indices', async (t2) => {
+    const storage = await createStorage(t2, 'A');
+    const id = await storage.insert({});
+    await storage.updateText(id, 'body', 'hello world');
+    const tokens = await E.selectionToTokens(storage, id, 'body', { anchor: 6, head: 11 });
+    assert.deepStrictEqual(
+      [tokens.id, tokens.field, typeof tokens.anchor, typeof tokens.head],
+      [id, 'body', 'string', 'string'],
+    );
+    await storage.splice(id, 'body', 0, 0, 'well, ');
+    assert.deepStrictEqual(await E.tokensToSelection(storage, tokens), { anchor: 12, head: 17 });
+    const caret = await E.selectionToTokens(storage, id, 'body', { anchor: 3 });
+    assert.strictEqual(caret.anchor, caret.head);
+    assert.strictEqual(await E.selectionToTokens(storage, id, 'nope', { anchor: 0 }), null);
+    await storage.splice(id, 'body', 12, 5);
+    assert.deepStrictEqual(
+      await E.tokensToSelection(storage, tokens),
+      { anchor: 12, head: 12 },
+      'a cut keeps the place',
+    );
+    const gone = await E.selectionToTokens(storage, id, 'body', { anchor: 2 });
+    await storage.set(id, { title: 'reset' });
+    assert.strictEqual(await E.tokensToSelection(storage, gone), null, 'the field is gone');
+    await storage.updateText(id, 'body', 'well, hello ');
+    // A caret made in the field as it is now: the one before the reset has no place.
+    const fresh = await E.selectionToTokens(storage, id, 'body', { anchor: 3 });
+    const presence = createPresence(storage, { timeout: 1000 });
+    t2.after(() => presence.destroy());
+    await presence.set({ name: 'ada', cursor: fresh });
+    await presence.apply({
+      p: 1,
+      scope: '*',
+      s: [['someone', 1, Date.now(), { cursor: { id, field: 'body', anchor: tokens.anchor } }]],
+    });
+    await presence.apply({
+      p: 1,
+      scope: '*',
+      s: [['other', 1, Date.now(), { cursor: { id: 'x', field: 'body', anchor: tokens.anchor } }]],
+    });
+    // A peer whose token this field cannot read: its cursor alone is left out.
+    await presence.apply({
+      p: 1,
+      scope: '*',
+      s: [['broken', 1, Date.now(), { cursor: { id, field: 'body', anchor: 'x' } }]],
+    });
+    await presence.apply({
+      p: 1,
+      scope: '*',
+      s: [['odd', 1, Date.now(), { cursor: { id, field: 'body', anchor: fresh.anchor, head: 7 } }]],
+    });
+    const cursors = await E.presenceCursors(presence, storage, id, 'body');
+    assert.deepStrictEqual(
+      cursors.map(({ node, anchor, head }) => [node, anchor, head]),
+      [[storage.nodeId, 3, 3]],
+      'this node’s caret; the other’s place is gone, the third is on another record, the broken tokens left out',
+    );
+    assert.strictEqual(cursors[0].state.name, 'ada');
+    await assert.rejects(() => E.tokensToSelection(storage, { id }), TypeError);
+    await assert.rejects(() => E.selectionToTokens(storage, id, 'body', {}), TypeError);
+    await assert.rejects(() => E.presenceCursors({}, storage, id, 'body'), TypeError);
+  });
 
-  await t.test('the delta algebra keeps its laws over random deltas; one style in any key order is one op', () => {
+  it('should keep the laws of the delta algebra over random deltas; one style in any key order is one op', () => {
     const rnd = prng(29);
     const randomDelta = (length) => {
       const ops = [];
@@ -578,7 +570,7 @@ const runEditorTests = async (t, assert, createStorage) => {
     );
   });
 
-  await t.test('an adapter’s fit holds what its document differs by, and maps indices across it', () => {
+  it('should hold in an adapter’s fit what its document differs by, and map indices across it', () => {
     const plain = (text) => [{ type: 'text', text, marks: {} }];
     let shown = 'ab\r\ncd';
     const fit = E.createFit(() => plain(shown), E.diffSpans);
@@ -598,7 +590,7 @@ const runEditorTests = async (t, assert, createStorage) => {
     assert.strictEqual(fit.toField(9), 9, 'nothing held again: the document is not read');
   });
 
-  await t.test('undo steps answer whether there is a step and take it once the binding’s edits landed', async () => {
+  it('should answer through undo steps whether there is a step, and take it once the binding’s edits landed', async () => {
     assert.throws(
       () =>
         E.undoSteps(

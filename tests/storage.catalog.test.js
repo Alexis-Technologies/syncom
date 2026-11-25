@@ -2,16 +2,16 @@
 
 // Files land at once here (`defer: 0`): what these tests read of the disk is the engine's, not the window's — the window has tests of its own (storage.defer, storage.group).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 const { runCatalogTests } = require('./suites/catalog.js');
 
-test('Catalog (node)', async (t) => {
-  // The same name within one subtest reopens the same directory.
+describe('Catalog (node)', () => {
+  // The same name within one test reopens the same directory.
   const dirs = new Map();
-  await runCatalogTests(t, assert, async (t2, name, options = {}) => {
+  runCatalogTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     let dir = dirs.get(key);
     if (!dir) {

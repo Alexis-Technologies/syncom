@@ -12,8 +12,8 @@ const path = require('node:path');
 const { readFileSync, readdirSync, statSync, mkdtempSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
 const { spawnSync } = require('node:child_process');
-const { test } = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 
 const ROOT = path.join(__dirname, '..', '..');
 const EXAMPLES = path.join(ROOT, 'docs', 'examples');
@@ -38,45 +38,47 @@ const run = (file, args) => {
   }
 };
 
-for (const file of files(EXAMPLES)) {
-  const name = path.relative(ROOT, file);
-  const browserOnly = BROWSER_ONLY.test(readFileSync(file, 'utf8'));
-  test(`${name} ${browserOnly ? 'parses' : 'runs'}`, () => {
-    const result = run(file, browserOnly ? ['--check'] : []);
-    const output = `${result.stdout}\n${result.stderr}`.trim().slice(-4000);
-    assert.strictEqual(result.signal, null, `${name} timed out\n${output}`);
-    assert.strictEqual(result.status, 0, `${name} failed\n${output}`);
-  });
-}
-
-test('every page region an example names exists in its file', () => {
-  const missing = [];
-  const pages = [];
-  const walk = (dir) => {
-    for (const name of readdirSync(dir)) {
-      const full = path.join(dir, name);
-      if (name === '.vitepress' || name === 'examples' || name === 'public') continue;
-      if (statSync(full).isDirectory()) walk(full);
-      else if (name.endsWith('.md') && name !== 'CLAUDE.md') pages.push(full);
-    }
-  };
-  walk(path.join(ROOT, 'docs'));
-  for (const page of pages) {
-    const text = readFileSync(page, 'utf8');
-    for (const match of text.matchAll(/^<<< @\/(examples\/[^\s#{]+)(?:#([\w-]+))?/gm)) {
-      const [, rel, region] = match;
-      const full = path.join(ROOT, 'docs', rel);
-      let source;
-      try {
-        source = readFileSync(full, 'utf8');
-      } catch {
-        missing.push(`${path.relative(ROOT, page)}: ${rel} does not exist`);
-        continue;
-      }
-      if (region && !source.includes(`// #region ${region}\n`)) {
-        missing.push(`${path.relative(ROOT, page)}: ${rel} has no region ${region}`);
-      }
-    }
+describe('docs examples', () => {
+  for (const file of files(EXAMPLES)) {
+    const name = path.relative(ROOT, file);
+    const browserOnly = BROWSER_ONLY.test(readFileSync(file, 'utf8'));
+    it(`should ${browserOnly ? 'parse' : 'run'} ${name}`, () => {
+      const result = run(file, browserOnly ? ['--check'] : []);
+      const output = `${result.stdout}\n${result.stderr}`.trim().slice(-4000);
+      assert.strictEqual(result.signal, null, `${name} timed out\n${output}`);
+      assert.strictEqual(result.status, 0, `${name} failed\n${output}`);
+    });
   }
-  assert.deepStrictEqual(missing, []);
+
+  it('should find in its file every page region an example names', () => {
+    const missing = [];
+    const pages = [];
+    const walk = (dir) => {
+      for (const name of readdirSync(dir)) {
+        const full = path.join(dir, name);
+        if (name === '.vitepress' || name === 'examples' || name === 'public') continue;
+        if (statSync(full).isDirectory()) walk(full);
+        else if (name.endsWith('.md') && name !== 'CLAUDE.md') pages.push(full);
+      }
+    };
+    walk(path.join(ROOT, 'docs'));
+    for (const page of pages) {
+      const text = readFileSync(page, 'utf8');
+      for (const match of text.matchAll(/^<<< @\/(examples\/[^\s#{]+)(?:#([\w-]+))?/gm)) {
+        const [, rel, region] = match;
+        const full = path.join(ROOT, 'docs', rel);
+        let source;
+        try {
+          source = readFileSync(full, 'utf8');
+        } catch {
+          missing.push(`${path.relative(ROOT, page)}: ${rel} does not exist`);
+          continue;
+        }
+        if (region && !source.includes(`// #region ${region}\n`)) {
+          missing.push(`${path.relative(ROOT, page)}: ${rel} has no region ${region}`);
+        }
+      }
+    }
+    assert.deepStrictEqual(missing, []);
+  });
 });

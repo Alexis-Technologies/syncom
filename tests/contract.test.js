@@ -1,15 +1,15 @@
 'use strict';
 
 const path = require('node:path');
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { SmartContract, DataReader } = require('../src/contracts/contracts.js');
 const { Blockchain } = syncom;
 const { createTemp, cleanupTemp } = require('./utils/temp.js');
 
-test('Contract module', async (t) => {
-  await t.test('DataReader get reads storage', async () => {
+describe('Contract module', () => {
+  it('should read storage through DataReader get', async () => {
     const tempDir = await createTemp();
     try {
       const storage = await syncom.createDatabase({ path: tempDir });
@@ -24,7 +24,7 @@ test('Contract module', async (t) => {
     }
   });
 
-  await t.test('SmartContract execute method', async () => {
+  it('should run a contract and save its result through the SmartContract execute method', async () => {
     const tempDir = await createTemp();
     try {
       const storage = await syncom.createDatabase({ path: tempDir });
@@ -53,7 +53,7 @@ test('Contract module', async (t) => {
     }
   });
 
-  await t.test('SmartContract execute method with error', async () => {
+  it('should reject from the SmartContract execute method with the error, and add the error to the chain', async () => {
     const tempDir = await createTemp();
     try {
       const storage = await syncom.createDatabase({ path: tempDir });
@@ -87,7 +87,7 @@ test('Contract module', async (t) => {
     }
   });
 
-  await t.test('SmartContract save and load static methods', async () => {
+  it('should save and load a contract through the SmartContract save and load static methods', async () => {
     const tempDir = await createTemp();
     try {
       const storage = await syncom.createDatabase({ path: tempDir });
@@ -117,7 +117,7 @@ test('Contract module', async (t) => {
     }
   });
 
-  await t.test('SmartContract.load rejects non-contract block', async () => {
+  it('should reject a non-contract block in SmartContract.load', async () => {
     const tempDir = await createTemp();
     try {
       const storage = await syncom.createDatabase({ path: tempDir });
@@ -128,7 +128,7 @@ test('Contract module', async (t) => {
       const plainHash = await blockchain.addBlock({ kind: 'not-a-contract' });
 
       await assert.rejects(() => SmartContract.load(plainHash, context), {
-        code: 'NOT_CONTRACT',
+        code: 'ALX_ERR_NOT_CONTRACT',
         message: /Not a smart contract block/,
       });
     } finally {

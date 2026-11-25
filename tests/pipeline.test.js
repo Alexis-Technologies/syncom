@@ -4,8 +4,8 @@
 // once, in order, inside one transaction per turn; the checkpoint after the
 // write; a reopen replays from it, or rebuilds where the log cannot resume.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { memory } = require('../src/memory/memory.js');
 const { createPipeline } = require('../src/pipeline/pipeline.js');
@@ -18,8 +18,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const schema = { entities: { Order: { index: ['customer'] }, Total: {} } };
 
-test('pipelines', async (t) => {
-  await t.test('a pipeline resumes from its checkpoint after a reopen and handles every change once', async (t2) => {
+describe('pipelines', () => {
+  it('should resume a pipeline from its checkpoint after a reopen and handle every change once', async (t2) => {
     const fsi = memory();
     const openDb = async (options = {}) =>
       syncom.createDatabase({ path: '/p', fsi, defer: 0, logger: false, schema, ...options });
@@ -108,7 +108,7 @@ test('pipelines', async (t) => {
       ['boom'],
       'once: nothing is handed over while stopped',
     );
-    assert.deepStrictEqual(errors, [['PIPELINE_FAILED', 'broken', 'boom']]);
+    assert.deepStrictEqual(errors, [['ALX_ERR_PIPELINE_FAILED', 'broken', 'boom']]);
     arm = false;
     await broken.start();
     await broken.awaitIdle();
@@ -138,100 +138,97 @@ test('pipelines', async (t) => {
     assert.throws(() => createPipeline(db, { name: 'bad name', source: 'Order', handler }), TypeError);
   });
 
-  await t.test(
-    'a rebuild and a replay are handed over 500 records at a time with the checkpoint after the last page; turns that come while one is handled join as one batch',
-    async () => {
-      // The checkpoint's write (the `pipeline` namespace) held while `gate` is set: what lands meanwhile queues up.
-      const fsi = memory();
-      let gate = null;
-      const slow = {
-        read: (dir, name) => fsi.read(dir, name),
-        write: (dir, name, content, options) =>
-          gate !== null && dir.endsWith('pipeline')
-            ? gate.then(() => fsi.write(dir, name, content, options))
-            : fsi.write(dir, name, content, options),
-        append: (dir, name, content) => fsi.append(dir, name, content),
-        exists: (dir, name) => fsi.exists(dir, name),
-        remove: (dir, name) => fsi.remove(dir, name),
-        list: (dir) => fsi.list(dir),
-      };
-      const db = await syncom.createDatabase({ path: '/r', fsi: slow, defer: 0, logger: false, schema });
-      const rows = [];
-      for (let i = 0; i < 1200; i++) rows.push({ customer: `c${i % 7}`, amount: i });
-      await db.Order.bulkInsert(rows);
-      const batches = [];
-      let failAt = 1;
-      const live = [];
-      let firstLive = null;
-      const handled = new Promise((resolve) => (firstLive = resolve));
-      const pipeline = createPipeline(db, {
-        name: 'pages',
-        source: 'Order',
-        handler: async ({ ids, changes, replay, rebuilt }) => {
-          if (replay) {
-            if (batches.length === failAt) throw new Error(`page ${failAt + 1}`);
-            batches.push([ids.length, rebuilt]);
-            return;
-          }
-          live.push([ids.slice(), changes.length]);
-          if (live.length === 1) firstLive();
-        },
-      });
-      // A rebuild (no checkpoint): page 2 fails — page 1 was handled, nothing is checkpointed.
-      await pipeline.start();
-      await pipeline.awaitIdle();
-      assert.deepStrictEqual(batches, [[500, true]]);
-      assert.strictEqual(pipeline.stopped, true);
-      assert.strictEqual(pipeline.checkpoint, null, 'no page of a rebuild moves the checkpoint but the last');
-      // Started again: the rebuild from the start, every page, then the checkpoint.
-      failAt = -1;
-      batches.length = 0;
-      await pipeline.start();
-      await pipeline.awaitIdle();
-      assert.deepStrictEqual(batches, [
-        [500, true],
-        [500, true],
-        [200, true],
-      ]);
-      const after = pipeline.checkpoint;
-      assert.ok(after !== null);
-      // Live: the first turn is handled and its checkpoint held; the three turns that land meanwhile join as one
-      // batch — the ids each once, every change — handed over after it.
-      let open = null;
-      gate = new Promise((resolve) => (open = resolve));
-      const a = (await db.Order.insert({ customer: 'live', amount: 1 })).id;
-      await handled;
-      const b = (await db.Order.insert({ customer: 'live', amount: 2 })).id;
-      const c = (await db.Order.insert({ customer: 'live', amount: 3 })).id;
-      await db.Order.update(b, { amount: 20 });
-      open();
-      await pipeline.awaitIdle();
-      gate = null;
-      // A change per field written: three of an insert, one of the update.
-      assert.deepStrictEqual(live, [
-        [[a], 3],
-        [[b, c], 7],
-      ]);
-      assert.notStrictEqual(pipeline.checkpoint, after);
-      // Stopped, 600 records written: the replay hands them over in pages too.
-      pipeline.stop();
-      batches.length = 0;
-      const more = [];
-      for (let i = 0; i < 600; i++) more.push({ customer: 'later', amount: i });
-      await db.Order.bulkInsert(more);
-      await pipeline.start();
-      await pipeline.awaitIdle();
-      assert.deepStrictEqual(batches, [
-        [500, false],
-        [100, false],
-      ]);
-      assert.strictEqual(pipeline.rebuilt, false);
-      pipeline.stop();
-      await db.close();
-    },
-  );
+  it('should hand a rebuild and a replay over 500 records at a time with the checkpoint after the last page, and join the turns that come while one is handled as one batch', async () => {
+    // The checkpoint's write (the `pipeline` namespace) held while `gate` is set: what lands meanwhile queues up.
+    const fsi = memory();
+    let gate = null;
+    const slow = {
+      read: (dir, name) => fsi.read(dir, name),
+      write: (dir, name, content, options) =>
+        gate !== null && dir.endsWith('pipeline')
+          ? gate.then(() => fsi.write(dir, name, content, options))
+          : fsi.write(dir, name, content, options),
+      append: (dir, name, content) => fsi.append(dir, name, content),
+      exists: (dir, name) => fsi.exists(dir, name),
+      remove: (dir, name) => fsi.remove(dir, name),
+      list: (dir) => fsi.list(dir),
+    };
+    const db = await syncom.createDatabase({ path: '/r', fsi: slow, defer: 0, logger: false, schema });
+    const rows = [];
+    for (let i = 0; i < 1200; i++) rows.push({ customer: `c${i % 7}`, amount: i });
+    await db.Order.bulkInsert(rows);
+    const batches = [];
+    let failAt = 1;
+    const live = [];
+    let firstLive = null;
+    const handled = new Promise((resolve) => (firstLive = resolve));
+    const pipeline = createPipeline(db, {
+      name: 'pages',
+      source: 'Order',
+      handler: async ({ ids, changes, replay, rebuilt }) => {
+        if (replay) {
+          if (batches.length === failAt) throw new Error(`page ${failAt + 1}`);
+          batches.push([ids.length, rebuilt]);
+          return;
+        }
+        live.push([ids.slice(), changes.length]);
+        if (live.length === 1) firstLive();
+      },
+    });
+    // A rebuild (no checkpoint): page 2 fails — page 1 was handled, nothing is checkpointed.
+    await pipeline.start();
+    await pipeline.awaitIdle();
+    assert.deepStrictEqual(batches, [[500, true]]);
+    assert.strictEqual(pipeline.stopped, true);
+    assert.strictEqual(pipeline.checkpoint, null, 'no page of a rebuild moves the checkpoint but the last');
+    // Started again: the rebuild from the start, every page, then the checkpoint.
+    failAt = -1;
+    batches.length = 0;
+    await pipeline.start();
+    await pipeline.awaitIdle();
+    assert.deepStrictEqual(batches, [
+      [500, true],
+      [500, true],
+      [200, true],
+    ]);
+    const after = pipeline.checkpoint;
+    assert.ok(after !== null);
+    // Live: the first turn is handled and its checkpoint held; the three turns that land meanwhile join as one
+    // batch — the ids each once, every change — handed over after it.
+    let open = null;
+    gate = new Promise((resolve) => (open = resolve));
+    const a = (await db.Order.insert({ customer: 'live', amount: 1 })).id;
+    await handled;
+    const b = (await db.Order.insert({ customer: 'live', amount: 2 })).id;
+    const c = (await db.Order.insert({ customer: 'live', amount: 3 })).id;
+    await db.Order.update(b, { amount: 20 });
+    open();
+    await pipeline.awaitIdle();
+    gate = null;
+    // A change per field written: three of an insert, one of the update.
+    assert.deepStrictEqual(live, [
+      [[a], 3],
+      [[b, c], 7],
+    ]);
+    assert.notStrictEqual(pipeline.checkpoint, after);
+    // Stopped, 600 records written: the replay hands them over in pages too.
+    pipeline.stop();
+    batches.length = 0;
+    const more = [];
+    for (let i = 0; i < 600; i++) more.push({ customer: 'later', amount: i });
+    await db.Order.bulkInsert(more);
+    await pipeline.start();
+    await pipeline.awaitIdle();
+    assert.deepStrictEqual(batches, [
+      [500, false],
+      [100, false],
+    ]);
+    assert.strictEqual(pipeline.rebuilt, false);
+    pipeline.stop();
+    await db.close();
+  });
 
-  await t.test('an unreadable checkpoint is said so and rebuilt from, never a position', async () => {
+  it('should say so of an unreadable checkpoint and rebuild, never read it as a position', async () => {
     const fsi = memory();
     const warned = [];
     const logger = { warn: (entry) => warned.push([entry.event, entry.name]), info() {}, debug() {}, error() {} };
@@ -254,7 +251,7 @@ test('pipelines', async (t) => {
     await db.close();
   });
 
-  await t.test('a pipeline hears a plain delete and a purge of its source', async () => {
+  it('should let a pipeline hear a plain delete and a purge of its source', async () => {
     const db = await syncom.createDatabase({ path: '/d', fsi: memory(), defer: 0, logger: false, schema });
     const heard = [];
     const pipeline = createPipeline(db, {
@@ -289,148 +286,142 @@ test('pipelines', async (t) => {
     await db.close();
   });
 
-  await t.test(
-    'with leader the pipeline runs on the leading instance alone; the next leader resumes it from the checkpoint, no turn handled twice',
-    async (t2) => {
-      const engine = memoryEngine();
-      const locks = createFakeLocks();
-      const open = async () => {
-        const shared = await openShared({
-          createDatabase: syncom.createDatabase,
-          engine,
-          path: 'shop',
-          schema,
-          logger: false,
-          defer: 0,
-          election: { locks },
-          grace: 20,
-        });
-        t2.after(() => shared.close().catch(() => {}));
-        return shared;
-      };
-      const seen = { a: [], b: [] };
-      // The handler writes through the transaction: only a leader's database takes it.
-      const pipelineOf = (shared, key) =>
-        createPipeline(shared.db, {
-          name: 'orders',
-          source: 'Order',
-          leader: shared,
-          handler: async ({ ids, replay }, tx) => {
-            for (const id of ids) {
-              seen[key].push(replay ? `replay:${id}` : id);
-              await tx.set(`seen.${id}`, { $type: 'Total', order: id });
-            }
-          },
-        });
-      const a = await open();
-      const b = await open();
-      assert.strictEqual(a.isLeader(), true);
-      assert.strictEqual(b.isLeader(), false);
-      const onA = pipelineOf(a, 'a');
-      const onB = pipelineOf(b, 'b');
-      await onA.start();
-      await onB.start();
-      assert.strictEqual(onB.stopped, false, 'started on the follower: it waits for the lead');
-      const first = await a.insert({ $type: 'Order', customer: 'ann', amount: 1 });
-      const second = await a.insert({ $type: 'Order', customer: 'bob', amount: 2 });
-      await onA.awaitIdle();
-      await sleep(30);
-      assert.deepStrictEqual(seen.a, [first, second]);
-      assert.deepStrictEqual(seen.b, [], 'the follower runs nothing');
-      assert.deepStrictEqual(onB.errors, []);
-      // A turn written while no pipeline follows: the next leader's start hands it over from the checkpoint.
-      onA.stop();
-      const third = await a.insert({ $type: 'Order', customer: 'cid', amount: 3 });
-      await a.close();
-      await b.waitForLeadership();
-      await waitUntil(() => seen.b.length === 1);
-      await onB.awaitIdle();
-      assert.deepStrictEqual(seen.b, [`replay:${third}`], 'resumed from the checkpoint the old leader wrote');
-      assert.strictEqual(onB.rebuilt, false);
-      const fourth = await b.insert({ $type: 'Order', customer: 'dan', amount: 4 });
-      await onB.awaitIdle();
-      assert.deepStrictEqual(seen.b, [`replay:${third}`, fourth]);
-      assert.deepStrictEqual(seen.a, [first, second], 'the old leader handled nothing more');
-      for (const id of [first, second, third, fourth]) assert.ok(await b.db.has(`seen.${id}`), id);
-      onB.stop();
-    },
-  );
-
-  await t.test(
-    'with leader the pipeline follows while the handle leads and lets go when it stops; the options are checked',
-    async () => {
-      const db = await syncom.createDatabase({ path: '/lead', fsi: memory(), defer: 0, logger: false, schema });
-      // A handle of openShared()'s shape (`db`, `isLeader`, `live`) whose lead the test moves.
-      let leading = false;
-      let make = null;
-      let stop = null;
-      const handle = {
-        db,
-        isLeader: () => leading,
-        live(fn) {
-          make = fn;
-          stop = fn(db);
-          return () => {
-            if (typeof stop === 'function') stop();
-            stop = null;
-            make = null;
-          };
-        },
-      };
-      const lead = (to) => {
-        if (typeof stop === 'function') stop();
-        leading = to;
-        stop = make(db);
-      };
-      const seen = [];
-      const pipeline = createPipeline(db, {
-        name: 'lead',
+  it('should run the pipeline with leader on the leading instance alone; the next leader resumes it from the checkpoint, no turn handled twice', async (t2) => {
+    const engine = memoryEngine();
+    const locks = createFakeLocks();
+    const open = async () => {
+      const shared = await openShared({
+        createDatabase: syncom.createDatabase,
+        engine,
+        path: 'shop',
+        schema,
+        logger: false,
+        defer: 0,
+        election: { locks },
+        grace: 20,
+      });
+      t2.after(() => shared.close().catch(() => {}));
+      return shared;
+    };
+    const seen = { a: [], b: [] };
+    // The handler writes through the transaction: only a leader's database takes it.
+    const pipelineOf = (shared, key) =>
+      createPipeline(shared.db, {
+        name: 'orders',
         source: 'Order',
-        leader: handle,
-        handler: ({ ids, replay, rebuilt }) => void seen.push([ids.length, replay, rebuilt]),
-      });
-      await pipeline.start();
-      await db.Order.insert({ customer: 'ann', amount: 1 });
-      await pipeline.awaitIdle();
-      assert.deepStrictEqual(seen, [], 'not leading: nothing followed');
-      lead(true);
-      await waitUntil(() => seen.length === 1);
-      assert.deepStrictEqual(seen, [[1, true, true]], 'leading: no checkpoint, every record once');
-      await db.Order.insert({ customer: 'bob', amount: 2 });
-      await pipeline.awaitIdle();
-      assert.deepStrictEqual(seen[1], [1, false, false]);
-      lead(false);
-      await db.Order.insert({ customer: 'cid', amount: 3 });
-      await pipeline.awaitIdle();
-      assert.strictEqual(seen.length, 2, 'the lead lost: nothing followed');
-      lead(true);
-      await waitUntil(() => seen.length === 3);
-      assert.deepStrictEqual(seen[2], [1, true, false], 'the lead again: replayed from the checkpoint');
-      pipeline.stop();
-      assert.strictEqual(make, null, 'stop() lets go of the handle');
-      await db.Order.insert({ customer: 'dan', amount: 4 });
-      await pipeline.awaitIdle();
-      assert.strictEqual(seen.length, 3);
-      const handler = () => {};
-      assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: true }), TypeError);
-      assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: {} }), TypeError);
-      const other = { ...handle, db: {} };
-      assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: other }), {
-        name: 'TypeError',
-        message: /leader\.db/,
-      });
-      // A handle that refuses the subscription (a closed facade): start() rejects and the pipeline stays stopped.
-      const closed = {
-        db,
-        isLeader: () => true,
-        live() {
-          throw new Error('closed');
+        leader: shared,
+        handler: async ({ ids, replay }, tx) => {
+          for (const id of ids) {
+            seen[key].push(replay ? `replay:${id}` : id);
+            await tx.set(`seen.${id}`, { $type: 'Total', order: id });
+          }
         },
-      };
-      const refused = createPipeline(db, { name: 'refused', source: 'Order', handler, leader: closed });
-      await assert.rejects(() => refused.start(), /closed/);
-      assert.strictEqual(refused.stopped, true);
-      await db.close();
-    },
-  );
+      });
+    const a = await open();
+    const b = await open();
+    assert.strictEqual(a.isLeader(), true);
+    assert.strictEqual(b.isLeader(), false);
+    const onA = pipelineOf(a, 'a');
+    const onB = pipelineOf(b, 'b');
+    await onA.start();
+    await onB.start();
+    assert.strictEqual(onB.stopped, false, 'started on the follower: it waits for the lead');
+    const first = await a.insert({ $type: 'Order', customer: 'ann', amount: 1 });
+    const second = await a.insert({ $type: 'Order', customer: 'bob', amount: 2 });
+    await onA.awaitIdle();
+    await sleep(30);
+    assert.deepStrictEqual(seen.a, [first, second]);
+    assert.deepStrictEqual(seen.b, [], 'the follower runs nothing');
+    assert.deepStrictEqual(onB.errors, []);
+    // A turn written while no pipeline follows: the next leader's start hands it over from the checkpoint.
+    onA.stop();
+    const third = await a.insert({ $type: 'Order', customer: 'cid', amount: 3 });
+    await a.close();
+    await b.waitForLeadership();
+    await waitUntil(() => seen.b.length === 1);
+    await onB.awaitIdle();
+    assert.deepStrictEqual(seen.b, [`replay:${third}`], 'resumed from the checkpoint the old leader wrote');
+    assert.strictEqual(onB.rebuilt, false);
+    const fourth = await b.insert({ $type: 'Order', customer: 'dan', amount: 4 });
+    await onB.awaitIdle();
+    assert.deepStrictEqual(seen.b, [`replay:${third}`, fourth]);
+    assert.deepStrictEqual(seen.a, [first, second], 'the old leader handled nothing more');
+    for (const id of [first, second, third, fourth]) assert.ok(await b.db.has(`seen.${id}`), id);
+    onB.stop();
+  });
+
+  it('should have the pipeline with leader follow while the handle leads and let go when it stops; the options are checked', async () => {
+    const db = await syncom.createDatabase({ path: '/lead', fsi: memory(), defer: 0, logger: false, schema });
+    // A handle of openShared()'s shape (`db`, `isLeader`, `live`) whose lead the test moves.
+    let leading = false;
+    let make = null;
+    let stop = null;
+    const handle = {
+      db,
+      isLeader: () => leading,
+      live(fn) {
+        make = fn;
+        stop = fn(db);
+        return () => {
+          if (typeof stop === 'function') stop();
+          stop = null;
+          make = null;
+        };
+      },
+    };
+    const lead = (to) => {
+      if (typeof stop === 'function') stop();
+      leading = to;
+      stop = make(db);
+    };
+    const seen = [];
+    const pipeline = createPipeline(db, {
+      name: 'lead',
+      source: 'Order',
+      leader: handle,
+      handler: ({ ids, replay, rebuilt }) => void seen.push([ids.length, replay, rebuilt]),
+    });
+    await pipeline.start();
+    await db.Order.insert({ customer: 'ann', amount: 1 });
+    await pipeline.awaitIdle();
+    assert.deepStrictEqual(seen, [], 'not leading: nothing followed');
+    lead(true);
+    await waitUntil(() => seen.length === 1);
+    assert.deepStrictEqual(seen, [[1, true, true]], 'leading: no checkpoint, every record once');
+    await db.Order.insert({ customer: 'bob', amount: 2 });
+    await pipeline.awaitIdle();
+    assert.deepStrictEqual(seen[1], [1, false, false]);
+    lead(false);
+    await db.Order.insert({ customer: 'cid', amount: 3 });
+    await pipeline.awaitIdle();
+    assert.strictEqual(seen.length, 2, 'the lead lost: nothing followed');
+    lead(true);
+    await waitUntil(() => seen.length === 3);
+    assert.deepStrictEqual(seen[2], [1, true, false], 'the lead again: replayed from the checkpoint');
+    pipeline.stop();
+    assert.strictEqual(make, null, 'stop() lets go of the handle');
+    await db.Order.insert({ customer: 'dan', amount: 4 });
+    await pipeline.awaitIdle();
+    assert.strictEqual(seen.length, 3);
+    const handler = () => {};
+    assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: true }), TypeError);
+    assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: {} }), TypeError);
+    const other = { ...handle, db: {} };
+    assert.throws(() => createPipeline(db, { name: 'x', source: 'Order', handler, leader: other }), {
+      name: 'ArgumentError',
+      message: /leader\.db/,
+    });
+    // A handle that refuses the subscription (a closed facade): start() rejects and the pipeline stays stopped.
+    const closed = {
+      db,
+      isLeader: () => true,
+      live() {
+        throw new Error('closed');
+      },
+    };
+    const refused = createPipeline(db, { name: 'refused', source: 'Order', handler, leader: closed });
+    await assert.rejects(() => refused.start(), /closed/);
+    assert.strictEqual(refused.stopped, true);
+    await db.close();
+  });
 });

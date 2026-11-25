@@ -4,22 +4,22 @@
 // ways a real browser misbehaves — a failing put, a database the browser
 // closed under us, a close() of our own.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { IDBFactory } = require('fake-indexeddb');
 const { createIdbFsi } = require('../src/idb/idb.js');
 const { runFsiTests } = require('./suites/fsi.js');
 
-test('createIdbFsi', async (t) => {
+describe('createIdbFsi', () => {
   const fsi = createIdbFsi({ indexedDB: new IDBFactory() });
-  t.after(() => fsi.close());
+  after(() => fsi.close());
   let n = 0;
-  await runFsiTests(t, fsi, {
+  runFsiTests(fsi, {
     getRoot: async () => `idb-${n++}`,
     joinPath: (root, ...parts) => [root, ...parts].join('/'),
   });
 
-  await t.test('an empty database lists nothing; a read of a missing file is NotFoundError', async () => {
+  it('should list nothing in an empty database and reject a read of a missing file with NotFoundError', async () => {
     const fresh = createIdbFsi({ indexedDB: new IDBFactory(), name: 'other', store: 'blobs' });
     assert.deepStrictEqual(await fresh.list('anything'), []);
     const error = await fresh.read('a', 'b').catch((e) => e);
@@ -33,7 +33,7 @@ test('createIdbFsi', async (t) => {
     await fresh.close();
   });
 
-  await t.test('a database another tab deletes is let go, and recreated on the next call', async () => {
+  it('should let go of a database another tab deletes and recreate it on the next call', async () => {
     const factory = new IDBFactory();
     const backend = createIdbFsi({ indexedDB: factory, name: 'shared' });
     await backend.write('d', 'f', 'x');
@@ -50,7 +50,7 @@ test('createIdbFsi', async (t) => {
     await backend.close();
   });
 
-  await t.test('a request that fails, a transaction that errors or aborts: the call rejects', async () => {
+  it('should reject the call on a request that fails, a transaction that errors or aborts', async () => {
     const settle = (req, outcome) => {
       queueMicrotask(() => (outcome === 'fail' ? req.onerror?.() : req.onsuccess?.()));
       return req;
@@ -80,8 +80,8 @@ test('createIdbFsi', async (t) => {
     await backend.close();
   });
 
-  await t.test('no indexedDB is a TypeError at creation; an open that fails rejects every call', async () => {
-    assert.throws(() => createIdbFsi({ indexedDB: null }), { name: 'TypeError', message: /no indexedDB/ });
+  it('should throw a TypeError at creation without indexedDB, and reject every call when the open fails', async () => {
+    assert.throws(() => createIdbFsi({ indexedDB: null }), { name: 'ArgumentError', message: /no indexedDB/ });
     assert.throws(() => createIdbFsi({ indexedDB: {} }), TypeError);
     const failing = createIdbFsi({
       indexedDB: {

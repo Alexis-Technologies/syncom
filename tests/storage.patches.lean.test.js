@@ -5,8 +5,8 @@
 // tree, sync, encryption, chain, schema, query; no signing: the node ids are
 // UUIDs).
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe } = require('node:test');
+const assert = require('node:assert/strict');
 const core = require('../index.js');
 const { memory } = require('../src/memory/memory.js');
 const { versions } = require('../src/versions/versions.js');
@@ -19,11 +19,12 @@ const { schema } = require('../src/schema/schema.js');
 const { query } = require('../src/query/query.js');
 const { runPatchTests } = require('./suites/patches.js');
 
-test('Patches (lean core, plugins by hand)', async (t) => {
+describe('Patches (lean core, plugins by hand)', () => {
+  // A Map in memory, no I/O: made as the suite is declared, shared by its tests (each under a path of its own).
   const fsi = memory();
   let n = 0;
   const paths = new Map();
-  await runPatchTests(t, assert, async (t2, name, options = {}) => {
+  runPatchTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!paths.has(key)) paths.set(key, `patches-${n++}-${name}`);
     const plugins = [versions, text, tree, sync, encryption, chain, schema, query];

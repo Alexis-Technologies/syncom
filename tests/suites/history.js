@@ -4,12 +4,13 @@
 // history() lists what the node applied, get(id, { at }) folds it back by
 // event id, stamp or vector, and both say when the log cannot vouch for it.
 
+const { it } = require('node:test');
 const { createMesh, settle, waitUntil } = require('../utils/mesh.js');
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 3));
 
-const runHistoryTests = async (t, assert, createStorage) => {
-  await t.test('history() lists one version per op, newest first; get(id, { at }) reads each back', async (t2) => {
+const runHistoryTests = (assert, createStorage) => {
+  it('should list one version per op in history(), newest first, and read each back with get(id, { at })', async (t2) => {
     const storage = await createStorage(t2, 'A', { actor: 'ada' });
     const id = await storage.insert({ title: 'a' });
     await storage.update(id, { title: 'b' }, { actor: 'bob' });
@@ -100,17 +101,17 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.strictEqual((await storage.history(id, { limit: Infinity })).versions.length, 13);
     // Arguments and codes.
     await assert.rejects(() => storage.history(id, { limit: 0 }), TypeError);
-    await assert.rejects(() => storage.get(id, { at: true }), { name: 'TypeError', code: 'INVALID_VERSION' });
-    await assert.rejects(() => storage.get(id, { at: 'no-dot' }), { code: 'INVALID_VERSION' });
-    await assert.rejects(() => storage.get(id, { at: -1 }), { code: 'INVALID_VERSION' });
-    await assert.rejects(() => storage.get(id, { at: { vector: { a: 'x' } } }), { code: 'INVALID_VERSION' });
+    await assert.rejects(() => storage.get(id, { at: true }), { name: 'DataError', code: 'ALX_ERR_INVALID_VERSION' });
+    await assert.rejects(() => storage.get(id, { at: 'no-dot' }), { code: 'ALX_ERR_INVALID_VERSION' });
+    await assert.rejects(() => storage.get(id, { at: -1 }), { code: 'ALX_ERR_INVALID_VERSION' });
+    await assert.rejects(() => storage.get(id, { at: { vector: { a: 'x' } } }), { code: 'ALX_ERR_INVALID_VERSION' });
     await assert.rejects(() => storage.get(id, { at: storage.log.formatId(storage.log.next) }), {
-      name: 'TypeError',
-      code: 'INVALID_VERSION',
+      name: 'DataError',
+      code: 'ALX_ERR_INVALID_VERSION',
     });
     await assert.rejects(() => storage.get(id, { at: `other.${versions[0].seq}` }), {
       name: 'SyncomError',
-      code: 'HISTORY_GONE',
+      code: 'ALX_ERR_HISTORY_GONE',
       id,
       reason: 'epoch',
     });
@@ -129,7 +130,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.strictEqual(await typed.Post.get('nope', { at: first.eventId }), null);
   });
 
-  await t.test('an event id is what this node held; a stamp and a vector are what was written by then', async (t2) => {
+  it('should read at an event id what this node held, and at a stamp or a vector what was written by then', async (t2) => {
     const mesh = await createMesh(t2, ['A', 'B'], [['A', 'B']], createStorage);
     const a = mesh.get('A');
     const b = mesh.get('B');
@@ -175,7 +176,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await b.get(id, { at: between }), { n: 0, fromB: 1, hits: 1 });
   });
 
-  await t.test('a skipped op is no version; a held op becomes one once the node runs its version', async (t2) => {
+  it('should make no version of a skipped op, and one of a held op once the node runs its version', async (t2) => {
     // Skipped by a hook: logged, relayed, never a version here.
     const skipping = await createMesh(t2, ['C', 'D'], [['D', 'C']], createStorage, {
       nodes: { D: { hooks: { beforeApply: ({ op }) => op.id !== 'skip-me' } } },
@@ -229,7 +230,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await upgraded.get(post.id, { at: heldIds[0] }), { n: 1, $type: 'Post' });
   });
 
-  await t.test('compaction: the past is exact from a reset above what was dropped, gone before it', async (t2) => {
+  it('should keep the past exact after compaction from a reset above what was dropped, gone before it', async (t2) => {
     const storage = await createStorage(t2, 'A', { sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
     const id = await storage.insert({ n: 0 });
     const first = storage.log.lastEventId;
@@ -242,12 +243,12 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.ok(partial.versions.length > 0, 'what is retained is still listed');
     await assert.rejects(() => storage.get(id, { at: first }), {
       name: 'SyncomError',
-      code: 'HISTORY_GONE',
+      code: 'ALX_ERR_HISTORY_GONE',
       id,
       reason: 'compacted',
     });
-    await assert.rejects(() => storage.get(id, { at: storage.log.lastEventId }), { code: 'HISTORY_GONE' });
-    await assert.rejects(() => storage.get(id, { at: Date.now() + 1000 }), { code: 'HISTORY_GONE' });
+    await assert.rejects(() => storage.get(id, { at: storage.log.lastEventId }), { code: 'ALX_ERR_HISTORY_GONE' });
+    await assert.rejects(() => storage.get(id, { at: Date.now() + 1000 }), { code: 'ALX_ERR_HISTORY_GONE' });
     // A reset (a whole-record write) stamped above the dropped ops: exact
     // from it on, and the present check holds.
     await storage.set(id, { n: 'reset' });
@@ -266,7 +267,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     );
     assert.deepStrictEqual(await storage.get(id, { at: reset }), { n: 'reset' });
     assert.deepStrictEqual(await storage.get(id, { at: { vector: storage.vector } }), { n: 'after', hits: 5 });
-    await assert.rejects(() => storage.get(id, { at: first }), { code: 'HISTORY_GONE', reason: 'compacted' });
+    await assert.rejects(() => storage.get(id, { at: first }), { code: 'ALX_ERR_HISTORY_GONE', reason: 'compacted' });
     // A record that never existed here reads as nothing, dropped or not.
     assert.strictEqual(await storage.get('never', { at: storage.log.lastEventId }), null);
     // A record written only after the compaction, exact from its first write.
@@ -275,10 +276,13 @@ const runHistoryTests = async (t, assert, createStorage) => {
     const fresh = await storage.history(young);
     assert.deepStrictEqual([fresh.exact, fresh.complete, fresh.versions.length], [true, false, 2]);
     assert.deepStrictEqual(await storage.get(young, { at: fresh.versions[1].eventId }), { y: 1 });
-    await assert.rejects(() => storage.get(young, { at: first }), { code: 'HISTORY_GONE', reason: 'compacted' });
+    await assert.rejects(() => storage.get(young, { at: first }), {
+      code: 'ALX_ERR_HISTORY_GONE',
+      reason: 'compacted',
+    });
   });
 
-  await t.test('a counter incremented across the reset compaction crossed makes the past inexact', async (t2) => {
+  it('should make the past inexact when a counter was incremented across the reset compaction crossed', async (t2) => {
     // defer: 0 — what the log compacts follows what landed; under load a deferred window still open sealed nothing.
     const storage = await createStorage(t2, 'A', { defer: 0, sync: { log: { rollAfter: 1 }, retention: { ops: 4 } } });
     const id = await storage.insert({ n: 0 });
@@ -304,7 +308,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.strictEqual(exact, false);
     assert.deepStrictEqual(versions[0].data, { n: 2 });
     await assert.rejects(() => storage.get(id, { at: storage.log.lastEventId }), {
-      code: 'HISTORY_GONE',
+      code: 'ALX_ERR_HISTORY_GONE',
       reason: 'compacted',
     });
     // Another reset ends the straddle: exact again from there.
@@ -313,7 +317,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.get(id, { at: storage.log.lastEventId }), { n: 'again' });
   });
 
-  await t.test('a snapshot joined after a stamp hides what it carried: HISTORY_GONE merge', async (t2) => {
+  it('should hide what a snapshot joined after a stamp carried: HISTORY_GONE merge', async (t2) => {
     const options = { sync: { log: { rollAfter: 2 }, retention: { ops: 4 } } };
     const mesh = await createMesh(t2, ['A', 'B'], [], createStorage, options);
     const a = mesh.get('A');
@@ -334,7 +338,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.strictEqual(exact, true, 'nothing dropped on B');
     assert.deepStrictEqual(versions[0].data, { n: 0, hits: 8 });
     // By stamp, B cannot tell what of the joined state was written before: refused.
-    await assert.rejects(() => b.get(id, { at: before }), { code: 'HISTORY_GONE', id, reason: 'merge' });
+    await assert.rejects(() => b.get(id, { at: before }), { code: 'ALX_ERR_HISTORY_GONE', id, reason: 'merge' });
     // By event id or vector, the merge is one op like any other.
     assert.deepStrictEqual(await b.get(id, { at: versions[0].eventId }), { n: 0, hits: 8 });
     assert.deepStrictEqual(await b.get(id, { at: { vector: b.vector } }), { n: 0, hits: 8 });
@@ -348,7 +352,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await b.get(id, { at: Date.now() + 1000 }), { n: 0, hits: 9 });
   });
 
-  await t.test('a purge leaves the ops and takes their content; an encrypted record has no past', async (t2) => {
+  it('should leave the ops and take their content on a purge, and give an encrypted record no past', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({ secret: 'SSN-1' });
     await storage.update(id, { secret: 'SSN-2' });
@@ -369,14 +373,18 @@ const runHistoryTests = async (t, assert, createStorage) => {
     assert.ok(!JSON.stringify(versions).includes('SSN'), 'no payload survives');
     assert.strictEqual(await storage.get(id, { at: purgeId }), null);
     assert.strictEqual(await storage.get(id, { at: { vector: storage.vector } }), null);
-    await assert.rejects(() => storage.get(id, { at: first }), { code: 'HISTORY_GONE', id, reason: 'scrubbed' });
-    await assert.rejects(() => storage.get(id, { at: second }), { code: 'HISTORY_GONE', reason: 'scrubbed' });
+    await assert.rejects(() => storage.get(id, { at: first }), {
+      code: 'ALX_ERR_HISTORY_GONE',
+      id,
+      reason: 'scrubbed',
+    });
+    await assert.rejects(() => storage.get(id, { at: second }), { code: 'ALX_ERR_HISTORY_GONE', reason: 'scrubbed' });
     const sealed = await storage.insert({ pin: '1234' }, { encrypted: true });
-    await assert.rejects(() => storage.history(sealed), { code: 'ENCRYPTED' });
-    await assert.rejects(() => storage.get(sealed, { at: storage.log.lastEventId }), { code: 'ENCRYPTED' });
+    await assert.rejects(() => storage.history(sealed), { code: 'ALX_ERR_ENCRYPTED' });
+    await assert.rejects(() => storage.get(sealed, { at: storage.log.lastEventId }), { code: 'ALX_ERR_ENCRYPTED' });
   });
 
-  await t.test('the read hooks see the version; afterRead redacts each one', async (t2) => {
+  it('should show the read hooks the version and let afterRead redact each one', async (t2) => {
     const seen = [];
     const storage = await createStorage(t2, 'A', {
       hooks: {
@@ -403,7 +411,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     ]);
   });
 
-  await t.test('history({ limit }) runs afterRead for the versions it hands out alone', async (t2) => {
+  it('should run afterRead in history({ limit }) for the versions it hands out alone', async (t2) => {
     let reads = 0;
     const storage = await createStorage(t2, 'A', { hooks: { afterRead: () => void reads++ } });
     const id = await storage.insert({ n: 0 });
@@ -419,7 +427,7 @@ const runHistoryTests = async (t, assert, createStorage) => {
     );
   });
 
-  await t.test('history({ before }) pages back: the versions older than an event id, until complete', async (t2) => {
+  it('should page back with history({ before }): the versions older than an event id, until complete', async (t2) => {
     const storage = await createStorage(t2, 'A');
     const id = await storage.insert({ n: 0 });
     for (let i = 1; i <= 25; i++) await storage.update(id, { n: i });

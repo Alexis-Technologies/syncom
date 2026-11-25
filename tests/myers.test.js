@@ -4,12 +4,12 @@
 // last first, turns the first string into the second — minimal where it is
 // cheap to be, exact always.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { diff, patch } = require('../src/text/myers.js');
 
-test('myers diff', async (t) => {
-  await t.test('hunks are splices in the before string, last first', () => {
+describe('myers diff', () => {
+  it('should give the hunks as splices in the before string, last first', () => {
     assert.deepStrictEqual(diff('hello', 'hallo'), [[1, 1, 'a']]);
     assert.deepStrictEqual(diff('', 'abc'), [[0, 0, 'abc']]);
     assert.deepStrictEqual(diff('abc', ''), [[0, 3, '']]);
@@ -32,7 +32,7 @@ test('myers diff', async (t) => {
     );
   });
 
-  await t.test('applying the hunks gives the second string, over seeded random pairs', () => {
+  it('should give the second string when the hunks are applied, over seeded random pairs', () => {
     let seed = 20260924;
     const random = () => {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff;
@@ -48,7 +48,7 @@ test('myers diff', async (t) => {
     }
   });
 
-  await t.test('a pair is never split: the diff runs by code points where a surrogate is about', () => {
+  it('should never split a pair: the diff runs by code points where a surrogate is about', () => {
     const halves = (s) => /[\uD800-\uDFFF]/.test(s) && !s.isWellFormed();
     for (const [a, b] of [
       ['a😀b', 'a😁b'],
@@ -67,7 +67,7 @@ test('myers diff', async (t) => {
     assert.deepStrictEqual(diff('a😀b', 'a😁b'), [[1, 2, '😁']], 'the whole character, two units');
   });
 
-  await t.test('indices are UTF-16 code units; past max edits one hunk replaces the middle', () => {
+  it('should count indices in UTF-16 code units, and past max edits replace the middle with one hunk', () => {
     assert.deepStrictEqual(diff('a😀b', 'ab'), [[1, 2, '']], 'the emoji is two units');
     const a = `keep ${'x'.repeat(3000)} keep`;
     const b = `keep ${'y'.repeat(3000)} keep`;

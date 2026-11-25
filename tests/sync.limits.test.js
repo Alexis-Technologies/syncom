@@ -4,8 +4,8 @@
 // codes they answer with, what the dialer makes of them, the `meta` every
 // procedure carries, and the reserved shared-log contract.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const syncom = require('../src/all/all.js');
 const { packOps } = require('../src/ops.js');
 const { isSharedLog } = require('../src/sync/shared-log.js');
@@ -25,8 +25,8 @@ const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date
 const ops = (origin, from, n, data = {}) =>
   Array.from({ length: n }, (_, i) => remoteOp(origin, from + i, 'write', `r${from + i}`, { data }));
 
-test('Hosting limits', async (t) => {
-  await t.test('opsPerPush and bytesPerPush refuse a page with 413, before anything is applied', async (t2) => {
+describe('Hosting limits', () => {
+  it('should refuse a page past opsPerPush or bytesPerPush with 413, before anything is applied', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public', limits: { opsPerPush: 3, bytesPerPush: 400 } });
     const link = new MemoryLink(unit);
@@ -48,7 +48,7 @@ test('Hosting limits', async (t) => {
     assert.strictEqual((await link.call('syncom/push', {})).applied, 0, 'no ops: nothing to limit');
   });
 
-  await t.test('opsPerSecond is a token bucket per peer: 429 when empty, refilled at the rate', async (t2) => {
+  it('should keep opsPerSecond a token bucket per peer: 429 when empty, refilled at the rate', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public', limits: { opsPerSecond: 10 } });
     const link = new MemoryLink(unit);
@@ -67,7 +67,7 @@ test('Hosting limits', async (t) => {
     assert.strictEqual((await other.call('syncom/push', { ops: packOps(ops('other', 1, 10)) })).applied, 10);
   });
 
-  await t.test('a host that sets no limits still refuses a push past 10 000 ops; Infinity lifts it', async (t2) => {
+  it('should still refuse a push past 10 000 ops on a host that sets no limits; Infinity lifts it', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public' });
     const link = new MemoryLink(unit);
@@ -82,7 +82,7 @@ test('Hosting limits', async (t) => {
     assert.strictEqual((await open.call('syncom/push', { ops: packOps(ops('wide', 1, 10_001)) })).applied, 10_001);
   });
 
-  await t.test('the dialer reports a refused page and recovers at the next handshake', async (t2) => {
+  it('should report a refused page on the dialer and recover at the next handshake', async (t2) => {
     const host = await openTemp(t2);
     const unit = host.sync.unit({ access: 'public', limits: { opsPerPush: 2 } });
     const dialer = await openTemp(t2, { sync: { autoStart: false, pageSize: 5, connect: () => new MemoryLink(unit) } });
@@ -104,7 +104,7 @@ test('Hosting limits', async (t) => {
     await waitUntil(async () => (await host.list()).length === 3);
   });
 
-  await t.test('the options are checked; meta rides on every procedure', async (t2) => {
+  it('should check the options and carry meta on every procedure', async (t2) => {
     const host = await openTemp(t2);
     for (const limits of [
       'many',
@@ -116,7 +116,7 @@ test('Hosting limits', async (t) => {
       assert.throws(() => host.sync.unit({ limits }), TypeError, JSON.stringify(limits));
     }
     assert.throws(() => host.sync.unit({ meta: 'x' }), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: 'unit({ meta }): meta must be an object',
     });
     assert.throws(() => host.sync.unit({ meta: [] }), TypeError);
@@ -130,7 +130,7 @@ test('Hosting limits', async (t) => {
     assert.strictEqual('bucket' in host.sync.unit({ limits: null }).push, false);
   });
 
-  await t.test('the shared-log contract is checked, and the option with it', async (t2) => {
+  it('should check the shared-log contract, and the option with it', async (t2) => {
     const log = { append: async () => '1.1', read: () => ({}), parseId: () => null };
     assert.strictEqual(isSharedLog(log), true);
     assert.strictEqual(syncom.isSharedLog(log), true);
@@ -139,21 +139,21 @@ test('Hosting limits', async (t) => {
     }
     const message = /a shared log \(append, read, parseId\), or \{ log, topic, inbox, stopWait \}/;
     for (const sharedLog of ['log', {}, { log: {} }, { topic: 'x' }]) {
-      await assert.rejects(async () => openTemp(t2, { sync: { sharedLog } }), { name: 'TypeError', message });
+      await assert.rejects(async () => openTemp(t2, { sync: { sharedLog } }), { name: 'ArgumentError', message });
     }
     await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, topic: '' } } }), {
-      name: 'TypeError',
+      name: 'ArgumentError',
       message: /topic must be a non-empty string/,
     });
     for (const inbox of ['', 7, 'ops']) {
       await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, topic: 'ops', inbox } } }), {
-        name: 'TypeError',
+        name: 'ArgumentError',
         message: /inbox must be a non-empty string other than the topic, or false/,
       });
     }
     for (const stopWait of [-1, 1.5, 'soon']) {
       await assert.rejects(async () => openTemp(t2, { sync: { sharedLog: { log, stopWait } } }), {
-        name: 'TypeError',
+        name: 'ArgumentError',
         message: /stopWait must be a non-negative integer/,
       });
     }

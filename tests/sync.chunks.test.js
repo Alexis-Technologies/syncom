@@ -5,8 +5,8 @@
 // wrpc's shapes, each with the one behaviour its case needs; tests/attachments.test.js and
 // tests/wrpc.integration.test.js run the same code over MemoryLink's streams and over wrpc's own.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, it } = require('node:test');
+const assert = require('node:assert/strict');
 const { streams, sendAll, collect } = require('../src/sync/chunks.js');
 
 // A writable whose `writeAll` records what it is handed and answers `all`: whether every byte went.
@@ -31,8 +31,8 @@ const bytesOf = (length) => {
   return bytes;
 };
 
-test('a blob over a stream', async (t) => {
-  await t.test('sendAll hands every byte to writeAll and ends the stream once all of it went', async () => {
+describe('a blob over a stream', () => {
+  it('should hand every byte to writeAll in sendAll and end the stream once all of it went', async () => {
     const stream = writable();
     assert.strictEqual(await sendAll(stream, bytesOf(70_000)), true);
     assert.deepStrictEqual([stream.written, stream.ended, stream.terminated], [[70_000], 1, 0]);
@@ -42,13 +42,13 @@ test('a blob over a stream', async (t) => {
     assert.deepStrictEqual([none.written, none.ended], [[0], 1]);
   });
 
-  await t.test('sendAll leaves a stream the transport closed or its reader let go of as it is', async () => {
+  it('should leave in sendAll a stream the transport closed or its reader let go of as it is', async () => {
     const stream = writable(false);
     assert.strictEqual(await sendAll(stream, bytesOf(10)), false);
     assert.deepStrictEqual([stream.ended, stream.terminated], [0, 0]);
   });
 
-  await t.test('collect reads the size announced and no further: short as it is, long as null', async () => {
+  it('should read in collect the size announced and no further: short as it is, long as null', async () => {
     const source = async function* source(chunks, seen) {
       for (const chunk of chunks) {
         seen.push(chunk.length);
@@ -72,7 +72,7 @@ test('a blob over a stream', async (t) => {
     assert.strictEqual(await collect(source(parts, []), 0), null);
   });
 
-  await t.test('streams() is a persistent, binary client that announces streams', () => {
+  it('should make streams() a persistent, binary client that announces streams', () => {
     const createStream = () => {};
     assert.strictEqual(streams({ createStream }), true);
     assert.strictEqual(streams({ createStream, binary: true, persistent: true }), true);

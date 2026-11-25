@@ -21,13 +21,17 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
   const held = [];
   const state = (topic) => {
     let found = topics.get(topic);
-    if (!found) topics.set(topic, (found = { entries: [], first: 1, next: 1, waiters: new Set() }));
+    if (!found) {
+      topics.set(topic, (found = { entries: [], first: 1, next: 1, waiters: new Set() }));
+    }
     return found;
   };
   const wake = (found) => {
     const waiters = [...found.waiters];
     found.waiters.clear();
-    for (const waiter of waiters) waiter();
+    for (const waiter of waiters) {
+      waiter();
+    }
   };
   const wait = (found, signal) =>
     new Promise((resolve) => {
@@ -41,9 +45,13 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     });
   const trim = (topic, keep) => {
     const found = topics.get(topic);
-    if (!found) return;
+    if (!found) {
+      return;
+    }
     const excess = found.entries.length - keep;
-    if (excess <= 0) return;
+    if (excess <= 0) {
+      return;
+    }
     found.entries.splice(0, excess);
     found.first += excess;
   };
@@ -51,15 +59,20 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     name: 'memory',
     epoch,
     async append(topic, value, { headers = {} } = {}) {
-      if (closed) throw coded('closed', 503);
+      if (closed) {
+        throw coded('closed', 503);
+      }
       if (hanging.has(topic)) {
         hanging.delete(topic);
         await new Promise((resolve) => held.push(resolve));
       }
       const remaining = failing.get(topic);
       if (remaining !== undefined) {
-        if (remaining === 1) failing.delete(topic);
-        else failing.set(topic, remaining - 1);
+        if (remaining === 1) {
+          failing.delete(topic);
+        } else {
+          failing.set(topic, remaining - 1);
+        }
         throw coded(`the broker is down (${topic})`, 503);
       }
       const found = state(topic);
@@ -70,7 +83,9 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
         value: typeof value === 'string' ? value : new TextDecoder().decode(value),
         headers: { ...headers },
       });
-      if (found.entries.length > maxEntries) trim(topic, maxEntries);
+      if (found.entries.length > maxEntries) {
+        trim(topic, maxEntries);
+      }
       queueMicrotask(() => wake(found));
       return id;
     },
@@ -79,21 +94,35 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
       let position;
       let failure = null;
       if (after !== null && after !== undefined) {
-        if (!LOG_ID.test(after)) failure = coded('Malformed event id', 400);
-        else {
+        if (!LOG_ID.test(after)) {
+          failure = coded('Malformed event id', 400);
+        } else {
           const dot = after.lastIndexOf('.');
           const n = Number(after.slice(dot + 1));
-          if (after.slice(0, dot) !== epoch) failure = coded('Event id belongs to another log', 410);
-          else if (n >= found.next) failure = coded('Event id is beyond the end of the log', 400);
-          else if (n + 1 < found.first) failure = coded('Event history was trimmed past this id', 410);
-          else position = n + 1;
+          if (after.slice(0, dot) !== epoch) {
+            failure = coded('Event id belongs to another log', 410);
+          } else if (n >= found.next) {
+            failure = coded('Event id is beyond the end of the log', 400);
+          } else if (n + 1 < found.first) {
+            failure = coded('Event history was trimmed past this id', 410);
+          } else {
+            position = n + 1;
+          }
         }
-      } else position = from === 'earliest' ? found.first : found.next;
+      } else {
+        position = from === 'earliest' ? found.first : found.next;
+      }
       const iterate = async function* () {
-        if (failure) throw failure;
+        if (failure) {
+          throw failure;
+        }
         for (;;) {
-          if (signal?.aborted || closed) return;
-          if (position < found.first) throw coded('Event history was trimmed past this reader', 410);
+          if (signal?.aborted || closed) {
+            return;
+          }
+          if (position < found.first) {
+            throw coded('Event history was trimmed past this reader', 410);
+          }
           if (position < found.next) {
             const entry = found.entries[position - found.first];
             position++;
@@ -110,9 +139,13 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     /** Everything of `topic` at or before `id` dropped. */
     async trimBefore(topic, id) {
       const found = topics.get(topic);
-      if (!found || !LOG_ID.test(id)) return;
+      if (!found || !LOG_ID.test(id)) {
+        return;
+      }
       const dot = id.lastIndexOf('.');
-      if (id.slice(0, dot) !== epoch) return;
+      if (id.slice(0, dot) !== epoch) {
+        return;
+      }
       const n = Number(id.slice(dot + 1));
       trim(topic, Math.max(0, found.next - 1 - n));
     },
@@ -127,13 +160,17 @@ const createMemorySharedLog = ({ epoch = Math.random().toString(36).slice(2, 10)
     /** Every append held by `hang` goes on. */
     release() {
       const waiting = held.splice(0);
-      for (const resolve of waiting) resolve();
+      for (const resolve of waiting) {
+        resolve();
+      }
     },
     entries: (topic) =>
       (topics.get(topic)?.entries ?? []).map((entry) => ({ ...entry, headers: { ...entry.headers } })),
     close() {
       closed = true;
-      for (const found of topics.values()) wake(found);
+      for (const found of topics.values()) {
+        wake(found);
+      }
     },
   };
 };

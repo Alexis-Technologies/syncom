@@ -4,6 +4,8 @@
 // catalog: what is refused, at which entrance, and that a refusal leaves no
 // trace — against whichever storage half the caller builds.
 
+const { it } = require('node:test');
+
 const remoteOp = (origin, seq, type, id, extra = {}) => ({ origin, seq, ts: Date.now() + seq, type, id, ...extra });
 
 const BAD_IDS = ['', '.', '..', '../evil', 'a/b', 'a\\b', '.hidden', 'a b', 'tab\tx', 'x'.repeat(129), 42, null];
@@ -18,16 +20,20 @@ const GOOD_IDS = [
   '-d',
 ];
 
-const runIdTests = async (t, assert, createStorage) => {
-  await t.test('a local write with an invalid id is refused before anything is durable', async (t2) => {
+const runIdTests = (assert, createStorage) => {
+  it('should refuse a local write with an invalid id before anything is durable', async (t2) => {
     const storage = await createStorage(t2, 'A');
     for (const id of BAD_IDS) {
       const label = JSON.stringify(id);
-      await assert.rejects(() => storage.set(id, { a: 1 }), { name: 'TypeError', code: 'INVALID_ID' }, label);
-      await assert.rejects(() => storage.inc(id, 'n'), { code: 'INVALID_ID' }, label);
-      await assert.rejects(() => storage.delete(id), { code: 'INVALID_ID' }, label);
-      await assert.rejects(() => storage.purge(id), { code: 'INVALID_ID' }, label);
-      await assert.rejects(() => storage.update(id, { a: 1 }), { name: 'TypeError', code: 'INVALID_ID' }, label);
+      await assert.rejects(() => storage.set(id, { a: 1 }), { name: 'DataError', code: 'ALX_ERR_INVALID_ID' }, label);
+      await assert.rejects(() => storage.inc(id, 'n'), { code: 'ALX_ERR_INVALID_ID' }, label);
+      await assert.rejects(() => storage.delete(id), { code: 'ALX_ERR_INVALID_ID' }, label);
+      await assert.rejects(() => storage.purge(id), { code: 'ALX_ERR_INVALID_ID' }, label);
+      await assert.rejects(
+        () => storage.update(id, { a: 1 }),
+        { name: 'DataError', code: 'ALX_ERR_INVALID_ID' },
+        label,
+      );
       assert.strictEqual(await storage.get(id), null, label);
       assert.strictEqual(await storage.has(id), false, label);
     }
@@ -37,14 +43,18 @@ const runIdTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual((await storage.list()).sort(), [...GOOD_IDS].sort());
   });
 
-  await t.test('getId must mint a valid id', async (t2) => {
+  it('should require getId to mint a valid id', async (t2) => {
     const storage = await createStorage(t2, 'B', { getId: () => '../minted' });
-    await assert.rejects(() => storage.insert({ a: 1 }), { name: 'TypeError', code: 'INVALID_ID', message: /getId/ });
+    await assert.rejects(() => storage.insert({ a: 1 }), {
+      name: 'DataError',
+      code: 'ALX_ERR_INVALID_ID',
+      message: /getId/,
+    });
     assert.strictEqual(storage.log.length, 0);
     assert.strictEqual(await storage.fsi.exists(storage.path, 'minted.json'), false);
   });
 
-  await t.test("a peer's op or snapshot record with an invalid id is refused, and the stream goes on", async (t2) => {
+  it("should refuse a peer's op or snapshot record with an invalid id, and go on with the stream", async (t2) => {
     const storage = await createStorage(t2, 'C');
     const ops = [remoteOp('peer', 1, 'write', 'ok', { data: { a: 1 } })];
     let seq = 2;

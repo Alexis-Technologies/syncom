@@ -6,6 +6,7 @@
 // options)` gives the same directory for the same name within one subtest;
 // the memory backend is wrapped to count reads, so "no I/O" is a number.
 
+const { it } = require('node:test');
 const { memory } = require('../../src/memory/memory.js');
 const { createSearch } = require('../../src/search/search.js');
 
@@ -28,33 +29,30 @@ const counting = (fsi) => {
 const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 const titles = (rows) => rows.map((row) => row.title);
 
-const runSearchTests = async (t, assert, createStorage) => {
+const runSearchTests = (assert, createStorage) => {
   const schema = { entities: { Post: { index: ['orgId'], search: ['title', 'body'] }, Tag: {} } };
   const search = createSearch();
 
-  await t.test(
-    'search fields without open({ search }) are refused at open; so is a bad option or index',
-    async (t2) => {
-      await assert.rejects(() => createStorage(t2, 'none', { schema }), {
-        name: 'TypeError',
-        message: /createDatabase\(\{ search \}\): entity Post declares search fields/,
-      });
-      await assert.rejects(() => createStorage(t2, 'bad', { schema, search: 'yes' }), {
-        name: 'TypeError',
-        message: /createDatabase\(\{ search \}\): search must be a function/,
-      });
-      await assert.rejects(() => createStorage(t2, 'shape', { schema, search: () => ({}) }), {
-        name: 'TypeError',
-        message: /the index for Post must have put\(\), remove\(\) and query\(\)/,
-      });
-      // An index given to a storage with nothing to search is simply unused.
-      const plain = await createStorage(t2, 'plain', { search });
-      const id = await plain.insert({ title: 'no schema' });
-      assert.deepStrictEqual(await plain.get(id), { title: 'no schema' });
-    },
-  );
+  it('should refuse search fields without open({ search }) at open, and a bad option or index too', async (t2) => {
+    await assert.rejects(() => createStorage(t2, 'none', { schema }), {
+      name: 'ArgumentError',
+      message: /createDatabase\(\{ search \}\): entity Post declares search fields/,
+    });
+    await assert.rejects(() => createStorage(t2, 'bad', { schema, search: 'yes' }), {
+      name: 'ArgumentError',
+      message: /createDatabase\(\{ search \}\): search must be a function/,
+    });
+    await assert.rejects(() => createStorage(t2, 'shape', { schema, search: () => ({}) }), {
+      name: 'ArgumentError',
+      message: /the index for Post must have put\(\), remove\(\) and query\(\)/,
+    });
+    // An index given to a storage with nothing to search is simply unused.
+    const plain = await createStorage(t2, 'plain', { search });
+    const id = await plain.insert({ title: 'no schema' });
+    assert.deepStrictEqual(await plain.get(id), { title: 'no schema' });
+  });
 
-  await t.test('every write path reaches the index: insert, update, delete, purge, a peer op', async (t2) => {
+  it('should reach the index from every write path: insert, update, delete, purge, a peer op', async (t2) => {
     const storage = await createStorage(t2, 'A', { schema, search });
     const find = async (text) => titles(await storage.Post.select({ $text: text }).fetch());
     const post = await storage.Post.insert({ orgId: 'o1', title: 'Quick brown fox', body: 'jumps' });
@@ -82,7 +80,7 @@ const runSearchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await find('peer'), ['From a peer']);
   });
 
-  await t.test('a text field is searched as it reads: updateText moves a word in and out of the index', async (t2) => {
+  it('should search a text field as it reads: updateText moves a word in and out of the index', async (t2) => {
     const storage = await createStorage(t2, 'T', { schema, search });
     const find = async (text) => titles(await storage.Post.select({ $text: text }).fetch());
     const post = await storage.Post.insert({ orgId: 'o1', title: 'Typed' });
@@ -96,7 +94,7 @@ const runSearchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await find('jumps'), []);
   });
 
-  await t.test('$text ranks, an equality narrows, limit and one() read little, order re-sorts', async (t2) => {
+  it('should rank by $text, narrow by an equality, read little with limit and one(), and re-sort with order', async (t2) => {
     const fsi = counting(memory());
     const storage = await createStorage(t2, 'A', { fsi, schema, search, cache: { max: 5 } });
     const words = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta'];
@@ -140,36 +138,33 @@ const runSearchTests = async (t, assert, createStorage) => {
     assert.deepStrictEqual(await storage.Post.select({ $text: '...' }).fetch(), [], 'nothing to search for');
   });
 
-  await t.test(
-    'what is searched: the record as it reads, never encrypted, deleted or another collection',
-    async (t2) => {
-      const v1 = { version: 1, entities: { Post: { search: ['headline'] }, Tag: {} } };
-      const v2 = {
-        version: 2,
-        entities: { Post: { search: ['title'] }, Tag: {} },
-        migrations: { 2: { Post: { up: ({ headline, ...rest }) => ({ ...rest, title: headline }) } } },
-      };
-      const fsi = memory();
-      let storage = await createStorage(t2, 'A', { fsi, schema: v1, search });
-      await storage.Post.insert({ headline: 'Written before the rename' });
-      await storage.insert({ $type: 'Post', headline: 'sealed words' }, { encrypted: true });
-      await storage.Tag.insert({ headline: 'a tag, not a post' });
-      await storage.close();
-      // Read through the lens: the v1 record's `headline` is v2's `title`.
-      storage = await createStorage(t2, 'A', { fsi, schema: v2, search });
-      assert.deepStrictEqual(titles(await storage.Post.select({ $text: 'rename' }).fetch()), [
-        'Written before the rename',
-      ]);
-      assert.strictEqual(await storage.Post.count({ $text: 'sealed' }), 0, 'an encrypted record is never matched');
-      assert.throws(() => storage.Tag.select({ $text: 'tag' }), {
-        name: 'TypeError',
-        message: /\$text needs search fields on Tag/,
-      });
-      assert.throws(() => storage.Post.select({ $or: [{ $text: 'x' }] }), /only allowed at the top level/);
-    },
-  );
+  it('should search the record as it reads, never encrypted, deleted or another collection', async (t2) => {
+    const v1 = { version: 1, entities: { Post: { search: ['headline'] }, Tag: {} } };
+    const v2 = {
+      version: 2,
+      entities: { Post: { search: ['title'] }, Tag: {} },
+      migrations: { 2: { Post: { up: ({ headline, ...rest }) => ({ ...rest, title: headline }) } } },
+    };
+    const fsi = memory();
+    let storage = await createStorage(t2, 'A', { fsi, schema: v1, search });
+    await storage.Post.insert({ headline: 'Written before the rename' });
+    await storage.insert({ $type: 'Post', headline: 'sealed words' }, { encrypted: true });
+    await storage.Tag.insert({ headline: 'a tag, not a post' });
+    await storage.close();
+    // Read through the lens: the v1 record's `headline` is v2's `title`.
+    storage = await createStorage(t2, 'A', { fsi, schema: v2, search });
+    assert.deepStrictEqual(titles(await storage.Post.select({ $text: 'rename' }).fetch()), [
+      'Written before the rename',
+    ]);
+    assert.strictEqual(await storage.Post.count({ $text: 'sealed' }), 0, 'an encrypted record is never matched');
+    assert.throws(() => storage.Tag.select({ $text: 'tag' }), {
+      name: 'ArgumentError',
+      message: /\$text needs search fields on Tag/,
+    });
+    assert.throws(() => storage.Post.select({ $or: [{ $text: 'x' }] }), /only allowed at the top level/);
+  });
 
-  await t.test('a reopen reuses the catalog, text included; other search fields rebuild it once', async (t2) => {
+  it('should reuse the catalog on a reopen, text included, and rebuild it once for other search fields', async (t2) => {
     const fsi = counting(memory());
     let storage = await createStorage(t2, 'A', { fsi, schema, search, catalog: { flushEvery: 1000 } });
     for (let i = 0; i < 20; i++) await storage.Post.insert({ title: `title ${i}`, body: `body word${i}` });
@@ -196,7 +191,7 @@ const runSearchTests = async (t, assert, createStorage) => {
     assert.strictEqual(await storage.Post.count({ $text: 'title' }), 20);
   });
 
-  await t.test('watch() runs again when a matching record lands', async (t2) => {
+  it('should run watch() again when a matching record lands', async (t2) => {
     const storage = await createStorage(t2, 'A', { schema, search });
     await storage.Post.insert({ title: 'first fox' });
     const calls = [];
@@ -212,7 +207,7 @@ const runSearchTests = async (t, assert, createStorage) => {
     stop();
   });
 
-  await t.test('an index that throws is logged; the write lands and lists', async (t2) => {
+  it('should log an index that throws, the write landing and listing', async (t2) => {
     const warnings = [];
     const logger = { warn: (entry) => warnings.push(entry), info() {}, debug() {}, error() {} };
     let fail = true;

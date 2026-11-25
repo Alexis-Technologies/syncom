@@ -5,8 +5,8 @@
 // The convergence properties over IndexedDB (one factory per mesh, one
 // database per node), with the browser halves for everything else.
 
-const test = require('node:test');
-const assert = require('node:assert');
+const { describe, before, after } = require('node:test');
+const assert = require('node:assert/strict');
 const { IDBFactory } = require('fake-indexeddb');
 const { installBrowserGlobals, requireBrowserAll, prime } = require('./utils/browser-env.js');
 // Before the suite and everything it loads: the shared modules resolve to the browser halves.
@@ -14,15 +14,20 @@ prime();
 const { createIdbFsi } = require('../src/idb/idb.js');
 const { runSyncEngineTests } = require('./suites/sync-engine.js');
 
-test('Sync engine (IndexedDB backend)', async (t) => {
-  const env = installBrowserGlobals();
-  t.after(() => env.uninstall());
-  const browser = requireBrowserAll();
-  const factory = new IDBFactory();
+describe('Sync engine (IndexedDB backend)', () => {
+  let env = null;
+  let browser = null;
+  let factory = null;
+  before(() => {
+    env = installBrowserGlobals();
+    browser = requireBrowserAll();
+    factory = new IDBFactory();
+  });
+  after(() => env.uninstall());
 
   let n = 0;
   const backends = new Map();
-  await runSyncEngineTests(t, assert, async (t2, name, options = {}) => {
+  runSyncEngineTests(assert, async (t2, name, options = {}) => {
     const key = `${t2.name}:${name}`;
     if (!backends.has(key)) {
       const fsi = createIdbFsi({ indexedDB: factory, name: `mesh-${n++}-${name}` });
