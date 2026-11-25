@@ -125,7 +125,7 @@ export interface SyncUnitOptions {
   /**
    * Ask every peer to prove it holds the key that is its node id before anything is taken or handed to it: hello
    * answers a `challenge`, the peer signs it (`syncom/prove`), and until then push, snapshot and changes are 403
-   * `ALX_ERR_UNPROVEN`. On by default under `sync.signatures: 'require'`; needs the signing plugin.
+   * `UNPROVEN`. On by default under `sync.signatures: 'require'`; needs the signing plugin.
    */
   prove?: boolean;
   /**

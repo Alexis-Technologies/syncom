@@ -243,7 +243,7 @@ event (`ALX_ERR_BAD_SIGNATURE` or `ALX_ERR_UNSIGNED`, with the first refused op 
 it is a gap for its stream until it comes again, intact. A host announces
 the same through the `refused` event (`reason: 'forged' | 'unsigned'`), and
 a `'require'` host refuses a `hello` from a node id that is no key (403
-`ALX_ERR_UNSIGNED`). A signature is checked only after the op's shape, and a check
+`UNSIGNED`). A signature is checked only after the op's shape, and a check
 that throws is that op's `ALX_ERR_BAD_SIGNATURE`, never the page's failure.
 
 What a signature leaves open: `actor` is signed, so no relay changes it,
@@ -719,7 +719,7 @@ transport's message limit bounds the attachment (10 MiB of body over wrpc's HTTP
 encoding).
 
 Past `limits.bytesPerBlob` it is 413 `BYTES_PER_BLOB`, past 64 MiB (`MAX_BLOB_BYTES`, the one cap) 413
-`ALX_ERR_BLOB_TOO_LARGE` — told by the `size` announced, or by the text's length, before a byte is read or decoded; 400
+`BLOB_TOO_LARGE` — told by the `size` announced, or by the text's length, before a byte is read or decoded; 400
 `BAD_DIGEST` for what is no digest; 400 `BAD_BLOB` for bytes that are no base64 text, for `stream` and `base64`
 together, a `size` that is no non-negative integer, a stream this connection did not announce (or cannot carry), and a
 stream that ended short of its `size` or ran past it; 403 `READ_ONLY` where the unit takes no pushes (`allow.push`

@@ -104,7 +104,7 @@ src/sync/shared.js        SharedHub — the hubs' shared log (`sync.sharedLog`):
   (`#forwarded`, by stream key, `FORWARD_TTL`) and forwards the page to the inbox — the shadow moves on topic
   entries alone (`#shadowAdvance`, which lets a hold go as it passes it), never on a forward, so a writer's refusal
   is never acked for good — serves no snapshot (403
-  `ALX_ERR_READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
+  `READ_ONLY`: the shadow runs ahead of its engine, a page could lack what the vector claims; a fresh client
   bootstraps from a hub that writes) and stops reading the inbox (the next writer takes it from the saved cursor,
   which only a writer saves). The writer rules the inbox as it rules a push — `#apply` passes the manager's
   `authorizeWrite` (`sync.authorizeWrite`, every unit's default) as `authorize`, a refusal — the rule's, or a record out of the client's scopes — logged as a withheld
