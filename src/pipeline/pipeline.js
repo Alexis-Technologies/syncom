@@ -139,7 +139,7 @@ const createPipeline = (db, { name, source, handler, leader = null } = {}) => {
       binding.db,
       binding.logger,
       'error',
-      new SyncomError('ALX_ERR_PIPELINE_FAILED', message, { pipeline: name, eventId, cause }),
+      new SyncomError(message, { code: 'ALX_ERR_PIPELINE_FAILED', pipeline: name, eventId, cause }),
     );
   };
 

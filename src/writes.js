@@ -66,7 +66,7 @@ const operate = async (api, tx, id, delta, options, view) => {
 // null; no record is ALX_ERR_NOT_FOUND.
 const modifyIn = async (tx, id, fn, options) => {
   const before = await tx.get(id);
-  if (before === null) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+  if (before === null) throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id });
   const copy = asJson(before);
   let after = await fn(copy);
   if (after === undefined) after = copy;

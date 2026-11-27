@@ -150,9 +150,8 @@ const callOf = (payload) => {
 
 const notLeader = (path, what, hint = null) =>
   new SyncomError(
-    'ALX_ERR_NOT_LEADER',
     `${what} is the leader's: the instance at ${path} follows${hint === null ? '' : ` — ${hint}`}`,
-    hint === null ? { path, what } : { path, what, hint },
+    hint === null ? { code: 'ALX_ERR_NOT_LEADER', path, what } : { code: 'ALX_ERR_NOT_LEADER', path, what, hint },
   );
 const noCollection = (name) => new ArgumentError(`collection(): no collection ${String(name)}`);
 
@@ -203,7 +202,7 @@ const revived = (verdicts) => {
   }
   return { success: verdicts.success, error };
 };
-const closed = (path) => new SyncomError('ALX_ERR_CLOSED', `The shared database at ${path} is closed`, { path });
+const closed = (path) => new SyncomError(`The shared database at ${path} is closed`, { code: 'ALX_ERR_CLOSED', path });
 
 // A live Document of the current instance, made again over the next: `data()`, the `update` event (data, delta)
 // — and once after a failover, with the data as the new instance reads it (delta null). A bind that failed is
@@ -560,15 +559,12 @@ class Shared extends Emitter {
       } catch (error) {
         if (error?.code !== 'ALX_ERR_READ_ONLY') throw error;
         if (Date.now() >= deadline) {
-          throw new SyncomError(
-            'ALX_ERR_LEADER_LOST',
-            `No leader wrote the database at ${this.#path} within ${this.#failover} ms`,
-            {
-              path: this.#path,
-              reason: 'fresh',
-              cause: error,
-            },
-          );
+          throw new SyncomError(`No leader wrote the database at ${this.#path} within ${this.#failover} ms`, {
+            code: 'ALX_ERR_LEADER_LOST',
+            path: this.#path,
+            reason: 'fresh',
+            cause: error,
+          });
         }
         await sleep(Math.min(this.#grace, LOCKED_STEP) || LOCKED_STEP);
       }
@@ -632,9 +628,8 @@ class Shared extends Emitter {
       if (first) throw error;
       const attempt = this.#attempts++;
       const failed = new SyncomError(
-        'ALX_ERR_PROMOTE_FAILED',
         `Elected, but the database at ${this.#path} could not be opened as the leader (attempt ${attempt + 1})`,
-        { path: this.#path, attempt, cause: error },
+        { code: 'ALX_ERR_PROMOTE_FAILED', path: this.#path, attempt, cause: error },
       );
       this.#logger().error({ event: 'tabs.promote.failed', path: this.#path, attempt, err: error });
       this.#stats.yields++;
@@ -907,9 +902,16 @@ class Shared extends Emitter {
           if (code === 'ALX_ERR_CALL_UNKNOWN') {
             this.#lost();
             throw new SyncomError(
-              'ALX_ERR_LEADER_LOST',
               `${name}() was tried again at a leader that never saw it: the leader changed, the first may have landed`,
-              { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: true, cause: error },
+              {
+                code: 'ALX_ERR_LEADER_LOST',
+                path: this.#path,
+                method: name,
+                id,
+                attempts: attempt + 1,
+                maybeApplied: true,
+                cause: error,
+              },
             );
           }
           // The instance that answered follows now, or is closing: the leader is another, dialed again.
@@ -924,11 +926,15 @@ class Shared extends Emitter {
       await this.#dropChannel();
       if (Date.now() >= deadline) {
         this.#lost();
-        throw new SyncomError(
-          'ALX_ERR_LEADER_LOST',
-          `${name}() reached no leader of ${this.#path} within ${this.#failover} ms`,
-          { path: this.#path, method: name, id, attempts: attempt + 1, maybeApplied: sent, cause },
-        );
+        throw new SyncomError(`${name}() reached no leader of ${this.#path} within ${this.#failover} ms`, {
+          code: 'ALX_ERR_LEADER_LOST',
+          path: this.#path,
+          method: name,
+          id,
+          attempts: attempt + 1,
+          maybeApplied: sent,
+          cause,
+        });
       }
       await sleep(Math.min(LOCKED_STEP * (attempt + 1), 1000));
     }
@@ -1014,9 +1020,8 @@ class Shared extends Emitter {
       }
       if (call.retry) {
         const unknown = new SyncomError(
-          'ALX_ERR_CALL_UNKNOWN',
           `${method}: the call ${call.id} was tried again, and this leader never saw it`,
-          { id: call.id, method },
+          { code: 'ALX_ERR_CALL_UNKNOWN', id: call.id, method },
         );
         return { ok: false, error: describe(unknown) };
       }

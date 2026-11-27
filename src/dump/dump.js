@@ -139,14 +139,11 @@ const importJSON = async (db, dump, { mode = 'merge', force = false, batch = PAG
   const given = isPlainObject(dump.schema) ? dump.schema : null;
   const mine = db.schemaInfo;
   if (!force && given !== null && mine !== null && given.hash !== mine.hash) {
-    throw new SyncomError(
-      'ALX_ERR_SCHEMA_MISMATCH',
-      'The dump was made under another schema; importJSON({ force: true }) takes it',
-      {
-        expected: mine.hash,
-        given: given.hash,
-      },
-    );
+    throw new SyncomError('The dump was made under another schema; importJSON({ force: true }) takes it', {
+      code: 'ALX_ERR_SCHEMA_MISMATCH',
+      expected: mine.hash,
+      given: given.hash,
+    });
   }
   const source = db[SOURCE];
   if (mode === 'merge') {

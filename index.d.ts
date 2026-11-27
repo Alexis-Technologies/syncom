@@ -744,16 +744,35 @@ export interface DataErrorDetails {
   max?: number;
 }
 
+/** What a `DataError` is made with: its code, what the code documents (null by default) and the standard `cause`. */
+export interface DataErrorOptions {
+  code: DataErrorCode;
+  details?: DataErrorDetails | null;
+  cause?: unknown;
+}
+
 /**
  * A value syncom refuses that came from data or configuration rather than
  * from the code that called (a `DataErrorCode`). A `TypeError`; one shape for
  * every code, `details` null where the code documents nothing.
  */
 export class DataError extends TypeError {
-  constructor(code: DataErrorCode, message: string, details?: DataErrorDetails | null, options?: { cause?: unknown });
+  constructor(message: string, options: DataErrorOptions);
   readonly name: 'DataError';
   readonly code: DataErrorCode;
   readonly details: DataErrorDetails | null;
+}
+
+/**
+ * What a `SyncomError` is made with: its code, the standard `cause` (set only
+ * when it is not `undefined`) and the fields the code documents, each laid on
+ * the error under its own name — never `name`, `message`, `stack` or
+ * `__proto__`.
+ */
+export interface SyncomErrorOptions {
+  code: SyncomErrorCode;
+  cause?: unknown;
+  [field: string]: unknown;
 }
 
 /**
@@ -766,7 +785,7 @@ export class DataError extends TypeError {
  * carries and a `reason`, the protocol's constant.
  */
 export class SyncomError extends Error {
-  constructor(code: SyncomErrorCode, message: string, fields?: { cause?: unknown; [field: string]: unknown });
+  constructor(message: string, options: SyncomErrorOptions);
   readonly name: string;
   readonly code: SyncomErrorCode;
   cause?: unknown;
@@ -779,7 +798,7 @@ export class SyncomError extends Error {
  * `after*` hook fails the call while what it observed stays committed.
  */
 export class HookError extends SyncomError {
-  constructor(hook: string, cause: unknown);
+  constructor(message: string, options?: { hook?: string; cause?: unknown; [field: string]: unknown });
   readonly name: 'HookError';
   readonly code: 'ALX_ERR_HOOK_FAILED';
   readonly hook: string;
@@ -1084,7 +1103,10 @@ export interface ValidationIssue {
  * something of its own.
  */
 export class ValidationError extends SyncomError {
-  constructor(entity: string | null, issues: ValidationIssue[]);
+  constructor(
+    message: string,
+    options?: { entity?: string | null; issues?: ValidationIssue[]; cause?: unknown; [field: string]: unknown },
+  );
   readonly name: 'ValidationError';
   readonly code: 'ALX_ERR_VALIDATION_FAILED';
   readonly entity: string | null;

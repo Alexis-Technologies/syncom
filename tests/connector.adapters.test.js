@@ -252,11 +252,11 @@ describe('Connector adapters', () => {
         fetch: async () => ({ ok: false, status: 503, text: async () => 'busy' }),
       });
       await assert.rejects(() => down.pull.handler(null, 10), {
-        status: 503,
+        statusCode: 503,
         message: /_changes answered 503: busy/,
       });
       await assert.rejects(() => down.push.handler([{ id: 'x', data: {}, deleted: false, assumed: null }]), {
-        status: 503,
+        statusCode: 503,
       });
       const adapter = couchdb({ url: 'https://couch.test/db/', fetch: couch.fetch });
       assert.strictEqual(adapter.revisionOf('b1'), undefined);
@@ -395,7 +395,7 @@ describe('Connector adapters', () => {
         },
       );
       const failing = graphql({ url: 'x', fetch: async () => ({ ok: false, status: 500 }), pull });
-      await assert.rejects(() => failing.pull.handler(null, 10), { message: /answered 500/, status: 500 });
+      await assert.rejects(() => failing.pull.handler(null, 10), { message: /answered 500/, statusCode: 500 });
       const own = graphql({
         request: async (query, variables) => ({ q: { documents: [], checkpoint: variables.limit } }),
         pull,
@@ -1110,7 +1110,7 @@ describe('Connector adapters', () => {
       assert.deepStrictEqual(fresh.read('d2'), { b: 3 });
       const down = gdrive({ fetch: async () => ({ ok: false, status: 503, text: async () => 'busy' }), name: 'x' });
       await assert.rejects(() => down.pull.handler(null, 10), {
-        status: 503,
+        statusCode: 503,
         message: /Google Drive files\.list answered 503: busy/,
       });
     });
@@ -1143,7 +1143,7 @@ describe('Connector adapters', () => {
       const blind = gdrive({ fetch: shared.fetch, token: 't', name: 'race.json' });
       await assert.rejects(
         () => blind.push.handler([{ id: 'from-c', data: { c: 1 }, deleted: false, assumed: null }]),
-        { status: 428, message: /no ETag/ },
+        { statusCode: 428, message: /no ETag/ },
       );
       assert.strictEqual(shared.read('from-c'), null);
       assert.strictEqual(shared.store.unconditional, 0);
@@ -1201,7 +1201,7 @@ describe('Connector adapters', () => {
       assert.deepStrictEqual(ids.sort(), [id, 'from-laptop'].sort());
       await assert.rejects(
         () => blind.push.handler([{ id: 'from-c', data: { c: 1 }, deleted: false, assumed: null }]),
-        { status: 428, message: /no ETag/ },
+        { statusCode: 428, message: /no ETag/ },
       );
       assert.strictEqual(tasksDrive.read('from-c'), null);
       assert.strictEqual(tasksDrive.store.unconditional, 0);
@@ -1245,7 +1245,7 @@ describe('Connector adapters', () => {
         path: 'x',
       });
       await assert.rejects(() => down.pull.handler(null, 10), {
-        status: 503,
+        statusCode: 503,
         message: /OneDrive item answered 503: busy/,
       });
     });
@@ -1299,12 +1299,12 @@ describe('Connector adapters', () => {
       save: async () => {
         saves++;
         const error = new Error('412');
-        error.status = 412;
+        error.statusCode = 412;
         throw error;
       },
     });
     await assert.rejects(() => contended.push.handler([{ id: 'x', data: { a: 1 }, deleted: false, assumed: null }]), {
-      status: 412,
+      statusCode: 412,
     });
     assert.strictEqual(saves, RETRIES + 1);
     // A 409 — another device made the file first — is tried the same way.
@@ -1314,12 +1314,12 @@ describe('Connector adapters', () => {
       save: async () => {
         made++;
         const error = new Error('409');
-        error.status = 409;
+        error.statusCode = 409;
         throw error;
       },
     });
     await assert.rejects(() => raced.push.handler([{ id: 'x', data: { a: 1 }, deleted: false, assumed: null }]), {
-      status: 409,
+      statusCode: 409,
     });
     assert.strictEqual(made, RETRIES + 1);
     const other = jsonFile({

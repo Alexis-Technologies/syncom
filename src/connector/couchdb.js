@@ -40,7 +40,7 @@ const failed = async (response, what) => {
     // The body is not the point.
   }
   const error = new Error(`CouchDB ${what} answered ${response.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
-  error.status = response.status;
+  error.statusCode = response.status;
   return error;
 };
 

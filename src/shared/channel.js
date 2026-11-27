@@ -31,7 +31,10 @@ const answerOf = async (fn) => {
 /** The leader's answer opened: its value, or what it threw, thrown again; an answer that is not one is `ALX_ERR_LEADER_LOST`. */
 const unwrap = (answer, method) => {
   if (answer === null || typeof answer !== 'object' || typeof answer.ok !== 'boolean') {
-    throw new SyncomError('ALX_ERR_LEADER_LOST', `The leader answered ${method} with nothing readable`, { method });
+    throw new SyncomError(`The leader answered ${method} with nothing readable`, {
+      code: 'ALX_ERR_LEADER_LOST',
+      method,
+    });
   }
   if (answer.ok) return answer.value;
   throw revive(answer.error);

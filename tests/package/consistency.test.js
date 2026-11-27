@@ -257,8 +257,9 @@ describe('package consistency', () => {
   });
 
   // Every code src/ raises is in its union and in the API reference's table, and nothing is there that src/ does not
-  // raise: a SyncomError's in `SyncomErrorCode`, a typed TypeError's in `TypedErrorCode` — each code read off the
-  // first argument of `new SyncomError(…)`, a `super(…)` of a class extending it, or `typed(…)`, a conditional's
+  // raise: a SyncomError's in `SyncomErrorCode`, a DataError's in `DataErrorCode` — each code read off the `code:` of
+  // the options of `new SyncomError(message, { code, … })` or `new DataError(message, { code, … })` (every class takes
+  // `(message, options)`, as Error does), or off `this.code = …` of a class extending SyncomError, a conditional's
   // codes included, a call over several lines too.
   it('should list every error code src/ raises in its union and in the reference table, and nothing else', () => {
     const fs = require('node:fs');
@@ -273,24 +274,46 @@ describe('package consistency', () => {
       }
     };
     walk(nodePath.join(root, 'src'));
-    // The text of a call's first argument: up to the first comma at depth 0.
-    const firstArgument = (text, from) => {
+    // The index of the bracket that closes what `from` is in, or of the first comma at depth 0 where `comma`: a string
+    // and a template skipped, a template's `${…}` read as code.
+    const endOf = (text, from, comma) => {
       let depth = 0;
+      const stack = []; // 'T' a template, '$' a ${ of one, '{' a brace inside a ${
       for (let i = from; i < text.length; i++) {
         const c = text[i];
-        if (c === '(' || c === '[' || c === '{') depth++;
+        const top = stack.at(-1);
+        if (top === 'T') {
+          if (c === '\\') i++;
+          else if (c === '`') stack.pop();
+          else if (c === '$' && text[i + 1] === '{') {
+            stack.push('$');
+            i++;
+          }
+          continue;
+        }
+        if (c === "'" || c === '"') {
+          for (i++; i < text.length && text[i] !== c; i++) if (text[i] === '\\') i++;
+        } else if (c === '`') stack.push('T');
+        else if (stack.length > 0) {
+          if (c === '{') stack.push('{');
+          else if (c === '}') stack.pop();
+        } else if (c === '(' || c === '[' || c === '{') depth++;
         else if (c === ')' || c === ']' || c === '}') {
-          if (depth === 0) return text.slice(from, i);
+          if (depth === 0) return i;
           depth--;
-        } else if (c === ',' && depth === 0) return text.slice(from, i);
+        } else if (comma && c === ',' && depth === 0) return i;
       }
-      return '';
+      return text.length;
     };
+    // The codes of every call the pattern opens: the literals each `code:` among its arguments holds.
     const codesIn = (text, pattern) => {
       const out = new Set();
       for (const match of text.matchAll(pattern)) {
-        for (const code of firstArgument(text, match.index + match[0].length).matchAll(/'([A-Z][A-Z_]+)'/g)) {
-          out.add(code[1]);
+        const from = match.index + match[0].length;
+        const args = text.slice(from, endOf(text, from, false));
+        for (const at of args.matchAll(/\bcode: /g)) {
+          const value = args.slice(at.index + at[0].length, endOf(args, at.index + at[0].length, true));
+          for (const code of value.matchAll(/'([A-Z][A-Z_]+)'/g)) out.add(code[1]);
         }
       }
       return out;
@@ -301,8 +324,9 @@ describe('package consistency', () => {
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8');
       for (const code of codesIn(text, /new SyncomError\(/g)) raised.add(code);
+      // A class with a fixed code sets it itself.
       if (/extends (SyncomError|HookError)/.test(text)) {
-        for (const code of codesIn(text, /\bsuper\(/g)) raised.add(code);
+        for (const match of text.matchAll(/\bthis\.code = '([A-Z][A-Z_]+)'/g)) raised.add(match[1]);
       }
       for (const code of codesIn(text, /new DataError\(/g)) dataCodes.add(code);
       // A wrong argument is syncom's own class: no bare TypeError or RangeError outside the module that defines them

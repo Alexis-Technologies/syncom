@@ -43,7 +43,7 @@ class Blockchain {
         chain = JSON.parse(raw);
       } catch (error) {
         const message = `${BLOCKCHAIN} is unreadable (${error.message}); restore it or remove the directory`;
-        throw new SyncomError('ALX_ERR_CORRUPT', message, { cause: error });
+        throw new SyncomError(message, { code: 'ALX_ERR_CORRUPT', cause: error });
       }
       this.tailHash = chain.tailHash;
     }
@@ -95,7 +95,7 @@ class Blockchain {
 
   async readBlock(hash) {
     const raw = await this.#store.get(`${hash}.json`);
-    if (raw === null) throw new SyncomError('ALX_ERR_BLOCK_NOT_FOUND', `Block not found: ${hash}`, { hash });
+    if (raw === null) throw new SyncomError(`Block not found: ${hash}`, { code: 'ALX_ERR_BLOCK_NOT_FOUND', hash });
     return JSON.parse(raw);
   }
 

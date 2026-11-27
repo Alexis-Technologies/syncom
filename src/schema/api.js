@@ -30,7 +30,7 @@ const loadVersion = async ({ db, logger, hash: sha256 }, { version, snapshot, ah
       raw = JSON.parse(text);
     } catch (error) {
       const message = `${SCHEMA_FILE} is unreadable (${error.message}); restore it or remove the directory`;
-      throw new SyncomError('ALX_ERR_CORRUPT', message, { cause: error });
+      throw new SyncomError(message, { code: 'ALX_ERR_CORRUPT', cause: error });
     }
     if (isPlainObject(raw) && Number.isInteger(raw.version)) {
       stored = { version: raw.version, hash: typeof raw.hash === 'string' ? raw.hash : null, migrated: raw.migrated };
@@ -44,8 +44,8 @@ const loadVersion = async ({ db, logger, hash: sha256 }, { version, snapshot, ah
     logger[stored.version > version ? 'warn' : 'info']({ event, from: stored.version, to: version });
     if (stored.version > version && ahead === 'hold') {
       throw new SyncomError(
-        'ALX_ERR_DOWNGRADE',
         `Schema version ${version} is below the ${stored.version} this directory ran; ahead 'hold' cannot downgrade`,
+        { code: 'ALX_ERR_DOWNGRADE' },
       );
     }
   }

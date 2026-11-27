@@ -204,7 +204,8 @@ const CHECKS = Object.freeze({
 const STORES = Object.freeze(Object.keys(CHECKS));
 
 const unreachable = (reason, fields = {}) =>
-  new SyncomError('ALX_ERR_ENGINE_UNREACHABLE', `remoteEngine(): the served engine is unreachable (${reason})`, {
+  new SyncomError(`remoteEngine(): the served engine is unreachable (${reason})`, {
+    code: 'ALX_ERR_ENGINE_UNREACHABLE',
     reason,
     ...fields,
     cause: null,

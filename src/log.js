@@ -736,7 +736,7 @@ class OpLog {
     }
     // A medium that is full is said as such: the writer hears ALX_ERR_QUOTA, with the platform's error as the cause.
     const reported = isQuotaError(error)
-      ? new SyncomError('ALX_ERR_QUOTA', 'The medium is full: nothing more can be appended', { cause: error })
+      ? new SyncomError('The medium is full: nothing more can be appended', { code: 'ALX_ERR_QUOTA', cause: error })
       : error;
     if (this.#onFail !== null) {
       try {

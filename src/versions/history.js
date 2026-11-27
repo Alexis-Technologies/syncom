@@ -33,7 +33,11 @@ const gone = (id, reason) => {
     epoch: 'the event id belongs to another incarnation of this log',
     merge: 'a snapshot joined after the stamp carries ops stamped before it',
   };
-  return new SyncomError('ALX_ERR_HISTORY_GONE', `History of record ${id} is gone: ${why[reason]}`, { id, reason });
+  return new SyncomError(`History of record ${id} is gone: ${why[reason]}`, {
+    code: 'ALX_ERR_HISTORY_GONE',
+    id,
+    reason,
+  });
 };
 
 const isVector = (value) => {
@@ -51,20 +55,21 @@ const isVector = (value) => {
 const parseVersion = (at) => {
   if (typeof at === 'string') {
     const parsed = parseEventId(at);
-    if (parsed === null) throw new DataError('ALX_ERR_INVALID_VERSION', `at: not an event id: ${at}`);
+    if (parsed === null) throw new DataError(`at: not an event id: ${at}`, { code: 'ALX_ERR_INVALID_VERSION' });
     return { kind: 'event', epoch: parsed.epoch, seq: parsed.seq };
   }
   const stamp = at instanceof Date ? at.getTime() : at;
   if (typeof stamp === 'number') {
-    if (!Number.isFinite(stamp) || stamp < 0) throw new DataError('ALX_ERR_INVALID_VERSION', `at: not a stamp: ${at}`);
+    if (!Number.isFinite(stamp) || stamp < 0) {
+      throw new DataError(`at: not a stamp: ${at}`, { code: 'ALX_ERR_INVALID_VERSION' });
+    }
     return { kind: 'stamp', ts: stamp };
   }
   if (at !== null && typeof at === 'object' && isVector(at.vector)) return { kind: 'vector', vector: at.vector };
   if (at !== null && typeof at === 'object' && typeof at.tag === 'string') return { kind: 'tag', name: at.tag };
-  throw new DataError(
-    'ALX_ERR_INVALID_VERSION',
-    'at: an event id, a stamp (a number or a Date), { vector } or { tag }',
-  );
+  throw new DataError('at: an event id, a stamp (a number or a Date), { vector } or { tag }', {
+    code: 'ALX_ERR_INVALID_VERSION',
+  });
 };
 
 // Whether an applied entry falls inside the version.

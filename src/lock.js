@@ -14,7 +14,7 @@ const LOCK_FILE = 'lock.json';
 const DEFAULT_STALE = 30 * 60 * 1000;
 
 const locked = (path, why = 'is locked by another instance') =>
-  new SyncomError('ALX_ERR_LOCKED', `Storage at ${path} ${why}`, { path });
+  new SyncomError(`Storage at ${path} ${why}`, { code: 'ALX_ERR_LOCKED', path });
 
 const random = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 

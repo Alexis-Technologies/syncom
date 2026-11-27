@@ -18,7 +18,9 @@ const SIGNING_FILES = { public: 'sign-public.pem', private: 'sign-private.pem' }
 
 const incomplete = (where, hasPublic, files) => {
   const missing = hasPublic ? files.private : files.public;
-  return new SyncomError('ALX_ERR_KEYS_INCOMPLETE', `Key pair at ${where} is incomplete: ${missing} is missing`);
+  return new SyncomError(`Key pair at ${where} is incomplete: ${missing} is missing`, {
+    code: 'ALX_ERR_KEYS_INCOMPLETE',
+  });
 };
 
 // Half a pair is refused, not replaced: without private.pem every sealed

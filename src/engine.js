@@ -187,7 +187,7 @@ const checkKvKey = (ns, key, label) => {
 // there is one), and a key `create` found held (EEXIST, as an fsi says it).
 // No requires here: the error class is the caller's (src/errors.js).
 const unreadableRecord = (SyncomError, id, cause = null) =>
-  new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+  new SyncomError(`Record ${id} is unreadable`, { code: 'ALX_ERR_INTEGRITY', id, cause, reason: 'unreadable' });
 const eexist = (key) => Object.assign(new Error(`EEXIST: key already exists, ${key}`), { code: 'EEXIST' });
 
 module.exports = {

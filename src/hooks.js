@@ -11,10 +11,14 @@ const { SyncomError, ArgumentError } = require('./errors.js');
 // outside: many listeners, none of which can affect the operation — a
 // listener that throws is logged and forgotten.
 
+// `hook` names the hook, `cause` is what it threw.
 class HookError extends SyncomError {
-  constructor(hook, cause) {
-    super('ALX_ERR_HOOK_FAILED', `The ${hook} hook failed: ${cause?.message ?? cause}`, { cause, hook });
+  constructor(message, options = {}) {
+    const { hook = null } = options;
+    super(message, options);
     this.name = 'HookError';
+    this.code = 'ALX_ERR_HOOK_FAILED';
+    this.hook = hook;
   }
 }
 
@@ -45,7 +49,7 @@ const runHook = async (hooks, name, ...args) => {
   try {
     return await fn(...args);
   } catch (error) {
-    throw new HookError(name, error);
+    throw new HookError(`The ${name} hook failed: ${String(error?.message ?? error)}`, { hook: name, cause: error });
   }
 };
 

@@ -502,7 +502,7 @@ const wholeCharacters = (id, key, idx, ...indexes) => {
     if (index <= 0 || index >= length) continue;
     if (!isHigh(unitAt(idx, index - 1)) || !isLow(unitAt(idx, index))) continue;
     const message = `Index ${index} of field ${key} of record ${id} falls inside a surrogate pair`;
-    throw new SyncomError('ALX_ERR_SURROGATE', message, { id, field: key, index });
+    throw new SyncomError(message, { code: 'ALX_ERR_SURROGATE', id, field: key, index });
   }
 };
 
@@ -539,7 +539,7 @@ const resolveSplice = (core, id, payload, current) => {
   if (at > length || at + count > length) {
     const span = count > 0 ? `${at}..${at + count}` : `${at}`;
     const message = `Index ${span} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, index: at, count, length });
+    throw new SyncomError(message, { code: 'ALX_ERR_OUT_OF_RANGE', id, field: key, index: at, count, length });
   }
   wholeCharacters(id, key, idx, at, at + count);
   // joinBlock(): the one slot it cuts holds a block marker, or there is none to join.
@@ -565,7 +565,7 @@ const resolveSplice = (core, id, payload, current) => {
 // A text's slot that is no block marker and no embed: nothing to set or join there.
 const noMarker = (id, field, index) => {
   const message = `Index ${index} of text field ${field} of record ${id} holds no block marker or embed`;
-  return new SyncomError('ALX_ERR_NOT_FOUND', message, { id, field, index });
+  return new SyncomError(message, { code: 'ALX_ERR_NOT_FOUND', id, field, index });
 };
 
 // A list's element, by its index: the name it keeps across moves. A field
@@ -577,7 +577,7 @@ const elementAt = (core, id, key, index, current) => {
   const length = idx === null ? 0 : S.lengthOf(idx);
   if (index >= length) {
     const message = `Index ${index} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, index, count: 0, length });
+    throw new SyncomError(message, { code: 'ALX_ERR_OUT_OF_RANGE', id, field: key, index, count: 0, length });
   }
   return { idx, elem: S.elemAt(idx, index) };
 };
@@ -601,7 +601,7 @@ const resolveMove = (core, id, payload, current) => {
   const length = S.lengthOf(idx);
   if (to >= length) {
     const message = `Index ${to} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, index: to, count: 0, length });
+    throw new SyncomError(message, { code: 'ALX_ERR_OUT_OF_RANGE', id, field: key, index: to, count: 0, length });
   }
   const origin = core.nodeId;
   const place = S.placeInsert(idx, to < from ? to : to + 1, origin);
@@ -623,7 +623,8 @@ const resolveMark = (core, id, payload, current) => {
   const length = idx === null ? 0 : S.lengthOf(idx);
   if (start > end || end > length) {
     const message = `Range ${start}..${end} is out of range for field ${key} of record ${id} (length ${length})`;
-    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, {
+    throw new SyncomError(message, {
+      code: 'ALX_ERR_OUT_OF_RANGE',
       id,
       field: key,
       index: start,

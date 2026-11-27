@@ -147,7 +147,8 @@ class Attachments {
 
   // The attachment's name rides as `attachment`: a field named `name` would be the error's own.
   #invalid(id, name) {
-    return new SyncomError('ALX_ERR_ATTACHMENT_INVALID', `The register of attachment ${name} of ${id} is no register`, {
+    return new SyncomError(`The register of attachment ${name} of ${id} is no register`, {
+      code: 'ALX_ERR_ATTACHMENT_INVALID',
       id,
       attachment: name,
     });
@@ -197,11 +198,10 @@ class Attachments {
     // A sealed record takes none: the blobs store holds bytes the record's key does not cover.
     const row = this.#storage[SOURCE].row(id);
     if (row !== null && row.encrypted === true) {
-      throw new SyncomError(
-        'ALX_ERR_ENCRYPTED',
-        `attachments.put(): record ${id} is sealed — its bytes would lie in the clear`,
-        { id },
-      );
+      throw new SyncomError(`attachments.put(): record ${id} is sealed — its bytes would lie in the clear`, {
+        code: 'ALX_ERR_ENCRYPTED',
+        id,
+      });
     }
     // In flight: a sweep meanwhile keeps the blob the register is about to name.
     this.#pending.set(entry.digest, (this.#pending.get(entry.digest) ?? 0) + 1);
@@ -367,24 +367,20 @@ class Attachments {
     this.#stats.mismatches++;
     this.#otel().recordBlob('get', 'mismatch', 0);
     return new SyncomError(
-      'ALX_ERR_BLOB_MISMATCH',
       `The bytes of attachment ${name} of ${id} (${digest}) are not what the register says (${reason})`,
-      { id, attachment: name, digest, reason },
+      { code: 'ALX_ERR_BLOB_MISMATCH', id, attachment: name, digest, reason },
     );
   }
 
   #missing(id, name, digest) {
     this.#stats.missing++;
     this.#otel().recordBlob('get', 'missing', 0);
-    return new SyncomError(
-      'ALX_ERR_BLOB_NOT_FOUND',
-      `The bytes of attachment ${name} of ${id} (${digest}) are not here`,
-      {
-        id,
-        attachment: name,
-        digest,
-      },
-    );
+    return new SyncomError(`The bytes of attachment ${name} of ${id} (${digest}) are not here`, {
+      code: 'ALX_ERR_BLOB_NOT_FOUND',
+      id,
+      attachment: name,
+      digest,
+    });
   }
 
   // The bytes asked of the peers, through the sync plugin where it runs: checked by digest and kept there (once —

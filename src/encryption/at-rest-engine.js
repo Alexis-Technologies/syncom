@@ -176,7 +176,7 @@ const atRestEngine = (engine, cipher) => {
     const sealAll = (entries) => eachChunk(entries, sealEntry);
     // A row decrypted that is no JSON: the medium is corrupt at that seq — never a bare SyntaxError out of an open.
     const corrupt = (what, cause) =>
-      new SyncomError('ALX_ERR_CORRUPT', `The log's ${what} does not read once decrypted`, { cause, file: what });
+      new SyncomError(`The log's ${what} does not read once decrypted`, { code: 'ALX_ERR_CORRUPT', cause, file: what });
     const parsedJson = (what, text) => {
       try {
         return JSON.parse(text);

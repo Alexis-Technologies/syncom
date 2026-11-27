@@ -49,7 +49,7 @@ const graphql = ({ url, fetch = globalThis.fetch, headers = {}, request = null, 
     });
     if (!response.ok) {
       const error = new Error(`GraphQL answered ${response.status}`);
-      error.status = response.status;
+      error.statusCode = response.status;
       throw error;
     }
     const body = await response.json();

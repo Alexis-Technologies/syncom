@@ -189,7 +189,8 @@ class TextHandle extends Emitter {
     const length = this.length;
     if (end > length) {
       const message = `Index ${end} is out of range for field ${this.field} of record ${this.id} (length ${length})`;
-      throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, {
+      throw new SyncomError(message, {
+        code: 'ALX_ERR_OUT_OF_RANGE',
         id: this.id,
         field: this.field,
         index: end,
@@ -318,7 +319,9 @@ class TextHandle extends Emitter {
   // changed — and kept to log, grown into the one before where the two are
   // one; the observers told.
   #edit(type, payload) {
-    if (this.#closed) throw new SyncomError('ALX_ERR_CLOSED', `The handle on ${this.field} of ${this.id} is closed`);
+    if (this.#closed) {
+      throw new SyncomError(`The handle on ${this.field} of ${this.id} is closed`, { code: 'ALX_ERR_CLOSED' });
+    }
     const { editing } = this.#core;
     const from = this.#overlay;
     const op = editing.makeOp(type, this.id, payload, from, this.#actor);
@@ -327,7 +330,7 @@ class TextHandle extends Emitter {
     if (applied === null) {
       // Nothing to edit: the record is gone (a delete or a purge heard) — said, never a keystroke that vanishes.
       if (from !== null && !this.#core.alive(from)) {
-        throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${this.id} is gone: nothing to edit`, { id: this.id });
+        throw new SyncomError(`Record ${this.id} is gone: nothing to edit`, { code: 'ALX_ERR_NOT_FOUND', id: this.id });
       }
       return;
     }
@@ -547,7 +550,8 @@ class TextHandle extends Emitter {
       edits += later.batch.length;
       cancelled.push(later);
     }
-    const error = new SyncomError('ALX_ERR_UNLOGGED', `Edits of ${this.field} of ${this.id} could not be logged`, {
+    const error = new SyncomError(`Edits of ${this.field} of ${this.id} could not be logged`, {
+      code: 'ALX_ERR_UNLOGGED',
       id: this.id,
       field: this.field,
       edits,
@@ -592,13 +596,16 @@ const openText = async (core, id, key, { window, actor, source } = {}) => {
   const base = await core.run(async () => {
     await core.drain();
     const entry = await core.current(id);
-    if (entry?.encrypted === true) throw new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is encrypted`, { id });
+    if (entry?.encrypted === true) {
+      throw new SyncomError(`Record ${id} is encrypted`, { code: 'ALX_ERR_ENCRYPTED', id });
+    }
     return entry;
   });
   // A field of another kind would refuse every edit: refused here, once.
   const kind = base === null || !core.alive(base) ? undefined : core.kindOf(base, key);
   if (kind !== undefined && kind !== 'text') {
-    throw new SyncomError('ALX_ERR_FIELD_KIND', `Field ${key} of record ${id} is a ${kind}, not a text`, {
+    throw new SyncomError(`Field ${key} of record ${id} is a ${kind}, not a text`, {
+      code: 'ALX_ERR_FIELD_KIND',
       field: key,
       kind,
     });

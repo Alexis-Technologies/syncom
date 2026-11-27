@@ -132,7 +132,7 @@ const resolve = (core, id, type, payload, current) => {
   if (T.under(s, node, parent)) {
     const where = parent === node ? 'itself' : `${parent}, a node under it`;
     const message = `Node ${node} of field ${key} of record ${id} cannot go under ${where}`;
-    throw new SyncomError('ALX_ERR_CYCLE', message, { id, field: key, node, parent });
+    throw new SyncomError(message, { code: 'ALX_ERR_CYCLE', id, field: key, node, parent });
   }
   // The siblings without the node in one pass: where it was, and where the
   // sibling it lands after or before is among the others.
@@ -154,7 +154,7 @@ const resolve = (core, id, type, payload, current) => {
   if (next !== undefined) {
     if (i < 0) {
       const message = `Node ${next} is not under ${parent ?? 'the root'} of field ${key} of record ${id}`;
-      throw new SyncomError('ALX_ERR_NOT_FOUND', message, { id, field: key, node: next });
+      throw new SyncomError(message, { code: 'ALX_ERR_NOT_FOUND', id, field: key, node: next });
     }
     at = after !== undefined ? i + 1 : i;
   }
@@ -163,7 +163,7 @@ const resolve = (core, id, type, payload, current) => {
     const depth = (parent === null ? 0 : T.depthOf(s, parent)) + T.heightOf(s, node);
     if (depth > T.MAX_DEPTH) {
       const message = `Node ${node} of field ${key} of record ${id} would reach level ${depth}; a tree reads ${T.MAX_DEPTH}`;
-      throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, { id, field: key, node, depth, max: T.MAX_DEPTH });
+      throw new SyncomError(message, { code: 'ALX_ERR_OUT_OF_RANGE', id, field: key, node, depth, max: T.MAX_DEPTH });
     }
   }
   const lower = at > 0 ? sibs[at - 1] : null;
@@ -180,7 +180,8 @@ const resolve = (core, id, type, payload, current) => {
   const fi = between(lower, upper);
   if (fi.length > T.MAX_FI) {
     const message = `No room left between the neighbours of node ${node} in field ${key} of record ${id}; move a sibling away or reset the field`;
-    throw new SyncomError('ALX_ERR_OUT_OF_RANGE', message, {
+    throw new SyncomError(message, {
+      code: 'ALX_ERR_OUT_OF_RANGE',
       id,
       field: key,
       node,

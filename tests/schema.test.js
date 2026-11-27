@@ -6,7 +6,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { ValidationError } = require('../src/errors.js');
+const { ValidationError, describeIssues } = require('../src/errors.js');
 const {
   normalizeSchema,
   normalizeValidator,
@@ -22,21 +22,19 @@ const typeError = (message) => ({ name: 'ArgumentError', message });
 
 describe('ValidationError', () => {
   it('should name the entity and the first issue, and count the rest', () => {
-    const error = new ValidationError('Post', [
+    const issues = [
       { path: ['title'], message: 'is required', code: 'required' },
       { path: [], message: 'too big' },
-    ]);
+    ];
+    const error = new ValidationError(describeIssues('Post', issues), { entity: 'Post', issues });
     assert.ok(error instanceof Error);
     assert.strictEqual(error.name, 'ValidationError');
     assert.strictEqual(error.code, 'ALX_ERR_VALIDATION_FAILED');
     assert.strictEqual(error.entity, 'Post');
     assert.strictEqual(error.message, 'Post failed validation at title: is required (+1 more)');
     assert.strictEqual(error.issues.length, 2);
-    assert.strictEqual(
-      new ValidationError(null, [{ path: [], message: 'bad' }]).message,
-      'Record failed validation: bad',
-    );
-    assert.strictEqual(new ValidationError('Post', []).message, 'Post failed validation');
+    assert.strictEqual(describeIssues(null, [{ path: [], message: 'bad' }]), 'Record failed validation: bad');
+    assert.strictEqual(describeIssues('Post', []), 'Post failed validation');
   });
 });
 
@@ -461,7 +459,7 @@ describe('normalizeValidator', () => {
         }, 'Post')({}),
       invalid('Post', [{ path: [], message: 'nope' }]),
     );
-    const own = new ValidationError('Post', [{ path: ['k'], message: 'mine' }]);
+    const own = new ValidationError('mine', { entity: 'Post', issues: [{ path: ['k'], message: 'mine' }] });
     const rethrown = await normalizeValidator(() => {
       throw own;
     }, 'Post')({}).catch((e) => e);

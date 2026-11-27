@@ -822,7 +822,8 @@ class Database extends Emitter {
   // was logged but not landed is held as ALX_ERR_UNPERSISTED).
   #refused(what) {
     const why = this.#leaseLost ? 'its lease was lost' : 'it was opened with readOnly: true';
-    return new SyncomError('ALX_ERR_READ_ONLY', `Database at ${this.#path} is read-only (${why}): ${what} refused`, {
+    return new SyncomError(`Database at ${this.#path} is read-only (${why}): ${what} refused`, {
+      code: 'ALX_ERR_READ_ONLY',
       path: this.#path,
       lease: this.#leaseLost,
     });
@@ -844,7 +845,12 @@ class Database extends Emitter {
     this.#log?.readOnly(this.#db.log);
     this.#logger.error({ event: 'storage.lease.lost', path: this.#path, err: cause });
     const message = `Database at ${this.#path} lost its lease: read-only from here on`;
-    notify(this, this.#logger, 'error', new SyncomError('ALX_ERR_LEASE_LOST', message, { path: this.#path, cause }));
+    notify(
+      this,
+      this.#logger,
+      'error',
+      new SyncomError(message, { code: 'ALX_ERR_LEASE_LOST', path: this.#path, cause }),
+    );
     notify(this, this.#logger, 'lease', { state: 'lost', path: this.#path });
   }
 
@@ -915,7 +921,12 @@ class Database extends Emitter {
     this.#unhear = null;
     this.#logger.warn({ event: 'follow.lost', path: this.#path, err: cause });
     const message = `Database at ${this.#path} lost the writer's change stream: every record is read again`;
-    notify(this, this.#logger, 'error', new SyncomError('ALX_ERR_FOLLOW_LOST', message, { path: this.#path, cause }));
+    notify(
+      this,
+      this.#logger,
+      'error',
+      new SyncomError(message, { code: 'ALX_ERR_FOLLOW_LOST', path: this.#path, cause }),
+    );
     try {
       this.#subscribeChanges();
     } catch (error) {
@@ -1287,7 +1298,7 @@ class Database extends Emitter {
       blobStore: () => (this.#leaseLost ? null : this.#rawBlobs),
       // A plugin's own write (a local document) refused as the queue would refuse a write: closed, or read-only.
       guard: (what) => {
-        if (this.#closed) throw new SyncomError('ALX_ERR_CLOSED', 'Storage is closed');
+        if (this.#closed) throw new SyncomError('Storage is closed', { code: 'ALX_ERR_CLOSED' });
         if (this.#readOnly || this.#leaseLost) throw this.#refused(what);
       },
       advise: (fn) => {
@@ -1779,7 +1790,7 @@ class Database extends Emitter {
   // log's seq counter and a record's entry are all read-then-written, and two
   // interleaved writers would race all three.
   #run(task) {
-    if (this.#closed) return Promise.reject(new SyncomError('ALX_ERR_CLOSED', 'Storage is closed'));
+    if (this.#closed) return Promise.reject(new SyncomError('Storage is closed', { code: 'ALX_ERR_CLOSED' }));
     if (this.#readOnly) return Promise.reject(this.#refused('a write'));
     // A write or apply hook runs inside the queue; a write it issues would
     // wait for the hook that waits for it. Refused here, where the deadlock
@@ -1788,16 +1799,16 @@ class Database extends Emitter {
     if (this.#inHook > 0) {
       return Promise.reject(
         new SyncomError(
-          'ALX_ERR_IN_HOOK',
           'Cannot write to the storage from inside a hook: the write would wait for the hook that waits for it',
+          { code: 'ALX_ERR_IN_HOOK' },
         ),
       );
     }
     if (this.#task.inside()) {
       return Promise.reject(
         new SyncomError(
-          'ALX_ERR_IN_TRANSACTION',
           'Cannot write to the database from inside a transaction or modify(): write through tx, or return the record',
+          { code: 'ALX_ERR_IN_TRANSACTION' },
         ),
       );
     }
@@ -1952,7 +1963,7 @@ class Database extends Emitter {
     const fields = { ids, cause: error };
     // A medium that is full: said on the error, so the application can ask for room (`quota()`, `persist()`).
     if (isQuotaError(error)) fields.quota = true;
-    notify(this, this.#logger, 'error', new SyncomError('ALX_ERR_UNPERSISTED', message, fields));
+    notify(this, this.#logger, 'error', new SyncomError(message, { code: 'ALX_ERR_UNPERSISTED', ...fields }));
   }
 
   async #persistBatch(touched, fromSeq, toSeq) {
@@ -2056,7 +2067,7 @@ class Database extends Emitter {
       const why = this.#plugins.names.includes('chain')
         ? 'createDatabase({ chain: false })'
         : "the chain plugin is not registered (createDatabase({ plugins: [chain] }) from '@alexify/syncom/chain')";
-      throw new DataError('ALX_ERR_NO_CHAIN', `${why}: this storage keeps no chain to validate against`);
+      throw new DataError(`${why}: this storage keeps no chain to validate against`, { code: 'ALX_ERR_NO_CHAIN' });
     }
     if (isChainValidation) {
       return await this.#chain.validate(idOrOptions);
@@ -2099,9 +2110,12 @@ class Database extends Emitter {
     const named = namedId(def, data);
     if (named === null) return null;
     if (named.id === null) {
-      throw new DataError('ALX_ERR_INVALID_ID', `A ${def.name} ${idReason(named)}`, {
-        entity: def.name,
-        field: named.field,
+      throw new DataError(`A ${def.name} ${idReason(named)}`, {
+        code: 'ALX_ERR_INVALID_ID',
+        details: {
+          entity: def.name,
+          field: named.field,
+        },
       });
     }
     if (!isRecordId(named.id)) throw invalidId(named.id);
@@ -2247,7 +2261,7 @@ class Database extends Emitter {
     }
     if (cause === null) return;
     const message = `Edits of ${handles} text handle${handles === 1 ? '' : 's'} could not be logged`;
-    throw new SyncomError('ALX_ERR_UNLOGGED', message, { handles, edits, cause });
+    throw new SyncomError(message, { code: 'ALX_ERR_UNLOGGED', handles, edits, cause });
   }
 
   // A handle's listener of the `transaction` event, kept by record id; the
@@ -2406,7 +2420,9 @@ class Database extends Emitter {
    * a peer makes it again. Idempotent.
    */
   async forget(id) {
-    if (!isRecordId(id)) throw new DataError('ALX_ERR_INVALID_ID', `forget(): ${String(id)} is not a record id`);
+    if (!isRecordId(id)) {
+      throw new DataError(`forget(): ${String(id)} is not a record id`, { code: 'ALX_ERR_INVALID_ID' });
+    }
     // One turn of the queue: the deferred slot goes with the record (a flush after would lay it back as a file),
     // then the log's entries are scrubbed and flagged skipped — before the next turn can write the id again.
     await this.#run(async () => {
@@ -2478,7 +2494,7 @@ class Database extends Emitter {
 
   async #update(id, delta, actor) {
     if (!isRecordId(id)) throw invalidId(id);
-    if (!(await this.has(id))) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+    if (!(await this.has(id))) throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id });
     if (!isPlainObject(delta)) throw new ArgumentError('update() takes a plain object');
     await this[COMMIT]('set', id, { data: delta }, { actor });
   }
@@ -2683,7 +2699,7 @@ class Database extends Emitter {
     }
     if (start === -1) {
       const message = `Record ${id} cannot be rebuilt: the log holds no whole-record op for it`;
-      throw new SyncomError('ALX_ERR_UNRECOVERABLE', message, { id });
+      throw new SyncomError(message, { code: 'ALX_ERR_UNRECOVERABLE', id });
     }
     let entry = null;
     for (let i = start; i < entries.length; i++) {
@@ -2821,12 +2837,12 @@ class Database extends Emitter {
           await tx.commit(dead ? 'write' : 'set', id, { data: delta }, { actor: options.actor });
           return undefined;
         }
-        if (!(await api.has(id))) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+        if (!(await api.has(id))) throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id });
         await tx.commit('set', id, { data: delta }, { actor: options.actor });
         return undefined;
       }
       const view = await api.get(id);
-      if (view === null) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+      if (view === null) throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id });
       // The record's id laid last: a data field named `id` is not the record's.
       if (test !== null && !test({ ...view, id })) return false;
       // The operators decided over the view read once here.

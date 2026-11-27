@@ -124,7 +124,7 @@ const missing = (what, home = HOME[what.endsWith('()') ? what.slice(0, -2) : wha
     home === null
       ? 'a plugin'
       : `the ${home} plugin: createDatabase({ plugins: [${home}] }) from '@alexify/syncom/${home}'`;
-  return new DataError('ALX_ERR_PLUGIN_MISSING', `${what} needs ${where}`);
+  return new DataError(`${what} needs ${where}`, { code: 'ALX_ERR_PLUGIN_MISSING' });
 };
 
 /** A plugin module: a frozen object with a name, and either kinds (a kind module) or an open() (an API module). */

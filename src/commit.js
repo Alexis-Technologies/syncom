@@ -15,7 +15,7 @@ const { missing } = require('./plugin.js');
 const { opKey } = require('./vector.js');
 const { digest, headerText } = require('./header.js');
 const { hashText } = require('./crypto/digest.js');
-const { SyncomError, ArgumentError, DataError, ValidationError } = require('./errors.js');
+const { SyncomError, ArgumentError, DataError, ValidationError, describeIssues } = require('./errors.js');
 const { project, unproject, foldSet } = require('./schema/entity.js');
 const { fieldName } = require('./args.js');
 const { traced, now } = require('./telemetry/writer.js');
@@ -51,7 +51,7 @@ const sameType = (type, id, data, current) => {
   if (before === undefined) return data;
   if (data.$type === undefined) return type === 'write' ? { ...data, $type: before } : data;
   if (data.$type !== before) {
-    throw new DataError('ALX_ERR_TYPE_IMMUTABLE', `Record ${id} is a ${before}; $type is immutable`);
+    throw new DataError(`Record ${id} is a ${before}; $type is immutable`, { code: 'ALX_ERR_TYPE_IMMUTABLE' });
   }
   return data;
 };
@@ -77,14 +77,14 @@ const refuse = (core, id, rejected) => {
   if (reason === 'member') {
     const { prefix, member } = rejected[0];
     const message = `Field ${field} of record ${id}: ${prefix} has no element or node ${member}`;
-    throw new SyncomError('ALX_ERR_NOT_FOUND', message, { id, field: prefix, elem: member });
+    throw new SyncomError(message, { code: 'ALX_ERR_NOT_FOUND', id, field: prefix, elem: member });
   }
   const fields = { field, kind: reason };
   if (detail !== undefined) Object.assign(fields, { detail, count, max });
   if (rejected[0].prefix !== undefined) fields.prefix = rejected[0].prefix;
   const hint = HINTS[reason] ?? core.plugins.hints[reason] ?? `held by another kind (${reason})`;
   const where = fields.prefix === undefined ? `Field ${field}` : `Field ${field} lies under ${fields.prefix}, which`;
-  throw new SyncomError('ALX_ERR_FIELD_KIND', `${where} of record ${id} is ${hint}`, fields);
+  throw new SyncomError(`${where} of record ${id} is ${hint}`, { code: 'ALX_ERR_FIELD_KIND', ...fields });
 };
 
 // `$type` and the fields a composite id is derived from are the record's for
@@ -98,10 +98,12 @@ const immutables = (core, type, id, payload, data) => {
     const names = payload.value;
     for (let i = 0; i < names.length; i++) {
       if (names[i] === '$type' && typeof data.$type === 'string') {
-        throw new DataError('ALX_ERR_TYPE_IMMUTABLE', `Record ${id} is a ${data.$type}; $type is immutable`);
+        throw new DataError(`Record ${id} is a ${data.$type}; $type is immutable`, { code: 'ALX_ERR_TYPE_IMMUTABLE' });
       }
       if (named !== null && named.has(names[i])) {
-        throw new DataError('ALX_ERR_ID_IMMUTABLE', `Record ${id}: ${names[i]} is part of its id and cannot be unset`);
+        throw new DataError(`Record ${id}: ${names[i]} is part of its id and cannot be unset`, {
+          code: 'ALX_ERR_ID_IMMUTABLE',
+        });
       }
     }
     return;
@@ -111,7 +113,9 @@ const immutables = (core, type, id, payload, data) => {
     const field = fields[i];
     if (!Object.hasOwn(payload.data, field)) continue;
     if (String(payload.data[field]) !== String(data[field])) {
-      throw new DataError('ALX_ERR_ID_IMMUTABLE', `Record ${id}: ${field} is part of its id and cannot change`);
+      throw new DataError(`Record ${id}: ${field} is part of its id and cannot change`, {
+        code: 'ALX_ERR_ID_IMMUTABLE',
+      });
     }
   }
 };
@@ -122,7 +126,7 @@ const expectation = async (core, id, current, expect) => {
   let seen = null;
   if (current?.encrypted) seen = current.data;
   else if (current && isAlive(current)) seen = await core.view(id, current);
-  if (!seen) throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+  if (!seen) throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id });
   for (const key of Object.keys(expect)) {
     if (seen[key] !== expect[key]) return false;
   }
@@ -165,7 +169,7 @@ const sealedData = (type, id, payload, current) => {
   if (type === 'write') return payload.data;
   if (type === 'set') return { ...current?.data, ...payload.data };
   if (type === 'delete' || type === 'purge') return null;
-  throw new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is encrypted; ${type} needs a replicated record`);
+  throw new SyncomError(`Record ${id} is encrypted; ${type} needs a replicated record`, { code: 'ALX_ERR_ENCRYPTED' });
 };
 
 const commitSealed = async (core, type, id, payload, current, ctx, source) => {
@@ -300,7 +304,7 @@ const prepareOp = (core, type, id, payload, current, who, from) => {
   // Delete wins: a field op on a deleted (or purged) record would lie in its meta unseen — refused here as
   // update() refuses it; a whole-record write is what brings a deleted record back. An absent one it makes.
   if (current && !current.encrypted && !WHOLE.has(type) && !isAlive(current)) {
-    throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id });
+    throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id });
   }
   refuse(core, id, kindClash(type, payload, current, core.plugins));
   core.observe(latestHeld(current?.meta), id);
@@ -362,7 +366,8 @@ const assertUnique = async (core, id, entry) => {
     const { fields, other } = conflicts[i];
     issues.push({ path: fields, message: `is not unique (held by ${other})`, code: 'unique', conflict: other });
   }
-  throw new ValidationError(entry.data.$type, issues);
+  const entity = entry.data.$type;
+  throw new ValidationError(describeIssues(entity, issues), { entity, issues });
 };
 
 // The op applied, and validated as the record will be after it. What the
@@ -723,10 +728,14 @@ const prepare = async (core, type, id, payload, options) => {
   const msg = messageArg(message);
   const current = await core.current(id);
   if (expect === ABSENT && current && (current.encrypted || isAlive(current))) {
-    throw new SyncomError('ALX_ERR_EXISTS', `Record ${id} exists already`, { id, entity: current.data?.$type ?? null });
+    throw new SyncomError(`Record ${id} exists already`, {
+      code: 'ALX_ERR_EXISTS',
+      id,
+      entity: current.data?.$type ?? null,
+    });
   }
   if (encrypted && current && !current.encrypted) {
-    throw new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is replicated and cannot become encrypted`);
+    throw new SyncomError(`Record ${id} is replicated and cannot become encrypted`, { code: 'ALX_ERR_ENCRYPTED' });
   }
   if (expect !== null && expect !== ABSENT && !(await expectation(core, id, current, expect))) return { op: MISMATCH };
   if ((type === 'set' || type === 'unset') && current && !current.encrypted && isAlive(current)) {
@@ -1177,10 +1186,9 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     if (!isRecordId(id)) throw invalidId(id);
     const current = await tx.current(id);
     if (options.encrypted === true || current?.encrypted === true) {
-      throw new SyncomError(
-        'ALX_ERR_ENCRYPTED',
-        `Record ${id} is encrypted: an encrypted write stays outside a transaction`,
-      );
+      throw new SyncomError(`Record ${id} is encrypted: an encrypted write stays outside a transaction`, {
+        code: 'ALX_ERR_ENCRYPTED',
+      });
     }
     const given = { ...options, source, message: msg };
     if (given.actor === undefined) given.actor = actor;
@@ -1209,10 +1217,9 @@ const transact = async (core, fn, { actor, source = null, message } = {}) => {
     const { id, type } = op;
     const current = await tx.current(id);
     if (current?.encrypted === true) {
-      throw new SyncomError(
-        'ALX_ERR_ENCRYPTED',
-        `Record ${id} is encrypted: an encrypted write stays outside a transaction`,
-      );
+      throw new SyncomError(`Record ${id} is encrypted: an encrypted write stays outside a transaction`, {
+        code: 'ALX_ERR_ENCRYPTED',
+      });
     }
     if (msg !== undefined) op.msg = msg;
     assignScope(tx, op, () => scopeData(type, {}, current));

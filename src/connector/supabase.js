@@ -28,9 +28,9 @@ const OVER = new Set(['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED']);
 
 const answered = (result, what) => {
   if (result?.error) {
-    const error = new Error(`Supabase ${what} failed: ${result.error.message ?? result.error}`);
-    error.cause = result.error;
-    throw error;
+    throw new Error(`Supabase ${what} failed: ${String(result.error.message ?? result.error)}`, {
+      cause: result.error,
+    });
   }
   return result?.data ?? null;
 };

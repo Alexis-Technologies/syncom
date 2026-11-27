@@ -222,7 +222,9 @@ const ENTRIES = [
   // place of array destructuring, the helpers the lint split out (79.707 KB measured). 79.75, raised by name.
   // 79.8 with a caller's sparse array read as its methods read it (alexiskills 1.1.2, 2026-11-25): a hole
   // skipped and a dense copy handed on in the schema, the query and the patches (79.775 KB measured). 79.8, raised by name.
-  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 79.8 },
+  // 79.9 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (79.897 KB measured). 79.9, raised by name.
+  { label: 'main entry — browser (@alexify/syncom)', entry: 'browser.js', platform: 'browser', budget: 79.9 },
   { label: 'main entry — node (@alexify/syncom)', entry: 'index.js', platform: 'node' },
   // Platform-neutral (no node builtins, no browser-only globals): one file
   // serves both, bundled as a browser entry so the self-contained check
@@ -522,7 +524,9 @@ const ENTRIES = [
   // place of array destructuring, the helpers the lint split out (186.443 KB measured). 186.5, raised by name.
   // 186.65 with a caller's sparse array read as its methods read it (alexiskills 1.1.2, 2026-11-25): a hole
   // skipped and a dense copy handed on in the schema, the query and the patches (186.630 KB measured). 186.65, raised by name.
-  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 186.65 },
+  // 186.8 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (186.785 KB measured). 186.8, raised by name.
+  { label: 'all — browser (@alexify/syncom/all)', entry: 'src/all/all.js', platform: 'browser', budget: 186.8 },
   // The list and text kinds alone: the sequence engine over its rope
   // (src/text/rope.js, ids.js, cow.js), its patches and its methods;
   // in an app bundle the core they stand on is shared (21.4 measured).
@@ -584,6 +588,8 @@ const ENTRIES = [
   // header hashed in JavaScript (src/crypto/sha256.js, through src/header.js). 6, raised by name.
   // 7.1 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (7.078 KB measured). 7.1, raised by name.
+  // 7.15 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (7.104 KB measured). 7.15, raised by name.
   {
     label: 'signing — browser (@alexify/syncom/signing)',
     entry: 'src/signing/signing.js',
@@ -591,7 +597,7 @@ const ENTRIES = [
     // 6.3 with the key pair read through a store (src/engine.js kvNamespace/fsiNamespace; engines plan, E1.3). 6.5, raised by name.
     // 6.6 with the engines' shared errors beside the contract (src/engine.js unreadableRecord, eexist; review №5 M-4). 6.75, raised by name.
     // 6.8 with isQuotaError in the errors it shares with the core (sync-parity plan, S5); was 6.75. 7, raised by name.
-    budget: 7.1,
+    budget: 7.15,
   },
   // The chain: the blocks, SHA-256 through Web Crypto, the plugin. 2.9 with the digest module's SHA-256 in JavaScript,
   // which the chain does not call (a browser split of its own was not worth 0.4 KB). 3, raised by name.
@@ -684,11 +690,15 @@ const ENTRIES = [
   // touchedBy; 2026-11-16). 34.2, raised by name.
   // 34.65 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (34.591 KB measured). 34.65, raised by name.
-  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 34.65 },
+  // 34.7 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (34.653 KB measured). 34.7, raised by name.
+  { label: 'sync — browser (@alexify/syncom/sync)', entry: 'src/sync/sync.js', platform: 'browser', budget: 34.7 },
   // The schema: the definitions read once, the validator adapters, the lens.
   // 4.3 with a set folded back by path (src/schema/entity.js over src/paths.js).
   // 8.75 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (8.697 KB measured). 8.75, raised by name.
+  // 8.8 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (8.774 KB measured). 8.8, raised by name.
   {
     label: 'schema — browser (@alexify/syncom/schema)',
     entry: 'src/schema/schema.js',
@@ -704,7 +714,7 @@ const ENTRIES = [
     // 8.6 with a migration that writes what the lens changed (migrateRecord: the record compared name by name, a
     // rename told by its value) — src/compose.js rides along, which an app bundle shares with the core
     // (2026-11-16). 8.6, raised by name.
-    budget: 8.75,
+    budget: 8.8,
   },
   // The OpenTelemetry adapter: the tracer and meter resolved, the instruments, the gauges.
   // 4.1 with nine instruments more — the query cache, live changes, plans, bulk rows, pipeline turns and lag, cleanup, dumps, named inserts (review №6, E7; 2026-11-02). 4.5, raised by name.
@@ -747,6 +757,8 @@ const ENTRIES = [
   // place of array destructuring, the helpers the lint split out (42.175 KB measured). 42.2, raised by name.
   // 42.25 with a caller's sparse array read as its methods read it (alexiskills 1.1.2, 2026-11-25): a hole
   // skipped and a dense copy handed on in the schema, the query and the patches (42.213 KB measured). 42.25, raised by name.
+  // 42.35 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (42.314 KB measured). 42.35, raised by name.
   {
     label: 'versions — browser (@alexify/syncom/versions)',
     entry: 'src/versions/versions.js',
@@ -775,7 +787,7 @@ const ENTRIES = [
     // (2026-11-16). 41.7, raised by name.
     // 41.8 (over by bytes) with a kind change in a diff and the refusal's kinds it bundles (2026-11-16). 41.8,
     // raised by name.
-    budget: 42.25,
+    budget: 42.35,
   },
   // Local documents: a store over the `local` kv namespace, the plugin — measured with the kv namespace and the
   // contained event it shares with the core (collections plan, C4.1). 2.3 measured; 2.5.
@@ -822,11 +834,13 @@ const ENTRIES = [
   // `#pullPage`, `#judge`, `#touch` (feature/leftovers, 2026-11-16). 10.6, raised by name.
   // 10.8 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (10.774 KB measured). 10.8, raised by name.
+  // 10.85 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (10.804 KB measured). 10.85, raised by name.
   {
     label: 'connector — browser (@alexify/syncom/connector)',
     entry: 'src/connector/connector.js',
     platform: 'browser',
-    budget: 10.8,
+    budget: 10.85,
   },
   // The connector's adapters, each over an injected client or fetch — the plan said 2 KB each (sync-parity plan, S2).
   { label: 'connector/couchdb — browser', entry: 'src/connector/couchdb.js', platform: 'browser', budget: 2 },
@@ -858,11 +872,13 @@ const ENTRIES = [
   // bundled for `traced` (review №7, E9; 2026-11-07). 5.75, raised by name.
   // 5.8 (over by bytes) with symbols.js's `CREATE`, which it bundles (fix/core-docs-bugs; 2026-11-15). 5.9, raised by
   // name.
+  // 5.95 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (5.903 KB measured). 5.95, raised by name.
   {
     label: 'attachments — browser (@alexify/syncom/attachments)',
     entry: 'src/attachments/attachments.js',
     platform: 'browser',
-    budget: 5.9,
+    budget: 5.95,
   },
   // Several instances over one database: the election, the facade over a leader or a follower, the forwarded writes
   // and the recorded transaction — the plan said 6 KB (sync-parity plan, S3).
@@ -875,11 +891,13 @@ const ENTRIES = [
   // 2026-11-07). 8.5, raised by name.
   // 8.8 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (8.760 KB measured). 8.8, raised by name.
+  // 8.85 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (8.804 KB measured). 8.85, raised by name.
   {
     label: 'shared — browser (@alexify/syncom/shared)',
     entry: 'src/shared/shared.js',
     platform: 'browser',
-    budget: 8.8,
+    budget: 8.85,
   },
   // What a test stands on: the in-process link, the mesh and the memory engine it re-exports (3.6 KB of the row) —
   // the plan said 3 KB for the link and the mesh alone; 6.5 measured (sync-parity plan, S6). 7, set by name.
@@ -903,6 +921,8 @@ const ENTRIES = [
   // raised by name.
   // 3.9 with the alexiskills 1.1 conventions (2026-11-25): argument-errors.js, the ALX_ERR_ codes, index reads in
   // place of array destructuring, the helpers the lint split out (3.879 KB measured). 3.9, raised by name.
+  // 3.95 with the error classes of alexiskills 1.2 (2026-11-27): the code and the fields in the options,
+  // `(message, { code, ...fields })`, at every construction (3.906 KB measured). 3.95, raised by name.
   {
     label: 'pipeline — browser (@alexify/syncom/pipeline)',
     entry: 'src/pipeline/pipeline.js',
@@ -912,7 +932,7 @@ const ENTRIES = [
     // 3.5, raised by name.
     // 3.71 with `leader`: the pipeline on the leading instance of openShared(), bound again at every change of instance
     // (docs found-bugs, infra; 2026-11-15). 3.8, raised by name.
-    budget: 3.9,
+    budget: 3.95,
   },
   // Tombstone cleanup: a tombstone's file folded into its catalog row (collections plan, C4.5–C4.6).
   // 3.0 with a sweep spanned and counted through the writer (review №6, E7; 2026-11-02). 3.25, raised by name.

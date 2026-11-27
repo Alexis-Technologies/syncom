@@ -44,10 +44,10 @@ const unpackError = (packed, fallback = 'The other side answered an error') => {
   const name = packed?.name;
   if (name === 'DataError' && typeof packed.code === 'string') {
     const details = fields.details !== null && typeof fields.details === 'object' ? fields.details : null;
-    return new DataError(packed.code, message, details);
+    return new DataError(message, { code: packed.code, details });
   }
   if (DATA_ERRORS.has(name) && typeof packed.code === 'string') {
-    return lay(new SyncomError(packed.code, message), fields);
+    return lay(new SyncomError(message, { code: packed.code }), fields);
   }
   if (name === 'ArgumentError') return new ArgumentError(message);
   if (name === 'ArgumentRangeError') return new ArgumentRangeError(message);

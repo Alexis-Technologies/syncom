@@ -39,14 +39,13 @@ const checkDigest = (value, label) => {
 const checkBlobBytes = (bytes, label, max = MAX_BLOB_BYTES) => {
   if (!(bytes instanceof Uint8Array)) throw new ArgumentError(`${label}: a blob is a Uint8Array`);
   if (bytes.length > max) {
-    throw new DataError(
-      'ALX_ERR_BLOB_TOO_LARGE',
-      `${label}: a blob of ${bytes.length} bytes is past the cap (${max})`,
-      {
+    throw new DataError(`${label}: a blob of ${bytes.length} bytes is past the cap (${max})`, {
+      code: 'ALX_ERR_BLOB_TOO_LARGE',
+      details: {
         length: bytes.length,
         max,
       },
-    );
+    });
   }
   return bytes;
 };

@@ -514,7 +514,7 @@ describe('Shared database', () => {
       call: async (method, payload) => {
         answered++;
         if (answered < 3) {
-          return { ok: false, error: describeError(new SyncomError('ALX_ERR_NOT_LEADER', 'follows', {})) };
+          return { ok: false, error: describeError(new SyncomError('follows', { code: 'ALX_ERR_NOT_LEADER' })) };
         }
         return stale[method].handler({}, JSON.parse(JSON.stringify(payload)));
       },
@@ -850,7 +850,10 @@ describe('Shared database', () => {
           }
           if (failures === 1) {
             failures++;
-            return { ok: false, error: describeError(new SyncomError('ALX_ERR_CLOSED', 'closing', { path: 'order' })) };
+            return {
+              ok: false,
+              error: describeError(new SyncomError('closing', { code: 'ALX_ERR_CLOSED', path: 'order' })),
+            };
           }
           return channel.call(method, args);
         },
@@ -1013,7 +1016,7 @@ describe('Shared database', () => {
   });
 
   it('should keep the name, code and fields of an error described and revived on the channel; the wrpc channel names the unit', async () => {
-    const error = new SyncomError('ALX_ERR_NOT_FOUND', 'no such record', { id: 'x', path: 'p' });
+    const error = new SyncomError('no such record', { code: 'ALX_ERR_NOT_FOUND', id: 'x', path: 'p' });
     const described = describeError(error);
     assert.deepStrictEqual(described, {
       name: 'SyncomError',
@@ -1025,7 +1028,9 @@ describe('Shared database', () => {
     assert.ok(back instanceof SyncomError);
     assert.strictEqual(back.code, 'ALX_ERR_NOT_FOUND');
     assert.strictEqual(back.id, 'x');
-    const typed = revive(describeError(new DataError('ALX_ERR_INVALID_ID', 'bad', { entity: 'Task', field: 'key' })));
+    const typed = revive(
+      describeError(new DataError('bad', { code: 'ALX_ERR_INVALID_ID', details: { entity: 'Task', field: 'key' } })),
+    );
     assert.ok(typed instanceof DataError);
     assert.strictEqual(typed.name, 'DataError');
     assert.strictEqual(typed.code, 'ALX_ERR_INVALID_ID');
@@ -1071,7 +1076,7 @@ describe('Shared database', () => {
       code: 'ENOENT',
       fields: {},
     });
-    const data = new SyncomError('ALX_ERR_NOT_FOUND', 'gone', { id: 'x' });
+    const data = new SyncomError('gone', { code: 'ALX_ERR_NOT_FOUND', id: 'x' });
     assert.deepStrictEqual(describeError(data).fields, { id: 'x' });
     // Described fields that would reach the prototype or the error's own are never laid on.
     const hostile = {
@@ -1096,7 +1101,9 @@ describe('Shared database', () => {
     // A SharedDocument whose bind failed: data() throws what the bind threw, never a read of null.
     const failing = {
       live(make) {
-        make({ document: async () => Promise.reject(new SyncomError('ALX_ERR_CLOSED', 'the instance is closed')) });
+        make({
+          document: async () => Promise.reject(new SyncomError('the instance is closed', { code: 'ALX_ERR_CLOSED' })),
+        });
         return () => {};
       },
     };

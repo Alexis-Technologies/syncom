@@ -177,14 +177,14 @@ const reportSignatures = (batch) => {
     const count = batch.forged;
     core.logger.warn({ event: 'sync.op.forged', origin: op.origin, seq: op.seq, count });
     const message = `Op ${op.origin}:${op.seq} does not verify against its origin (${count} in this page)`;
-    core.emit('error', new SyncomError('ALX_ERR_BAD_SIGNATURE', message, { op, count }));
+    core.emit('error', new SyncomError(message, { code: 'ALX_ERR_BAD_SIGNATURE', op, count }));
   }
   if (batch.unsigned > 0) {
     const op = batch.firstUnsigned;
     const count = batch.unsigned;
     core.logger.warn({ event: 'sync.op.unsigned', origin: op.origin, seq: op.seq, count });
     const message = `Op ${op.origin}:${op.seq} carries no signature; sync.signatures is 'require' (${count} in this page)`;
-    core.emit('error', new SyncomError('ALX_ERR_UNSIGNED', message, { op, count }));
+    core.emit('error', new SyncomError(message, { code: 'ALX_ERR_UNSIGNED', op, count }));
   }
 };
 
@@ -211,7 +211,7 @@ const reportKinds = (batch) => {
   const kinds = [...names];
   core.logger.warn({ event: 'sync.op.rejected', id: op.id, rejected, count, kinds });
   const message = `Refused ${count} op${count > 1 ? 's' : ''} of a kind this node runs no plugin for (${kinds.join(', ')})`;
-  core.emit('error', new SyncomError('ALX_ERR_OP_REFUSED', message, { op, rejected, count, kinds }));
+  core.emit('error', new SyncomError(message, { code: 'ALX_ERR_OP_REFUSED', op, rejected, count, kinds }));
 };
 
 // The fingerprint this node holds for the op at `seq` of the stream `key`:
@@ -302,7 +302,7 @@ const reportEquivocations = (batch) => {
     reason === 'chain'
       ? `Op ${op.origin}:${op.seq} does not follow the op this node holds at seq ${op.seq - 1} (${count} in this page)`
       : `Op ${op.origin}:${op.seq} is not the op this node holds at that seq (${count} in this page)`;
-  core.emit('error', new SyncomError('ALX_ERR_EQUIVOCATION', message, { op, ...fields }));
+  core.emit('error', new SyncomError(message, { code: 'ALX_ERR_EQUIVOCATION', op, ...fields }));
 };
 
 // The newest stamp a merge's meta holds — a peer's whole meta, every stamp
@@ -323,7 +323,7 @@ const skewed = (batch, op, ts) => {
   core.otel.recordMalformed();
   batch.malformed++;
   const message = `Op ${op.origin}:${op.seq} carries a stamp ${ahead} ms ahead of this node (maxSkew ${core.maxSkew})`;
-  core.emit('error', new SyncomError('ALX_ERR_SKEW', message, { op }));
+  core.emit('error', new SyncomError(message, { code: 'ALX_ERR_SKEW', op }));
   return false;
 };
 
@@ -386,7 +386,7 @@ const currentOf = async (batch, op) => {
     return batch.touched.get(op.id) ?? (await core.current(op.id));
   } catch (error) {
     const message = `Record ${op.id} is unreadable here; op ${op.origin}:${op.seq} skipped`;
-    const reported = new SyncomError('ALX_ERR_OP_UNREADABLE', message, { cause: error, op });
+    const reported = new SyncomError(message, { code: 'ALX_ERR_OP_UNREADABLE', cause: error, op });
     report(batch, { event: 'sync.op.unreadable', id: op.id, err: error }, 'unreadable', reported);
     skip(batch, op);
     return undefined;
@@ -576,7 +576,7 @@ const applyOne = async (batch, op) => {
   if (rejected.length > 0) {
     if (onlyKinds(rejected)) refuseKind(batch, op, rejected);
     else {
-      const error = new SyncomError('ALX_ERR_OP_REFUSED', `Refused op on ${op.id}`, { op, rejected });
+      const error = new SyncomError(`Refused op on ${op.id}`, { code: 'ALX_ERR_OP_REFUSED', op, rejected });
       report(batch, { event: 'sync.op.rejected', id: op.id, rejected }, rejected[0].reason, error);
     }
   }
@@ -584,7 +584,7 @@ const applyOne = async (batch, op) => {
   // logged, relayed, replay-safe — and reported.
   const invalid = changed && !ahead ? await core.invalid(op, entry) : null;
   if (invalid) {
-    const error = new SyncomError('ALX_ERR_OP_INVALID', `Invalid op on ${op.id}`, { op, ...invalid });
+    const error = new SyncomError(`Invalid op on ${op.id}`, { code: 'ALX_ERR_OP_INVALID', op, ...invalid });
     report(batch, { event: 'sync.op.invalid', id: op.id, ...invalid }, 'validation', error);
     return void skip(batch, op);
   }

@@ -26,6 +26,12 @@
 //   - a wire refusal (src/sync/hosting.js) is a plain Error with the numeric
 //     `code` wrpc transports (400–429) and a `reason` constant beside it: the
 //     protocol's, not an error code of this package.
+//
+// Every class takes `(message, options = {})`, as Error does: `options` holds
+// `cause`, the code and the fields, and goes to `super` whole, so `cause` is set
+// only when given — `new SyncomError(message, { code, cause, ...fields })`. A
+// class with a fixed code (HookError, ValidationError) keeps the signature and
+// sets its code itself.
 
 const { ArgumentError, ArgumentRangeError, DataError } = require('./argument-errors.js');
 
@@ -53,7 +59,8 @@ const isQuotaError = (error) => {
   return false;
 };
 
-const describe = (entity, issues) => {
+// The message of a ValidationError as syncom writes it: the entity, the first issue and how many more.
+const describeIssues = (entity, issues) => {
   const subject = entity === null ? 'Record' : entity;
   const first = issues[0];
   if (!first) return `${subject} failed validation`;
@@ -62,13 +69,15 @@ const describe = (entity, issues) => {
   return `${subject} failed validation${where}: ${first.message}${more}`;
 };
 
+// `cause` is set only when given: a field passed on as `{ cause }` where none was caught (an `undefined`) is no cause,
+// and an own `cause: undefined` is what every inspection of the error would print.
 class SyncomError extends Error {
-  constructor(code, message, { cause, ...fields } = {}) {
-    super(message, cause === undefined ? undefined : { cause });
+  constructor(message, options = {}) {
+    super(message, options.cause === undefined ? undefined : options);
     this.name = 'SyncomError';
-    this.code = code;
-    for (const key of Object.keys(fields)) {
-      if (!RESERVED.has(key)) this[key] = fields[key];
+    this.code = options.code;
+    for (const key of Object.keys(options)) {
+      if (!RESERVED.has(key)) this[key] = options[key];
     }
     Error.captureStackTrace?.(this, this.constructor);
   }
@@ -79,10 +88,22 @@ class SyncomError extends Error {
 // collection, `issues` are `{ path, message, code? }`. Thrown by the write
 // path and by the schema plugin's validator adapters, one class for both.
 class ValidationError extends SyncomError {
-  constructor(entity, issues) {
-    super('ALX_ERR_VALIDATION_FAILED', describe(entity, issues), { entity, issues });
+  constructor(message, options = {}) {
+    const { entity = null, issues = [] } = options;
+    super(message, options);
     this.name = 'ValidationError';
+    this.code = 'ALX_ERR_VALIDATION_FAILED';
+    this.entity = entity;
+    this.issues = issues;
   }
 }
 
-module.exports = { isQuotaError, SyncomError, ArgumentError, ArgumentRangeError, DataError, ValidationError };
+module.exports = {
+  isQuotaError,
+  describeIssues,
+  SyncomError,
+  ArgumentError,
+  ArgumentRangeError,
+  DataError,
+  ValidationError,
+};

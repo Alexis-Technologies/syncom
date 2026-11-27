@@ -47,7 +47,25 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
 `'ArgumentError'`, `code` `ALX_ERR_INVALID_ARGUMENT`) and a refused value a `DataError` whose fields are under
 `details` — both still `instanceof TypeError`. A host's refusal keeps its numeric code and its `reason`.
 
+**Upgrading a checkout from before alexiskills 1.2** (nothing published): every error class takes
+`(message, options = {})`, as `Error` does — `new SyncomError('ALX_ERR_NOT_FOUND', 'gone', { id })` is
+`new SyncomError('gone', { code: 'ALX_ERR_NOT_FOUND', id })`, `new DataError(code, message, details)` is
+`new DataError(message, { code, details })`, `new HookError(hook, cause)` is `new HookError(message, { hook, cause })`
+and `new ValidationError(entity, issues)` is `new ValidationError(message, { entity, issues })`. What an error carries
+is unchanged (`err.code`, `err.id`, `err.details`). A connector adapter's error for a backend's answer carries
+`statusCode`, no longer `status`.
+
 ### Changed (breaking)
+
+- **Every error class takes `(message, options = {})`, as `Error` does (alexiskills 1.2).** `SyncomError`,
+  `DataError`, `HookError`, `ValidationError`, `ArgumentError` and `ArgumentRangeError` take the message first and
+  the rest in `options`: the code, the fields the code documents (laid on a `SyncomError` under their own names, as
+  before; a `DataError`'s `details`), and the standard `cause`, set only when it is not `undefined`. `HookError` and
+  `ValidationError` set their code themselves; syncom writes a `ValidationError`'s message as before. The 152
+  constructions of `src/` are rewritten; a field is never assigned to an error after it is made (the schema
+  plugin's `cause`, Supabase's), and `SyncomErrorOptions` and `DataErrorOptions` are exported types.
+- **A connector adapter's error for a backend's answer carries `statusCode`, as `error-handling` asks**, no longer
+  `status`: CouchDB's, GraphQL's, Google Drive's, OneDrive's and the requester they share.
 
 - **Every error code starts with `ALX_ERR_`, as every Alexis library's does (alexiskills 1.1).** The 71 codes of
   `SyncomErrorCode` and the 8 of `DataErrorCode` keep their names after the prefix: `NOT_FOUND` is
@@ -2764,12 +2782,13 @@ prefix — switch on `ALX_ERR_NOT_FOUND`, never `NOT_FOUND`; a wrong argument is
 
 ### Tooling
 
-- **The skills are alexiskills 1.1.2** (`@alexify/metaskills` ^1.1.2, a devDependency), linked into `.claude/skills`
+- **The skills are alexiskills 1.2.0** (`@alexify/metaskills` ^1.2.0, a devDependency), linked into `.claude/skills`
   by the `prepare` script in place of the six metarhia 1.0.5 skills the repository kept; what they said of syncom
   alone is in CLAUDE.md ("Conventions", "Release process"). 1.1.2 allows `for...of` and `for...in` in library `src/`:
   the `Object.keys` loops stay, and the `for...in` of `hasAny` in `src/ops.js` is no longer an exception. Its rule
   that a loop replacing an array method skips the holes of a caller's array as the method did is followed where the
-  lean-core release made those loops (see Fixed).
+  lean-core release made those loops (see Fixed). 1.2.0 makes every error class `(message, options = {})` (see
+  Changed (breaking)).
 - **The lint is alexiskills' reference**: `correctness` and `suspicious` as errors, `eqeqeq` with `null` included,
   `func-style`, `max-depth` 4, `no-nested-ternary`, `no-console`, the unicorn rules and `max-lines-per-function` in
   `src/`; an unused disable comment is an error. `no-underscore-dangle` and `unicorn/prefer-add-event-listener` are

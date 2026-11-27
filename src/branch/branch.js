@@ -104,7 +104,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   const taken = probe === null ? await fsi.exists(path, FILE) : await probe.kv.has('', FILE);
   if (taken) {
     await probe?.close();
-    throw new SyncomError('ALX_ERR_BRANCH_EXISTS', `${path} holds a branch already`, { path });
+    throw new SyncomError(`${path} holds a branch already`, { code: 'ALX_ERR_BRANCH_EXISTS', path });
   }
   let present = [];
   try {
@@ -116,7 +116,7 @@ const branch = async (parent, { path, from = null, ...options } = {}) => {
   await probe?.close();
   if (present.length > 0) {
     const message = `${path} holds files already; a branch opens in a new directory`;
-    throw new SyncomError('ALX_ERR_BRANCH_EXISTS', message, { path });
+    throw new SyncomError(message, { code: 'ALX_ERR_BRANCH_EXISTS', path });
   }
   const sync = { ...rest.sync, retention: { ...rest.sync?.retention, ops: 0 }, autoStart: false };
   const Database = parent.constructor;
@@ -167,10 +167,10 @@ const branchInfo = async (storage) => {
   try {
     parsed = JSON.parse(text);
   } catch (error) {
-    throw new SyncomError('ALX_ERR_CORRUPT', `${FILE} is unreadable`, { cause: error });
+    throw new SyncomError(`${FILE} is unreadable`, { code: 'ALX_ERR_CORRUPT', cause: error });
   }
   if (!parsed || parsed.format !== FORMAT || typeof parsed.parent !== 'string') {
-    throw new SyncomError('ALX_ERR_CORRUPT', `${FILE} is not a branch file`);
+    throw new SyncomError(`${FILE} is not a branch file`, { code: 'ALX_ERR_CORRUPT' });
   }
   const { parent, forkedAt, createdAt } = parsed;
   return { parent, forkedAt, createdAt };

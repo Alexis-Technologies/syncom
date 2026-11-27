@@ -121,6 +121,8 @@ export type {
   DataErrorCode,
   ErrorCode,
   DataErrorDetails,
+  DataErrorOptions,
+  SyncomErrorOptions,
   SyncomDocumentConstructor,
   SyncomCollectionConstructor,
   StorageStats,

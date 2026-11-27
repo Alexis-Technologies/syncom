@@ -58,7 +58,7 @@ const DUPLICATE = 11000;
 const isDuplicate = (error) => error?.code === DUPLICATE || error?.writeErrors?.[0]?.code === DUPLICATE;
 
 const locked = (path, why = 'is leased by another instance') =>
-  new SyncomError('ALX_ERR_LOCKED', `Database at ${path} ${why}`, { path });
+  new SyncomError(`Database at ${path} ${why}`, { code: 'ALX_ERR_LOCKED', path });
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const unreadable = (id, cause = null) => unreadableRecord(SyncomError, id, cause);
@@ -256,14 +256,11 @@ const mongoEngine = ({ client = null, db = null, name = 'syncom', transactions =
     });
     const del = (_id) => ({ deleteOne: { filter: { _id, ...fence() } } });
     const leaseLost = (cause) =>
-      new SyncomError(
-        'ALX_ERR_LEASE_LOST',
-        `Database at ${p}: a newer lease holds the document, the write was refused`,
-        {
-          path: p,
-          cause,
-        },
-      );
+      new SyncomError(`Database at ${p}: a newer lease holds the document, the write was refused`, {
+        code: 'ALX_ERR_LEASE_LOST',
+        path: p,
+        cause,
+      });
     // Every statement of this handle: under the fence, in a transaction where asked.
     const fenced = async (fn) => {
       try {

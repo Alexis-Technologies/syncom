@@ -16,11 +16,11 @@
 // set, probes the ETag every `poll` ms and says `RESYNC` when it moved. The
 // store is the backend's door: `load()` → `{ etag, text }` or null for no
 // file (an empty text is an empty collection), `save(text, etag)` → `{ etag }`
-// (an error with `status` 412 or 409 is the conflict; `etag` null means no
+// (an error with `statusCode` 412 or 409 is the conflict; `etag` null means no
 // file is known — the store must make it conditionally), `probe()` → the
 // ETag or null. `requester` is the fetch the two
 // drives share: the common headers on every request, an error with the status
-// for every answer that is not ok. Requires same.js and errors.js only.
+// for every answer that is not ok. Requires same.js and argument-errors.js only.
 
 const { same } = require('./same.js');
 const { ArgumentError } = require('../argument-errors.js');
@@ -150,7 +150,7 @@ const jsonFile = (store, { poll = 0 } = {}) => {
             return conflicts;
           } catch (error) {
             // Another device wrote first (412), or made the file first (409): its file read, the rows judged again.
-            if ((error?.status !== 412 && error?.status !== 409) || attempt >= RETRIES) throw error;
+            if ((error?.statusCode !== 412 && error?.statusCode !== 409) || attempt >= RETRIES) throw error;
             await refresh(true);
           }
         }
@@ -164,7 +164,7 @@ const jsonFile = (store, { poll = 0 } = {}) => {
 /**
  * A fetch over `fetch` with `headers` (and `token` as a bearer) on every
  * request, that answers the response when ok and throws an error carrying
- * `status` — `<label> <what> answered <status>` — otherwise.
+ * `statusCode` — `<label> <what> answered <status>` — otherwise.
  */
 const requester = (fetch, { headers = {}, token = null, label }) => {
   if (typeof fetch !== 'function') throw new ArgumentError(`${label}: fetch must be a function`);
@@ -183,7 +183,7 @@ const requester = (fetch, { headers = {}, token = null, label }) => {
       }
     }
     const error = new Error(`${label} ${what} answered ${response.status}${text ? `: ${text.slice(0, 200)}` : ''}`);
-    error.status = response.status;
+    error.statusCode = response.status;
     throw error;
   };
 };

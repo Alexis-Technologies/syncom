@@ -17,7 +17,8 @@ const { traced } = require('./telemetry/writer.js');
 const { asJson, isRecordId, invalidId } = require('./shape.js');
 const { SyncomError, ArgumentError } = require('./errors.js');
 
-const sealed = (id, rest = '') => new SyncomError('ALX_ERR_ENCRYPTED', `Record ${id} is encrypted here${rest}`);
+const sealed = (id, rest = '') =>
+  new SyncomError(`Record ${id} is encrypted here${rest}`, { code: 'ALX_ERR_ENCRYPTED' });
 
 // What an entry reads as, the way `get()` hands a record out: an encrypted
 // one as its data, a live one through the lens, a tombstone or none as null.

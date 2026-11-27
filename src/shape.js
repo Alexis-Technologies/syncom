@@ -28,10 +28,9 @@ const RECORD_ID = /^[A-Za-z0-9_@-][A-Za-z0-9._@-]{0,127}$/;
 const isRecordId = (id) => typeof id === 'string' && id.length <= 128 && RECORD_ID.test(id);
 const invalidId = (id) => {
   const shown = typeof id === 'string' ? JSON.stringify(id) : typeof id;
-  return new DataError(
-    'ALX_ERR_INVALID_ID',
-    `Invalid record id ${shown}: letters, digits, . _ - @, not starting with a dot, 128 at most`,
-  );
+  return new DataError(`Invalid record id ${shown}: letters, digits, . _ - @, not starting with a dot, 128 at most`, {
+    code: 'ALX_ERR_INVALID_ID',
+  });
 };
 
 // An origin or a scope ends up a vector key (`origin@scope`) and a room

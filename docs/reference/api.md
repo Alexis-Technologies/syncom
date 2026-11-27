@@ -555,7 +555,14 @@ both:
   `details`, the fields the row lists or `null`.
 
 All four classes are exported from the package root; `ErrorCode` is the
-union of every code.
+union of every code. Each takes `(message, options = {})`, as `Error` does:
+the code and the fields go in `options` beside the standard `cause`, which is
+set only when it is not `undefined` —
+`new SyncomError('Record x not found', { code: 'ALX_ERR_NOT_FOUND', id: 'x' })`
+lays `id` on the error beside its `code`, `new DataError(message, { code,
+details })` keeps `details` whole, and `new ArgumentError(message, { cause })`
+has its one code already. `HookError` and `ValidationError` set their code
+themselves.
 
 | Code | Raised by | Fields |
 | --- | --- | --- |
@@ -657,7 +664,9 @@ What a write rejects with when the record would not pass its entity's
 validator — nothing was stamped, logged or written: `name`
 `'ValidationError'`, `code` `'ALX_ERR_VALIDATION_FAILED'`, `entity` (the collection),
 `issues` (`[{ path, message, code? }]`), and `cause` when the validator threw
-something of its own. A `SyncomError`; exported from the package root.
+something of its own. A `SyncomError`; exported from the package root. A
+validator may throw one of its own — `new ValidationError(message, { entity,
+issues })` — and the write rejects with it as it is.
 
 ### `isSyncLink(value)` / `outbound(log, { exclude, vector, scopes, own, allStreams })`
 

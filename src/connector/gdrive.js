@@ -19,13 +19,13 @@ const { jsonFile, requester } = require('./jsonfile.js');
 const { ArgumentError } = require('../argument-errors.js');
 
 const notFound = (error) => {
-  if (error?.status !== 404) throw error;
+  if (error?.statusCode !== 404) throw error;
   return null;
 };
 
 const refused = (status, message) => {
   const error = new Error(message);
-  error.status = status;
+  error.statusCode = status;
   return error;
 };
 

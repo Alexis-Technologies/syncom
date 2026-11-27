@@ -99,21 +99,24 @@ included; `pnpm docs:build` is the one gate it leaves to CI and the release.
   dependency count.
 - **Every error syncom throws on purpose has a `code`, and every code starts with `ALX_ERR_`.** `src/errors.js`:
   - a failure that can happen to correct calling code — given the data, the files or the peers — is
-    `new SyncomError(code, message, { cause, ...fields })`, its code in the `SyncomErrorCode` union of `index.d.ts`;
-    `HookError` and `ValidationError` extend it;
+    `new SyncomError(message, { code, cause, ...fields })`, its code in the `SyncomErrorCode` union of `index.d.ts`,
+    a field laid on the error by its name (`err.id`); `HookError` and `ValidationError` (its message syncom's
+    `describeIssues`) extend it and set their code themselves;
   - a wrong argument, option, definition or hook result is an `ArgumentError` (it extends `TypeError`; one code,
     `ALX_ERR_INVALID_ARGUMENT`), or an `ArgumentRangeError` (a `RangeError`, the same code) where the API always threw
     a `RangeError` (`src/order/order.js`). Never a bare `TypeError`, `RangeError` or `Error` for it;
   - a value that is data (`ALX_ERR_INVALID_ID`, `ALX_ERR_TYPE_IMMUTABLE`, `ALX_ERR_INVALID_VERSION`,
     `ALX_ERR_PRESENCE_SIZE`…) or configuration (`ALX_ERR_NO_CHAIN`, `ALX_ERR_PLUGIN_MISSING`) is
-    `new DataError(code, message, details)` (a `TypeError`, one shape: `details` null where the code documents
+    `new DataError(message, { code, details })` (a `TypeError`, one shape: `details` null where the code documents
     nothing) — the `DataErrorCode` union, never in `SyncomErrorCode`.
 
-  `ErrorCode` is the union of all three, and the table of `docs/reference/api.md` has one row per code (who raises
-  it, which fields ride on it); `tests/package/consistency.test.js` reads every code off `src/` and holds both unions
-  and the table to it. **The wire is the exception:** a host's refusal (`coded` in `src/sync/rules.js`) keeps the
-  numeric code wrpc carries and names the check in `reason` (`403` `READ_ONLY`, `404` `BLOB_NOT_FOUND`): that
-  constant is the protocol's, not an error code, and keeps its name. Never `new Error(...)` for something a caller
+  Every class takes `(message, options = {})`, as `Error` does (alexiskills 1.2): the code and the fields in `options`
+  beside `cause` (set only when not `undefined`), never assigned to the error after it is made; a backend's HTTP
+  status is `statusCode`. `ErrorCode` is the union of all three, and the table of `docs/reference/api.md` has one row
+  per code (who raises it, which fields ride on it); `tests/package/consistency.test.js` reads every code off the
+  `code:` of `src/`'s constructions and holds both unions and the table to it. **The wire is the exception:** a host's
+  refusal (`coded` in `src/sync/rules.js`) keeps the numeric code wrpc carries and names the check in `reason` (`403`
+  `READ_ONLY`, `404` `BLOB_NOT_FOUND`): that constant is the protocol's, not an error code, and keeps its name. Never `new Error(...)` for something a caller
   may handle, never invent a code without its row in the table and its union.
 - **A `.d.ts` change and its `tsd` test land together** (`tests/*.test-d.ts`).
 - **Record types are phantom.** `Schema<Shapes>` (`shapes?`) and a Standard Schema's
@@ -237,7 +240,7 @@ are CONTRIBUTING.md's "Release checklist". What syncom adds to the steps of the 
 
 ## Skills
 
-The skills are [alexiskills](https://alexiskills.vercel.app), `@alexify/metaskills` 1.1, a devDependency: its 37
+The skills are [alexiskills](https://alexiskills.vercel.app), `@alexify/metaskills` 1.2, a devDependency: its 37
 skills, `.claude/skills` one symlink to `node_modules/@alexify/metaskills/skills` that the `prepare` script
 (`alexiskills claude`) makes on every `pnpm install` and `.gitignore` leaves out. They are not edited here: a change
 goes to `Alexis-Technologies/metaskills` and comes back with a release. What the six metarhia 1.0.5 skills kept here

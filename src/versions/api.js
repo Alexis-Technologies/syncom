@@ -90,7 +90,9 @@ const past = async (core, id, version) => {
   if (version.kind === 'event') {
     if (version.epoch !== log.epoch) throw gone(id, 'epoch');
     if (version.seq >= log.next) {
-      throw new DataError('ALX_ERR_INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
+      throw new DataError(`at: ${log.formatId(version.seq)} is not in this log yet`, {
+        code: 'ALX_ERR_INVALID_VERSION',
+      });
     }
   }
   const { entries, purged, current } = await applied(core, id);
@@ -273,7 +275,7 @@ const tag = async (core, name) => {
     if (held.size > 0) {
       const ids = [...held];
       const message = `tag(): ${ids.join(', ')}: logged, but not written; take the tag once they land`;
-      throw new SyncomError('ALX_ERR_UNPERSISTED', message, { ids });
+      throw new SyncomError(message, { code: 'ALX_ERR_UNPERSISTED', ids });
     }
     const rows = core.catalog.rows();
     const take = () =>
@@ -375,7 +377,9 @@ const atVersion = (core, given) => {
   if (version.kind === 'event') {
     if (version.epoch !== log.epoch) throw gone(null, 'epoch');
     if (version.seq >= log.next) {
-      throw new DataError('ALX_ERR_INVALID_VERSION', `at: ${log.formatId(version.seq)} is not in this log yet`);
+      throw new DataError(`at: ${log.formatId(version.seq)} is not in this log yet`, {
+        code: 'ALX_ERR_INVALID_VERSION',
+      });
     }
   }
   // Everything the log retains, from its floor: below it is compacted.

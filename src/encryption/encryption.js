@@ -68,9 +68,8 @@ const subtle = () => globalThis.crypto.subtle;
 
 const failed = (where, reason, cause) =>
   new SyncomError(
-    'ALX_ERR_DECRYPT_FAILED',
     `${where}: ${reason === 'plain' ? 'not encrypted' : 'cannot be decrypted (the wrong key, or a torn file)'}`,
-    { path: where, reason, cause },
+    { code: 'ALX_ERR_DECRYPT_FAILED', path: where, reason, cause },
   );
 
 // The options, checked when the wrapper is made (a TypeError then, not at

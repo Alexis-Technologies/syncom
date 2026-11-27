@@ -128,7 +128,7 @@ const isJson = (value, depth = 0) => {
 const textOf = (doc) => (doc.deleted ? null : canonical(doc.data));
 
 const failed = (direction, message, cause, name, retryIn = null) =>
-  new SyncomError('ALX_ERR_REPLICATION_FAILED', message, { direction, connector: name, cause, retryIn });
+  new SyncomError(message, { code: 'ALX_ERR_REPLICATION_FAILED', direction, connector: name, cause, retryIn });
 
 // The canonical text parsed back — the backend's state as a push hands it over as `assumed`.
 const parsed = (text) => (text === null ? null : JSON.parse(text));
@@ -395,7 +395,8 @@ class Replication extends Emitter {
    */
   start() {
     if (this.#canceled) {
-      throw new SyncomError('ALX_ERR_REPLICATION_FAILED', `Connector ${this.#name} was canceled`, {
+      throw new SyncomError(`Connector ${this.#name} was canceled`, {
+        code: 'ALX_ERR_REPLICATION_FAILED',
         direction: null,
         name: this.#name,
       });
@@ -457,7 +458,8 @@ class Replication extends Emitter {
    */
   async reSync() {
     if (!this.#active) {
-      throw new SyncomError('ALX_ERR_REPLICATION_FAILED', `Connector ${this.#name} is not active`, {
+      throw new SyncomError(`Connector ${this.#name} is not active`, {
+        code: 'ALX_ERR_REPLICATION_FAILED',
         direction: null,
         name: this.#name,
       });

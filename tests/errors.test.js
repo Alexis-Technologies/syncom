@@ -27,7 +27,7 @@ const openTemp = async (t, options = {}) => {
 describe('SyncomError', () => {
   it('should carry a code, its fields and a cause, the two older classes being SyncomErrors', () => {
     const cause = new Error('disk');
-    const error = new SyncomError('ALX_ERR_CORRUPT', 'node.json is unreadable', { cause, file: 'node.json' });
+    const error = new SyncomError('node.json is unreadable', { code: 'ALX_ERR_CORRUPT', cause, file: 'node.json' });
     assert.ok(error instanceof Error);
     assert.strictEqual(error.name, 'SyncomError');
     assert.strictEqual(error.code, 'ALX_ERR_CORRUPT');
@@ -35,29 +35,46 @@ describe('SyncomError', () => {
     assert.strictEqual(error.cause, cause);
     assert.strictEqual(error.message, 'node.json is unreadable');
     assert.match(error.stack, /^SyncomError: node.json is unreadable/);
-    const bare = new SyncomError('ALX_ERR_CLOSED', 'Storage is closed');
+    const bare = new SyncomError('Storage is closed', { code: 'ALX_ERR_CLOSED' });
     assert.strictEqual('cause' in bare, false, 'no cause property when none was given');
     assert.deepStrictEqual(Object.keys(bare), ['name', 'code']);
 
-    const hook = new HookError('beforeWrite', new Error('no'));
+    const hook = new HookError('The beforeWrite hook failed: no', { hook: 'beforeWrite', cause: new Error('no') });
     assert.ok(hook instanceof SyncomError);
     assert.strictEqual(hook.name, 'HookError');
     assert.strictEqual(hook.code, 'ALX_ERR_HOOK_FAILED');
     assert.strictEqual(hook.hook, 'beforeWrite');
     assert.strictEqual(hook.cause.message, 'no');
-    const validation = new ValidationError('Post', [{ path: ['title'], message: 'is required' }]);
+    const issues = [{ path: ['title'], message: 'is required' }];
+    const validation = new ValidationError('Post failed validation', { entity: 'Post', issues });
     assert.ok(validation instanceof SyncomError);
     assert.strictEqual(validation.name, 'ValidationError');
     assert.strictEqual(validation.code, 'ALX_ERR_VALIDATION_FAILED');
     assert.strictEqual(validation.entity, 'Post');
-    assert.strictEqual(validation.issues.length, 1);
+    assert.strictEqual(validation.issues, issues);
+    assert.deepStrictEqual(
+      [new ValidationError('Record failed validation').entity, new ValidationError('x').issues],
+      [null, []],
+      'no entity is null, no issues an empty list',
+    );
+    // A class with a fixed code keeps it whatever the options say: the code is the class's.
+    assert.strictEqual(new HookError('no', { code: 'ALX_ERR_CLOSED' }).code, 'ALX_ERR_HOOK_FAILED');
+    assert.strictEqual(new SyncomError('gone', { code: 'ALX_ERR_NOT_FOUND', cause: undefined }).cause, undefined);
+    assert.strictEqual(
+      'cause' in new SyncomError('gone', { code: 'ALX_ERR_NOT_FOUND', cause: undefined }),
+      false,
+      'a cause passed on as undefined is none',
+    );
 
-    const data = new DataError('ALX_ERR_INVALID_ID', 'Invalid record id', { entity: 'Task', field: 'key' });
+    const data = new DataError('Invalid record id', {
+      code: 'ALX_ERR_INVALID_ID',
+      details: { entity: 'Task', field: 'key' },
+    });
     assert.ok(data instanceof TypeError);
     assert.strictEqual(data.name, 'DataError');
     assert.strictEqual(data.code, 'ALX_ERR_INVALID_ID');
     assert.deepStrictEqual(data.details, { entity: 'Task', field: 'key' });
-    assert.strictEqual(new DataError('ALX_ERR_NO_CHAIN', 'no chain').details, null);
+    assert.strictEqual(new DataError('no chain', { code: 'ALX_ERR_NO_CHAIN' }).details, null);
     const wrong = new ArgumentError('createDatabase(): path is a string', { cause: data });
     assert.ok(wrong instanceof TypeError);
     assert.deepStrictEqual([wrong.name, wrong.code, wrong.cause], ['ArgumentError', 'ALX_ERR_INVALID_ARGUMENT', data]);

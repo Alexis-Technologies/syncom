@@ -145,7 +145,11 @@ class Collection extends Emitter {
 
   #mine(id) {
     if (this.#foreign(id)) {
-      throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} is not a ${this.#name}`, { id, entity: this.#name });
+      throw new SyncomError(`Record ${id} is not a ${this.#name}`, {
+        code: 'ALX_ERR_NOT_FOUND',
+        id,
+        entity: this.#name,
+      });
     }
   }
 
@@ -163,19 +167,21 @@ class Collection extends Emitter {
     const def = this.#storage[SOURCE].definition(this.#name) ?? LOOSE;
     const named = namedId(def, data);
     if (named === null) {
-      throw new DataError(
-        'ALX_ERR_INVALID_ID',
-        `${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`,
-        {
+      throw new DataError(`${method}(): a ${this.#name} needs its id under ${def.idField || 'an id field'}`, {
+        code: 'ALX_ERR_INVALID_ID',
+        details: {
           entity: this.#name,
           field: def.idField || null,
         },
-      );
+      });
     }
     if (named.id === null) {
-      throw new DataError('ALX_ERR_INVALID_ID', `${method}(): a ${this.#name} ${idReason(named)}`, {
-        entity: this.#name,
-        field: named.field,
+      throw new DataError(`${method}(): a ${this.#name} ${idReason(named)}`, {
+        code: 'ALX_ERR_INVALID_ID',
+        details: {
+          entity: this.#name,
+          field: named.field,
+        },
       });
     }
     return named;
@@ -309,7 +315,7 @@ class Collection extends Emitter {
         if (typeof id !== 'string') throw new ArgumentError('bulkRemove() takes ids');
         this.#mine(id);
         if (!(await tx.has(id))) {
-          throw new SyncomError('ALX_ERR_NOT_FOUND', `Record ${id} not found`, { id, entity: this.#name });
+          throw new SyncomError(`Record ${id} not found`, { code: 'ALX_ERR_NOT_FOUND', id, entity: this.#name });
         }
         await tx.delete(id, options);
         return id;

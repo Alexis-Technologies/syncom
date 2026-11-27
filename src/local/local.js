@@ -33,7 +33,7 @@ const parse = (key, text) => {
   try {
     return JSON.parse(text);
   } catch (cause) {
-    throw new SyncomError('ALX_ERR_CORRUPT', `Local document ${key} is unreadable`, { key, cause });
+    throw new SyncomError(`Local document ${key} is unreadable`, { code: 'ALX_ERR_CORRUPT', key, cause });
   }
 };
 

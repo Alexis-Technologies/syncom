@@ -79,8 +79,8 @@ src/collection.js         Collection — an entity's records, `db.<Entity>`; pub
 src/commit.js             the one local write path: prepare → validate → issue (in the queue) → land → announce (outside it, in log order) (`storage[COMMIT]`); `commitAtOnce`, the same write made at once on an idle queue (LOG-9), and `transact`
 src/apply.js              a peer's batch: admit → apply one by one → persist → announce (`storage.applyRemote`)
 src/bootstrap.js          snapshot pages out, merge pages in, adoptVector — the bootstrap write path
-src/errors.js             SyncomError (a field never its own name, code or stack, never `__proto__`), ValidationError, isQuotaError, the TypeError family re-exported — requires argument-errors.js only
-src/argument-errors.js    ArgumentError, ArgumentRangeError (ALX_ERR_INVALID_ARGUMENT), DataError (a DataErrorCode, `details`): what a module that throws nothing else requires — no requires
+src/errors.js             SyncomError (`(message, { code, cause, ...fields })`: a field never its own name, code or stack, never `__proto__`), ValidationError and describeIssues (its message), isQuotaError, the TypeError family re-exported — requires argument-errors.js only
+src/argument-errors.js    ArgumentError, ArgumentRangeError (ALX_ERR_INVALID_ARGUMENT), DataError (`(message, { code, details })`, a DataErrorCode): what a module that throws nothing else requires — no requires
 src/wire-error.js         packError/unpackError — an error as JSON between two sides of this package (the tabs' channel, the remote engine) — requires errors.js only
 src/ops.js                the record-level model: applyOp / mergeEntry / isAlive
 src/vector.js             clocks, version vectors, event ids

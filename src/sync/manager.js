@@ -238,7 +238,7 @@ class SyncManager extends Emitter {
     const { url, token, scopes, direction = 'both' } = nodeData ?? {};
     if (typeof url !== 'string' || url.length === 0) throw new ArgumentError('Node URL is required');
     if (this.#nodes.has(url)) {
-      throw new SyncomError('ALX_ERR_NODE_EXISTS', `Node with URL ${url} already exists`, { url });
+      throw new SyncomError(`Node with URL ${url} already exists`, { code: 'ALX_ERR_NODE_EXISTS', url });
     }
     // The scopes kept dense: a hole of the caller's list is skipped, as the `every` this check replaced skipped it.
     let named = null;
@@ -270,7 +270,7 @@ class SyncManager extends Emitter {
 
   async removeNode(url) {
     const node = this.#nodes.get(url);
-    if (!node) throw new SyncomError('ALX_ERR_NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
+    if (!node) throw new SyncomError(`Node with URL ${url} not found`, { code: 'ALX_ERR_NODE_NOT_FOUND', url });
     this.#nodes.delete(url);
     this.#disconnect(url);
     this.#uploads.forget(url);
@@ -286,7 +286,7 @@ class SyncManager extends Emitter {
 
   async enableNode(url, enabled = true) {
     const node = this.#nodes.get(url);
-    if (!node) throw new SyncomError('ALX_ERR_NODE_NOT_FOUND', `Node with URL ${url} not found`, { url });
+    if (!node) throw new SyncomError(`Node with URL ${url} not found`, { code: 'ALX_ERR_NODE_NOT_FOUND', url });
     node.enabled = enabled;
     await this.#saveNode(node);
     notify(this, this.#storage.logger, 'node', { url, action: enabled ? 'enable' : 'disable' });
@@ -830,7 +830,7 @@ class SyncManager extends Emitter {
     });
     if (peer.closed) return;
     if (!answer || typeof answer.node !== 'string') {
-      throw new SyncomError('ALX_ERR_BAD_HELLO', `Bad hello from ${node.url}`);
+      throw new SyncomError(`Bad hello from ${node.url}`, { code: 'ALX_ERR_BAD_HELLO' });
     }
     if (answer.duplicate) {
       // A host may say it already dials us; one link is enough.
@@ -931,7 +931,7 @@ class SyncManager extends Emitter {
       if (!Object.hasOwn(adopted, stays[i])) (peer.rewound ??= new Set()).add(stays[i]);
     }
     const message = `${peer.node.url} holds more of this node's ops than its log: a restored copy, a second instance or a false claim`;
-    this.#fail(peer, new SyncomError('ALX_ERR_REWOUND', message, { local, remote, adopted }));
+    this.#fail(peer, new SyncomError(message, { code: 'ALX_ERR_REWOUND', local, remote, adopted }));
     return op !== null;
   }
 
@@ -941,7 +941,7 @@ class SyncManager extends Emitter {
     const signer = this.#storage[SIGNER];
     if (signer === null) {
       const message = `${peer.node.url} asks for proof of this node's key, and this node has none (the signing plugin)`;
-      throw new SyncomError('ALX_ERR_UNPROVEN', message, { url: peer.node.url, node: answer.node });
+      throw new SyncomError(message, { code: 'ALX_ERR_UNPROVEN', url: peer.node.url, node: answer.node });
     }
     const sig = await signer.signMessage(proveMessage(answer.challenge, answer.node, this.#storage.nodeId));
     await peer.link.call('syncom/prove', { sig });
@@ -965,7 +965,10 @@ class SyncManager extends Emitter {
     await this.#saveNode(node);
     const revoked = [...taken];
     const message = `${node.url} took back the scopes ${revoked.join(', ')}`;
-    this.#fail(peer, new SyncomError('ALX_ERR_REVOKED', message, { scopes: revoked, node: peer.remote?.id ?? null }));
+    this.#fail(
+      peer,
+      new SyncomError(message, { code: 'ALX_ERR_REVOKED', scopes: revoked, node: peer.remote?.id ?? null }),
+    );
     if (this.#hooks.onRevoke !== null) {
       await runHook(this.#hooks, 'onRevoke', { url: node.url, node: peer.remote?.id ?? null, scopes: revoked });
     } else await this.#forgetScopes(taken);
@@ -1112,7 +1115,7 @@ class SyncManager extends Emitter {
     if (!peer.undeliverable) {
       peer.undeliverable = true;
       const message = `${peer.node.url} lacks ops of this node that its log no longer holds`;
-      this.#fail(peer, new SyncomError('ALX_ERR_UNDELIVERABLE', message, { missing }));
+      this.#fail(peer, new SyncomError(message, { code: 'ALX_ERR_UNDELIVERABLE', missing }));
     }
     return missing;
   }
@@ -1257,7 +1260,7 @@ class SyncManager extends Emitter {
         this.#otel.recordBlob('uploaded', final ? 'refused' : 'failed', 0);
         const message = `${peer.node.url} did not take the bytes of ${id}/${name}`;
         const fields = { digest, id, attachment: name, cause: error, retry: !final };
-        this.#fail(peer, new SyncomError('ALX_ERR_BLOB_UPLOAD_FAILED', message, fields));
+        this.#fail(peer, new SyncomError(message, { code: 'ALX_ERR_BLOB_UPLOAD_FAILED', ...fields }));
       }
     }
   }
@@ -1337,7 +1340,7 @@ class SyncManager extends Emitter {
       const what = refusalNote(revert, current, reason);
       const message = `${peer.node.url} refused ${origin}:${seq} on ${id}${what}`;
       const fields = { origin, seq, id, current: reason === 'scope' ? null : (current ?? null), own, touched, reason };
-      this.#fail(peer, new SyncomError('ALX_ERR_WRITE_REFUSED', message, fields));
+      this.#fail(peer, new SyncomError(message, { code: 'ALX_ERR_WRITE_REFUSED', ...fields }));
       if (!revert) continue;
       try {
         const options = { actor: 'revert', kinds: isPlainObject(kinds) ? kinds : {} };
@@ -1382,7 +1385,7 @@ class SyncManager extends Emitter {
           if (error?.code === 428 && peer.connected) {
             if (++peer.rehellos > MAX_REHELLOS) {
               const message = `The host answered 428 to ${MAX_REHELLOS} fresh hellos in a row; not greeting again`;
-              this.#fail(peer, new SyncomError('ALX_ERR_HANDSHAKE_LOOP', message, { cause: error }));
+              this.#fail(peer, new SyncomError(message, { code: 'ALX_ERR_HANDSHAKE_LOOP', cause: error }));
               return void this.#terminal(peer);
             }
             return void this.#rehello(peer);
@@ -1414,7 +1417,8 @@ class SyncManager extends Emitter {
     peer.feed++;
     const stuck = peer.failures >= MAX_PAGE_RETRIES;
     const message = `Page after ${peer.node.cursor ?? 'the start'} failed (${error?.message ?? error})`;
-    const reported = new SyncomError(stuck ? 'ALX_ERR_STUCK' : 'ALX_ERR_PAGE_FAILED', message, {
+    const reported = new SyncomError(message, {
+      code: stuck ? 'ALX_ERR_STUCK' : 'ALX_ERR_PAGE_FAILED',
       cause: error,
       cursor: peer.node.cursor ?? null,
       attempt: peer.failures,
@@ -1518,7 +1522,7 @@ class SyncManager extends Emitter {
       if (missing.length > 0) {
         const message = `${peer.node.url} cannot hold the ${missing.join(', ')} kind${missing.length > 1 ? 's' : ''}; not bootstrapping from it`;
         this.#otel.recordBootstrap('refused');
-        this.#fail(peer, new SyncomError('ALX_ERR_KINDS_MISMATCH', message, { node: peer.remote.id, missing }));
+        this.#fail(peer, new SyncomError(message, { code: 'ALX_ERR_KINDS_MISMATCH', node: peer.remote.id, missing }));
         return void this.#terminal(peer);
       }
       const otel = this.#otel;
@@ -1557,7 +1561,7 @@ class SyncManager extends Emitter {
     // The host pages; this node checks it moves on: a cursor that does not
     // pass the last one (record ids, in order) would page for ever.
     const bad = (reason, message) =>
-      new SyncomError('ALX_ERR_BAD_PAGE', `${node.url}: ${message}`, { url: node.url, reason });
+      new SyncomError(`${node.url}: ${message}`, { code: 'ALX_ERR_BAD_PAGE', url: node.url, reason });
     do {
       const page = await link.call('syncom/snapshot', { cursor, scopes: node.scopes });
       pages++;
@@ -1645,32 +1649,37 @@ class SyncManager extends Emitter {
       fields.id = id;
       fields.attachment = name;
     }
-    throw new SyncomError('ALX_ERR_BLOB_NOT_FOUND', `No connected peer holds blob ${digest} (${asked} asked)`, fields);
+    throw new SyncomError(`No connected peer holds blob ${digest} (${asked} asked)`, {
+      code: 'ALX_ERR_BLOB_NOT_FOUND',
+      ...fields,
+    });
   }
 
   // A blob as a host answers it: the bytes of a stream — `size` of them, in pieces — or base64 in the answer itself;
   // bounded by MAX_BLOB_BYTES.
   async #readBlob(link, answer) {
     if (answer === null || typeof answer !== 'object') {
-      throw new SyncomError('ALX_ERR_BAD_PAGE', 'A blob answer that is no object');
+      throw new SyncomError('A blob answer that is no object', { code: 'ALX_ERR_BAD_PAGE' });
     }
     if (typeof answer.base64 === 'string') {
       if (answer.base64.length > (MAX_BLOB_BYTES / 3) * 4 + 4) {
-        throw new SyncomError('ALX_ERR_BAD_PAGE', 'A blob past MAX_BLOB_BYTES');
+        throw new SyncomError('A blob past MAX_BLOB_BYTES', { code: 'ALX_ERR_BAD_PAGE' });
       }
       return fromBase64(answer.base64);
     }
     if (typeof link.stream !== 'function') {
-      throw new SyncomError('ALX_ERR_STREAMS_UNSUPPORTED', 'The host streamed a blob but the link cannot read streams');
+      throw new SyncomError('The host streamed a blob but the link cannot read streams', {
+        code: 'ALX_ERR_STREAMS_UNSUPPORTED',
+      });
     }
     const { size } = answer;
     if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BLOB_BYTES) {
-      throw new SyncomError('ALX_ERR_BAD_PAGE', 'A streamed blob of no size, or past MAX_BLOB_BYTES');
+      throw new SyncomError('A streamed blob of no size, or past MAX_BLOB_BYTES', { code: 'ALX_ERR_BAD_PAGE' });
     }
     // The size announced, and not a byte further: the pieces as the host wrote them.
     const bytes = await collect(link.stream(answer.id), size);
     if (bytes === null || bytes.length !== size) {
-      throw new SyncomError('ALX_ERR_BAD_PAGE', 'A streamed blob that is not the size it announced');
+      throw new SyncomError('A streamed blob that is not the size it announced', { code: 'ALX_ERR_BAD_PAGE' });
     }
     return bytes;
   }
@@ -1680,10 +1689,9 @@ class SyncManager extends Emitter {
   // mergeSnapshot as one page — a page is bounded by the host's `pageSize`.
   async #readSnapshot(link, page, bad) {
     if (typeof link.stream !== 'function') {
-      throw new SyncomError(
-        'ALX_ERR_STREAMS_UNSUPPORTED',
-        'The host streamed a snapshot but the link cannot read streams',
-      );
+      throw new SyncomError('The host streamed a snapshot but the link cannot read streams', {
+        code: 'ALX_ERR_STREAMS_UNSUPPORTED',
+      });
     }
     const decoder = new TextDecoder();
     const records = [];
@@ -1847,15 +1855,12 @@ class SyncManager extends Emitter {
     // pushes forwarded to the inbox.
     if (this.#storage.readOnly && this.#shared === null) {
       const { path } = this.#storage;
-      throw new SyncomError(
-        'ALX_ERR_READ_ONLY',
-        `Storage at ${path} is read-only: it does not host without a shared log`,
-        {
-          path,
-          lease: this.#storage.stats().lock !== null,
-          reason: 'hosting',
-        },
-      );
+      throw new SyncomError(`Storage at ${path} is read-only: it does not host without a shared log`, {
+        code: 'ALX_ERR_READ_ONLY',
+        path,
+        lease: this.#storage.stats().lock !== null,
+        reason: 'hosting',
+      });
     }
     return createUnit(this, options, {
       storage: this.#storage,

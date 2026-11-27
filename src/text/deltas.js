@@ -150,7 +150,11 @@ const applyDelta = async (core, id, key, delta, { actor, message, source, expect
           const shown = entry && !entry.encrypted && blockOf(entry, key) !== undefined ? render(entry, key) : '';
           const text = typeof shown === 'string' ? shown : '';
           if (text !== expect) {
-            throw new SyncomError('ALX_ERR_STALE', `Field ${key} of ${id} changed under the delta`, { id, field: key });
+            throw new SyncomError(`Field ${key} of ${id} changed under the delta`, {
+              code: 'ALX_ERR_STALE',
+              id,
+              field: key,
+            });
           }
         }
       }

@@ -133,9 +133,10 @@ expectError(syncom.createDatabase({ schema: { entities: { P: { index: 'orgId' } 
 expectError(syncom.createDatabase({ schema: { entities: { P: { uniqe: ['slug'] } } } }));
 expectError(syncom.createDatabase({ validator: {} }));
 expectType<Promise<unknown>>(storage.check('Project', { title: 'a' }));
-const validationError = new syncom.ValidationError('Project', [
-  { path: ['title'], message: 'is required', code: 'required' },
-]);
+const validationError = new syncom.ValidationError('Project failed validation at title: is required', {
+  entity: 'Project',
+  issues: [{ path: ['title'], message: 'is required', code: 'required' }],
+});
 expectType<'ALX_ERR_VALIDATION_FAILED'>(validationError.code);
 expectType<string | null>(validationError.entity);
 expectType<syncom.ValidationIssue[]>(validationError.issues);
@@ -381,7 +382,10 @@ declare const telemetryStorage: Database;
 expectType<unknown>(telemetryStorage.telemetry);
 
 // hooks
-const hookError = new syncom.HookError('beforeWrite', new Error('x'));
+const hookError = new syncom.HookError('The beforeWrite hook failed: x', {
+  hook: 'beforeWrite',
+  cause: new Error('x'),
+});
 expectType<'ALX_ERR_HOOK_FAILED'>(hookError.code);
 expectType<string>(hookError.hook);
 expectType<unknown>(hookError.cause);
@@ -389,9 +393,17 @@ expectAssignable<SyncomError>(hookError);
 expectAssignable<SyncomError>(validationError);
 
 // errors: operational ones carry a code from the union
-const coded = new syncom.SyncomError('ALX_ERR_NOT_FOUND', 'Record x not found', { cause: new Error('y'), id: 'x' });
+// every class takes (message, options): the code and the fields in the options, as `cause` is
+const coded = new syncom.SyncomError('Record x not found', {
+  code: 'ALX_ERR_NOT_FOUND',
+  cause: new Error('y'),
+  id: 'x',
+});
 expectType<SyncomErrorCode>(coded.code);
 expectAssignable<Error>(coded);
+expectError(new syncom.SyncomError('Record x not found'));
+expectError(new syncom.SyncomError('ALX_ERR_NOT_FOUND', 'Record x not found'));
+expectAssignable<syncom.SyncomErrorOptions>({ code: 'ALX_ERR_CLOSED', path: 'db' });
 expectAssignable<SyncomErrorCode>('ALX_ERR_LOCKED');
 expectAssignable<SyncomErrorCode>('ALX_ERR_BLOB_UPLOAD_FAILED');
 expectAssignable<SyncomErrorCode>('ALX_ERR_IDENTITY_MISMATCH');
@@ -406,11 +418,15 @@ expectType<'ArgumentError'>(wrong.name);
 const outOfRange = new syncom.ArgumentRangeError('between(): the bounds are not in order');
 expectAssignable<RangeError>(outOfRange);
 expectType<'ALX_ERR_INVALID_ARGUMENT'>(outOfRange.code);
-const badId = new syncom.DataError('ALX_ERR_INVALID_ID', 'Invalid record id', { entity: 'Task', field: 'key' });
+const badId = new syncom.DataError('Invalid record id', {
+  code: 'ALX_ERR_INVALID_ID',
+  details: { entity: 'Task', field: 'key' },
+});
 expectAssignable<TypeError>(badId);
 expectType<syncom.DataErrorCode>(badId.code);
 expectType<syncom.DataErrorDetails | null>(badId.details);
-expectError(new syncom.DataError('ALX_ERR_NOT_FOUND', 'not a data code'));
+expectError(new syncom.DataError('not a data code', { code: 'ALX_ERR_NOT_FOUND' }));
+expectAssignable<syncom.DataErrorOptions>({ code: 'ALX_ERR_NO_CHAIN' });
 expectAssignable<syncom.ErrorCode>('ALX_ERR_INVALID_ARGUMENT');
 expectAssignable<syncom.ErrorCode>('ALX_ERR_INVALID_ID');
 expectAssignable<syncom.ErrorCode>('ALX_ERR_NOT_FOUND');
@@ -432,7 +448,7 @@ expectAssignable<syncom.SyncOp>({
   digest: 'd',
   nonce: 'n',
 });
-expectError(new syncom.SyncomError('NOT_A_CODE', 'x'));
+expectError(new syncom.SyncomError('x', { code: 'NOT_A_CODE' }));
 expectAssignable<Error>(hookError);
 expectAssignable<StorageOptions>({
   hooks: {

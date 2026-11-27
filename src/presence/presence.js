@@ -171,8 +171,8 @@ class Presence extends Emitter {
     const text = state === null ? null : boundedJson(state);
     if (state !== null && text === null) {
       throw new DataError(
-        'ALX_ERR_PRESENCE_SIZE',
         `A presence state is a JSON object of at most ${MAX_KEYS} keys, ${MAX_DEPTH} deep, ${MAX_STATE_BYTES} bytes`,
+        { code: 'ALX_ERR_PRESENCE_SIZE' },
       );
     }
     const copy = text === null ? null : JSON.parse(text);

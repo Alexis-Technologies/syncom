@@ -12,8 +12,8 @@ importers:
         specifier: ^3.4.0
         version: 3.4.0
       '@alexify/metaskills':
-        specifier: ^1.1.2
-        version: 1.1.2
+        specifier: ^1.2.0
+        version: 1.2.0
       '@alexify/wrpc':
         specifier: ^2.2.0
         version: 2.2.0
@@ -108,8 +108,8 @@ packages:
     resolution: {integrity: sha512-SMZZEVW+zzNlGjSQNw+qcOhG+YKVnGfKC7JzCxFbO5qCl0ha9Y43v/rTrYiFEpvuRHZEZEs7P9lYHGwJzBpKiw==}
     engines: {node: '>=18.0.0'}
 
-  '@alexify/metaskills@1.1.2':
-    resolution: {integrity: sha512-71Y5a1s8+6J7eTIp36mACA4CQxvjThq5dgMXaKU8r4YtQnFg+dpm3tccpRZhGIu0GMvfa2viPx1UqILthUiUcg==}
+  '@alexify/metaskills@1.2.0':
+    resolution: {integrity: sha512-wqQ0M5a7pBSUGHhqdX1FmukR89G6SiQ2N/DCc77su8JW2Y342C2HNRPQX9IePewXDkC+VENzm+RmzUzNMIugUg==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -2802,7 +2802,7 @@ snapshots:
 
   '@alexify/metaschema@3.4.0': {}
 
-  '@alexify/metaskills@1.1.2': {}
+  '@alexify/metaskills@1.2.0': {}
 
   '@alexify/wrpc@2.2.0': {}
 

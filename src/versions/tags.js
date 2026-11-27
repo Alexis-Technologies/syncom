@@ -60,7 +60,7 @@ const info = ({ name, eventId, seq, ts, vector, createdAt }) => ({
 });
 
 const notFound = (name, rest = '') =>
-  new SyncomError('ALX_ERR_TAG_NOT_FOUND', `Tag ${name} not found${rest}`, { tag: name });
+  new SyncomError(`Tag ${name} not found${rest}`, { code: 'ALX_ERR_TAG_NOT_FOUND', tag: name });
 
 class Tags {
   #db;
@@ -289,9 +289,9 @@ class Tags {
   async take(name, { eventId, seq, ts, vector, rows }) {
     if (this.#corrupt) {
       const message = `${FILE} is unreadable; repair or remove it (a copy is in ${CORRUPT_FILE}) before taking a tag`;
-      throw new SyncomError('ALX_ERR_CORRUPT', message, { file: FILE });
+      throw new SyncomError(message, { code: 'ALX_ERR_CORRUPT', file: FILE });
     }
-    if (this.#byName.has(name)) throw new SyncomError('ALX_ERR_TAG_EXISTS', `Tag ${name} exists`, { tag: name });
+    if (this.#byName.has(name)) throw new SyncomError(`Tag ${name} exists`, { code: 'ALX_ERR_TAG_EXISTS', tag: name });
     // Whatever a crash left under this name goes first: a stale copy would
     // read as this tag's.
     await this.#erase(name);

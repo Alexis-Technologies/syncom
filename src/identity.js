@@ -35,24 +35,18 @@ const moved = async (store) => {
     // A fence that does not read is a fence still.
   }
   const where = to === null ? '' : ` to ${to.path} on the ${to.engine} engine`;
-  throw new SyncomError(
-    'ALX_ERR_MOVED',
-    `This database was moved${where} (rotateAtRest): open it there, and dropDatabase this one`,
-    {
-      to,
-    },
-  );
+  throw new SyncomError(`This database was moved${where} (rotateAtRest): open it there, and dropDatabase this one`, {
+    code: 'ALX_ERR_MOVED',
+    to,
+  });
 };
 
 // A service file a storage wrote itself and cannot read any more.
 const corruptFile = (file, cause) =>
-  new SyncomError(
-    'ALX_ERR_CORRUPT',
-    `${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`,
-    {
-      cause,
-    },
-  );
+  new SyncomError(`${file} is unreadable (${cause?.message ?? cause}); restore it or remove the directory`, {
+    code: 'ALX_ERR_CORRUPT',
+    cause,
+  });
 
 /**
  * The node id of the storage at `path`: `keyId` the signing plugin's key
@@ -82,7 +76,7 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
       if (typeof name !== 'string') continue;
       if (!known.has(name)) {
         const message = `${NODE_FILE} says this storage runs with the ${name} plugin: createDatabase({ plugins }) with it from '@alexify/syncom/${name}'`;
-        throw new DataError('ALX_ERR_PLUGIN_MISSING', message);
+        throw new DataError(message, { code: 'ALX_ERR_PLUGIN_MISSING' });
       }
       count++;
     }
@@ -92,7 +86,7 @@ const loadIdentity = async ({ store, keyId, kinds, getId, logger }) => {
       if (same) return nodeId;
     } else if (isKeyId(id)) {
       const message = `${NODE_FILE} names node ${id}, but keys/sign-public.pem is ${keyId}`;
-      throw new SyncomError('ALX_ERR_IDENTITY_MISMATCH', message, { id, key: keyId });
+      throw new SyncomError(message, { code: 'ALX_ERR_IDENTITY_MISMATCH', id, key: keyId });
     } else {
       logger.warn({ event: 'identity.rekeyed', from: id, to: keyId });
       nodeId = keyId;

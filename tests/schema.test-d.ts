@@ -20,7 +20,9 @@ const storage = await createDatabase({
 expectType<SyncomCollection>(storage.Post);
 expectType<SchemaStatus | null>(storage.schemaInfo);
 expectType<Promise<unknown>>(storage.check('Post', { title: 'x' }));
-expectType<'ALX_ERR_VALIDATION_FAILED'>(new ValidationError('Post', []).code);
+expectType<'ALX_ERR_VALIDATION_FAILED'>(
+  new ValidationError('Post failed validation', { entity: 'Post', issues: [] }).code,
+);
 const definition: Schema = { entities: { Note: {} } };
 await createDatabase({ plugins: [schema], schema: definition });
 // The record types a schema carries for the types alone.

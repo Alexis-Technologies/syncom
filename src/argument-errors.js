@@ -4,11 +4,14 @@
 // option, definition or hook result — an ArgumentError, or an ArgumentRangeError where the API always threw a
 // RangeError — and a value of data or configuration refused, a DataError with its code and details. No requires:
 // a module that throws nothing else requires this file alone, so a small subpath stays small.
+//
+// Every class takes `(message, options = {})`, as Error does: `options` holds `cause` and the class's own fields
+// (a DataError's `code` and `details`), and goes to `super` whole, so `cause` is set only when given.
 
 const INVALID_ARGUMENT = 'ALX_ERR_INVALID_ARGUMENT';
 
 class ArgumentError extends TypeError {
-  constructor(message, options) {
+  constructor(message, options = {}) {
     super(message, options);
     this.name = 'ArgumentError';
     this.code = INVALID_ARGUMENT;
@@ -16,7 +19,7 @@ class ArgumentError extends TypeError {
 }
 
 class ArgumentRangeError extends RangeError {
-  constructor(message, options) {
+  constructor(message, options = {}) {
     super(message, options);
     this.name = 'ArgumentRangeError';
     this.code = INVALID_ARGUMENT;
@@ -26,7 +29,8 @@ class ArgumentRangeError extends RangeError {
 // One shape for every code: `details` is null where the code documents nothing (`{ entity, field }` of an id a
 // collection refused, `{ length, max }` of a blob past the cap).
 class DataError extends TypeError {
-  constructor(code, message, details = null, options = undefined) {
+  constructor(message, options = {}) {
+    const { code, details = null } = options;
     super(message, options);
     this.name = 'DataError';
     this.code = code;

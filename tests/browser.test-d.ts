@@ -13,7 +13,9 @@ expectType<Promise<Database>>(browser.createDatabase({ path: 'data', telemetry: 
 expectType<string>(browser.Database.generateId());
 expectType<Promise<Database>>(browser.createDatabase({ fsi: memory(), durable: true }));
 expectType<boolean>(browser.isFsi(memory()));
-expectType<'ALX_ERR_VALIDATION_FAILED'>(new browser.ValidationError('Post', []).code);
+expectType<'ALX_ERR_VALIDATION_FAILED'>(
+  new browser.ValidationError('Post failed validation', { entity: 'Post', issues: [] }).code,
+);
 declare const browserStorage: Database;
 expectType<Promise<unknown>>(browserStorage.check('Post', {}));
 expectType<Promise<string>>(browser.read('dir', 'file.json'));

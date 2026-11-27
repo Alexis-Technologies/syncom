@@ -67,9 +67,9 @@ class SmartContract {
 
   static async load(hash, { storage, chain }) {
     const block = await chain.readBlock(hash);
-    if (!block) throw new SyncomError('ALX_ERR_BLOCK_NOT_FOUND', 'Block not found', { hash });
+    if (!block) throw new SyncomError('Block not found', { code: 'ALX_ERR_BLOCK_NOT_FOUND', hash });
     if (block.data.type !== 'smart contract') {
-      throw new SyncomError('ALX_ERR_NOT_CONTRACT', 'Not a smart contract block', { hash });
+      throw new SyncomError('Not a smart contract block', { code: 'ALX_ERR_NOT_CONTRACT', hash });
     }
     const { name, source } = block.data;
     const proc = deserializeFunction(source);

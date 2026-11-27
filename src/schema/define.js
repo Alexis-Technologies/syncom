@@ -14,7 +14,7 @@
 // everything a validator returns or throws is normalized here, once, so the
 // write path sees `async (record) => validated` and nothing else.
 
-const { ValidationError, ArgumentError } = require('../errors.js');
+const { ValidationError, ArgumentError, describeIssues } = require('../errors.js');
 
 const isObject = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
@@ -83,15 +83,17 @@ const toIssues = (issues) => {
   return out.length > 0 ? out : [{ path: [], message: 'invalid' }];
 };
 
+// The issues of `entity` as the error a write rejects with, syncom's message over them.
+const invalid = (entity, issues, cause) =>
+  new ValidationError(describeIssues(entity, issues), { entity, issues, cause });
+
 // Whatever a validator threw, as a ValidationError: its own, one carrying
 // ajv-style `errors`, or anything else as a single issue with the cause kept.
 const failure = (entity, error) => {
   if (error instanceof ValidationError) return error;
-  if (Array.isArray(error?.errors)) return new ValidationError(entity, toIssues(error.errors));
+  if (Array.isArray(error?.errors)) return invalid(entity, toIssues(error.errors));
   const message = typeof error?.message === 'string' ? error.message : String(error);
-  const wrapped = new ValidationError(entity, [{ path: [], message }]);
-  wrapped.cause = error;
-  return wrapped;
+  return invalid(entity, [{ path: [], message }], error);
 };
 
 const isThenable = (value) => Boolean(value) && typeof value.then === 'function';
@@ -109,8 +111,8 @@ const fromStandard = (standard, entity) => async (data) => {
   } catch (error) {
     throw failure(entity, error);
   }
-  if (!isObject(result)) throw new ValidationError(entity, [{ path: [], message: 'the validator returned no result' }]);
-  if (result.issues !== undefined) throw new ValidationError(entity, toIssues(result.issues));
+  if (!isObject(result)) throw invalid(entity, [{ path: [], message: 'the validator returned no result' }]);
+  if (result.issues !== undefined) throw invalid(entity, toIssues(result.issues));
   return result.value;
 };
 
@@ -125,7 +127,7 @@ const fromFunction = (fn, entity) => async (data) => {
   } catch (error) {
     throw failure(entity, error);
   }
-  if (result === false) throw new ValidationError(entity, toIssues(fn.errors));
+  if (result === false) throw invalid(entity, toIssues(fn.errors));
   return result === true || result === undefined ? data : result;
 };
 

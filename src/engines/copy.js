@@ -32,7 +32,7 @@ const TAGS_FILE = 'tags.json';
 const PENDING = '.pending';
 
 const empty = (path) =>
-  new SyncomError('ALX_ERR_TARGET_NOT_EMPTY', `copyEngine(): the target holds a database at ${path}`, { path });
+  new SyncomError(`copyEngine(): the target holds a database at ${path}`, { code: 'ALX_ERR_TARGET_NOT_EMPTY', path });
 // A source that rotateAtRest moved elsewhere: copied again it would be the node in two places.
 const movedAway = (path, text) => {
   let to = null;
@@ -41,23 +41,24 @@ const movedAway = (path, text) => {
   } catch {
     // A fence that does not read is a fence still.
   }
-  return new SyncomError(
-    'ALX_ERR_MOVED',
-    `copyEngine(): the database at ${path} was moved (rotateAtRest): copy it from where it went`,
-    {
-      path,
-      to,
-    },
-  );
+  return new SyncomError(`copyEngine(): the database at ${path} was moved (rotateAtRest): copy it from where it went`, {
+    code: 'ALX_ERR_MOVED',
+    path,
+    to,
+  });
 };
 const noBlobs = (engine, blobs) =>
-  new SyncomError(
-    'ALX_ERR_BLOBS_UNSUPPORTED',
-    `copyEngine(): the ${engine} engine has no blobs store, and the source holds ${blobs} blob(s)`,
-    { engine, blobs },
-  );
+  new SyncomError(`copyEngine(): the ${engine} engine has no blobs store, and the source holds ${blobs} blob(s)`, {
+    code: 'ALX_ERR_BLOBS_UNSUPPORTED',
+    engine,
+    blobs,
+  });
 const lost = (path, cause) =>
-  new SyncomError('ALX_ERR_LEASE_LOST', `copyEngine(): the lease on ${path} was lost during the copy`, { path, cause });
+  new SyncomError(`copyEngine(): the lease on ${path} was lost during the copy`, {
+    code: 'ALX_ERR_LEASE_LOST',
+    path,
+    cause,
+  });
 
 // The database held the way createDatabase() holds it: the engine's lease, or the lock key.
 const hold = async (db, path, onLost) => {

@@ -213,7 +213,7 @@ const newestTs = (ops) => {
 };
 
 const failed = (reason, message, fields) =>
-  new SyncomError('ALX_ERR_SHARED_LOG_FAILED', message, { reason, ...fields });
+  new SyncomError(message, { code: 'ALX_ERR_SHARED_LOG_FAILED', reason, ...fields });
 
 class SharedHub {
   #manager;

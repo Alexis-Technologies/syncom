@@ -40,7 +40,7 @@ const onedrive = ({
     try {
       return await (await request(`${base}/root:/${at}?$select=id,eTag`, {}, 'item')).json();
     } catch (error) {
-      if (error?.status !== 404) throw error;
+      if (error?.statusCode !== 404) throw error;
       return null;
     }
   };

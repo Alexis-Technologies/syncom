@@ -120,7 +120,8 @@ const readOrNull = async (fsi, dir, name) => {
     return await fsi.read(dir, name);
   } catch (error) {
     if (isAbsent(error)) return null;
-    throw new SyncomError('ALX_ERR_CORRUPT', `The log file ${dir}/${name} cannot be read`, {
+    throw new SyncomError(`The log file ${dir}/${name} cannot be read`, {
+      code: 'ALX_ERR_CORRUPT',
       cause: error,
       file: name,
     });

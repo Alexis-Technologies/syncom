@@ -32,7 +32,7 @@ const { now } = require('./telemetry/writer.js');
 const TOMBSTONES = 'tombstones';
 
 const unreadableTombstone = (id, cause) =>
-  new SyncomError('ALX_ERR_INTEGRITY', `Tombstone ${id} is unreadable`, { id, cause, reason: 'unreadable' });
+  new SyncomError(`Tombstone ${id} is unreadable`, { code: 'ALX_ERR_INTEGRITY', id, cause, reason: 'unreadable' });
 
 // A write set's kv part with the tombstones' removals added — the chain's puts never edited in place.
 const withRemovals = (kv, removals) => {
@@ -399,7 +399,7 @@ class EntryStore {
       cause = error;
     }
     if (stored === null || typeof stored !== 'object' || Array.isArray(stored)) {
-      throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is unreadable`, { id, cause });
+      throw new SyncomError(`Record ${id} is unreadable`, { code: 'ALX_ERR_INTEGRITY', id, cause });
     }
     return this.#fromStored(id, stored);
   }
@@ -410,7 +410,7 @@ class EntryStore {
     const { data, meta, encrypted, block } = stored;
     if (this.#verify !== null) {
       const isValid = await this.#verify(id, data, block);
-      if (!isValid) throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is invalid`, { id });
+      if (!isValid) throw new SyncomError(`Record ${id} is invalid`, { code: 'ALX_ERR_INTEGRITY', id });
     }
     if (encrypted) return { data: await this.#decrypt(data), meta: null, encrypted: true, block };
     const entry = { data, meta: await this.#assemble(id, meta, stored.gen, true), encrypted: false, block };
@@ -438,7 +438,7 @@ class EntryStore {
         const name = held.parts[i];
         if (name === null) continue;
         if (typeof name !== 'string' || !name.startsWith(`${id}~`) || !name.endsWith('.json')) {
-          throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} names a piece not its own`, { id });
+          throw new SyncomError(`Record ${id} names a piece not its own`, { code: 'ALX_ERR_INTEGRITY', id });
         }
         wanted.push(name);
       }
@@ -454,12 +454,18 @@ class EntryStore {
         let piece = null;
         try {
           const text = texts.get(name) ?? null;
-          if (text === null) throw new SyncomError('ALX_ERR_INTEGRITY', `piece ${name} is missing`, { id });
+          if (text === null) throw new SyncomError(`piece ${name} is missing`, { code: 'ALX_ERR_INTEGRITY', id });
           piece = JSON.parse(text);
         } catch (cause) {
-          throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id} is unreadable: its piece ${name}`, { id, cause });
+          throw new SyncomError(`Record ${id} is unreadable: its piece ${name}`, {
+            code: 'ALX_ERR_INTEGRITY',
+            id,
+            cause,
+          });
         }
-        if (!isPlainObject(piece)) throw new SyncomError('ALX_ERR_INTEGRITY', `Record ${id}: piece ${name}`, { id });
+        if (!isPlainObject(piece)) {
+          throw new SyncomError(`Record ${id}: piece ${name}`, { code: 'ALX_ERR_INTEGRITY', id });
+        }
         const keys = Object.keys(piece);
         for (let k = 0; k < keys.length; k++) {
           if (keys[k] !== '__proto__') runs[keys[k]] = piece[keys[k]];
